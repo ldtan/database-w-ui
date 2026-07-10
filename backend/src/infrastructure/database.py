@@ -16,7 +16,12 @@ engine = create_async_engine(
     settings.DATABASE_URI,
     pool_pre_ping=True,
 )
-SessionLocal = async_sessionmaker(engine)
+# expire_on_commit=False keeps ORM instances usable after commit. With the
+# default (True), reading any attribute of an object after db.commit() triggers
+# a lazy reload; under the async asyncpg driver that lazy IO happens outside the
+# greenlet and raises MissingGreenlet. Services pass loaded objects (e.g. the
+# parent list) into helpers after committing, so they must not re-expire.
+SessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
 
 class Base(DeclarativeBase):
