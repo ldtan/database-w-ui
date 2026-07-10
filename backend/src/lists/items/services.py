@@ -13,11 +13,13 @@ from ..columns.enums import ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
+from ..views.models import View
+from .filtering import apply_filters, apply_sorts
 from .models import ListItem
+from .schemas import ListItemCreate, ListItemUpdate
 
 # Namespace for the per-list advisory lock that serializes unique-value writes.
 _UNIQUE_LOCK_NS = 0x4C495354  # "LIST"
-from .schemas import ListItemCreate, ListItemUpdate
 
 
 class ListItemService:
@@ -39,11 +41,37 @@ class ListItemService:
 
     @classmethod
     async def list(
-        cls, db: AsyncSession, list_id: int, skip: int = 0, limit: int = 100
+        cls,
+        db: AsyncSession,
+        lst: List,
+        view_uuid: Optional[Union[str, UUID]] = None,
+        skip: int = 0,
+        limit: int = 100,
     ) -> Sequence[ListItem]:
-        result = await db.execute(
-            cls._select(list_id).order_by(ListItem.id).offset(skip).limit(limit)
-        )
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt = cls._select(lst.id)
+        sorts = None
+
+        if view_uuid is not None:
+            parsed = coerce_uuid(view_uuid)
+            view = None
+            if parsed is not None:
+                view = (
+                    await db.execute(
+                        select(View).where(
+                            View.list_id == lst.id,
+                            View.uuid == parsed,
+                            View.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().first()
+            if view is not None:
+                config = view.config or {}
+                stmt = apply_filters(stmt, config.get("filters"), columns)
+                sorts = config.get("sorts")
+
+        stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
+        result = await db.execute(stmt)
         return result.scalars().all()
 
     @classmethod

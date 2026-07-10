@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -33,10 +34,13 @@ async def create_item(
 async def list_items(
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    view_uuid: Optional[UUID] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
 ):
-    return await ListItemService.list(db, lst.id, skip=skip, limit=limit)
+    return await ListItemService.list(
+        db, lst, view_uuid=view_uuid, skip=skip, limit=limit
+    )
 
 
 @router.get("/{uuid}", response_model=ListItemRead)
