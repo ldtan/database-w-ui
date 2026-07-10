@@ -143,8 +143,9 @@ class ColumnService:
         ``existing`` is the column's current stored config (on update), used to
         keep choice option ids stable across edits.
         """
-        # Drop keys the caller left unset so stored config stays lean.
-        data = config.model_dump(mode="json", exclude_none=True)
+        # Only the keys the caller explicitly set on this request, so that on
+        # update the merge below preserves stored settings left unspecified.
+        data = config.model_dump(mode="json", exclude_unset=True)
 
         if type_ == ColumnType.choice:
             options = resolve_choice_options(data, existing)
@@ -162,14 +163,23 @@ class ColumnService:
                 if default in by_label:
                     data["default"] = by_label[default]
 
+        # On update, a config PATCH merges onto the stored config rather than
+        # replacing it, so settings the caller didn't resend are preserved.
+        if existing:
+            for key, value in existing.items():
+                data.setdefault(key, value)
+
         if type_ == ColumnType.lookup:
-            if config.target_list_uuid is None:
+            target_list_uuid = data.get("target_list_uuid")
+            if target_list_uuid is None:
                 raise ValidationError("A lookup column requires a target_list_uuid")
+            if data.get("default") is not None:
+                raise ValidationError("A lookup column cannot have a default value")
             result = await db.execute(
                 select(List.id)
                 .join(Workspace, List.workspace_id == Workspace.id)
                 .where(
-                    List.uuid == config.target_list_uuid,
+                    List.uuid == coerce_uuid(target_list_uuid),
                     Workspace.owner_id == lst.workspace.owner_id,
                     List.deleted_at.is_(None),
                     Workspace.deleted_at.is_(None),

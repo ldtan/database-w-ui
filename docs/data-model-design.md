@@ -197,7 +197,12 @@ Notes:
   Explicit `options` (with colors) override the shorthand. A choice `default` may be given
   as an option label and is stored as the id.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the
-  target list's `primary_column_id`.
+  target list's `primary_column_id`. A lookup column cannot have a `default`.
+- **Config updates merge:** a `PATCH` to a column's `config` merges onto the stored
+  config — settings you don't resend are preserved (rather than the whole config being
+  replaced). To change a choice column's option set, resend `choices` or `options`.
+- Temporal `min`/`max` and the value must share a timezone convention (both aware or both
+  naive); a mismatch is a `400`, not a server error.
 - `date` / `time` / `datetime` — stored as ISO-8601 strings and validated via Python's
   `fromisoformat`. The three separate types replace a single date type with an
   `include_time` flag.

@@ -72,18 +72,22 @@ def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[dict]
         return options
 
     choices = config.get("choices")
-    if not choices:
-        return []
+    if choices is None:
+        # Neither `options` nor `choices` was resent: keep the existing options
+        # (a config update shouldn't silently wipe the option set).
+        return list((existing or {}).get("options", []) or [])
 
     existing_by_label = {
         opt["label"]: opt["id"] for opt in (existing or {}).get("options", []) or []
     }
+    labels = [raw.strip() for raw in choices.split(";") if raw.strip()]
+    # Reserve ids reused for unchanged labels up front, so a generated slug can
+    # never collide with one assigned to a later label (e.g. "done" vs "Done").
+    seen: set[str] = {
+        existing_by_label[label] for label in labels if label in existing_by_label
+    }
     result: list[dict] = []
-    seen: set[str] = set()
-    for raw in choices.split(";"):
-        label = raw.strip()
-        if not label:
-            continue
+    for label in labels:
         oid = existing_by_label.get(label)
         if oid is None:
             oid = base = _slugify(label)
@@ -91,7 +95,7 @@ def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[dict]
             while oid in seen:
                 oid = f"{base}_{i}"
                 i += 1
-        seen.add(oid)
+            seen.add(oid)
         result.append({"id": oid, "label": label})
     return result
 
@@ -142,12 +146,15 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
                 except (ValueError, TypeError):
                     raise ValidationError(f"'{key}' must be {expected}")
         lo, hi = config.get("min"), config.get("max")
-        if (
-            lo is not None
-            and hi is not None
-            and parse_temporal(column_type, lo) > parse_temporal(column_type, hi)
-        ):
-            raise ValidationError("'min' cannot exceed 'max'")
+        if lo is not None and hi is not None:
+            try:
+                exceeds = parse_temporal(column_type, lo) > parse_temporal(column_type, hi)
+            except TypeError:
+                raise ValidationError(
+                    "'min' and 'max' must both be timezone-aware or both naive"
+                )
+            if exceeds:
+                raise ValidationError("'min' cannot exceed 'max'")
 
 
 def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> None:
@@ -203,7 +210,12 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         except (ValueError, TypeError):
             _expect(name, _TEMPORAL[column_type][1])
         lo, hi = config.get("min"), config.get("max")
-        if lo is not None and parsed < parse_temporal(column_type, lo):
-            raise ValidationError(f"Column '{name}' must be on or after {lo}")
-        if hi is not None and parsed > parse_temporal(column_type, hi):
-            raise ValidationError(f"Column '{name}' must be on or before {hi}")
+        try:
+            if lo is not None and parsed < parse_temporal(column_type, lo):
+                raise ValidationError(f"Column '{name}' must be on or after {lo}")
+            if hi is not None and parsed > parse_temporal(column_type, hi):
+                raise ValidationError(f"Column '{name}' must be on or before {hi}")
+        except TypeError:
+            raise ValidationError(
+                f"Column '{name}' must use the same timezone convention as its min/max"
+            )
