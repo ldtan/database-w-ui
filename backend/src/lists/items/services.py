@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
@@ -187,9 +187,12 @@ class ListItemService:
         type_ = column.type
         config = column.config or {}
 
-        if type_ in (ColumnType.text, ColumnType.long_text, ColumnType.date):
+        if type_ in (ColumnType.text, ColumnType.long_text):
             if not isinstance(value, str):
                 cls._type_error(column, "a string")
+
+        elif type_ in (ColumnType.date, ColumnType.time, ColumnType.datetime):
+            cls._validate_temporal(column, value)
 
         elif type_ == ColumnType.number:
             if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -260,6 +263,22 @@ class ListItemService:
                 f"Lookup column '{column.name}' references unknown row(s): "
                 f"{', '.join(missing)}"
             )
+
+    @classmethod
+    def _validate_temporal(cls, column: Column, value) -> None:
+        """Validate that a date/time/datetime value is a well-formed ISO-8601 string."""
+        if not isinstance(value, str):
+            cls._type_error(column, "an ISO-8601 string")
+        parsers = {
+            ColumnType.date: (date.fromisoformat, "a date (YYYY-MM-DD)"),
+            ColumnType.time: (time.fromisoformat, "a time (HH:MM[:SS])"),
+            ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
+        }
+        parser, expected = parsers[column.type]
+        try:
+            parser(value)
+        except ValueError:
+            cls._type_error(column, expected)
 
     @staticmethod
     def _type_error(column: Column, expected: str) -> None:

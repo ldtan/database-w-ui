@@ -9,3 +9,5 @@ class ColumnType(str, enum.Enum):
     choice = "choice"
     lookup = "lookup"
     date = "date"
+    time = "time"
+    datetime = "datetime"

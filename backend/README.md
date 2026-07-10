@@ -28,8 +28,8 @@ adding, renaming, or removing a column never requires a database migration.
 - **Lists** — tables (scoped to a workspace) with settings and a designated primary/display
   column. Creating a list auto-provisions a default grid view and create/update forms.
 - **Columns** — typed fields: `text`, `long_text`, `number`, `checkbox`, `choice`,
-  `lookup` (link to another list's rows), `date`. Type-specific settings live in a
-  per-column JSONB `config`.
+  `lookup` (link to another list's rows), `date`, `time`, `datetime`. Type-specific
+  settings live in a per-column JSONB `config`.
 - **Records** (`list_items`) — stored as JSONB keyed by column UUID; every value is
   validated against its column's type and config on write (required, choice options,
   lookup existence, etc.).

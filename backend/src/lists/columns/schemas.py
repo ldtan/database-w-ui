@@ -35,8 +35,6 @@ class ColumnConfig(BaseModel):
     multiple: Optional[bool] = None
     # lookup
     target_list_uuid: Optional[UUID] = None
-    # date
-    include_time: Optional[bool] = None
 
     model_config = ConfigDict(extra="forbid")
 

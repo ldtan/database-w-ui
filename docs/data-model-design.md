@@ -168,7 +168,9 @@ Common `config` keys (all optional unless noted):
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option `id` (or `[id, …]` if multi)        | `options: [{id, label, color}]`, `multiple: bool` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple: bool` |
-| `date`        | ISO-8601 `string`                          | `include_time?: bool` |
+| `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | — |
+| `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | — |
+| `datetime`    | ISO-8601 date-time `string`                | — |
 
 `number`'s format key is `number_format` (`plain`/`currency`/`percent`). `lookup`
 references its target list by **uuid** (`target_list_uuid`), not internal id, so the
@@ -178,6 +180,9 @@ Notes:
 - `choice` — options carry stable `id`s (D3); records store the id.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the
   target list's `primary_column_id`.
+- `date` / `time` / `datetime` — stored as ISO-8601 strings and validated on write via
+  Python's `date`/`time`/`datetime` `fromisoformat`. The three separate types replace a
+  single date type with an `include_time` flag.
 - The set is extensible: adding e.g. `email`, `url`, `attachment`, `rating` is just a
   new enum member + `config` convention, no migration.
 
