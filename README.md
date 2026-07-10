@@ -12,21 +12,27 @@ adding, renaming, or removing a column never requires a database migration.
 | Directory | Description |
 |-----------|-------------|
 | [`backend/`](backend/) | FastAPI + SQLAlchemy (async) + PostgreSQL API. See its [README](backend/README.md) to run it. |
-| `frontend/` | UI (not yet implemented). |
+| [`frontend/`](frontend/) | React + TypeScript + PrimeReact SPA. See its [README](frontend/README.md) to run it. |
 | [`docs/`](docs/) | Design docs, including the [data-model specification](docs/data-model-design.md). |
 
 ## Getting started
 
-The backend is the runnable part today:
+Run the backend and frontend together:
 
 ```bash
+# backend — http://localhost:5000 (docs at /docs)
 cd backend
 uv sync
-uv run python main.py   # serves on http://localhost:5000 (docs at /docs)
+uv run python main.py
+
+# frontend — http://localhost:5173 (proxies /api to the backend)
+cd frontend
+npm install
+npm run dev
 ```
 
-See [`backend/README.md`](backend/README.md) for prerequisites, environment configuration,
-and the full API overview.
+See [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md)
+for prerequisites, environment configuration, and the full API/UI overview.
 
 ## Documentation
 
