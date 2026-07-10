@@ -5,6 +5,8 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { Dialog } from "primereact/dialog";
+import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import type { Workspace } from "../../lib/types";
@@ -12,6 +14,9 @@ import { slugify } from "../../lib/slug";
 
 export function WorkspacesPage() {
   const queryClient = useQueryClient();
+  const invalidate = () =>
+    queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+
   const workspaces = useQuery({
     queryKey: ["workspaces"],
     queryFn: () => api.get<Workspace[]>("/workspaces/"),
@@ -26,17 +31,44 @@ export function WorkspacesPage() {
       }),
     onSuccess: () => {
       setDisplayName("");
-      queryClient.invalidateQueries({ queryKey: ["workspaces"] });
+      invalidate();
     },
+  });
+
+  const [renaming, setRenaming] = useState<Workspace | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const rename = useMutation({
+    mutationFn: () =>
+      api.patch<Workspace>(`/workspaces/${renaming!.uuid}`, {
+        display_name: renameValue,
+      }),
+    onSuccess: () => {
+      setRenaming(null);
+      invalidate();
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: (uuid: string) => api.del(`/workspaces/${uuid}`),
+    onSuccess: invalidate,
   });
 
   function onCreate(event: FormEvent) {
     event.preventDefault();
     if (displayName.trim()) create.mutate(displayName.trim());
   }
+  function confirmDelete(ws: Workspace) {
+    confirmDialog({
+      message: `Delete workspace "${ws.display_name}" and all its lists?`,
+      header: "Confirm",
+      icon: "pi pi-exclamation-triangle",
+      accept: () => remove.mutate(ws.uuid),
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
+      <ConfirmDialog />
       <h1 className="text-xl font-semibold">Workspaces</h1>
 
       <form onSubmit={onCreate} className="flex gap-2">
@@ -57,14 +89,61 @@ export function WorkspacesPage() {
 
       <div className="flex flex-col gap-2">
         {workspaces.data?.map((ws) => (
-          <Link key={ws.uuid} to={`/workspaces/${ws.uuid}`} className="no-underline">
-            <Card className="cursor-pointer">
-              <div className="font-medium">{ws.display_name}</div>
-              <div className="text-sm text-gray-500">{ws.name}</div>
-            </Card>
-          </Link>
+          <Card key={ws.uuid}>
+            <div className="flex items-center justify-between">
+              <Link to={`/workspaces/${ws.uuid}`} className="no-underline">
+                <div className="font-medium">{ws.display_name}</div>
+                <div className="text-sm text-gray-500">{ws.name}</div>
+              </Link>
+              <div className="flex gap-1">
+                <Button
+                  icon="pi pi-pencil"
+                  text
+                  aria-label="Rename workspace"
+                  onClick={() => {
+                    setRenaming(ws);
+                    setRenameValue(ws.display_name);
+                  }}
+                />
+                <Button
+                  icon="pi pi-trash"
+                  text
+                  severity="danger"
+                  aria-label="Delete workspace"
+                  onClick={() => confirmDelete(ws)}
+                />
+              </div>
+            </div>
+          </Card>
         ))}
       </div>
+
+      <Dialog
+        header="Rename workspace"
+        visible={!!renaming}
+        onHide={() => setRenaming(null)}
+        style={{ width: 380 }}
+      >
+        <div className="flex flex-col gap-4">
+          {rename.error instanceof ApiError && (
+            <Message severity="error" text={rename.error.message} />
+          )}
+          <InputText
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button label="Cancel" text onClick={() => setRenaming(null)} />
+            <Button
+              label="Save"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
+              disabled={!renameValue.trim()}
+            />
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
