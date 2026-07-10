@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, UnknownReferenceError
+from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash
 from .models import User, UserGroup
@@ -68,12 +69,16 @@ class UserService:
         db.add(user)
         try:
             await db.flush()
-            # Read the generated uuid before commit expires the instance.
+            # Read the generated identifiers before commit expires the instance.
             new_uuid = user.uuid
+            new_id = user.id
             await db.commit()
         except IntegrityError as exc:
             await db.rollback()
             raise ConflictError("Username or email is already in use") from exc
+
+        # Bootstrap a personal workspace so the account can create lists right away.
+        await WorkspaceService.create_default(db, new_id)
 
         return await cls.get_by_uuid(db, new_uuid)
 

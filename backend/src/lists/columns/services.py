@@ -1,0 +1,155 @@
+from datetime import datetime, timezone
+from typing import Optional, Sequence, Union
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
+from src.core.utils import coerce_uuid
+
+from ..models import List
+from .enums import ColumnType
+from .models import Column
+from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
+
+
+class ColumnService:
+    @staticmethod
+    def _select(list_id: int):
+        return select(Column).where(
+            Column.deleted_at.is_(None), Column.list_id == list_id
+        )
+
+    @classmethod
+    async def get_by_uuid(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[Column]:
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(cls._select(list_id).where(Column.uuid == parsed))
+        return result.scalars().first()
+
+    @classmethod
+    async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Column]:
+        result = await db.execute(
+            cls._select(list_id).order_by(Column.position, Column.id)
+        )
+        return result.scalars().all()
+
+    @classmethod
+    async def create(
+        cls, db: AsyncSession, lst: List, payload: ColumnCreate
+    ) -> Column:
+        config = await cls._validate_config(db, lst, payload.type, payload.config)
+        column = Column(
+            list_id=lst.id,
+            name=payload.name,
+            display_name=payload.display_name,
+            type=payload.type,
+            position=payload.position,
+            config=config,
+        )
+        db.add(column)
+        try:
+            await db.flush()
+            new_uuid = column.uuid
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError(
+                "A column with this name already exists on the list"
+            ) from exc
+
+        return await cls.get_by_uuid(db, lst.id, new_uuid)
+
+    @classmethod
+    async def update(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        uuid: Union[str, UUID],
+        payload: ColumnUpdate,
+    ) -> Optional[Column]:
+        column = await cls.get_by_uuid(db, lst.id, uuid)
+        if column is None:
+            return None
+
+        data = payload.model_dump(exclude_unset=True)
+
+        if "config" in data:
+            # A column's type is immutable after creation; re-validate the new
+            # config against the existing type.
+            column.config = await cls._validate_config(
+                db, lst, column.type, payload.config
+            )
+            data.pop("config")
+        if data.get("name") is None:
+            data.pop("name", None)
+        if data.get("display_name") is None:
+            data.pop("display_name", None)
+        if data.get("position") is None:
+            data.pop("position", None)
+
+        for field, value in data.items():
+            setattr(column, field, value)
+
+        try:
+            await db.flush()
+            target_uuid = column.uuid
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError(
+                "A column with this name already exists on the list"
+            ) from exc
+
+        return await cls.get_by_uuid(db, lst.id, target_uuid)
+
+    @classmethod
+    async def delete(
+        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+    ) -> bool:
+        column = await cls.get_by_uuid(db, lst.id, uuid)
+        if column is None:
+            return False
+
+        column.deleted_at = datetime.now(timezone.utc)
+        # Don't leave the list pointing at a deleted primary field.
+        if lst.primary_column_id == column.id:
+            lst.primary_column_id = None
+        await db.commit()
+        return True
+
+    @staticmethod
+    async def _validate_config(
+        db: AsyncSession, lst: List, type_: ColumnType, config: ColumnConfig
+    ) -> dict:
+        """Validate type-specific settings and return the JSON-ready dict to store."""
+        if type_ == ColumnType.choice:
+            options = config.options or []
+            if not options:
+                raise ValidationError("A choice column requires at least one option")
+            ids = [opt.id for opt in options]
+            if len(ids) != len(set(ids)):
+                raise ValidationError("Choice option ids must be unique")
+
+        if type_ == ColumnType.lookup:
+            if config.target_list_uuid is None:
+                raise ValidationError("A lookup column requires a target_list_uuid")
+            result = await db.execute(
+                select(List.id).where(
+                    List.uuid == config.target_list_uuid,
+                    List.owner_id == lst.owner_id,
+                    List.deleted_at.is_(None),
+                )
+            )
+            if result.scalars().first() is None:
+                raise UnknownReferenceError(
+                    "target_list_uuid does not reference a list you own"
+                )
+
+        # Drop keys the caller left unset so stored config stays lean.
+        return config.model_dump(mode="json", exclude_none=True)

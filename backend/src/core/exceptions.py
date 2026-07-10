@@ -10,6 +10,10 @@ class UnknownReferenceError(ServiceError):
     """A referenced resource does not exist."""
 
 
+class ValidationError(ServiceError):
+    """Submitted data failed domain validation (bad column config, record value, etc.)."""
+
+
 class InvalidCredentialsError(ServiceError):
     """The username does not exist or the password does not match."""
 

@@ -15,6 +15,12 @@ async def lifespan(app: FastAPI):
     # Explicitly import models to ensure they are registered with Base.metadata
     import src.auth.users.models
     import src.auth.tokens.models
+    import src.workspaces.models
+    import src.lists.models
+    import src.lists.columns.models
+    import src.lists.items.models
+    import src.lists.views.models
+    import src.lists.forms.models
 
     await init_db()
 
@@ -47,7 +53,11 @@ def create_app() -> FastAPI:
 
     # Import and include your routers here
     from src.auth.routers import router as auth_router
+    from src.workspaces.routers import router as workspaces_router
+    from src.lists.routers import router as lists_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
+    app.include_router(workspaces_router, prefix=settings.API_PREFIX)
+    app.include_router(lists_router, prefix=settings.API_PREFIX)
 
     return app
 
