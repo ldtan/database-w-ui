@@ -59,3 +59,23 @@ export interface ListItem {
   uuid: string;
   data: Record<string, unknown>;
 }
+
+export interface ViewSort {
+  column_uuid: string;
+  direction: "asc" | "desc";
+}
+
+export interface ViewConfig {
+  filters?: { conjunction: "and" | "or"; conditions: unknown[] };
+  sorts?: ViewSort[];
+  group_by?: { column_uuid: string } | null;
+  page_size?: number;
+}
+
+export interface View {
+  uuid: string;
+  name: string;
+  display_name: string;
+  position: number;
+  config: ViewConfig;
+}

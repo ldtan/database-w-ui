@@ -1,15 +1,18 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DataTable } from "primereact/datatable";
+import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api } from "../../lib/api";
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, ListItem, View, ViewConfig } from "../../lib/types";
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { ViewBar } from "../views/ViewBar";
+
+type SortOrder = 1 | 0 | -1 | null | undefined;
 
 function renderCell(column: Column, row: ListItem) {
   const value = row.data?.[column.uuid];
@@ -35,6 +38,11 @@ export function ListDetailPage() {
     item: ListItem | null;
   }>({ open: false, item: null });
 
+  const [activeViewUuid, setActiveViewUuid] = useState<string | null>(null);
+  const [sortField, setSortField] = useState<string | undefined>(undefined);
+  const [sortOrder, setSortOrder] = useState<SortOrder>(undefined);
+  const [pageSize, setPageSize] = useState(25);
+
   const columns = useQuery({
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
@@ -43,6 +51,27 @@ export function ListDetailPage() {
     queryKey: ["items", listUuid],
     queryFn: () => api.get<ListItem[]>(`/lists/${listUuid}/items/`),
   });
+  const views = useQuery({
+    queryKey: ["views", listUuid],
+    queryFn: () => api.get<View[]>(`/lists/${listUuid}/views/`),
+  });
+
+  // Default to the first view once loaded.
+  useEffect(() => {
+    if (!activeViewUuid && views.data && views.data.length > 0) {
+      setActiveViewUuid(views.data[0].uuid);
+    }
+  }, [views.data, activeViewUuid]);
+
+  // Apply the active view's saved sort + page size.
+  useEffect(() => {
+    const view = views.data?.find((v) => v.uuid === activeViewUuid);
+    if (!view) return;
+    const sort = view.config.sorts?.[0];
+    setSortField(sort ? `data.${sort.column_uuid}` : undefined);
+    setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
+    setPageSize(view.config.page_size ?? 25);
+  }, [activeViewUuid, views.data]);
 
   const deleteItem = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/items/${uuid}`),
@@ -58,6 +87,17 @@ export function ListDetailPage() {
   });
 
   const cols = columns.data ?? [];
+  const currentConfig: ViewConfig = {
+    sorts: sortField
+      ? [
+          {
+            column_uuid: sortField.replace(/^data\./, ""),
+            direction: sortOrder === 1 ? "asc" : "desc",
+          },
+        ]
+      : [],
+    page_size: pageSize,
+  };
 
   function confirmDeleteItem(row: ListItem) {
     confirmDialog({
@@ -100,6 +140,16 @@ export function ListDetailPage() {
         </div>
       </div>
 
+      {views.data && views.data.length > 0 && (
+        <ViewBar
+          listUuid={listUuid}
+          views={views.data}
+          activeUuid={activeViewUuid}
+          onSelect={setActiveViewUuid}
+          currentConfig={currentConfig}
+        />
+      )}
+
       {cols.length === 0 && !columns.isLoading && (
         <p>This list has no columns yet. Add one to get started.</p>
       )}
@@ -110,7 +160,15 @@ export function ListDetailPage() {
         dataKey="uuid"
         stripedRows
         paginator
-        rows={25}
+        rows={pageSize}
+        rowsPerPageOptions={[10, 25, 50, 100]}
+        onPage={(e) => setPageSize(e.rows)}
+        sortField={sortField}
+        sortOrder={sortOrder}
+        onSort={(e: DataTableSortEvent) => {
+          setSortField(e.sortField);
+          setSortOrder(e.sortOrder);
+        }}
         emptyMessage="No records yet."
       >
         {cols.map((col) => (
