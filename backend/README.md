@@ -188,6 +188,14 @@ POST /api/lists/{list_uuid}/columns
 uv run pytest          # run the test suite (pytest + pytest-asyncio)
 ```
 
+The tests run against a real PostgreSQL database (the models depend on JSONB, GIN and
+partial indexes, and advisory locks, so SQLite isn't an option). They connect to the same
+server as `DATABASE_URI` and auto-create a `<db>_test` database (override with the
+`TEST_DB_NAME` env var); the whole suite skips cleanly if Postgres isn't reachable. Each
+test gets a freshly created/dropped schema, and requests run with auth disabled as a
+single seeded user. `tests/test_unique_concurrency.py` verifies the per-list advisory lock
+by asserting a concurrent record `create` blocks while the lock is held.
+
 Model registration: new SQLAlchemy models must be imported in `main.py`'s `lifespan` so
 they register with `Base.metadata` before `create_all` runs.
 
