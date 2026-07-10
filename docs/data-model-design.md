@@ -187,7 +187,10 @@ Notes:
   regex, a `default` that is itself a valid value).
 - **`unique` is enforced:** on write, no other non-deleted record in the list may hold the
   same value for that column (checked with a JSONB `@>` containment query). Violations
-  return `409`. Empty and multi-valued (list) values are skipped.
+  return `409`. Empty and multi-valued (list) values are skipped. The check and the insert
+  are made atomic by a transaction-scoped Postgres advisory lock keyed on the list (taken
+  only when the list has a unique column), so concurrent writers can't both pass the check.
+  Note this guards writers going through the service layer, not arbitrary direct DB writes.
 - **Dynamic defaults:** temporal columns accept `default: "today"` (date) or `"now"`
   (time/datetime), resolved to the current value at insert time rather than stored as a
   fixed literal.

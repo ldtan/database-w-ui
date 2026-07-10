@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
@@ -14,6 +14,9 @@ from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
 from .models import ListItem
+
+# Namespace for the per-list advisory lock that serializes unique-value writes.
+_UNIQUE_LOCK_NS = 0x4C495354  # "LIST"
 from .schemas import ListItemCreate, ListItemUpdate
 
 
@@ -190,9 +193,22 @@ class ListItemService:
         exclude_id: Optional[int],
     ) -> None:
         """Reject records that duplicate a value on a column marked unique."""
-        for key, column in columns.items():
-            if not (column.config or {}).get("unique"):
-                continue
+        unique_columns = {
+            key: column
+            for key, column in columns.items()
+            if (column.config or {}).get("unique")
+        }
+        if not unique_columns:
+            return
+
+        # Serialize writes to this list so the check-and-insert is atomic: the
+        # lock is held until this transaction commits, closing the TOCTOU window
+        # where two concurrent writers both see "no duplicate" and both insert.
+        await db.execute(
+            select(func.pg_advisory_xact_lock(_UNIQUE_LOCK_NS, list_id))
+        )
+
+        for key, column in unique_columns.items():
             value = data.get(key)
             if cls._is_empty(value) or isinstance(value, list):
                 continue
