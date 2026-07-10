@@ -65,8 +65,19 @@ export interface ViewSort {
   direction: "asc" | "desc";
 }
 
+export interface FilterCondition {
+  column_uuid: string;
+  operator: string;
+  value?: unknown;
+}
+
+export interface FilterGroup {
+  conjunction: "and" | "or";
+  conditions: FilterCondition[];
+}
+
 export interface ViewConfig {
-  filters?: { conjunction: "and" | "or"; conditions: unknown[] };
+  filters?: FilterGroup;
   sorts?: ViewSort[];
   group_by?: { column_uuid: string } | null;
   page_size?: number;

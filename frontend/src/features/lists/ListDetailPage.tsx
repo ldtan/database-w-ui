@@ -11,6 +11,7 @@ import type { Column, ListItem, View, ViewConfig } from "../../lib/types";
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { ViewBar } from "../views/ViewBar";
+import { FilterDialog } from "../views/FilterDialog";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
@@ -42,14 +43,20 @@ export function ListDetailPage() {
   const [sortField, setSortField] = useState<string | undefined>(undefined);
   const [sortOrder, setSortOrder] = useState<SortOrder>(undefined);
   const [pageSize, setPageSize] = useState(25);
+  const [showFilter, setShowFilter] = useState(false);
 
   const columns = useQuery({
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
   });
   const items = useQuery({
-    queryKey: ["items", listUuid],
-    queryFn: () => api.get<ListItem[]>(`/lists/${listUuid}/items/`),
+    queryKey: ["items", listUuid, activeViewUuid],
+    queryFn: () =>
+      api.get<ListItem[]>(
+        `/lists/${listUuid}/items/${
+          activeViewUuid ? `?view_uuid=${activeViewUuid}` : ""
+        }`,
+      ),
   });
   const views = useQuery({
     queryKey: ["views", listUuid],
@@ -87,6 +94,8 @@ export function ListDetailPage() {
   });
 
   const cols = columns.data ?? [];
+  const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
+  const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
   const currentConfig: ViewConfig = {
     sorts: sortField
       ? [
@@ -97,6 +106,7 @@ export function ListDetailPage() {
         ]
       : [],
     page_size: pageSize,
+    filters: activeView?.config.filters ?? { conjunction: "and", conditions: [] },
   };
 
   function confirmDeleteItem(row: ListItem) {
@@ -141,13 +151,22 @@ export function ListDetailPage() {
       </div>
 
       {views.data && views.data.length > 0 && (
-        <ViewBar
-          listUuid={listUuid}
-          views={views.data}
-          activeUuid={activeViewUuid}
-          onSelect={setActiveViewUuid}
-          currentConfig={currentConfig}
-        />
+        <div className="flex items-center gap-2">
+          <ViewBar
+            listUuid={listUuid}
+            views={views.data}
+            activeUuid={activeViewUuid}
+            onSelect={setActiveViewUuid}
+            currentConfig={currentConfig}
+          />
+          <Button
+            label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
+            icon="pi pi-filter"
+            text
+            onClick={() => setShowFilter(true)}
+            disabled={!activeViewUuid || cols.length === 0}
+          />
+        </div>
       )}
 
       {cols.length === 0 && !columns.isLoading && (
@@ -232,6 +251,16 @@ export function ListDetailPage() {
         visible={recordDialog.open}
         onHide={() => setRecordDialog({ open: false, item: null })}
       />
+      {activeViewUuid && (
+        <FilterDialog
+          listUuid={listUuid}
+          viewUuid={activeViewUuid}
+          columns={cols}
+          baseConfig={currentConfig}
+          visible={showFilter}
+          onHide={() => setShowFilter(false)}
+        />
+      )}
     </div>
   );
 }

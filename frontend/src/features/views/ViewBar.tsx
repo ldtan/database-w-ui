@@ -26,8 +26,11 @@ export function ViewBar({
   currentConfig,
 }: Props) {
   const queryClient = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
+    // Sort/filter are applied server-side by view, so records must refetch too.
+    queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+  };
 
   const save = useMutation({
     mutationFn: () =>
