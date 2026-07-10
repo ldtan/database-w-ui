@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import UnknownReferenceError, ValidationError
+from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.infrastructure.database import get_db
 
 from ..dependencies import get_list_or_404
@@ -23,6 +23,8 @@ async def create_item(
 ):
     try:
         return await ListItemService.create(db, lst, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -58,6 +60,8 @@ async def update_item(
 ):
     try:
         item = await ListItemService.update(db, lst, uuid, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 

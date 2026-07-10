@@ -18,20 +18,28 @@ class ColumnConfig(BaseModel):
     """Type-specific column settings. Only the keys relevant to a column's
     ``type`` are meaningful; the service validates the combination."""
 
-    # Common
+    # Common (all types)
     required: bool = False
     default: Any = None
     help_text: Optional[str] = None
-    unique: bool = False
-    # text
+    unique: bool = False  # enforced: no two records may share the value
+    placeholder: Optional[str] = None  # UI hint, not enforced
+    read_only: bool = False  # UI hint, not enforced
+    # text / long_text
+    min_length: Optional[int] = None
     max_length: Optional[int] = None
+    pattern: Optional[str] = None  # regex; value must fully match
+    # number, date, time, datetime — min/max are interpreted per type
+    # (a number for number columns; an ISO-8601 string for temporal columns)
+    min: Optional[Any] = None
+    max: Optional[Any] = None
     # number
     precision: Optional[int] = None
     number_format: Optional[str] = None  # plain | currency | percent
-    min: Optional[float] = None
-    max: Optional[float] = None
+    integer_only: Optional[bool] = None
     # choice
-    options: Optional[list[ChoiceOption]] = None
+    choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
+    options: Optional[list[ChoiceOption]] = None  # full control (ids, colors)
     multiple: Optional[bool] = None
     # lookup
     target_list_uuid: Optional[UUID] = None

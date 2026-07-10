@@ -1,15 +1,17 @@
-from datetime import date, datetime, time, timezone
+from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.core.exceptions import UnknownReferenceError, ValidationError
+from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import coerce_uuid
+from src.workspaces.models import Workspace
 
 from ..columns.enums import ColumnType
 from ..columns.models import Column
+from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
 from .models import ListItem
 from .schemas import ListItemCreate, ListItemUpdate
@@ -47,6 +49,7 @@ class ListItemService:
     ) -> ListItem:
         columns = await cls._columns_by_key(db, lst.id)
         data = await cls._validate_data(db, lst, columns, payload.data, existing=None)
+        await cls._enforce_unique(db, lst.id, columns, data, exclude_id=None)
 
         item = ListItem(list_id=lst.id, data=data)
         db.add(item)
@@ -71,6 +74,7 @@ class ListItemService:
         merged = await cls._validate_data(
             db, lst, columns, payload.data, existing=item.data or {}
         )
+        await cls._enforce_unique(db, lst.id, columns, merged, exclude_id=item.id)
         # Reassign a new dict so SQLAlchemy detects the JSONB change.
         item.data = merged
         await db.commit()
@@ -170,11 +174,40 @@ class ListItemService:
             if result.get(key) is None:
                 default = config.get("default")
                 if default is not None:
-                    result[key] = default
+                    result[key] = resolve_dynamic_default(column.type, default)
             if config.get("required") and cls._is_empty(result.get(key)):
                 raise ValidationError(f"Column '{column.name}' is required")
 
         return result
+
+    @classmethod
+    async def _enforce_unique(
+        cls,
+        db: AsyncSession,
+        list_id: int,
+        columns: dict[str, Column],
+        data: dict,
+        exclude_id: Optional[int],
+    ) -> None:
+        """Reject records that duplicate a value on a column marked unique."""
+        for key, column in columns.items():
+            if not (column.config or {}).get("unique"):
+                continue
+            value = data.get(key)
+            if cls._is_empty(value) or isinstance(value, list):
+                continue
+            stmt = select(ListItem.id).where(
+                ListItem.list_id == list_id,
+                ListItem.deleted_at.is_(None),
+                ListItem.data.contains({key: value}),
+            )
+            if exclude_id is not None:
+                stmt = stmt.where(ListItem.id != exclude_id)
+            existing = (await db.execute(stmt.limit(1))).scalars().first()
+            if existing is not None:
+                raise ConflictError(
+                    f"Column '{column.name}' must be unique; that value already exists"
+                )
 
     @staticmethod
     def _is_empty(value) -> bool:
@@ -184,37 +217,11 @@ class ListItemService:
     async def _validate_value(
         cls, db: AsyncSession, lst: List, column: Column, value
     ) -> None:
-        type_ = column.type
-        config = column.config or {}
-
-        if type_ in (ColumnType.text, ColumnType.long_text):
-            if not isinstance(value, str):
-                cls._type_error(column, "a string")
-
-        elif type_ in (ColumnType.date, ColumnType.time, ColumnType.datetime):
-            cls._validate_temporal(column, value)
-
-        elif type_ == ColumnType.number:
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                cls._type_error(column, "a number")
-
-        elif type_ == ColumnType.checkbox:
-            if not isinstance(value, bool):
-                cls._type_error(column, "a boolean")
-
-        elif type_ == ColumnType.choice:
-            valid_ids = {opt["id"] for opt in config.get("options", [])}
-            values = value if config.get("multiple") else [value]
-            if config.get("multiple") and not isinstance(value, list):
-                cls._type_error(column, "a list of option ids")
-            for item in values:
-                if item not in valid_ids:
-                    raise ValidationError(
-                        f"'{item}' is not a valid option for column '{column.name}'"
-                    )
-
-        elif type_ == ColumnType.lookup:
+        # Lookups need the database; every other type is a pure scalar check.
+        if column.type == ColumnType.lookup:
             await cls._validate_lookup(db, lst, column, value)
+        else:
+            validate_scalar(column.type, column.config or {}, column.name, value)
 
     @classmethod
     async def _validate_lookup(
@@ -237,10 +244,13 @@ class ListItemService:
 
         target_list_uuid = config.get("target_list_uuid")
         target = await db.execute(
-            select(List.id).where(
+            select(List.id)
+            .join(Workspace, List.workspace_id == Workspace.id)
+            .where(
                 List.uuid == coerce_uuid(target_list_uuid),
-                List.owner_id == lst.owner_id,
+                Workspace.owner_id == lst.workspace.owner_id,
                 List.deleted_at.is_(None),
+                Workspace.deleted_at.is_(None),
             )
         )
         target_list_id = target.scalars().first()
@@ -263,22 +273,6 @@ class ListItemService:
                 f"Lookup column '{column.name}' references unknown row(s): "
                 f"{', '.join(missing)}"
             )
-
-    @classmethod
-    def _validate_temporal(cls, column: Column, value) -> None:
-        """Validate that a date/time/datetime value is a well-formed ISO-8601 string."""
-        if not isinstance(value, str):
-            cls._type_error(column, "an ISO-8601 string")
-        parsers = {
-            ColumnType.date: (date.fromisoformat, "a date (YYYY-MM-DD)"),
-            ColumnType.time: (time.fromisoformat, "a time (HH:MM[:SS])"),
-            ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
-        }
-        parser, expected = parsers[column.type]
-        try:
-            parser(value)
-        except ValueError:
-            cls._type_error(column, expected)
 
     @staticmethod
     def _type_error(column: Column, expected: str) -> None:

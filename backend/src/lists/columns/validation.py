@@ -1,0 +1,209 @@
+"""Pure (DB-free) validation helpers for column config and record values.
+
+Shared by the column service (validating a column's own settings and default)
+and the item service (validating record values), so the two never drift. Lookup
+validation needs the database and stays in the item service.
+"""
+import re
+from datetime import date, datetime, time
+from typing import Optional
+
+from src.core.exceptions import ValidationError
+
+from .enums import ColumnType
+
+
+# parser + human-readable expectation, per temporal type
+_TEMPORAL = {
+    ColumnType.date: (date.fromisoformat, "a date (YYYY-MM-DD)"),
+    ColumnType.time: (time.fromisoformat, "a time (HH:MM[:SS])"),
+    ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
+}
+_NUMBER_FORMATS = {"plain", "currency", "percent"}
+
+# Special `default` tokens for temporal columns, resolved at record-insert time.
+_DYNAMIC_DEFAULTS = {
+    ColumnType.date: {"today"},
+    ColumnType.time: {"now"},
+    ColumnType.datetime: {"now"},
+}
+
+
+def is_dynamic_default(column_type: ColumnType, default) -> bool:
+    """True if ``default`` is a dynamic token (e.g. "today"/"now") for this type."""
+    return isinstance(default, str) and default in _DYNAMIC_DEFAULTS.get(column_type, set())
+
+
+def resolve_dynamic_default(column_type: ColumnType, default):
+    """Resolve a dynamic default token to a concrete ISO string; else pass through."""
+    if not is_dynamic_default(column_type, default):
+        return default
+    now = datetime.now()
+    if column_type == ColumnType.date:
+        return now.date().isoformat()
+    if column_type == ColumnType.time:
+        return now.time().replace(microsecond=0).isoformat()
+    return now.replace(microsecond=0).isoformat()
+
+
+def _expect(name: str, expected: str) -> None:
+    raise ValidationError(f"Column '{name}' expects {expected}")
+
+
+def parse_temporal(column_type: ColumnType, value):
+    """Parse a temporal value; raises ValueError/TypeError if malformed."""
+    parser, _ = _TEMPORAL[column_type]
+    return parser(value)
+
+
+def _slugify(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "option"
+
+
+def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[dict]:
+    """Return the canonical option list for a choice column.
+
+    Explicit ``options`` win. Otherwise the ``choices`` shorthand ("A;B;C") is
+    expanded, reusing an existing option's id for an unchanged label so records
+    keep pointing at the right option across edits.
+    """
+    options = config.get("options")
+    if options:
+        return options
+
+    choices = config.get("choices")
+    if not choices:
+        return []
+
+    existing_by_label = {
+        opt["label"]: opt["id"] for opt in (existing or {}).get("options", []) or []
+    }
+    result: list[dict] = []
+    seen: set[str] = set()
+    for raw in choices.split(";"):
+        label = raw.strip()
+        if not label:
+            continue
+        oid = existing_by_label.get(label)
+        if oid is None:
+            oid = base = _slugify(label)
+            i = 2
+            while oid in seen:
+                oid = f"{base}_{i}"
+                i += 1
+        seen.add(oid)
+        result.append({"id": oid, "label": label})
+    return result
+
+
+def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
+    """Validate that a column's own settings are well-formed (min <= max, etc.)."""
+    if column_type in (ColumnType.text, ColumnType.long_text):
+        for key in ("min_length", "max_length"):
+            v = config.get(key)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 0):
+                raise ValidationError(f"'{key}' must be a non-negative integer")
+        lo, hi = config.get("min_length"), config.get("max_length")
+        if lo is not None and hi is not None and lo > hi:
+            raise ValidationError("'min_length' cannot exceed 'max_length'")
+        pattern = config.get("pattern")
+        if pattern is not None:
+            try:
+                re.compile(pattern)
+            except re.error:
+                raise ValidationError("'pattern' is not a valid regular expression")
+
+    elif column_type == ColumnType.number:
+        for key in ("min", "max"):
+            v = config.get(key)
+            if v is not None and (isinstance(v, bool) or not isinstance(v, (int, float))):
+                raise ValidationError(f"number '{key}' must be a number")
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and hi is not None and lo > hi:
+            raise ValidationError("'min' cannot exceed 'max'")
+        precision = config.get("precision")
+        if precision is not None and (
+            isinstance(precision, bool) or not isinstance(precision, int) or precision < 0
+        ):
+            raise ValidationError("'precision' must be a non-negative integer")
+        fmt = config.get("number_format")
+        if fmt is not None and fmt not in _NUMBER_FORMATS:
+            raise ValidationError(
+                f"'number_format' must be one of {sorted(_NUMBER_FORMATS)}"
+            )
+
+    elif column_type in _TEMPORAL:
+        expected = _TEMPORAL[column_type][1]
+        for key in ("min", "max"):
+            v = config.get(key)
+            if v is not None:
+                try:
+                    parse_temporal(column_type, v)
+                except (ValueError, TypeError):
+                    raise ValidationError(f"'{key}' must be {expected}")
+        lo, hi = config.get("min"), config.get("max")
+        if (
+            lo is not None
+            and hi is not None
+            and parse_temporal(column_type, lo) > parse_temporal(column_type, hi)
+        ):
+            raise ValidationError("'min' cannot exceed 'max'")
+
+
+def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> None:
+    """Validate a non-lookup value against its column type and constraints."""
+    if column_type in (ColumnType.text, ColumnType.long_text):
+        if not isinstance(value, str):
+            _expect(name, "a string")
+        lo, hi = config.get("min_length"), config.get("max_length")
+        if lo is not None and len(value) < lo:
+            raise ValidationError(f"Column '{name}' must be at least {lo} character(s)")
+        if hi is not None and len(value) > hi:
+            raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
+        pattern = config.get("pattern")
+        if pattern is not None and re.fullmatch(pattern, value) is None:
+            raise ValidationError(f"Column '{name}' does not match the required pattern")
+
+    elif column_type == ColumnType.number:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _expect(name, "a number")
+        if config.get("integer_only") and not (
+            isinstance(value, int) or (isinstance(value, float) and value.is_integer())
+        ):
+            _expect(name, "an integer")
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and value < lo:
+            raise ValidationError(f"Column '{name}' must be >= {lo}")
+        if hi is not None and value > hi:
+            raise ValidationError(f"Column '{name}' must be <= {hi}")
+
+    elif column_type == ColumnType.checkbox:
+        if not isinstance(value, bool):
+            _expect(name, "a boolean")
+
+    elif column_type == ColumnType.choice:
+        valid_ids = {opt["id"] for opt in config.get("options", []) or []}
+        if config.get("multiple"):
+            if not isinstance(value, list):
+                _expect(name, "a list of option ids")
+            candidates = value
+        else:
+            candidates = [value]
+        for item in candidates:
+            if item not in valid_ids:
+                raise ValidationError(
+                    f"'{item}' is not a valid option for column '{name}'"
+                )
+
+    elif column_type in _TEMPORAL:
+        if not isinstance(value, str):
+            _expect(name, "an ISO-8601 string")
+        try:
+            parsed = parse_temporal(column_type, value)
+        except (ValueError, TypeError):
+            _expect(name, _TEMPORAL[column_type][1])
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and parsed < parse_temporal(column_type, lo):
+            raise ValidationError(f"Column '{name}' must be on or after {lo}")
+        if hi is not None and parsed > parse_temporal(column_type, hi):
+            raise ValidationError(f"Column '{name}' must be on or before {hi}")

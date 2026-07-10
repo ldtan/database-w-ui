@@ -8,11 +8,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import coerce_uuid
+from src.workspaces.models import Workspace
 
 from ..models import List
 from .enums import ColumnType
 from .models import Column
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
+from .validation import (
+    is_dynamic_default,
+    resolve_choice_options,
+    validate_config_constraints,
+    validate_scalar,
+)
 
 
 class ColumnService:
@@ -81,9 +88,9 @@ class ColumnService:
 
         if "config" in data:
             # A column's type is immutable after creation; re-validate the new
-            # config against the existing type.
+            # config against the existing type, preserving choice option ids.
             column.config = await cls._validate_config(
-                db, lst, column.type, payload.config
+                db, lst, column.type, payload.config, existing=column.config
             )
             data.pop("config")
         if data.get("name") is None:
@@ -125,25 +132,47 @@ class ColumnService:
 
     @staticmethod
     async def _validate_config(
-        db: AsyncSession, lst: List, type_: ColumnType, config: ColumnConfig
+        db: AsyncSession,
+        lst: List,
+        type_: ColumnType,
+        config: ColumnConfig,
+        existing: Optional[dict] = None,
     ) -> dict:
-        """Validate type-specific settings and return the JSON-ready dict to store."""
+        """Validate type-specific settings and return the JSON-ready dict to store.
+
+        ``existing`` is the column's current stored config (on update), used to
+        keep choice option ids stable across edits.
+        """
+        # Drop keys the caller left unset so stored config stays lean.
+        data = config.model_dump(mode="json", exclude_none=True)
+
         if type_ == ColumnType.choice:
-            options = config.options or []
+            options = resolve_choice_options(data, existing)
             if not options:
                 raise ValidationError("A choice column requires at least one option")
-            ids = [opt.id for opt in options]
+            ids = [opt["id"] for opt in options]
             if len(ids) != len(set(ids)):
                 raise ValidationError("Choice option ids must be unique")
+            data["options"] = options
+            data.pop("choices", None)
+            # Let a default be given by option label; store it as the option id.
+            default = data.get("default")
+            if isinstance(default, str) and default not in set(ids):
+                by_label = {opt["label"]: opt["id"] for opt in options}
+                if default in by_label:
+                    data["default"] = by_label[default]
 
         if type_ == ColumnType.lookup:
             if config.target_list_uuid is None:
                 raise ValidationError("A lookup column requires a target_list_uuid")
             result = await db.execute(
-                select(List.id).where(
+                select(List.id)
+                .join(Workspace, List.workspace_id == Workspace.id)
+                .where(
                     List.uuid == config.target_list_uuid,
-                    List.owner_id == lst.owner_id,
+                    Workspace.owner_id == lst.workspace.owner_id,
                     List.deleted_at.is_(None),
+                    Workspace.deleted_at.is_(None),
                 )
             )
             if result.scalars().first() is None:
@@ -151,5 +180,17 @@ class ColumnService:
                     "target_list_uuid does not reference a list you own"
                 )
 
-        # Drop keys the caller left unset so stored config stays lean.
-        return config.model_dump(mode="json", exclude_none=True)
+        # Numeric/temporal/text settings must be well-formed (min <= max, ...).
+        validate_config_constraints(type_, data)
+
+        # A configured default must itself be a valid value for the column
+        # (dynamic tokens like "today"/"now" are resolved at insert time).
+        default = data.get("default")
+        if (
+            default is not None
+            and type_ != ColumnType.lookup
+            and not is_dynamic_default(type_, default)
+        ):
+            validate_scalar(type_, data, "default", default)
+
+        return data

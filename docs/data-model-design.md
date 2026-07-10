@@ -162,27 +162,45 @@ Common `config` keys (all optional unless noted):
 
 | `type`        | Stored value in `data`                     | Type-specific `config` |
 |---------------|--------------------------------------------|------------------------|
-| `text`        | `string`                                   | `max_length?` |
-| `long_text`   | `string`                                   | — |
-| `number`      | `number`                                   | `precision?`, `format?` (`plain`/`currency`/`percent`), `min?`, `max?` |
+| `text`        | `string`                                   | `min_length?`, `max_length?`, `pattern?` |
+| `long_text`   | `string`                                   | `min_length?`, `max_length?`, `pattern?` |
+| `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
-| `choice`      | option `id` (or `[id, …]` if multi)        | `options: [{id, label, color}]`, `multiple: bool` |
-| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple: bool` |
-| `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | — |
-| `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | — |
-| `datetime`    | ISO-8601 date-time `string`                | — |
+| `choice`      | option `id` (or `[id, …]` if multi)        | `choices?` (shorthand) **or** `options: [{id, label, color}]`; `multiple?` |
+| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?` |
+| `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
+| `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | `min?`, `max?` (ISO time); `default: "now"` |
+| `datetime`    | ISO-8601 date-time `string`                | `min?`, `max?` (ISO date-time); `default: "now"` |
 
-`number`'s format key is `number_format` (`plain`/`currency`/`percent`). `lookup`
-references its target list by **uuid** (`target_list_uuid`), not internal id, so the
-config stays API-portable.
+Common keys on **every** type: `required`, `default`, `unique`, `help_text`, plus the
+UI-only hints `placeholder` and `read_only` (stored, not enforced by the API).
+
+`min`/`max` are shared keys interpreted per type: numbers for `number`, ISO strings for
+the temporal types. `lookup` references its target list by **uuid** (`target_list_uuid`),
+not internal id, so the config stays API-portable.
 
 Notes:
-- `choice` — options carry stable `id`s (D3); records store the id.
+- **Every constraint is enforced on write** (both when a record is saved and against the
+  column's own `default`): text `min_length`/`max_length`/`pattern` (regex, full match),
+  number range and `integer_only`, temporal range, and choice membership. Config is also
+  validated when the column is created/updated (e.g. `min` ≤ `max`, well-formed dates and
+  regex, a `default` that is itself a valid value).
+- **`unique` is enforced:** on write, no other non-deleted record in the list may hold the
+  same value for that column (checked with a JSONB `@>` containment query). Violations
+  return `409`. Empty and multi-valued (list) values are skipped.
+- **Dynamic defaults:** temporal columns accept `default: "today"` (date) or `"now"`
+  (time/datetime), resolved to the current value at insert time rather than stored as a
+  fixed literal.
+- `choice` — options carry stable `id`s (D3); records store the id. The `choices`
+  shorthand (`"Todo;Doing;Done"`) is expanded server-side into `options` with generated
+  ids; on update, ids for **unchanged labels are preserved** so records stay valid.
+  Explicit `options` (with colors) override the shorthand. A choice `default` may be given
+  as an option label and is stored as the id.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the
   target list's `primary_column_id`.
-- `date` / `time` / `datetime` — stored as ISO-8601 strings and validated on write via
-  Python's `date`/`time`/`datetime` `fromisoformat`. The three separate types replace a
-  single date type with an `include_time` flag.
+- `date` / `time` / `datetime` — stored as ISO-8601 strings and validated via Python's
+  `fromisoformat`. The three separate types replace a single date type with an
+  `include_time` flag.
 - The set is extensible: adding e.g. `email`, `url`, `attachment`, `rating` is just a
   new enum member + `config` convention, no migration.
 
@@ -205,6 +223,14 @@ Notes:
     ]
   }
 }
+```
+
+The same column can be created with the shorthand instead — the server expands it into
+`options` with generated ids (`todo`, `doing`, `done`):
+
+```jsonc
+{ "name": "status", "display_name": "Status", "type": "choice",
+  "config": { "required": true, "choices": "To do;Doing;Done" } }
 ```
 
 ---
