@@ -21,6 +21,7 @@ import type {
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
+import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { LookupCell } from "../lookups/LookupControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
@@ -50,6 +51,7 @@ export function ListDetailPage() {
   const queryClient = useQueryClient();
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [showForms, setShowForms] = useState(false);
+  const [showTransfer, setShowTransfer] = useState(false);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
     item: ListItem | null;
@@ -230,6 +232,13 @@ export function ListDetailPage() {
             disabled={formList.length === 0}
           />
           <Button
+            label="Import / Export"
+            icon="pi pi-file-import"
+            outlined
+            onClick={() => setShowTransfer(true)}
+            disabled={cols.length === 0}
+          />
+          <Button
             label="Add record"
             icon="pi pi-plus"
             onClick={() => setRecordDialog({ open: true, item: null })}
@@ -404,6 +413,13 @@ export function ListDetailPage() {
         forms={formList}
         visible={showForms}
         onHide={() => setShowForms(false)}
+      />
+      <ImportExportDialog
+        listUuid={listUuid}
+        listName={list.data?.name ?? "records"}
+        columns={cols}
+        visible={showTransfer}
+        onHide={() => setShowTransfer(false)}
       />
       {activeViewUuid && (
         <FilterDialog
