@@ -1,0 +1,115 @@
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
+
+export type ThemeId = "modern" | "nordic" | "brutalist" | "luxury";
+export type ThemeMode = "light" | "dark";
+
+export interface ThemeMeta {
+  id: ThemeId;
+  label: string;
+  description: string;
+  /** [primary, secondary, accent] preview swatches (light-mode values). */
+  swatch: [string, string, string];
+}
+
+export const THEMES: ThemeMeta[] = [
+  {
+    id: "modern",
+    label: "Modern Tech",
+    description: "Clean, vibrant indigo & cyan",
+    swatch: ["#4f46e5", "#06b6d4", "#8b5cf6"],
+  },
+  {
+    id: "nordic",
+    label: "Minimalist Nordic",
+    description: "Warm, organic earth tones",
+    swatch: ["#2d3a3a", "#786f68", "#d4a373"],
+  },
+  {
+    id: "brutalist",
+    label: "Neo-Brutalist",
+    description: "Bold, high-contrast neon",
+    swatch: ["#ff0055", "#00ffcc", "#ffcc00"],
+  },
+  {
+    id: "luxury",
+    label: "Elegant Luxury",
+    description: "Deep emerald & warm gold",
+    swatch: ["#064e3b", "#374151", "#d97706"],
+  },
+];
+
+const THEME_KEY = "ui-theme";
+const MODE_KEY = "ui-mode";
+const DEFAULT_THEME: ThemeId = "modern";
+const DEFAULT_MODE: ThemeMode = "light";
+
+const THEME_IDS = new Set(THEMES.map((t) => t.id));
+
+function readTheme(): ThemeId {
+  const stored = localStorage.getItem(THEME_KEY);
+  return stored && THEME_IDS.has(stored as ThemeId)
+    ? (stored as ThemeId)
+    : DEFAULT_THEME;
+}
+
+function readMode(): ThemeMode {
+  const stored = localStorage.getItem(MODE_KEY);
+  return stored === "dark" || stored === "light" ? stored : DEFAULT_MODE;
+}
+
+interface ThemeContextValue {
+  theme: ThemeId;
+  mode: ThemeMode;
+  setTheme: (theme: ThemeId) => void;
+  setMode: (mode: ThemeMode) => void;
+  toggleMode: () => void;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [theme, setThemeState] = useState<ThemeId>(readTheme);
+  const [mode, setModeState] = useState<ThemeMode>(readMode);
+
+  // Reflect the current selection onto <html> so themes.css can key off it.
+  useEffect(() => {
+    const root = document.documentElement;
+    root.dataset.theme = theme;
+    root.dataset.mode = mode;
+  }, [theme, mode]);
+
+  const setTheme = useCallback((next: ThemeId) => {
+    localStorage.setItem(THEME_KEY, next);
+    setThemeState(next);
+  }, []);
+
+  const setMode = useCallback((next: ThemeMode) => {
+    localStorage.setItem(MODE_KEY, next);
+    setModeState(next);
+  }, []);
+
+  const toggleMode = useCallback(() => {
+    setMode(mode === "dark" ? "light" : "dark");
+  }, [mode, setMode]);
+
+  const value = useMemo(
+    () => ({ theme, mode, setTheme, setMode, toggleMode }),
+    [theme, mode, setTheme, setMode, toggleMode],
+  );
+
+  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+}
+
+export function useTheme(): ThemeContextValue {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error("useTheme must be used within a ThemeProvider");
+  return ctx;
+}

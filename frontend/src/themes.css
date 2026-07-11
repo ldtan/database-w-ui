@@ -1,0 +1,451 @@
+/* Theming layer.
+   The base PrimeReact theme (lara-light-cyan) ships with hardcoded hex colors —
+   its own --primary-color/--surface-* variables are defined but never referenced
+   by component rules. So we cannot recolor components by overriding those vars.
+   Instead we define our own semantic palette variables per theme, then restyle
+   the components the app actually uses to read from them.
+
+   This file is imported LAST and its rules are UNLAYERED, so for equal specificity
+   they win over the base theme by source order. Match the base theme's selector
+   specificity when overriding more specific component rules. */
+
+/* ============================================================
+   Palettes — one block per theme, plus a dark variant.
+   The provider always sets both data-theme and data-mode on <html>.
+   :root holds the default (Modern Tech, light) as a fallback.
+   ============================================================ */
+:root,
+[data-theme="modern"] {
+  --radius: 6px;
+  --border-width: 1px;
+  --brand: #4f46e5;
+  --brand-contrast: #ffffff;
+  --secondary: #06b6d4;
+  --accent: #8b5cf6;
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --border: #e2e8f0;
+  --hover: #f1f5f9;
+}
+[data-theme="modern"][data-mode="dark"] {
+  --brand: #6366f1;
+  --brand-contrast: #ffffff;
+  --secondary: #22d3ee;
+  --accent: #a78bfa;
+  --bg: #0f172a;
+  --surface: #1e293b;
+  --text: #f1f5f9;
+  --text-muted: #94a3b8;
+  --border: #334155;
+  --hover: #263449;
+}
+
+[data-theme="nordic"] {
+  --brand: #2d3a3a;
+  --brand-contrast: #f9f6f0;
+  --secondary: #786f68;
+  --accent: #d4a373;
+  --bg: #f9f6f0;
+  --surface: #ffffff;
+  --text: #1c1a17;
+  --text-muted: #6b635c;
+  --border: #e7e0d5;
+  --hover: #f3eee5;
+}
+[data-theme="nordic"][data-mode="dark"] {
+  --brand: #a3b19b;
+  --brand-contrast: #1c1a17;
+  --secondary: #a39a92;
+  --accent: #e0b185;
+  --bg: #121212;
+  --surface: #1e1e1e;
+  --text: #eae5de;
+  --text-muted: #b8b0a6;
+  --border: #2e2e2e;
+  --hover: #262626;
+}
+
+[data-theme="brutalist"] {
+  --brand: #ff0055;
+  --brand-contrast: #ffffff;
+  --secondary: #00ffcc;
+  --accent: #ffcc00;
+  --bg: #f3f3f3;
+  --surface: #ffffff;
+  --text: #000000;
+  --text-muted: #333333;
+  --border: #000000;
+  --hover: #ececec;
+  --radius: 0px;
+  --border-width: 2px;
+}
+[data-theme="brutalist"][data-mode="dark"] {
+  --brand: #ff3377;
+  --brand-contrast: #ffffff;
+  --secondary: #33ffe0;
+  --accent: #ffe033;
+  --bg: #0a0a0c;
+  --surface: #16161a;
+  --text: #ffffff;
+  --text-muted: #c7c7ce;
+  --border: #3a3a40;
+  --hover: #202026;
+  --radius: 0px;
+  --border-width: 2px;
+}
+
+[data-theme="luxury"] {
+  --brand: #064e3b;
+  --brand-contrast: #f9fafb;
+  --secondary: #374151;
+  --accent: #d97706;
+  --bg: #faf9f6;
+  --surface: #ffffff;
+  --text: #111827;
+  --text-muted: #6b7280;
+  --border: #e5e1d8;
+  --hover: #f1efea;
+}
+[data-theme="luxury"][data-mode="dark"] {
+  --brand: #10b981;
+  --brand-contrast: #022c22;
+  --secondary: #9ca3af;
+  --accent: #f59e0b;
+  --bg: #022c22;
+  --surface: #064e3b;
+  --text: #f9fafb;
+  --text-muted: #a7c4b8;
+  --border: #0b5a45;
+  --hover: #0a3b2e;
+}
+
+/* ============================================================
+   Derived tokens (resolved against whatever palette is in scope).
+   ============================================================ */
+:root {
+  --brand-hover: color-mix(in srgb, var(--brand), black 14%);
+  --brand-tint: color-mix(in srgb, var(--brand) 14%, var(--surface));
+  --focus-ring: color-mix(in srgb, var(--brand) 30%, transparent);
+  --surface-2: color-mix(in srgb, var(--surface) 93%, var(--text));
+}
+[data-mode="dark"] {
+  --brand-hover: color-mix(in srgb, var(--brand), white 16%);
+  --brand-tint: color-mix(in srgb, var(--brand) 28%, var(--surface));
+}
+[data-mode="light"] {
+  color-scheme: light;
+}
+[data-mode="dark"] {
+  color-scheme: dark;
+}
+
+/* ============================================================
+   App chrome
+   ============================================================ */
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+.app-header {
+  background: var(--surface);
+  border-bottom: var(--border-width) solid var(--border);
+  color: var(--text);
+}
+a {
+  color: var(--brand);
+}
+.app-header a {
+  color: var(--text);
+}
+
+/* ============================================================
+   Buttons
+   ============================================================ */
+.p-button {
+  background: var(--brand);
+  border: var(--border-width) solid var(--brand);
+  color: var(--brand-contrast);
+  border-radius: var(--radius);
+}
+.p-button:enabled:hover,
+.p-button:not(button):not(a):not(.p-disabled):hover {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--brand-contrast);
+}
+.p-button:focus {
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+/* Text / link / outlined buttons render the brand as foreground, not fill. */
+.p-button.p-button-text,
+.p-button.p-button-link {
+  background: transparent;
+  border-color: transparent;
+  color: var(--brand);
+}
+.p-button.p-button-outlined {
+  background: transparent;
+  color: var(--brand);
+  border: var(--border-width) solid var(--brand);
+}
+.p-button.p-button-text:enabled:hover,
+.p-button.p-button-outlined:enabled:hover {
+  background: var(--brand-tint);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+/* Keep semantic (danger/secondary) buttons distinguishable. */
+.p-button.p-button-danger {
+  background: #ef4444;
+  border-color: #ef4444;
+  color: #ffffff;
+}
+.p-button.p-button-danger:enabled:hover {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+.p-button.p-button-danger.p-button-text,
+.p-button.p-button-danger.p-button-outlined {
+  background: transparent;
+  color: #ef4444;
+}
+.p-button.p-button-danger.p-button-text:enabled:hover,
+.p-button.p-button-danger.p-button-outlined:enabled:hover {
+  background: color-mix(in srgb, #ef4444 12%, var(--surface));
+  border-color: #ef4444;
+  color: #ef4444;
+}
+.p-button.p-button-secondary {
+  background: var(--secondary);
+  border-color: var(--secondary);
+  color: var(--brand-contrast);
+}
+
+/* ============================================================
+   Inputs
+   ============================================================ */
+.p-inputtext,
+.p-dropdown,
+.p-multiselect,
+.p-inputnumber-input {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-inputtext::placeholder {
+  color: var(--text-muted);
+}
+.p-inputtext:enabled:hover,
+.p-dropdown:not(.p-disabled):hover,
+.p-multiselect:not(.p-disabled):hover {
+  border-color: var(--brand);
+}
+.p-inputtext:enabled:focus,
+.p-dropdown:not(.p-disabled).p-focus,
+.p-multiselect:not(.p-disabled).p-focus {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+.p-dropdown .p-dropdown-label,
+.p-multiselect .p-multiselect-label {
+  color: var(--text);
+}
+.p-dropdown .p-dropdown-trigger,
+.p-multiselect .p-multiselect-trigger {
+  color: var(--text-muted);
+}
+
+/* Overlay panels for dropdowns / multiselects */
+.p-dropdown-panel,
+.p-multiselect-panel {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+}
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item,
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item {
+  color: var(--text);
+}
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item:not(.p-highlight):not(.p-disabled):hover,
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item.p-highlight,
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item.p-highlight {
+  background: var(--brand-tint);
+  color: var(--text);
+}
+.p-dropdown-panel .p-dropdown-header,
+.p-multiselect-panel .p-multiselect-header {
+  background: var(--surface-2);
+  color: var(--text);
+  border-bottom: var(--border-width) solid var(--border);
+}
+
+/* ============================================================
+   Checkbox
+   ============================================================ */
+.p-checkbox .p-checkbox-box {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-checkbox .p-checkbox-box.p-highlight {
+  background: var(--brand);
+  border-color: var(--brand);
+}
+.p-checkbox .p-checkbox-box.p-highlight .p-checkbox-icon {
+  color: var(--brand-contrast);
+}
+.p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box:hover {
+  border-color: var(--brand);
+}
+
+/* ============================================================
+   SelectButton
+   ============================================================ */
+.p-selectbutton .p-button {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  color: var(--text);
+}
+.p-selectbutton .p-button.p-highlight {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-contrast);
+}
+.p-selectbutton .p-button:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ============================================================
+   Dialog / OverlayPanel / ConfirmDialog
+   ============================================================ */
+.p-dialog,
+.p-overlaypanel,
+.p-confirm-popup {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-dialog .p-dialog-header,
+.p-dialog .p-dialog-footer {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.p-dialog .p-dialog-content,
+.p-overlaypanel .p-overlaypanel-content {
+  background: var(--surface);
+  color: var(--text);
+}
+.p-dialog .p-dialog-header .p-dialog-title {
+  color: var(--text);
+}
+.p-overlaypanel:after,
+.p-overlaypanel:before {
+  border-bottom-color: var(--surface);
+}
+
+/* ============================================================
+   DataTable
+   ============================================================ */
+.p-datatable .p-datatable-header,
+.p-datatable .p-datatable-footer {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.p-datatable .p-datatable-thead > tr > th {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.p-datatable .p-datatable-tbody > tr {
+  background: var(--surface);
+  color: var(--text);
+}
+.p-datatable .p-datatable-tbody > tr > td {
+  border-color: var(--border);
+}
+.p-datatable.p-datatable-striped .p-datatable-tbody > tr:nth-child(even) {
+  background: var(--surface-2);
+}
+.p-datatable .p-datatable-tbody > tr:not(.p-highlight):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.p-datatable .p-datatable-tbody > tr.p-highlight {
+  background: var(--brand-tint);
+  color: var(--text);
+}
+.p-datatable .p-rowgroup-header,
+.p-datatable .p-rowgroup-header td {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.p-column-filter-overlay,
+.p-datatable .p-sortable-column:not(.p-highlight):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.p-datatable .p-sortable-column.p-highlight {
+  background: var(--brand-tint);
+  color: var(--text);
+}
+.p-datatable .p-sortable-column .p-sortable-column-icon {
+  color: var(--text-muted);
+}
+
+/* Paginator */
+.p-paginator {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.p-paginator .p-paginator-pages .p-paginator-page.p-highlight {
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-contrast);
+}
+
+/* ============================================================
+   Card
+   ============================================================ */
+.p-card {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-card .p-card-title,
+.p-card .p-card-subtitle {
+  color: var(--text);
+}
+
+/* ============================================================
+   Menus / FileUpload / misc surfaces
+   ============================================================ */
+.p-menu,
+.p-tieredmenu,
+.p-fileupload .p-fileupload-content,
+.p-fileupload .p-fileupload-buttonbar {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+}
+.p-menuitem-link:not(.p-disabled):hover {
+  background: var(--hover);
+}
+
+/* Subtle text helpers used around the app */
+.text-muted,
+.p-inputgroup-addon {
+  color: var(--text-muted);
+}
