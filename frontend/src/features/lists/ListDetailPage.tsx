@@ -7,9 +7,11 @@ import { Button } from "primereact/button";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
 import { OverlayPanel } from "primereact/overlaypanel";
+import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
+import { useToast } from "../../lib/toast";
 import type {
   Column,
   Form,
@@ -49,6 +51,7 @@ function renderCell(column: Column, row: ListItem) {
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [showForms, setShowForms] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
@@ -114,15 +117,28 @@ export function ListDetailPage() {
 
   const deleteItem = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/items/${uuid}`),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success("Record deleted");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not delete record",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
   const deleteColumn = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/columns/${uuid}`),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success("Column deleted");
     },
+    onError: (err) =>
+      toast.error(
+        "Could not delete column",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
 
   const cols = columns.data ?? [];
@@ -319,7 +335,10 @@ export function ListDetailPage() {
       )}
 
       {cols.length === 0 && !columns.isLoading && (
-        <p>This list has no columns yet. Add one to get started.</p>
+        <Message
+          severity="info"
+          text="This list has no columns yet. Use “Add column” to define fields, then add records."
+        />
       )}
 
       <DataTable

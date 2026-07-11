@@ -11,6 +11,7 @@ import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 
@@ -209,6 +210,7 @@ export function RecordFormDialog({
   onHide,
 }: Props) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [values, setValues] = useState<Record<string, unknown>>({});
   const fields = resolveFields(columns, form);
 
@@ -252,6 +254,7 @@ export function RecordFormDialog({
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success(item ? "Record updated" : "Record added");
       onHide();
     },
   });

@@ -14,6 +14,7 @@ import {
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
 import { downloadBlob, downloadFile } from "../../lib/download";
 import type { Column, FilterCondition } from "../../lib/types";
@@ -45,6 +46,7 @@ export function ImportExportDialog({
   onHide,
 }: Props) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [format, setFormat] = useState<Format>("csv");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -93,8 +95,11 @@ export function ImportExportDialog({
         limit,
       });
       downloadBlob(`${listName}.${format}`, blob);
+      toast.success("Export ready", `${listName}.${format}`);
     } catch (err) {
-      setExportError(err instanceof ApiError ? err.message : "Export failed");
+      const message = err instanceof ApiError ? err.message : "Export failed";
+      setExportError(message);
+      toast.error("Export failed", message);
     } finally {
       setBusy(false);
     }
@@ -138,6 +143,15 @@ export function ImportExportDialog({
       );
       setResult(summary);
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      const skipped = summary.errors.length;
+      if (skipped === 0) {
+        toast.success("Import complete", `${summary.created} record(s) added`);
+      } else {
+        toast.warn(
+          "Import finished with errors",
+          `${summary.created} added, ${skipped} skipped`,
+        );
+      }
     } catch (err) {
       setResult({
         created: 0,

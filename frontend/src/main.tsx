@@ -12,17 +12,20 @@ import "./index.css";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { queryClient } from "./lib/queryClient";
+import { ToastProvider } from "./lib/toast";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <PrimeReactProvider>
-      <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <BrowserRouter>
-            <App />
-          </BrowserRouter>
-        </AuthProvider>
-      </QueryClientProvider>
+      <ToastProvider>
+        <QueryClientProvider client={queryClient}>
+          <AuthProvider>
+            <BrowserRouter>
+              <App />
+            </BrowserRouter>
+          </AuthProvider>
+        </QueryClientProvider>
+      </ToastProvider>
     </PrimeReactProvider>
   </React.StrictMode>,
 );

@@ -5,9 +5,11 @@ import { Button } from "primereact/button";
 import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
+import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
+import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
 
 interface Props {
@@ -26,19 +28,43 @@ export function ViewBar({
   currentConfig,
 }: Props) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
     // Sort/filter are applied server-side by view, so records must refetch too.
     queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
   };
 
+  const activeView = views.find((v) => v.uuid === activeUuid) ?? null;
+
   const save = useMutation({
     mutationFn: () =>
       api.patch<View>(`/lists/${listUuid}/views/${activeUuid}`, {
         config: currentConfig,
       }),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      toast.success("View saved");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not save view",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
+
+  // Saving overwrites the view's stored sort/filter/columns, so confirm first.
+  function confirmSave() {
+    confirmDialog({
+      message: `Overwrite "${
+        activeView?.display_name ?? "this view"
+      }" with the current sort, filter, and columns?`,
+      header: "Save view",
+      icon: "pi pi-save",
+      acceptLabel: "Save",
+      accept: () => save.mutate(),
+    });
+  }
 
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
@@ -54,6 +80,7 @@ export function ViewBar({
       setNewName("");
       invalidate();
       onSelect(view.uuid);
+      toast.success("View created", view.display_name);
     },
   });
 
@@ -70,7 +97,7 @@ export function ViewBar({
         label="Save view"
         icon="pi pi-save"
         text
-        onClick={() => save.mutate()}
+        onClick={confirmSave}
         loading={save.isPending}
         disabled={!activeUuid}
         tooltip="Save the current sort and page size to this view"

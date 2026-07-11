@@ -11,6 +11,7 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
+import { useToast } from "../../lib/toast";
 import type { Column, ColumnType, ListRead } from "../../lib/types";
 
 interface Props {
@@ -27,6 +28,7 @@ export function AddColumnDialog({
   onHide,
 }: Props) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [displayName, setDisplayName] = useState("");
   const [type, setType] = useState<ColumnType>("text");
   const [required, setRequired] = useState(false);
@@ -92,8 +94,9 @@ export function AddColumnDialog({
         config,
       });
     },
-    onSuccess: () => {
+    onSuccess: (column) => {
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
+      toast.success("Column added", column.display_name);
       reset();
       onHide();
     },

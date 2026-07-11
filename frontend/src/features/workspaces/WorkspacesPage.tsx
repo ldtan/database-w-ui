@@ -11,9 +11,11 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import type { Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
+import { useToast } from "../../lib/toast";
 
 export function WorkspacesPage() {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["workspaces"] });
 
@@ -29,9 +31,10 @@ export function WorkspacesPage() {
         name: slugify(name),
         display_name: name,
       }),
-    onSuccess: () => {
+    onSuccess: (ws) => {
       setDisplayName("");
       invalidate();
+      toast.success("Workspace created", ws.display_name);
     },
   });
 
@@ -45,12 +48,21 @@ export function WorkspacesPage() {
     onSuccess: () => {
       setRenaming(null);
       invalidate();
+      toast.success("Workspace renamed");
     },
   });
 
   const remove = useMutation({
     mutationFn: (uuid: string) => api.del(`/workspaces/${uuid}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      toast.success("Workspace deleted");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not delete workspace",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
 
   function onCreate(event: FormEvent) {

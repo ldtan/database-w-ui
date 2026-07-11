@@ -8,6 +8,7 @@ import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
 
 interface Row {
@@ -61,6 +62,7 @@ interface Props {
 
 export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
 
@@ -91,8 +93,10 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
           })),
         },
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      toast.success("Form saved", activeForm?.display_name);
+    },
   });
 
   function move(index: number, delta: number) {

@@ -11,10 +11,12 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import type { ListRead } from "../../lib/types";
 import { slugify } from "../../lib/slug";
+import { useToast } from "../../lib/toast";
 
 export function ListsPage() {
   const { workspaceUuid = "" } = useParams();
   const queryClient = useQueryClient();
+  const toast = useToast();
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["lists", workspaceUuid] });
 
@@ -32,9 +34,10 @@ export function ListsPage() {
         display_name: name,
         workspace_uuid: workspaceUuid,
       }),
-    onSuccess: () => {
+    onSuccess: (list) => {
       setDisplayName("");
       invalidate();
+      toast.success("List created", list.display_name);
     },
   });
 
@@ -48,12 +51,21 @@ export function ListsPage() {
     onSuccess: () => {
       setRenaming(null);
       invalidate();
+      toast.success("List renamed");
     },
   });
 
   const remove = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${uuid}`),
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      toast.success("List deleted");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not delete list",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
 
   function onCreate(event: FormEvent) {
