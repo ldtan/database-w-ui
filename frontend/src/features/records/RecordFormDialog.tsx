@@ -12,6 +12,7 @@ import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
 import type { Column, Form, ListItem } from "../../lib/types";
+import { LookupField } from "../lookups/LookupControls";
 
 interface Props {
   listUuid: string;
@@ -178,6 +179,15 @@ function RecordField({
           disabled={disabled}
         />
       );
+    case "lookup":
+      return (
+        <LookupField
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
     default:
       return (
         <InputText
@@ -225,7 +235,11 @@ export function RecordFormDialog({
       for (const { column, enabled } of fields) {
         if (!enabled) continue; // read-only fields keep default/existing value
         const value = values[column.uuid];
-        const empty = value === undefined || value === null || value === "";
+        const empty =
+          value === undefined ||
+          value === null ||
+          value === "" ||
+          (Array.isArray(value) && value.length === 0);
         if (item) {
           data[column.uuid] = empty ? null : serialize(column, value);
         } else if (!empty) {

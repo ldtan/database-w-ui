@@ -8,10 +8,18 @@ import { Dropdown } from "primereact/dropdown";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api } from "../../lib/api";
-import type { Column, Form, ListItem, View, ViewConfig } from "../../lib/types";
+import type {
+  Column,
+  Form,
+  ListItem,
+  ListRead,
+  View,
+  ViewConfig,
+} from "../../lib/types";
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
+import { LookupCell } from "../lookups/LookupControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
 
@@ -19,6 +27,9 @@ type SortOrder = 1 | 0 | -1 | null | undefined;
 
 function renderCell(column: Column, row: ListItem) {
   const value = row.data?.[column.uuid];
+  if (column.type === "lookup") {
+    return <LookupCell column={column} value={value} />;
+  }
   if (value === null || value === undefined || value === "") {
     return <span className="text-gray-300">—</span>;
   }
@@ -49,6 +60,10 @@ export function ListDetailPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [groupBy, setGroupBy] = useState<string | null>(null);
 
+  const list = useQuery({
+    queryKey: ["list", listUuid],
+    queryFn: () => api.get<ListRead>(`/lists/${listUuid}`),
+  });
   const columns = useQuery({
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
@@ -287,6 +302,7 @@ export function ListDetailPage() {
 
       <AddColumnDialog
         listUuid={listUuid}
+        workspaceUuid={list.data?.workspace.uuid ?? null}
         visible={showAddColumn}
         onHide={() => setShowAddColumn(false)}
       />

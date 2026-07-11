@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
 import { InputNumber } from "primereact/inputnumber";
@@ -11,15 +11,21 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
-import type { Column, ColumnType } from "../../lib/types";
+import type { Column, ColumnType, ListRead } from "../../lib/types";
 
 interface Props {
   listUuid: string;
+  workspaceUuid: string | null;
   visible: boolean;
   onHide: () => void;
 }
 
-export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
+export function AddColumnDialog({
+  listUuid,
+  workspaceUuid,
+  visible,
+  onHide,
+}: Props) {
   const queryClient = useQueryClient();
   const [displayName, setDisplayName] = useState("");
   const [type, setType] = useState<ColumnType>("text");
@@ -29,6 +35,16 @@ export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
   const [max, setMax] = useState<number | null>(null);
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
+  const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
+  const [multiple, setMultiple] = useState(false);
+
+  // Lists in this workspace are the candidate lookup targets (self included).
+  const lists = useQuery({
+    queryKey: ["lists", workspaceUuid],
+    queryFn: () =>
+      api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
+    enabled: type === "lookup" && !!workspaceUuid,
+  });
 
   function reset() {
     setDisplayName("");
@@ -39,6 +55,8 @@ export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
     setMax(null);
     setIntegerOnly(false);
     setChoices("");
+    setTargetListUuid(null);
+    setMultiple(false);
   }
 
   const create = useMutation({
@@ -54,6 +72,10 @@ export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
         if (integerOnly) config.integer_only = true;
       }
       if (type === "choice") config.choices = choices;
+      if (type === "lookup") {
+        config.target_list_uuid = targetListUuid;
+        if (multiple) config.multiple = true;
+      }
       return api.post<Column>(`/lists/${listUuid}/columns/`, {
         name: slugify(displayName),
         display_name: displayName,
@@ -156,6 +178,33 @@ export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
           </div>
         )}
 
+        {type === "lookup" && (
+          <>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="col-target">Target list</label>
+              <Dropdown
+                inputId="col-target"
+                value={targetListUuid}
+                options={(lists.data ?? []).map((l) => ({
+                  label: l.display_name,
+                  value: l.uuid,
+                }))}
+                onChange={(e) => setTargetListUuid(e.value)}
+                placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
+                filter
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                inputId="col-multiple"
+                checked={multiple}
+                onChange={(e) => setMultiple(!!e.checked)}
+              />
+              <label htmlFor="col-multiple">Allow linking multiple rows</label>
+            </div>
+          </>
+        )}
+
         <div className="flex items-center gap-2">
           <Checkbox
             inputId="col-required"
@@ -171,7 +220,9 @@ export function AddColumnDialog({ listUuid, visible, onHide }: Props) {
             label="Add"
             onClick={() => create.mutate()}
             loading={create.isPending}
-            disabled={!displayName.trim()}
+            disabled={
+              !displayName.trim() || (type === "lookup" && !targetListUuid)
+            }
           />
         </div>
       </div>

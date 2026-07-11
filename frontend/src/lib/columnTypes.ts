@@ -1,7 +1,6 @@
 import type { ColumnType } from "./types";
 
-// Types offered in the "add column" UI. `lookup` is omitted for now — it needs
-// a target-list/row picker, which is a later addition.
+// Types offered in the "add column" UI.
 export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Single line text", value: "text" },
   { label: "Long text", value: "long_text" },
@@ -11,4 +10,5 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Date", value: "date" },
   { label: "Time", value: "time" },
   { label: "Date & time", value: "datetime" },
+  { label: "Lookup (link to another list)", value: "lookup" },
 ];
