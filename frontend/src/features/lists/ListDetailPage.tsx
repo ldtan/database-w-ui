@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
+import { Dropdown } from "primereact/dropdown";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api } from "../../lib/api";
@@ -46,6 +47,7 @@ export function ListDetailPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(undefined);
   const [pageSize, setPageSize] = useState(25);
   const [showFilter, setShowFilter] = useState(false);
+  const [groupBy, setGroupBy] = useState<string | null>(null);
 
   const columns = useQuery({
     queryKey: ["columns", listUuid],
@@ -84,6 +86,7 @@ export function ListDetailPage() {
     setSortField(sort ? `data.${sort.column_uuid}` : undefined);
     setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
     setPageSize(view.config.page_size ?? 25);
+    setGroupBy(view.config.group_by?.column_uuid ?? null);
   }, [activeViewUuid, views.data]);
 
   const deleteItem = useMutation({
@@ -107,6 +110,7 @@ export function ListDetailPage() {
     null;
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
+  const groupColumn = groupBy ? cols.find((c) => c.uuid === groupBy) ?? null : null;
   const currentConfig: ViewConfig = {
     sorts: sortField
       ? [
@@ -118,7 +122,17 @@ export function ListDetailPage() {
       : [],
     page_size: pageSize,
     filters: activeView?.config.filters ?? { conjunction: "and", conditions: [] },
+    group_by: groupBy ? { column_uuid: groupBy } : null,
   };
+
+  function groupHeader(row: ListItem) {
+    if (!groupColumn) return null;
+    return (
+      <span className="font-semibold">
+        {groupColumn.display_name}: {renderCell(groupColumn, row)}
+      </span>
+    );
+  }
 
   function confirmDeleteItem(row: ListItem) {
     confirmDialog({
@@ -184,6 +198,15 @@ export function ListDetailPage() {
             onClick={() => setShowFilter(true)}
             disabled={!activeViewUuid || cols.length === 0}
           />
+          <Dropdown
+            value={groupBy}
+            options={cols.map((c) => ({ label: c.display_name, value: c.uuid }))}
+            onChange={(e) => setGroupBy(e.value)}
+            placeholder="Group by…"
+            showClear
+            disabled={cols.length === 0}
+            className="w-48"
+          />
         </div>
       )}
 
@@ -200,19 +223,24 @@ export function ListDetailPage() {
         rows={pageSize}
         rowsPerPageOptions={[10, 25, 50, 100]}
         onPage={(e) => setPageSize(e.rows)}
-        sortField={sortField}
-        sortOrder={sortOrder}
+        sortMode="single"
+        sortField={groupColumn ? `data.${groupBy}` : sortField}
+        sortOrder={groupColumn ? 1 : sortOrder}
         onSort={(e: DataTableSortEvent) => {
+          if (groupColumn) return; // sort is pinned to the group column
           setSortField(e.sortField);
           setSortOrder(e.sortOrder);
         }}
+        rowGroupMode={groupColumn ? "subheader" : undefined}
+        groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
+        rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
         emptyMessage="No records yet."
       >
         {cols.map((col) => (
           <DataColumn
             key={col.uuid}
             field={`data.${col.uuid}`}
-            sortable
+            sortable={!groupColumn}
             header={
               <div className="flex items-center gap-2">
                 <span>{col.display_name}</span>

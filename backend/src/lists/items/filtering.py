@@ -73,18 +73,29 @@ def apply_filters(stmt, filters: Optional[dict], columns: dict[str, Column]):
     return stmt.where(combined)
 
 
-def apply_sorts(stmt, sorts, columns: dict[str, Column]):
+def _order_term(key: str, direction: str, columns: dict[str, Column]):
+    column = columns.get(key)
+    if column is None:
+        return None
+    field = _field(key)
+    if column.type == ColumnType.number:
+        field = cast(field, Numeric)
+    return field.desc() if direction == "desc" else field.asc()
+
+
+def apply_sorts(stmt, sorts, columns: dict[str, Column], group_by: Optional[dict] = None):
     order = []
+    # Grouping requires all rows of a group to be adjacent, so order by the
+    # group column first; the view's own sorts break ties within each group.
+    if group_by:
+        term = _order_term(str(group_by.get("column_uuid")), "asc", columns)
+        if term is not None:
+            order.append(term)
     for spec in sorts or []:
-        key = str(spec.get("column_uuid"))
-        column = columns.get(key)
-        if column is None:
-            continue
-        field = _field(key)
-        if column.type == ColumnType.number:
-            field = cast(field, Numeric)
-        order.append(
-            field.desc() if spec.get("direction") == "desc" else field.asc()
+        term = _order_term(
+            str(spec.get("column_uuid")), spec.get("direction"), columns
         )
+        if term is not None:
+            order.append(term)
     order.append(ListItem.id)  # stable tiebreaker, and the default ordering
     return stmt.order_by(*order)

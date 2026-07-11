@@ -51,6 +51,7 @@ class ListItemService:
         columns = await cls._columns_by_key(db, lst.id)
         stmt = cls._select(lst.id)
         sorts = None
+        group_by = None
 
         if view_uuid is not None:
             parsed = coerce_uuid(view_uuid)
@@ -69,8 +70,9 @@ class ListItemService:
                 config = view.config or {}
                 stmt = apply_filters(stmt, config.get("filters"), columns)
                 sorts = config.get("sorts")
+                group_by = config.get("group_by")
 
-        stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
+        stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
 
