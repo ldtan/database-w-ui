@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,10 +15,14 @@ from src.workspaces.services import WorkspaceService
 from .columns.models import Column
 from .forms.enums import FormType
 from .forms.models import Form
+from .items.models import ListItem
 from .models import List
 from .schemas import ListCreate, ListUpdate
 from .views.models import View
 from .views.schemas import ViewConfig
+
+# Everything scoped under a list; soft-deleted together when the list goes.
+_LIST_CHILD_MODELS = (Column, ListItem, View, Form)
 
 
 class ListService:
@@ -150,9 +154,45 @@ class ListService:
         if lst is None:
             return False
 
-        lst.deleted_at = datetime.now(timezone.utc)
+        now = datetime.now(timezone.utc)
+        await cls._cascade_descendants(db, [lst.id], now)
+        lst.deleted_at = now
         await db.commit()
         return True
+
+    @classmethod
+    async def _cascade_descendants(
+        cls, db: AsyncSession, list_ids: Sequence[int], when: datetime
+    ) -> None:
+        """Soft-delete every child (columns, records, views, forms) of the given
+        lists in bulk. Does not touch the lists themselves and does not commit."""
+        if not list_ids:
+            return
+        for model in _LIST_CHILD_MODELS:
+            await db.execute(
+                update(model)
+                .where(model.list_id.in_(list_ids), model.deleted_at.is_(None))
+                .values(deleted_at=when)
+            )
+
+    @classmethod
+    async def soft_delete_for_workspace(
+        cls, db: AsyncSession, workspace_id: int, when: datetime
+    ) -> None:
+        """Soft-delete all lists in a workspace and their descendants, in bulk.
+        Does not commit — the caller (workspace delete) owns the transaction."""
+        result = await db.execute(
+            select(List.id).where(
+                List.workspace_id == workspace_id, List.deleted_at.is_(None)
+            )
+        )
+        list_ids = list(result.scalars().all())
+        if not list_ids:
+            return
+        await cls._cascade_descendants(db, list_ids, when)
+        await db.execute(
+            update(List).where(List.id.in_(list_ids)).values(deleted_at=when)
+        )
 
     @staticmethod
     def _provision_defaults(db: AsyncSession, lst: List) -> None:

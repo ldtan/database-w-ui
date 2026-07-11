@@ -1,5 +1,76 @@
 """End-to-end tests over the HTTP API: workspaces, lists, columns, records."""
 from datetime import date
+from uuid import UUID
+
+from sqlalchemy import func, select
+
+from src.lists.columns.models import Column
+from src.lists.forms.models import Form
+from src.lists.items.models import ListItem
+from src.lists.models import List
+from src.lists.views.models import View
+
+
+async def _child_counts(session_factory, list_uuid: str):
+    """Return {child: (total, active)} row counts for a list's descendants."""
+    async with session_factory() as db:
+        list_id = await db.scalar(
+            select(List.id).where(List.uuid == UUID(list_uuid))
+        )
+        counts = {}
+        for name, model in [
+            ("columns", Column),
+            ("items", ListItem),
+            ("views", View),
+            ("forms", Form),
+        ]:
+            total = await db.scalar(
+                select(func.count()).select_from(model).where(model.list_id == list_id)
+            )
+            active = await db.scalar(
+                select(func.count())
+                .select_from(model)
+                .where(model.list_id == list_id, model.deleted_at.is_(None))
+            )
+            counts[name] = (total, active)
+        return counts
+
+
+async def test_delete_list_cascades_soft_delete(
+    client, session_factory, list_uuid, add_column
+):
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: "x"}})
+
+    before = await _child_counts(session_factory, list_uuid)
+    assert all(total > 0 and active > 0 for total, active in before.values())
+
+    assert (await client.delete(f"/api/lists/{list_uuid}")).status_code == 204
+
+    after = await _child_counts(session_factory, list_uuid)
+    for name, (total, active) in after.items():
+        assert total > 0, f"{name} rows were hard-deleted"  # soft delete keeps rows
+        assert active == 0, f"{name} not soft-deleted on cascade"
+
+
+async def test_delete_workspace_cascades_to_lists_and_descendants(
+    client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    await add_column(list_uuid, name="n", display_name="N", type="text")
+
+    assert (await client.delete(f"/api/workspaces/{workspace_uuid}")).status_code == 204
+
+    # The list itself is soft-deleted...
+    async with session_factory() as db:
+        deleted_at = await db.scalar(
+            select(List.deleted_at).where(List.uuid == UUID(list_uuid))
+        )
+    assert deleted_at is not None
+
+    # ...and so are its descendants.
+    after = await _child_counts(session_factory, list_uuid)
+    for name, (total, active) in after.items():
+        assert active == 0, f"{name} not soft-deleted when workspace deleted"
 
 
 async def test_list_autoprovisions_view_and_forms(client, list_uuid):

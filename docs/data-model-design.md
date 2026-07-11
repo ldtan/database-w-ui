@@ -383,8 +383,14 @@ each is enabled. Field layout is JSONB (D5).
   commits, but reads the whole uploaded file into memory first. For very large uploads,
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
+- **Scrub lookup references on cascade delete:** single-record delete scrubs
+  lookup references pointing at that row, but deleting a whole list/workspace does
+  not scrub references held by lookup columns in *other* lists (they render as
+  `Row <uuid>` until fixed). Handle when it becomes a correctness problem.
+
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
-view/form auto-provisioning on list creation (§3), and lookup orphan cleanup on delete (§6).
+view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
+single-record delete (§6), and cascade soft delete for lists/workspaces (§10).
 
 ---
 
@@ -399,3 +405,8 @@ Because the DB does not enforce record-level constraints, the service layer MUST
 5. Validate `name` against the `NameSlug` pattern and scope all uniqueness checks —
    list `name` per owner; column/view/form `name` per list — excluding soft-deleted rows.
 6. Filter `deleted_at IS NULL` on every read path.
+7. Cascade soft delete: deleting a list stamps `deleted_at` on its columns,
+   records, views, and forms; deleting a workspace cascades to its lists and all
+   their descendants — all in one transaction (bulk `UPDATE`s, no per-row loop).
+   (Lookup columns in *other* lists that referenced the deleted rows are not yet
+   scrubbed on cascade — see §9.)

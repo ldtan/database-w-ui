@@ -120,6 +120,13 @@ class WorkspaceService:
         if workspace is None:
             return False
 
-        workspace.deleted_at = datetime.now(timezone.utc)
+        # Deferred import avoids a module cycle (lists.services imports this one).
+        from src.lists.services import ListService
+
+        now = datetime.now(timezone.utc)
+        # Cascade the soft delete to the workspace's lists and their descendants,
+        # all in this one transaction.
+        await ListService.soft_delete_for_workspace(db, workspace.id, now)
+        workspace.deleted_at = now
         await db.commit()
         return True
