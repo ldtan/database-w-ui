@@ -84,6 +84,7 @@ export interface ViewConfig {
   sorts?: ViewSort[];
   group_by?: { column_uuid: string } | null;
   hidden_columns?: string[];
+  column_order?: string[];
   page_size?: number;
 }
 

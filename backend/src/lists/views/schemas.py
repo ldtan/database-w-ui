@@ -33,6 +33,10 @@ class ViewConfig(BaseModel):
     # Columns to hide in this view; empty means every column is shown, so
     # newly-added columns appear automatically until explicitly hidden.
     hidden_columns: list[UUID] = Field(default_factory=list)
+    # Per-view column order (overrides the list's default column.position).
+    # Columns absent from this list fall after, in their position order, so
+    # newly-added columns still appear. Empty means pure position order.
+    column_order: list[UUID] = Field(default_factory=list)
     page_size: int = 50
 
     model_config = ConfigDict(extra="forbid")

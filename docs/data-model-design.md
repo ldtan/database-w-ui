@@ -308,6 +308,7 @@ A saved way of looking at a list: sort, filter, group, paging. Config is JSONB (
   ],
   "group_by": {"column_uuid": "9d1c…"},   // or null
   "hidden_columns": ["a4f0…"],            // columns to hide; empty = show all
+  "column_order": ["a4f0…", "9d1c…"],     // per-view order; empty = position order
   "page_size": 50
 }
 ```
@@ -315,8 +316,14 @@ A saved way of looking at a list: sort, filter, group, paging. Config is JSONB (
 Operators are per-type (e.g. `is`, `is_not`, `contains`, `is_empty`, `>`, `<`).
 Validate the operator against the referenced column's `type` in the app layer. Every
 `column_uuid` referenced must belong to the list (enforced on write) — including the
-entries in `hidden_columns`. An empty `hidden_columns` shows every column, so
-newly-added columns appear automatically until explicitly hidden.
+entries in `hidden_columns` and `column_order`. An empty `hidden_columns` shows every
+column; an empty `column_order` uses the list's default order.
+
+**Column order.** `columns.position` is the list's *default* column order. A view may
+override it with `column_order` (an ordered list of column uuids); columns absent from
+that list fall after it in `position` order, so newly-added columns still appear. Forms
+carry their own order independently, via `config.fields[].order` (see §8). This keeps
+`columns.position` as the shared default while letting each view and form reorder freely.
 
 ---
 

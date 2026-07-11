@@ -62,6 +62,7 @@ export function ListDetailPage() {
   const [showFilter, setShowFilter] = useState(false);
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
+  const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
   const list = useQuery({
     queryKey: ["list", listUuid],
@@ -106,6 +107,7 @@ export function ListDetailPage() {
     setPageSize(view.config.page_size ?? 25);
     setGroupBy(view.config.group_by?.column_uuid ?? null);
     setHiddenColumns(view.config.hidden_columns ?? []);
+    setColumnOrder(view.config.column_order ?? []);
   }, [activeViewUuid, views.data]);
 
   const deleteItem = useMutation({
@@ -122,7 +124,23 @@ export function ListDetailPage() {
   });
 
   const cols = columns.data ?? [];
-  const visibleCols = cols.filter((c) => !hiddenColumns.includes(c.uuid));
+  // Apply the view's column order first (for the columns it names), then any
+  // remaining columns in their default position order (so new columns appear).
+  const orderedCols: Column[] = (() => {
+    const byUuid = new Map(cols.map((c) => [c.uuid, c]));
+    const seen = new Set<string>();
+    const result: Column[] = [];
+    for (const uuid of columnOrder) {
+      const c = byUuid.get(uuid);
+      if (c) {
+        result.push(c);
+        seen.add(uuid);
+      }
+    }
+    for (const c of cols) if (!seen.has(c.uuid)) result.push(c);
+    return result;
+  })();
+  const visibleCols = orderedCols.filter((c) => !hiddenColumns.includes(c.uuid));
   const formList = forms.data ?? [];
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
@@ -144,6 +162,7 @@ export function ListDetailPage() {
     filters: activeView?.config.filters ?? { conjunction: "and", conditions: [] },
     group_by: groupBy ? { column_uuid: groupBy } : null,
     hidden_columns: hiddenColumns,
+    column_order: columnOrder,
   };
 
   const columnsPanel = useRef<OverlayPanel>(null);
@@ -151,6 +170,15 @@ export function ListDetailPage() {
     setHiddenColumns((prev) =>
       visible ? prev.filter((u) => u !== uuid) : [...new Set([...prev, uuid])],
     );
+  }
+  // Materialize the full effective order, swap two entries, and store it — so
+  // column_order is always a complete ordering after any manual reorder.
+  function moveColumn(index: number, delta: number) {
+    const target = index + delta;
+    if (target < 0 || target >= orderedCols.length) return;
+    const next = orderedCols.map((c) => c.uuid);
+    [next[index], next[target]] = [next[target], next[index]];
+    setColumnOrder(next);
   }
 
   function groupHeader(row: ListItem) {
@@ -247,15 +275,33 @@ export function ListDetailPage() {
             disabled={cols.length === 0}
           />
           <OverlayPanel ref={columnsPanel}>
-            <div className="flex flex-col gap-2">
-              {cols.map((col) => (
+            <div className="flex flex-col gap-1">
+              {orderedCols.map((col, i) => (
                 <div key={col.uuid} className="flex items-center gap-2">
+                  <Button
+                    icon="pi pi-chevron-up"
+                    text
+                    size="small"
+                    aria-label="Move up"
+                    disabled={i === 0}
+                    onClick={() => moveColumn(i, -1)}
+                  />
+                  <Button
+                    icon="pi pi-chevron-down"
+                    text
+                    size="small"
+                    aria-label="Move down"
+                    disabled={i === orderedCols.length - 1}
+                    onClick={() => moveColumn(i, 1)}
+                  />
                   <Checkbox
                     inputId={`vis-${col.uuid}`}
                     checked={!hiddenColumns.includes(col.uuid)}
                     onChange={(e) => toggleColumn(col.uuid, !!e.checked)}
                   />
-                  <label htmlFor={`vis-${col.uuid}`}>{col.display_name}</label>
+                  <label htmlFor={`vis-${col.uuid}`} className="flex-1">
+                    {col.display_name}
+                  </label>
                 </div>
               ))}
             </div>
