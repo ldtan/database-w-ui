@@ -8,7 +8,7 @@ never sinks the batch) with periodic commits.
 import csv
 import io
 import json
-from typing import AsyncIterator, Iterable, Optional
+from typing import AsyncIterator, Iterable, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,13 +80,18 @@ async def export_rows(
         if limit is not None:
             stmt = stmt.limit(limit)
 
-        result = await db.stream_scalars(stmt)
+        # Select only the JSONB payload, not whole ORM entities: Core rows do not
+        # enter the session identity map, so memory stays flat over a large
+        # export. yield_per bounds the client-side row buffer too.
+        result = await db.stream_scalars(
+            stmt.with_only_columns(ListItem.data).execution_options(yield_per=1000)
+        )
 
         if fmt == "json":
             first = True
             yield "["
-            async for item in result:
-                obj = {c.name: (item.data or {}).get(str(c.uuid)) for c in columns}
+            async for data in result:
+                obj = {c.name: (data or {}).get(str(c.uuid)) for c in columns}
                 yield ("" if first else ",") + json.dumps(obj, default=str)
                 first = False
             yield "]"
@@ -102,9 +107,9 @@ async def export_rows(
 
             writer.writerow([c.name for c in columns])
             yield flush()
-            async for item in result:
-                data = item.data or {}
-                writer.writerow([_csv_cell(data.get(str(c.uuid))) for c in columns])
+            async for data in result:
+                row = data or {}
+                writer.writerow([_csv_cell(row.get(str(c.uuid))) for c in columns])
                 yield flush()
 
 
@@ -153,21 +158,21 @@ def _parse_cell(column: Column, raw: object):
 async def import_records(
     db: AsyncSession,
     lst: List,
-    rows: Iterable[dict],
-    row_offset: int,
+    rows: Iterable[Tuple[int, dict]],
 ) -> dict:
-    """Validate and insert rows through the item service. Each row runs in a
-    savepoint so a failure is isolated; commits happen in batches. Returns a
-    summary dict {created, errors}."""
+    """Validate and insert rows through the item service. ``rows`` yields
+    ``(row_number, values)`` pairs so the caller controls how a row maps to a
+    file line. Each row runs in a savepoint so a failure is isolated; commits
+    happen in batches and the committed rows are expunged so memory stays flat
+    over a large import. Returns a summary dict {created, errors}."""
     columns = await ListItemService._columns_by_key(db, lst.id)
     by_name = {c.name: c for c in columns.values()}
 
     created = 0
-    pending = 0
     errors: list[dict] = []
+    batch: list[ListItem] = []
 
-    for index, raw_row in enumerate(rows, start=1):
-        row_number = index + row_offset
+    for row_number, raw_row in rows:
         try:
             incoming: dict = {}
             for key, value in raw_row.items():
@@ -185,13 +190,18 @@ async def import_records(
                 await ListItemService._enforce_unique(
                     db, lst.id, columns, data, exclude_id=None
                 )
-                db.add(ListItem(list_id=lst.id, data=data))
+                item = ListItem(list_id=lst.id, data=data)
+                db.add(item)
 
             created += 1
-            pending += 1
-            if pending >= _IMPORT_BATCH:
+            batch.append(item)
+            if len(batch) >= _IMPORT_BATCH:
                 await db.commit()
-                pending = 0
+                # Drop the committed rows from the identity map (but not `lst`)
+                # so the session does not retain the whole import.
+                for committed in batch:
+                    db.expunge(committed)
+                batch.clear()
         except (ValidationError, ConflictError, UnknownReferenceError) as exc:
             errors.append({"row": row_number, "message": str(exc)})
         except Exception as exc:  # pragma: no cover - defensive

@@ -40,10 +40,17 @@ async def export_list(
 
 
 def _infer_format(filename: Optional[str], override: Optional[str]) -> str:
+    # The file's own extension is authoritative — a wrong `format` field must not
+    # cause the file to be parsed with the wrong parser. The override only
+    # decides when the extension is missing/unrecognized.
+    if filename:
+        low = filename.lower()
+        if low.endswith(".json"):
+            return "json"
+        if low.endswith(".csv"):
+            return "csv"
     if override in ("csv", "json"):
         return override
-    if filename and filename.lower().endswith(".json"):
-        return "json"
     return "csv"
 
 
@@ -64,13 +71,16 @@ async def import_list(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid JSON file: {exc}",
             ) from exc
-        rows = parsed if isinstance(parsed, list) else [parsed]
-        # JSON element 1 maps to row 1 (no header line).
-        summary = await import_records(db, lst, rows, row_offset=0)
+        elements = parsed if isinstance(parsed, list) else [parsed]
+        # Number JSON rows by their 1-based position in the array.
+        rows = ((i, element) for i, element in enumerate(elements, start=1))
+        summary = await import_records(db, lst, rows)
     else:
         raw = await file.read()
         text = raw.decode("utf-8-sig")
         reader = csv.DictReader(io.StringIO(text))
-        # CSV data starts on line 2 (line 1 is the header).
-        summary = await import_records(db, lst, reader, row_offset=1)
+        # reader.line_num is the actual source line of the row just read, so
+        # reported rows stay accurate even when the file has blank lines.
+        rows = ((reader.line_num, row) for row in reader)
+        summary = await import_records(db, lst, rows)
     return summary

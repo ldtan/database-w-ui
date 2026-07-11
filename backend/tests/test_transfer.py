@@ -62,6 +62,40 @@ async def test_import_csv_creates_rows_and_reports_errors(client, list_uuid, add
     assert len(items) == 2
 
 
+async def test_import_csv_row_number_accounts_for_blank_lines(
+    client, list_uuid, add_column
+):
+    await _seed(client, list_uuid, add_column)
+    # Blank line 3; the duplicate "Ann" is on file line 4.
+    csv = "name,age\nAnn,30\n\nAnn,99\n"
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("people.csv", csv, "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"] == 1
+    assert body["errors"][0]["row"] == 4  # the actual source line, not 3
+
+
+async def test_import_extension_wins_over_format_field(client, list_uuid, add_column):
+    await _seed(client, list_uuid, add_column)
+    # A JSON file mislabeled as csv must still be parsed as JSON.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        data={"format": "csv"},
+        files={
+            "file": (
+                "people.json",
+                '[{"name": "Ann", "age": 30}]',
+                "application/json",
+            )
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] == 1
+
+
 async def test_import_json_typed_values(client, list_uuid, add_column):
     name, age = await _seed(client, list_uuid, add_column)
     resp = await client.post(

@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { MultiSelect } from "primereact/multiselect";
@@ -34,32 +35,43 @@ function useTargetRows(
   });
   const items = useQuery({
     queryKey: ["items", targetListUuid, null],
-    queryFn: () => api.get<ListItem[]>(`/lists/${targetListUuid}/items/`),
+    // Fetch up to the backend max so labels/picker cover large target lists,
+    // not just the default first page.
+    queryFn: () =>
+      api.get<ListItem[]>(`/lists/${targetListUuid}/items/?limit=1000`),
     enabled,
   });
 
-  const cols = columns.data ?? [];
-  const label =
-    (displayColumnUuid && cols.find((c) => c.uuid === displayColumnUuid)) ||
-    cols.find((c) => c.uuid === list.data?.primary_column?.uuid) ||
-    cols[0] ||
-    null;
-  const primary = label;
+  const cols = columns.data;
+  const primaryUuid = list.data?.primary_column?.uuid;
+  const label = useMemo(() => {
+    const list_ = cols ?? [];
+    return (
+      (displayColumnUuid && list_.find((c) => c.uuid === displayColumnUuid)) ||
+      list_.find((c) => c.uuid === primaryUuid) ||
+      list_[0] ||
+      null
+    );
+  }, [cols, primaryUuid, displayColumnUuid]);
 
-  function rowLabel(item: ListItem): string {
-    if (!primary) return `Row ${item.uuid.slice(0, 8)}`;
-    const text = displayText(primary, item.data?.[primary.uuid]);
-    return text || `Row ${item.uuid.slice(0, 8)}`;
-  }
-
-  const byId = new Map((items.data ?? []).map((i) => [i.uuid, rowLabel(i)]));
+  const rows = items.data;
+  // Build the id->label map and options once per data/label change, not once
+  // per rendered cell (LookupCell is rendered per row).
+  const { byId, options } = useMemo(() => {
+    const map = new Map<string, string>();
+    const opts: { label: string; value: string }[] = [];
+    for (const item of rows ?? []) {
+      const text = label ? displayText(label, item.data?.[label.uuid]) : "";
+      const rowLabel = text || `Row ${item.uuid.slice(0, 8)}`;
+      map.set(item.uuid, rowLabel);
+      opts.push({ label: rowLabel, value: item.uuid });
+    }
+    return { byId: map, options: opts };
+  }, [rows, label]);
 
   return {
     isLoading: list.isLoading || columns.isLoading || items.isLoading,
-    options: (items.data ?? []).map((i) => ({
-      label: rowLabel(i),
-      value: i.uuid,
-    })),
+    options,
     labelFor: (uuid) => byId.get(uuid) ?? `Row ${uuid.slice(0, 8)}`,
   };
 }
