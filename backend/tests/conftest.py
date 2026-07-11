@@ -13,7 +13,6 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.core.config import settings
 
@@ -33,7 +32,12 @@ import src.workspaces.models  # noqa: E402,F401
 from main import create_app  # noqa: E402
 from src.auth.users.schemas import UserCreate  # noqa: E402
 from src.auth.users.services import UserService  # noqa: E402
-from src.infrastructure.database import Base, get_db  # noqa: E402
+from src.infrastructure import database as db_module  # noqa: E402
+from src.infrastructure.database import (  # noqa: E402
+    Base,
+    make_engine,
+    make_session_factory,
+)
 
 _URL = make_url(settings.DATABASE_URI)
 TEST_DB_NAME = os.getenv("TEST_DB_NAME", f"{_URL.database}_test")
@@ -67,7 +71,7 @@ async def engine():
     except Exception as exc:  # pragma: no cover - environment dependent
         pytest.skip(f"PostgreSQL test database unavailable: {exc}")
 
-    eng = create_async_engine(TEST_URL)
+    eng = make_engine(TEST_URL)
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     try:
@@ -80,7 +84,9 @@ async def engine():
 
 @pytest_asyncio.fixture
 async def session_factory(engine):
-    return async_sessionmaker(engine, expire_on_commit=False)
+    # Built through the app's own factory so the session configuration under
+    # test (expire_on_commit, etc.) is identical to production's.
+    return make_session_factory(engine)
 
 
 @pytest_asyncio.fixture
@@ -97,23 +103,27 @@ async def user_id(session_factory) -> int:
 
 
 @pytest_asyncio.fixture
-async def client(session_factory, user_id):
+async def client(engine, session_factory, user_id):
+    # Point the app's real engine/SessionLocal at the test database instead of
+    # overriding get_db. This way requests go through the exact get_db and
+    # session configuration the app uses in production, so a regression there
+    # (e.g. the expire_on_commit setting) would fail the tests rather than hide.
+    orig_engine, orig_factory = db_module.engine, db_module.SessionLocal
+    db_module.engine = engine
+    db_module.SessionLocal = session_factory
     app = create_app()
-
-    async def _get_db():
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _get_db
     transport = ASGITransport(app=app)
     # OAuth2PasswordBearer still requires an Authorization header even when
     # DISABLE_AUTH short-circuits identity resolution, so send a dummy token.
-    async with AsyncClient(
-        transport=transport,
-        base_url="http://test",
-        headers={"Authorization": "Bearer test"},
-    ) as c:
-        yield c
+    try:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            headers={"Authorization": "Bearer test"},
+        ) as c:
+            yield c
+    finally:
+        db_module.engine, db_module.SessionLocal = orig_engine, orig_factory
 
 
 @pytest_asyncio.fixture
