@@ -4,6 +4,8 @@ import { Dialog } from "primereact/dialog";
 import { Button } from "primereact/button";
 import { Checkbox } from "primereact/checkbox";
 import { SelectButton } from "primereact/selectbutton";
+import { Dropdown } from "primereact/dropdown";
+import { InputNumber } from "primereact/inputnumber";
 import { Divider } from "primereact/divider";
 import {
   FileUpload,
@@ -14,7 +16,11 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { toCsv, parseCsv } from "../../lib/csv";
 import { downloadFile } from "../../lib/download";
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, FilterCondition, ListItem } from "../../lib/types";
+import {
+  FilterConditionsEditor,
+  cleanConditions,
+} from "../views/FilterConditionsEditor";
 
 interface Props {
   listUuid: string;
@@ -78,19 +84,6 @@ function parseCell(column: Column, raw: unknown): unknown {
   }
 }
 
-async function fetchAllItems(listUuid: string): Promise<ListItem[]> {
-  const all: ListItem[] = [];
-  const limit = 1000;
-  for (let skip = 0; ; skip += limit) {
-    const batch = await api.get<ListItem[]>(
-      `/lists/${listUuid}/items/?skip=${skip}&limit=${limit}`,
-    );
-    all.push(...batch);
-    if (batch.length < limit) break;
-  }
-  return all;
-}
-
 export function ImportExportDialog({
   listUuid,
   listName,
@@ -103,6 +96,12 @@ export function ImportExportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  // Export query options.
+  const [limit, setLimit] = useState<number>(1000);
+  const [sortColumn, setSortColumn] = useState<string | null>(null); // null = id
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
+  const [conjunction, setConjunction] = useState<"and" | "or">("and");
+  const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   // Default to all columns selected whenever the dialog opens.
   useEffect(() => {
@@ -126,7 +125,20 @@ export function ImportExportDialog({
   async function handleExport() {
     setBusy(true);
     try {
-      const items = await fetchAllItems(listUuid);
+      const items = await api.post<ListItem[]>(
+        `/lists/${listUuid}/items/query`,
+        {
+          filters: {
+            conjunction,
+            conditions: cleanConditions(conditions),
+          },
+          sorts: sortColumn
+            ? [{ column_uuid: sortColumn, direction: sortDir }]
+            : [],
+          skip: 0,
+          limit,
+        },
+      );
       if (format === "json") {
         const rows = items.map((it) =>
           Object.fromEntries(chosen.map((c) => [c.name, it.data?.[c.uuid] ?? null])),
@@ -271,6 +283,56 @@ export function ImportExportDialog({
               </div>
             ))}
           </div>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="font-semibold">Export options</span>
+          <div className="flex items-center gap-2 flex-wrap">
+            <label htmlFor="io-limit" className="text-sm">
+              Limit
+            </label>
+            <InputNumber
+              inputId="io-limit"
+              value={limit}
+              onValueChange={(e) => setLimit(e.value ?? 1)}
+              min={1}
+              max={1000}
+              useGrouping={false}
+              style={{ width: 90 }}
+            />
+            <label htmlFor="io-sort" className="text-sm ml-2">
+              Sort
+            </label>
+            <Dropdown
+              inputId="io-sort"
+              value={sortColumn}
+              options={columns.map((c) => ({
+                label: c.display_name,
+                value: c.uuid,
+              }))}
+              onChange={(e) => setSortColumn(e.value)}
+              placeholder="Record ID"
+              showClear
+              style={{ width: 160 }}
+            />
+            <SelectButton
+              value={sortDir}
+              onChange={(e) => e.value && setSortDir(e.value)}
+              options={[
+                { label: "Asc", value: "asc" },
+                { label: "Desc", value: "desc" },
+              ]}
+              disabled={!sortColumn}
+            />
+          </div>
+          <span className="text-sm text-gray-500">Filters (optional)</span>
+          <FilterConditionsEditor
+            columns={columns}
+            conjunction={conjunction}
+            onConjunctionChange={setConjunction}
+            conditions={conditions}
+            onConditionsChange={setConditions}
+          />
         </div>
 
         <div className="flex gap-2">

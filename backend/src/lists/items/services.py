@@ -77,6 +77,24 @@ class ListItemService:
         return result.scalars().all()
 
     @classmethod
+    async def query(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        filters: Optional[dict] = None,
+        sorts: Optional[list] = None,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> Sequence[ListItem]:
+        """Read records with ad-hoc filters/sorts (no saved view). Unknown
+        columns are ignored; empty sorts fall back to id-ascending order."""
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt = apply_filters(cls._select(lst.id), filters, columns)
+        stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
+        result = await db.execute(stmt)
+        return result.scalars().all()
+
+    @classmethod
     async def create(
         cls, db: AsyncSession, lst: List, payload: ListItemCreate
     ) -> ListItem:

@@ -9,7 +9,7 @@ from src.infrastructure.database import get_db
 
 from ..dependencies import get_list_or_404
 from ..models import List
-from .schemas import ListItemCreate, ListItemRead, ListItemUpdate
+from .schemas import ItemQuery, ListItemCreate, ListItemRead, ListItemUpdate
 from .services import ListItemService
 
 
@@ -40,6 +40,22 @@ async def list_items(
 ):
     return await ListItemService.list(
         db, lst, view_uuid=view_uuid, skip=skip, limit=limit
+    )
+
+
+@router.post("/query", response_model=list[ListItemRead])
+async def query_items(
+    payload: ItemQuery,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    return await ListItemService.query(
+        db,
+        lst,
+        filters=payload.filters.model_dump(),
+        sorts=[s.model_dump() for s in payload.sorts],
+        skip=payload.skip,
+        limit=payload.limit,
     )
 
 
