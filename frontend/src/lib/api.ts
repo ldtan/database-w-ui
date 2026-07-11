@@ -60,26 +60,34 @@ async function refreshTokens(): Promise<boolean> {
   return true;
 }
 
-async function request<T>(
+// Perform the fetch with auth + one-shot refresh, returning the raw Response so
+// callers can read JSON, a blob (downloads), or nothing.
+async function requestRaw(
   path: string,
   options: RequestInit = {},
   retry = true,
-): Promise<T> {
+): Promise<Response> {
   const headers = new Headers(options.headers);
   const token = getAccessToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
-  if (options.body && !headers.has("Content-Type")) {
-    headers.set("Content-Type", "application/json");
-  }
 
   const res = await fetch(`/api${path}`, { ...options, headers });
 
   if (res.status === 401 && retry && (await refreshTokens())) {
-    return request<T>(path, options, false);
+    return requestRaw(path, options, false);
   }
   if (!res.ok) {
     throw new ApiError(res.status, await extractDetail(res, res.statusText));
   }
+  return res;
+}
+
+async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+  const res = await requestRaw(path, { ...options, headers });
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
@@ -97,6 +105,16 @@ export const api = {
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
   del: (path: string) => request<void>(path, { method: "DELETE" }),
+  // Download: POST JSON, receive a file body as a Blob.
+  postBlob: (path: string, body: unknown) =>
+    requestRaw(path, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }).then((r) => r.blob()),
+  // Upload: POST multipart form data (browser sets the Content-Type boundary).
+  postForm: <T>(path: string, form: FormData) =>
+    requestRaw(path, { method: "POST", body: form }).then((r) => r.json() as Promise<T>),
 };
 
 export async function login(username: string, password: string): Promise<void> {

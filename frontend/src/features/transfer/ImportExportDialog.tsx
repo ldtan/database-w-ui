@@ -14,9 +14,9 @@ import {
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
-import { toCsv, parseCsv } from "../../lib/csv";
-import { downloadFile } from "../../lib/download";
-import type { Column, FilterCondition, ListItem } from "../../lib/types";
+import { toCsv } from "../../lib/csv";
+import { downloadBlob, downloadFile } from "../../lib/download";
+import type { Column, FilterCondition } from "../../lib/types";
 import {
   FilterConditionsEditor,
   cleanConditions,
@@ -37,53 +37,6 @@ interface ImportResult {
   errors: { row: number; message: string }[];
 }
 
-// -- value <-> file conversions ------------------------------------------
-
-// For CSV cells: everything becomes a string. Arrays (multi choice/lookup)
-// join with ";" — safe because their members are option ids / row uuids.
-function toCsvCell(value: unknown): string {
-  if (value === null || value === undefined) return "";
-  if (Array.isArray(value)) return value.join(";");
-  if (typeof value === "boolean") return value ? "true" : "false";
-  return String(value);
-}
-
-// Turn a raw file value (string from CSV, native from JSON) into the typed
-// value the API expects for this column. Returns undefined to skip the cell.
-function parseCell(column: Column, raw: unknown): unknown {
-  if (raw === null || raw === undefined) return undefined;
-  if (typeof raw === "string" && raw.trim() === "") return undefined;
-  const multiple = !!column.config.multiple;
-  switch (column.type) {
-    case "number": {
-      const n = typeof raw === "number" ? raw : Number(String(raw).trim());
-      if (Number.isNaN(n)) {
-        throw new Error(`column "${column.name}": "${raw}" is not a number`);
-      }
-      return n;
-    }
-    case "checkbox": {
-      if (typeof raw === "boolean") return raw;
-      const s = String(raw).trim().toLowerCase();
-      if (["true", "1", "yes", "y"].includes(s)) return true;
-      if (["false", "0", "no", "n"].includes(s)) return false;
-      throw new Error(`column "${column.name}": "${raw}" is not true/false`);
-    }
-    case "choice":
-    case "lookup":
-      if (multiple) {
-        if (Array.isArray(raw)) return raw;
-        return String(raw)
-          .split(";")
-          .map((s) => s.trim())
-          .filter(Boolean);
-      }
-      return String(raw);
-    default:
-      return typeof raw === "string" ? raw : String(raw);
-  }
-}
-
 export function ImportExportDialog({
   listUuid,
   listName,
@@ -96,8 +49,9 @@ export function ImportExportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   // Export query options.
-  const [limit, setLimit] = useState<number>(1000);
+  const [limit, setLimit] = useState<number | null>(null); // null = all rows
   const [sortColumn, setSortColumn] = useState<string | null>(null); // null = id
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [conjunction, setConjunction] = useState<"and" | "or">("and");
@@ -108,6 +62,7 @@ export function ImportExportDialog({
     if (visible) {
       setSelected(new Set(columns.map((c) => c.uuid)));
       setResult(null);
+      setExportError(null);
     }
   }, [visible, columns]);
 
@@ -124,40 +79,22 @@ export function ImportExportDialog({
 
   async function handleExport() {
     setBusy(true);
+    setExportError(null);
     try {
-      const items = await api.post<ListItem[]>(
-        `/lists/${listUuid}/items/query`,
-        {
-          filters: {
-            conjunction,
-            conditions: cleanConditions(conditions),
-          },
-          sorts: sortColumn
-            ? [{ column_uuid: sortColumn, direction: sortDir }]
-            : [],
-          skip: 0,
-          limit,
-        },
-      );
-      if (format === "json") {
-        const rows = items.map((it) =>
-          Object.fromEntries(chosen.map((c) => [c.name, it.data?.[c.uuid] ?? null])),
-        );
-        downloadFile(
-          `${listName}.json`,
-          JSON.stringify(rows, null, 2),
-          "application/json",
-        );
-      } else {
-        const rows = items.map((it) =>
-          chosen.map((c) => toCsvCell(it.data?.[c.uuid])),
-        );
-        downloadFile(
-          `${listName}.csv`,
-          toCsv(chosen.map((c) => c.name), rows),
-          "text/csv",
-        );
-      }
+      // The server streams the file (any size); values and headers (column
+      // names) are formatted server-side.
+      const blob = await api.postBlob(`/lists/${listUuid}/export`, {
+        format,
+        columns: chosen.map((c) => c.name),
+        filters: { conjunction, conditions: cleanConditions(conditions) },
+        sorts: sortColumn
+          ? [{ column_uuid: sortColumn, direction: sortDir }]
+          : [],
+        limit,
+      });
+      downloadBlob(`${listName}.${format}`, blob);
+    } catch (err) {
+      setExportError(err instanceof ApiError ? err.message : "Export failed");
     } finally {
       setBusy(false);
     }
@@ -187,55 +124,25 @@ export function ImportExportDialog({
     setBusy(true);
     setResult(null);
     try {
-      const text = await file.text();
-      const isJson = file.name.toLowerCase().endsWith(".json");
-      let rows: Record<string, unknown>[];
-      if (isJson) {
-        const parsed = JSON.parse(text);
-        rows = Array.isArray(parsed) ? parsed : [parsed];
-      } else {
-        const grid = parseCsv(text).filter((r) =>
-          r.some((cell) => cell.trim() !== ""),
-        );
-        const header = grid.shift() ?? [];
-        rows = grid.map((r) =>
-          Object.fromEntries(header.map((h, i) => [h, r[i] ?? ""])),
-        );
-      }
-
-      const byName = new Map(columns.map((c) => [c.name, c]));
-      const errors: ImportResult["errors"] = [];
-      let created = 0;
-      const lineBase = isJson ? 1 : 2; // CSV row 1 is the header
-      for (let idx = 0; idx < rows.length; idx++) {
-        try {
-          const data: Record<string, unknown> = {};
-          for (const [key, val] of Object.entries(rows[idx])) {
-            const col = byName.get(key);
-            if (!col) continue; // ignore columns not on this list
-            const parsed = parseCell(col, val);
-            if (parsed !== undefined) data[col.uuid] = parsed;
-          }
-          await api.post(`/lists/${listUuid}/items/`, { data });
-          created += 1;
-        } catch (err) {
-          errors.push({
-            row: idx + lineBase,
-            message: err instanceof ApiError ? err.message : String(err),
-          });
-        }
-      }
-      setResult({ created, errors });
+      // The server parses and bulk-inserts, validating each row and reporting
+      // per-row errors.
+      const form = new FormData();
+      form.append("file", file);
+      form.append(
+        "format",
+        file.name.toLowerCase().endsWith(".json") ? "json" : "csv",
+      );
+      const summary = await api.postForm<ImportResult>(
+        `/lists/${listUuid}/import`,
+        form,
+      );
+      setResult(summary);
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
     } catch (err) {
       setResult({
         created: 0,
         errors: [
-          {
-            row: 0,
-            message:
-              err instanceof Error ? err.message : "Could not read the file",
-          },
+          { row: 0, message: err instanceof ApiError ? err.message : "Import failed" },
         ],
       });
     } finally {
@@ -294,10 +201,10 @@ export function ImportExportDialog({
             <InputNumber
               inputId="io-limit"
               value={limit}
-              onValueChange={(e) => setLimit(e.value ?? 1)}
+              onValueChange={(e) => setLimit(e.value ?? null)}
               min={1}
-              max={1000}
               useGrouping={false}
+              placeholder="All"
               style={{ width: 90 }}
             />
             <label htmlFor="io-sort" className="text-sm ml-2">
@@ -335,6 +242,7 @@ export function ImportExportDialog({
           />
         </div>
 
+        {exportError && <Message severity="error" text={exportError} />}
         <div className="flex gap-2">
           <Button
             label="Export records"

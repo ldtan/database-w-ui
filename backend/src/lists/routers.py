@@ -16,6 +16,7 @@ from .columns.routers import router as columns_router
 from .items.routers import router as items_router
 from .views.routers import router as views_router
 from .forms.routers import router as forms_router
+from .transfer.routers import router as transfer_router
 
 
 router = APIRouter(
@@ -96,3 +97,4 @@ router.include_router(columns_router)
 router.include_router(items_router)
 router.include_router(views_router)
 router.include_router(forms_router)
+router.include_router(transfer_router)
