@@ -30,6 +30,9 @@ class ViewConfig(BaseModel):
     filters: FilterGroup = Field(default_factory=FilterGroup)
     sorts: list[SortSpec] = Field(default_factory=list)
     group_by: Optional[GroupBy] = None
+    # Columns to hide in this view; empty means every column is shown, so
+    # newly-added columns appear automatically until explicitly hidden.
+    hidden_columns: list[UUID] = Field(default_factory=list)
     page_size: int = 50
 
     model_config = ConfigDict(extra="forbid")

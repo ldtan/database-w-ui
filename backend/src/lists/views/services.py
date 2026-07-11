@@ -115,6 +115,7 @@ class ViewService:
         referenced: set[UUID] = set()
         referenced.update(c.column_uuid for c in config.filters.conditions)
         referenced.update(s.column_uuid for s in config.sorts)
+        referenced.update(config.hidden_columns)
         if config.group_by is not None:
             referenced.add(config.group_by.column_uuid)
         if not referenced:

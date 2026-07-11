@@ -83,6 +83,7 @@ export interface ViewConfig {
   filters?: FilterGroup;
   sorts?: ViewSort[];
   group_by?: { column_uuid: string } | null;
+  hidden_columns?: string[];
   page_size?: number;
 }
 

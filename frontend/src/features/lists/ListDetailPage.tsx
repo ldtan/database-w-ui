@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
 import { Dropdown } from "primereact/dropdown";
+import { Checkbox } from "primereact/checkbox";
+import { OverlayPanel } from "primereact/overlaypanel";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api } from "../../lib/api";
@@ -59,6 +61,7 @@ export function ListDetailPage() {
   const [pageSize, setPageSize] = useState(25);
   const [showFilter, setShowFilter] = useState(false);
   const [groupBy, setGroupBy] = useState<string | null>(null);
+  const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
 
   const list = useQuery({
     queryKey: ["list", listUuid],
@@ -102,6 +105,7 @@ export function ListDetailPage() {
     setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
     setPageSize(view.config.page_size ?? 25);
     setGroupBy(view.config.group_by?.column_uuid ?? null);
+    setHiddenColumns(view.config.hidden_columns ?? []);
   }, [activeViewUuid, views.data]);
 
   const deleteItem = useMutation({
@@ -118,6 +122,7 @@ export function ListDetailPage() {
   });
 
   const cols = columns.data ?? [];
+  const visibleCols = cols.filter((c) => !hiddenColumns.includes(c.uuid));
   const formList = forms.data ?? [];
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
@@ -138,7 +143,15 @@ export function ListDetailPage() {
     page_size: pageSize,
     filters: activeView?.config.filters ?? { conjunction: "and", conditions: [] },
     group_by: groupBy ? { column_uuid: groupBy } : null,
+    hidden_columns: hiddenColumns,
   };
+
+  const columnsPanel = useRef<OverlayPanel>(null);
+  function toggleColumn(uuid: string, visible: boolean) {
+    setHiddenColumns((prev) =>
+      visible ? prev.filter((u) => u !== uuid) : [...new Set([...prev, uuid])],
+    );
+  }
 
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
@@ -222,6 +235,31 @@ export function ListDetailPage() {
             disabled={cols.length === 0}
             className="w-48"
           />
+          <Button
+            label={
+              hiddenColumns.length > 0
+                ? `Columns (${visibleCols.length}/${cols.length})`
+                : "Columns"
+            }
+            icon="pi pi-eye"
+            text
+            onClick={(e) => columnsPanel.current?.toggle(e)}
+            disabled={cols.length === 0}
+          />
+          <OverlayPanel ref={columnsPanel}>
+            <div className="flex flex-col gap-2">
+              {cols.map((col) => (
+                <div key={col.uuid} className="flex items-center gap-2">
+                  <Checkbox
+                    inputId={`vis-${col.uuid}`}
+                    checked={!hiddenColumns.includes(col.uuid)}
+                    onChange={(e) => toggleColumn(col.uuid, !!e.checked)}
+                  />
+                  <label htmlFor={`vis-${col.uuid}`}>{col.display_name}</label>
+                </div>
+              ))}
+            </div>
+          </OverlayPanel>
         </div>
       )}
 
@@ -251,7 +289,7 @@ export function ListDetailPage() {
         rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
         emptyMessage="No records yet."
       >
-        {cols.map((col) => (
+        {visibleCols.map((col) => (
           <DataColumn
             key={col.uuid}
             field={`data.${col.uuid}`}
