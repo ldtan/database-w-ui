@@ -31,11 +31,22 @@ class ViewService:
         return result.scalars().first()
 
     @classmethod
-    async def list(cls, db: AsyncSession, list_id: int) -> Sequence[View]:
+    async def list(cls, db: AsyncSession, list_id: int, user) -> Sequence[View]:
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
         result = await db.execute(
             cls._select(list_id).order_by(View.position, View.id)
         )
-        return result.scalars().all()
+        views = result.scalars().all()
+        # Few views per list, so resolve visibility per row rather than in SQL.
+        visible = []
+        for view in views:
+            if await PermissionService.has(
+                db, user, ResourceType.view, view.id, Action.view
+            ):
+                visible.append(view)
+        return visible
 
     @classmethod
     async def create(cls, db: AsyncSession, lst: List, payload: ViewCreate) -> View:
@@ -82,6 +93,8 @@ class ViewService:
             data.pop("display_name", None)
         if data.get("position") is None:
             data.pop("position", None)
+        if data.get("permissions_inherit") is None:
+            data.pop("permissions_inherit", None)
 
         for field, value in data.items():
             setattr(view, field, value)

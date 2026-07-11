@@ -14,6 +14,10 @@ class ValidationError(ServiceError):
     """Submitted data failed domain validation (bad column config, record value, etc.)."""
 
 
+class PermissionDeniedError(ServiceError):
+    """The caller lacks the required permission on a resource (maps to 403)."""
+
+
 class InvalidCredentialsError(ServiceError):
     """The username does not exist or the password does not match."""
 

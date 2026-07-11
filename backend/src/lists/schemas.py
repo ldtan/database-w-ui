@@ -27,11 +27,15 @@ class ListUpdate(BaseModel):
     # Move the list to a different workspace (must be owned by the caller).
     workspace_uuid: Optional[UUID] = None
     settings: Optional[dict] = None
+    # Whether this list inherits permission grants from its workspace. Changing it
+    # requires 'share' on the list.
+    permissions_inherit: Optional[bool] = None
 
 
 class ListRead(ListBase):
     uuid: UUID
     workspace: ResourceLink
     primary_column: Optional[ResourceLink] = None
+    permissions_inherit: bool = True
 
     model_config = ConfigDict(from_attributes=True)

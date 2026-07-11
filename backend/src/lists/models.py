@@ -30,6 +30,11 @@ class List(BaseModel):
         nullable=True,
     )
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # When True, this list combines its own permission grants with the workspace's;
+    # when False ("unique"), it stands alone. See src/permissions.
+    permissions_inherit: Mapped[bool] = mapped_column(
+        sa.Boolean, default=True, server_default=sa.true(), nullable=False
+    )
 
     workspace: Mapped["Workspace"] = relationship("Workspace")
     columns: Mapped[list["Column"]] = relationship(

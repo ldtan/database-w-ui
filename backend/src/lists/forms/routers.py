@@ -3,8 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import get_current_user
+from src.auth.users.models import User
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
@@ -20,7 +24,11 @@ async def create_form(
     payload: FormCreate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
     try:
         return await FormService.create(db, lst, payload)
     except ConflictError as exc:
@@ -33,8 +41,9 @@ async def create_form(
 async def list_forms(
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await FormService.list(db, lst.id)
+    return await FormService.list(db, lst.id, current_user)
 
 
 @router.get("/{uuid}", response_model=FormRead)
@@ -42,10 +51,14 @@ async def get_form(
     uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     form = await FormService.get_by_uuid(db, lst.id, uuid)
     if form is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.form, form.id, Action.view
+    )
     return form
 
 
@@ -55,7 +68,18 @@ async def update_form(
     payload: FormUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    form = await FormService.get_by_uuid(db, lst.id, uuid)
+    if form is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.form, form.id, Action.configure
+    )
+    if payload.permissions_inherit is not None:
+        await PermissionService.require(
+            db, current_user, ResourceType.form, form.id, Action.share
+        )
     try:
         form = await FormService.update(db, lst, uuid, payload)
     except ConflictError as exc:
@@ -73,6 +97,12 @@ async def delete_form(
     uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    if not await FormService.delete(db, lst.id, uuid):
+    form = await FormService.get_by_uuid(db, lst.id, uuid)
+    if form is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.form, form.id, Action.configure
+    )
+    await FormService.delete(db, lst.id, uuid)

@@ -36,6 +36,8 @@ class FormUpdate(BaseModel):
     type: Optional[FormType] = None
     is_default: Optional[bool] = None
     config: Optional[FormConfig] = None
+    # Changing this requires 'share' on the form.
+    permissions_inherit: Optional[bool] = None
 
 
 class FormRead(BaseModel):
@@ -45,5 +47,6 @@ class FormRead(BaseModel):
     type: FormType
     is_default: bool
     config: dict
+    permissions_inherit: bool = True
 
     model_config = ConfigDict(from_attributes=True)

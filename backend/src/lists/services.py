@@ -52,15 +52,45 @@ class ListService:
         return result.scalars().first()
 
     @classmethod
+    async def get_any_by_uuid(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[List]:
+        """Resolve a live list by uuid regardless of owner. Callers enforce
+        permissions separately (see src/permissions)."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            select(List)
+            .where(List.uuid == parsed, List.deleted_at.is_(None))
+            .options(selectinload(List.workspace), selectinload(List.primary_column))
+        )
+        return result.scalars().first()
+
+    @classmethod
     async def list(
         cls,
         db: AsyncSession,
-        owner_id: int,
+        user,
         workspace_uuid: Optional[Union[str, UUID]] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Sequence[List]:
-        stmt = cls._select(owner_id)
+        """Lists the user can view (owned, directly granted, or inherited from a
+        workspace grant), optionally scoped to one workspace."""
+        from src.permissions.services import PermissionService
+
+        condition = await PermissionService.list_query_filter(db, user)
+        stmt = (
+            select(List)
+            .join(Workspace, List.workspace_id == Workspace.id)
+            .where(
+                List.deleted_at.is_(None),
+                Workspace.deleted_at.is_(None),
+                condition,
+            )
+            .options(selectinload(List.workspace), selectinload(List.primary_column))
+        )
         if workspace_uuid is not None:
             parsed = coerce_uuid(workspace_uuid)
             stmt = stmt.where(Workspace.uuid == parsed)
@@ -68,15 +98,12 @@ class ListService:
         return result.scalars().all()
 
     @classmethod
-    async def create(
-        cls, db: AsyncSession, owner_id: int, payload: ListCreate
-    ) -> List:
-        workspace = await WorkspaceService.get_by_uuid(
-            db, owner_id, payload.workspace_uuid
-        )
+    async def create(cls, db: AsyncSession, payload: ListCreate) -> List:
+        # Owner-agnostic: the router enforces 'configure' on the target workspace.
+        workspace = await WorkspaceService.get_any_by_uuid(db, payload.workspace_uuid)
         if workspace is None:
             raise UnknownReferenceError(
-                "workspace_uuid does not reference a workspace you own"
+                "workspace_uuid does not reference a workspace"
             )
 
         lst = List(
@@ -96,17 +123,18 @@ class ListService:
             await db.rollback()
             raise ConflictError("A list with this name already exists") from exc
 
-        return await cls.get_by_uuid(db, owner_id, new_uuid)
+        return await cls.get_any_by_uuid(db, new_uuid)
 
     @classmethod
     async def update(
         cls,
         db: AsyncSession,
-        owner_id: int,
         uuid: Union[str, UUID],
         payload: ListUpdate,
     ) -> Optional[List]:
-        lst = await cls.get_by_uuid(db, owner_id, uuid)
+        # Owner-agnostic: the router enforces 'configure' (and 'share' when
+        # permissions_inherit is being changed) before calling this.
+        lst = await cls.get_any_by_uuid(db, uuid)
         if lst is None:
             return None
 
@@ -121,10 +149,10 @@ class ListService:
         if "workspace_uuid" in data:
             target_uuid = data.pop("workspace_uuid")
             if target_uuid is not None:
-                workspace = await WorkspaceService.get_by_uuid(db, owner_id, target_uuid)
+                workspace = await WorkspaceService.get_any_by_uuid(db, target_uuid)
                 if workspace is None:
                     raise UnknownReferenceError(
-                        "workspace_uuid does not reference a workspace you own"
+                        "workspace_uuid does not reference a workspace"
                     )
                 lst.workspace_id = workspace.id
 
@@ -133,6 +161,8 @@ class ListService:
             data.pop("name", None)
         if data.get("display_name") is None:
             data.pop("display_name", None)
+        if data.get("permissions_inherit") is None:
+            data.pop("permissions_inherit", None)
 
         for field, value in data.items():
             setattr(lst, field, value)
@@ -145,13 +175,12 @@ class ListService:
             await db.rollback()
             raise ConflictError("A list with this name already exists") from exc
 
-        return await cls.get_by_uuid(db, owner_id, target_uuid)
+        return await cls.get_any_by_uuid(db, target_uuid)
 
     @classmethod
-    async def delete(
-        cls, db: AsyncSession, owner_id: int, uuid: Union[str, UUID]
-    ) -> bool:
-        lst = await cls.get_by_uuid(db, owner_id, uuid)
+    async def delete(cls, db: AsyncSession, uuid: Union[str, UUID]) -> bool:
+        # Owner-agnostic: the router enforces 'delete' before calling this.
+        lst = await cls.get_any_by_uuid(db, uuid)
         if lst is None:
             return False
 

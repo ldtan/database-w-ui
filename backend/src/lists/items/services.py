@@ -44,12 +44,17 @@ class ListItemService:
         cls,
         db: AsyncSession,
         lst: List,
+        user,
         view_uuid: Optional[Union[str, UUID]] = None,
         skip: int = 0,
         limit: int = 100,
     ) -> Sequence[ListItem]:
+        from src.permissions.services import PermissionService
+
         columns = await cls._columns_by_key(db, lst.id)
-        stmt = cls._select(lst.id)
+        stmt = cls._select(lst.id).where(
+            await PermissionService.item_view_filter(db, user, lst)
+        )
         sorts = None
         group_by = None
 
@@ -81,6 +86,7 @@ class ListItemService:
         cls,
         db: AsyncSession,
         lst: List,
+        user,
         filters: Optional[dict] = None,
         sorts: Optional[list] = None,
         skip: int = 0,
@@ -88,8 +94,13 @@ class ListItemService:
     ) -> Sequence[ListItem]:
         """Read records with ad-hoc filters/sorts (no saved view). Unknown
         columns are ignored; empty sorts fall back to id-ascending order."""
+        from src.permissions.services import PermissionService
+
         columns = await cls._columns_by_key(db, lst.id)
-        stmt = apply_filters(cls._select(lst.id), filters, columns)
+        base = cls._select(lst.id).where(
+            await PermissionService.item_view_filter(db, user, lst)
+        )
+        stmt = apply_filters(base, filters, columns)
         stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
         result = await db.execute(stmt)
         return result.scalars().all()
@@ -128,6 +139,8 @@ class ListItemService:
         await cls._enforce_unique(db, lst.id, columns, merged, exclude_id=item.id)
         # Reassign a new dict so SQLAlchemy detects the JSONB change.
         item.data = merged
+        if payload.permissions_inherit is not None:
+            item.permissions_inherit = payload.permissions_inherit
         await db.commit()
         return await cls.get_by_uuid(db, lst.id, uuid)
 

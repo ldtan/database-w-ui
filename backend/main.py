@@ -1,8 +1,10 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
 
 from src.core.config import settings
+from src.core.exceptions import PermissionDeniedError
 
 
 @asynccontextmanager
@@ -21,6 +23,7 @@ async def lifespan(app: FastAPI):
     import src.lists.items.models
     import src.lists.views.models
     import src.lists.forms.models
+    import src.permissions.models
 
     await init_db()
 
@@ -50,13 +53,22 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # Map permission failures raised anywhere in the service layer onto 403.
+    @app.exception_handler(PermissionDeniedError)
+    async def _permission_denied_handler(request: Request, exc: PermissionDeniedError):
+        return JSONResponse(
+            status_code=status.HTTP_403_FORBIDDEN, content={"detail": str(exc)}
+        )
+
     # Import and include your routers here
     from src.auth.routers import router as auth_router
     from src.workspaces.routers import router as workspaces_router
     from src.lists.routers import router as lists_router
+    from src.permissions.routers import router as permissions_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
     app.include_router(lists_router, prefix=settings.API_PREFIX)
+    app.include_router(permissions_router, prefix=settings.API_PREFIX)
 
     return app
 

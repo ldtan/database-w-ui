@@ -18,6 +18,11 @@ class View(BaseModel):
     position: Mapped[int] = mapped_column(sa.Integer, default=0)
     # Saved sort / filter / group / paging (see schemas.ViewConfig).
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # When True, inherits permission grants from its list; when False, stands alone
+    # (used to target a view at a specific user/group). See src/permissions.
+    permissions_inherit: Mapped[bool] = mapped_column(
+        sa.Boolean, default=True, server_default=sa.true(), nullable=False
+    )
 
     __table_args__ = (
         sa.Index(

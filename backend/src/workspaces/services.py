@@ -31,11 +31,44 @@ class WorkspaceService:
         return result.scalars().first()
 
     @classmethod
+    async def get_any_by_uuid(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[Workspace]:
+        """Resolve a live workspace by uuid regardless of owner. Callers enforce
+        permissions separately (see src/permissions)."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            select(Workspace).where(
+                Workspace.uuid == parsed, Workspace.deleted_at.is_(None)
+            )
+        )
+        return result.scalars().first()
+
+    @classmethod
     async def list(
         cls, db: AsyncSession, owner_id: int, skip: int = 0, limit: int = 100
     ) -> Sequence[Workspace]:
         result = await db.execute(
             cls._select(owner_id).order_by(Workspace.id).offset(skip).limit(limit)
+        )
+        return result.scalars().all()
+
+    @classmethod
+    async def list_visible(
+        cls, db: AsyncSession, user, skip: int = 0, limit: int = 100
+    ) -> Sequence[Workspace]:
+        """Workspaces the user owns or has a workspace-level grant on."""
+        from src.permissions.services import PermissionService
+
+        condition = await PermissionService.workspace_view_filter(db, user)
+        result = await db.execute(
+            select(Workspace)
+            .where(Workspace.deleted_at.is_(None), condition)
+            .order_by(Workspace.id)
+            .offset(skip)
+            .limit(limit)
         )
         return result.scalars().all()
 
@@ -85,11 +118,11 @@ class WorkspaceService:
     async def update(
         cls,
         db: AsyncSession,
-        owner_id: int,
         uuid: Union[str, UUID],
         payload: WorkspaceUpdate,
     ) -> Optional[Workspace]:
-        workspace = await cls.get_by_uuid(db, owner_id, uuid)
+        # Owner-agnostic: the router enforces the required permission first.
+        workspace = await cls.get_any_by_uuid(db, uuid)
         if workspace is None:
             return None
 
@@ -114,9 +147,10 @@ class WorkspaceService:
 
     @classmethod
     async def delete(
-        cls, db: AsyncSession, owner_id: int, uuid: Union[str, UUID]
+        cls, db: AsyncSession, uuid: Union[str, UUID]
     ) -> bool:
-        workspace = await cls.get_by_uuid(db, owner_id, uuid)
+        # Owner-agnostic: the router enforces the required permission first.
+        workspace = await cls.get_any_by_uuid(db, uuid)
         if workspace is None:
             return False
 

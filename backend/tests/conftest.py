@@ -27,6 +27,7 @@ import src.lists.forms.models  # noqa: E402,F401
 import src.lists.items.models  # noqa: E402,F401
 import src.lists.models  # noqa: E402,F401
 import src.lists.views.models  # noqa: E402,F401
+import src.permissions.models  # noqa: E402,F401
 import src.workspaces.models  # noqa: E402,F401
 
 from main import create_app  # noqa: E402

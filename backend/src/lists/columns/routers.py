@@ -3,8 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import get_current_user
+from src.auth.users.models import User
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
@@ -20,7 +24,11 @@ async def create_column(
     payload: ColumnCreate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
     try:
         return await ColumnService.create(db, lst, payload)
     except ConflictError as exc:
@@ -55,7 +63,11 @@ async def update_column(
     payload: ColumnUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
     try:
         column = await ColumnService.update(db, lst, uuid, payload)
     except ConflictError as exc:
@@ -73,6 +85,10 @@ async def delete_column(
     uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
     if not await ColumnService.delete(db, lst, uuid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")

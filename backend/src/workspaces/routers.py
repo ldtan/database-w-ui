@@ -7,6 +7,8 @@ from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
 from src.core.exceptions import ConflictError
 from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
 
 from .schemas import WorkspaceCreate, WorkspaceRead, WorkspaceUpdate
 from .services import WorkspaceService
@@ -38,7 +40,7 @@ async def list_workspaces(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await WorkspaceService.list(db, current_user.id, skip=skip, limit=limit)
+    return await WorkspaceService.list_visible(db, current_user, skip=skip, limit=limit)
 
 
 @router.get("/{workspace_uuid}", response_model=WorkspaceRead)
@@ -47,9 +49,12 @@ async def get_workspace(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    workspace = await WorkspaceService.get_by_uuid(db, current_user.id, workspace_uuid)
+    workspace = await WorkspaceService.get_any_by_uuid(db, workspace_uuid)
     if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, workspace.id, Action.view
+    )
     return workspace
 
 
@@ -60,8 +65,14 @@ async def update_workspace(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    workspace = await WorkspaceService.get_any_by_uuid(db, workspace_uuid)
+    if workspace is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, workspace.id, Action.configure
+    )
     try:
-        workspace = await WorkspaceService.update(db, current_user.id, workspace_uuid, payload)
+        workspace = await WorkspaceService.update(db, workspace_uuid, payload)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -76,5 +87,10 @@ async def delete_workspace(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if not await WorkspaceService.delete(db, current_user.id, workspace_uuid):
+    workspace = await WorkspaceService.get_any_by_uuid(db, workspace_uuid)
+    if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, workspace.id, Action.delete
+    )
+    await WorkspaceService.delete(db, workspace_uuid)

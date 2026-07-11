@@ -22,6 +22,11 @@ class Form(BaseModel):
     is_default: Mapped[bool] = mapped_column(sa.Boolean, default=False)
     # Field layout: which columns show, order, enabled (see schemas.FormConfig).
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # When True, inherits permission grants from its list; when False, stands alone
+    # (used to target a form at a specific user/group). See src/permissions.
+    permissions_inherit: Mapped[bool] = mapped_column(
+        sa.Boolean, default=True, server_default=sa.true(), nullable=False
+    )
 
     __table_args__ = (
         sa.Index(

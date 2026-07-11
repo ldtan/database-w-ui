@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -31,10 +32,14 @@ class ListItemCreate(BaseModel):
 class ListItemUpdate(BaseModel):
     # Partial: only the provided keys are merged onto the existing record.
     data: dict = Field(default_factory=dict)
+    # Whether this record inherits permission grants from its list. Changing it
+    # requires 'share' on the record.
+    permissions_inherit: Optional[bool] = None
 
 
 class ListItemRead(BaseModel):
     uuid: UUID
     data: dict
+    permissions_inherit: bool = True
 
     model_config = ConfigDict(from_attributes=True)

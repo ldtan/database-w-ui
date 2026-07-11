@@ -371,8 +371,6 @@ each is enabled. Field layout is JSONB (D5).
   integrity, cheap reverse lookups, clean many-to-many links. Adopt when soft references
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
-- **Sharing / permissions:** per-list or per-workspace roles. The `workspaces` tenancy
-  boundary (§3) is now in place, so this can be layered on without restructuring.
 - **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
 - **Additional column types:** `email`, `url`, `attachment`, `rating`, `user` (assignee).
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
@@ -385,8 +383,8 @@ each is enabled. Field layout is JSONB (D5).
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
-single-record delete (§6), and cascade soft delete for lists/workspaces with
-cross-list lookup-reference scrubbing (§10).
+single-record delete (§6), cascade soft delete for lists/workspaces with
+cross-list lookup-reference scrubbing (§10), and sharing / permissions (§11).
 
 ---
 
@@ -407,3 +405,71 @@ Because the DB does not enforce record-level constraints, the service layer MUST
    Lookup columns on *surviving* lists that referenced the deleted rows have that
    key dropped from their records (a lookup targets one list, so deleting it makes
    every value in the column stale).
+8. Enforce permissions on every access path: reads are filtered to visible
+   resources and writes require the matching action (see §11). The workspace owner
+   is an implicit superuser over their own data.
+
+---
+
+## 11. Permissions / authorization
+
+Access is granted to **users or groups** and can reach down to individual records,
+forms, and views. See `src/permissions/`.
+
+### `permission_grants`
+
+One row per `(resource, principal)`. Grants point at a resource **polymorphically**
+via `(resource_type, resource_id)` — no FK, because `resource_id` refers to a
+different table per type. Existence is validated when a grant is created; the
+resolver only ever walks live resources.
+
+| Column | Notes |
+| --- | --- |
+| `resource_type` | `workspace` \| `list` \| `view` \| `form` \| `item` |
+| `resource_id` | integer id within that type's table |
+| `user_id` / `group_id` | exactly one is set (DB `CHECK`); FKs to `users`/`user_groups` |
+| `actions` | JSONB list of action strings |
+
+Partial unique indexes keep one grant per `(resource, user)` and per `(resource, group)`.
+
+### Actions and implication
+
+`view, create, edit, delete, configure, share, manage`. `view/create/edit/delete`
+act on records and on reading/deleting the resource; `configure` covers list
+settings, columns, forms, and views; `share` manages a resource's own grants;
+`manage` is full control. A granted action expands to what it implies —
+`manage → all`; `configure/share/edit/create/delete → {self, view}` — and a
+principal's effective set is the union over all applicable grants.
+
+### Inheritance and the "unique" break
+
+`item`, `view`, and `form` inherit their `list`'s grants; a `list` inherits its
+`workspace`'s. Each of `lists`, `list_items`, `views`, `forms` carries a
+`permissions_inherit` boolean (default `true`). When `false`, the resource is
+**unique**: the resolver stops walking up and it stands on its own grants only —
+this is how a single form/view is targeted at one group. The flag is reversible.
+
+The resolver builds the chain of `(type, id)` nodes whose grants apply (stopping
+where inheritance breaks), then unions the expanded actions from every grant on
+those nodes that matches the user or one of their groups. The owning workspace's
+owner short-circuits to all actions.
+
+### Enforcement
+
+- Reads are filtered to visible resources: `WorkspaceService.list_visible`,
+  `ListService.list`, `ListItemService.list`/`query` (SQL conditions from
+  `PermissionService`), and `ViewService.list`/`FormService.list` (per-row).
+- Writes call `PermissionService.require(...)`: item CRUD → `create/edit/delete`;
+  list/workspace settings, columns, forms, views → `configure`; deleting a
+  list/workspace → `delete`; import → `create`+`edit`, export → `view`; changing
+  any `permissions_inherit` flag → `share`.
+- Item routes resolve the list without a list-level `view` check (an item can be
+  shared directly), then enforce per item.
+- `PermissionDeniedError` is mapped to HTTP 403 by an app-level handler.
+
+Grant management + a `GET /permissions/effective` (the caller's actions on a
+resource, for the future UI) live under `/api/permissions`. User and group CRUD
+already exist under `/api/auth/users` and `/api/auth/groups`.
+
+Not yet done: a sharing UI, admin-gating of user/group management, grant scrubbing
+on hard delete, and permission-filtering of streamed exports.

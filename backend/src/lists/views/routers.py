@@ -3,8 +3,12 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import get_current_user
+from src.auth.users.models import User
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
@@ -20,7 +24,11 @@ async def create_view(
     payload: ViewCreate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
     try:
         return await ViewService.create(db, lst, payload)
     except ConflictError as exc:
@@ -33,8 +41,9 @@ async def create_view(
 async def list_views(
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await ViewService.list(db, lst.id)
+    return await ViewService.list(db, lst.id, current_user)
 
 
 @router.get("/{uuid}", response_model=ViewRead)
@@ -42,10 +51,14 @@ async def get_view(
     uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
     view = await ViewService.get_by_uuid(db, lst.id, uuid)
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.view, view.id, Action.view
+    )
     return view
 
 
@@ -55,7 +68,18 @@ async def update_view(
     payload: ViewUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
+    view = await ViewService.get_by_uuid(db, lst.id, uuid)
+    if view is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.view, view.id, Action.configure
+    )
+    if payload.permissions_inherit is not None:
+        await PermissionService.require(
+            db, current_user, ResourceType.view, view.id, Action.share
+        )
     try:
         view = await ViewService.update(db, lst, uuid, payload)
     except ConflictError as exc:
@@ -73,6 +97,12 @@ async def delete_view(
     uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    if not await ViewService.delete(db, lst.id, uuid):
+    view = await ViewService.get_by_uuid(db, lst.id, uuid)
+    if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.view, view.id, Action.configure
+    )
+    await ViewService.delete(db, lst.id, uuid)

@@ -54,6 +54,8 @@ class ViewUpdate(BaseModel):
     display_name: Optional[str] = None
     position: Optional[int] = None
     config: Optional[ViewConfig] = None
+    # Changing this requires 'share' on the view.
+    permissions_inherit: Optional[bool] = None
 
 
 class ViewRead(BaseModel):
@@ -62,5 +64,6 @@ class ViewRead(BaseModel):
     display_name: str
     position: int
     config: dict
+    permissions_inherit: bool = True
 
     model_config = ConfigDict(from_attributes=True)

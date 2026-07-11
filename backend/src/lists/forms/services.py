@@ -31,9 +31,20 @@ class FormService:
         return result.scalars().first()
 
     @classmethod
-    async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Form]:
+    async def list(cls, db: AsyncSession, list_id: int, user) -> Sequence[Form]:
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
         result = await db.execute(cls._select(list_id).order_by(Form.id))
-        return result.scalars().all()
+        forms = result.scalars().all()
+        # Few forms per list, so resolve visibility per row rather than in SQL.
+        visible = []
+        for form in forms:
+            if await PermissionService.has(
+                db, user, ResourceType.form, form.id, Action.view
+            ):
+                visible.append(form)
+        return visible
 
     @classmethod
     async def create(cls, db: AsyncSession, lst: List, payload: FormCreate) -> Form:
@@ -75,7 +86,7 @@ class FormService:
             await cls._validate_config(db, lst.id, payload.config)
             form.config = payload.config.model_dump(mode="json")
             data.pop("config")
-        for key in ("name", "display_name", "type", "is_default"):
+        for key in ("name", "display_name", "type", "is_default", "permissions_inherit"):
             if key in data and data[key] is None:
                 data.pop(key)
 

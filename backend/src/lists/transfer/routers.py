@@ -7,7 +7,11 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.auth.dependencies import get_current_user
+from src.auth.users.models import User
 from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
@@ -58,9 +62,16 @@ def _infer_format(filename: Optional[str], override: Optional[str]) -> str:
 async def import_list(
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
     file: UploadFile = File(...),
     format: Optional[str] = Form(None),
 ):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.create
+    )
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.edit
+    )
     fmt = _infer_format(file.filename, format)
     if fmt == "json":
         raw = await file.read()

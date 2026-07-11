@@ -15,6 +15,10 @@ class ListItem(BaseModel):
     )
     # The whole record, keyed by column uuid (string) -> value.
     data: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # When True, inherits permission grants from its list; when False, stands alone.
+    permissions_inherit: Mapped[bool] = mapped_column(
+        sa.Boolean, default=True, server_default=sa.true(), nullable=False
+    )
 
     __table_args__ = (
         sa.Index("ix_list_items_data", "data", postgresql_using="gin"),
