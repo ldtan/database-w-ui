@@ -90,3 +90,26 @@ export interface View {
   position: number;
   config: ViewConfig;
 }
+
+export type FormType = "create" | "update" | "custom";
+
+export interface FormField {
+  column_uuid: string;
+  included: boolean;
+  enabled: boolean;
+  order: number;
+  label_override?: string | null;
+}
+
+export interface FormConfig {
+  fields: FormField[];
+}
+
+export interface Form {
+  uuid: string;
+  name: string;
+  display_name: string;
+  type: FormType;
+  is_default: boolean;
+  config: FormConfig;
+}

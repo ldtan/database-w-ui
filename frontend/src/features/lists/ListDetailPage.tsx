@@ -7,9 +7,10 @@ import { Button } from "primereact/button";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api } from "../../lib/api";
-import type { Column, ListItem, View, ViewConfig } from "../../lib/types";
+import type { Column, Form, ListItem, View, ViewConfig } from "../../lib/types";
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { FormsPanel } from "../forms/FormsPanel";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
 
@@ -34,6 +35,7 @@ export function ListDetailPage() {
   const { listUuid = "" } = useParams();
   const queryClient = useQueryClient();
   const [showAddColumn, setShowAddColumn] = useState(false);
+  const [showForms, setShowForms] = useState(false);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
     item: ListItem | null;
@@ -61,6 +63,10 @@ export function ListDetailPage() {
   const views = useQuery({
     queryKey: ["views", listUuid],
     queryFn: () => api.get<View[]>(`/lists/${listUuid}/views/`),
+  });
+  const forms = useQuery({
+    queryKey: ["forms", listUuid],
+    queryFn: () => api.get<Form[]>(`/lists/${listUuid}/forms/`),
   });
 
   // Default to the first view once loaded.
@@ -94,6 +100,11 @@ export function ListDetailPage() {
   });
 
   const cols = columns.data ?? [];
+  const formList = forms.data ?? [];
+  // Editing uses the "update" form; creating uses the "create" form.
+  const recordForm =
+    formList.find((f) => f.type === (recordDialog.item ? "update" : "create")) ??
+    null;
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
   const currentConfig: ViewConfig = {
@@ -140,6 +151,13 @@ export function ListDetailPage() {
             icon="pi pi-plus"
             outlined
             onClick={() => setShowAddColumn(true)}
+          />
+          <Button
+            label="Forms"
+            icon="pi pi-file-edit"
+            outlined
+            onClick={() => setShowForms(true)}
+            disabled={formList.length === 0}
           />
           <Button
             label="Add record"
@@ -247,9 +265,17 @@ export function ListDetailPage() {
       <RecordFormDialog
         listUuid={listUuid}
         columns={cols}
+        form={recordForm}
         item={recordDialog.item}
         visible={recordDialog.open}
         onHide={() => setRecordDialog({ open: false, item: null })}
+      />
+      <FormsPanel
+        listUuid={listUuid}
+        columns={cols}
+        forms={formList}
+        visible={showForms}
+        onHide={() => setShowForms(false)}
       />
       {activeViewUuid && (
         <FilterDialog

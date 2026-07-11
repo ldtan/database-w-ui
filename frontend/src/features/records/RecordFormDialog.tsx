@@ -11,14 +11,45 @@ import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, Form, ListItem } from "../../lib/types";
 
 interface Props {
   listUuid: string;
   columns: Column[];
+  form: Form | null; // the create/update form whose config drives the layout
   item: ListItem | null; // null => create, otherwise edit
   visible: boolean;
   onHide: () => void;
+}
+
+interface ResolvedField {
+  column: Column;
+  enabled: boolean;
+  label: string;
+}
+
+// Apply the form's config: only included fields, in order, with enabled and
+// label overrides. An empty/absent config means "all columns in schema order".
+function resolveFields(columns: Column[], form: Form | null): ResolvedField[] {
+  if (form && form.config.fields && form.config.fields.length > 0) {
+    const byUuid = new Map(columns.map((c) => [c.uuid, c]));
+    return form.config.fields
+      .filter((f) => f.included)
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map((f) => {
+        const column = byUuid.get(f.column_uuid);
+        if (!column) return null;
+        return {
+          column,
+          enabled: f.enabled !== false,
+          label:
+            (f.label_override && f.label_override.trim()) || column.display_name,
+        };
+      })
+      .filter((x): x is ResolvedField => x !== null);
+  }
+  return columns.map((c) => ({ column: c, enabled: true, label: c.display_name }));
 }
 
 function pad(n: number): string {
@@ -40,7 +71,6 @@ function serialize(column: Column, value: unknown): unknown {
   return value;
 }
 
-// Turn a stored value back into a form value (dates -> Date for the Calendar).
 function deserialize(column: Column, raw: unknown): unknown {
   const s = String(raw);
   if (column.type === "date" || column.type === "datetime") {
@@ -60,10 +90,12 @@ function deserialize(column: Column, raw: unknown): unknown {
 function RecordField({
   column,
   value,
+  disabled,
   onChange,
 }: {
   column: Column;
   value: unknown;
+  disabled: boolean;
   onChange: (v: unknown) => void;
 }) {
   const id = `field-${column.uuid}`;
@@ -75,6 +107,7 @@ function RecordField({
           value={(value as string) ?? ""}
           onChange={(e) => onChange(e.target.value)}
           rows={3}
+          disabled={disabled}
         />
       );
     case "number":
@@ -84,6 +117,7 @@ function RecordField({
           value={(value as number) ?? null}
           onValueChange={(e) => onChange(e.value ?? null)}
           useGrouping={false}
+          disabled={disabled}
         />
       );
     case "checkbox":
@@ -92,6 +126,7 @@ function RecordField({
           inputId={id}
           checked={!!value}
           onChange={(e) => onChange(!!e.checked)}
+          disabled={disabled}
         />
       );
     case "choice": {
@@ -107,6 +142,7 @@ function RecordField({
           onChange={(e) => onChange(e.value)}
           showClear
           placeholder="Select…"
+          disabled={disabled}
         />
       );
     }
@@ -118,6 +154,7 @@ function RecordField({
           onChange={(e) => onChange(e.value ?? null)}
           dateFormat="yy-mm-dd"
           showButtonBar
+          disabled={disabled}
         />
       );
     case "time":
@@ -127,6 +164,7 @@ function RecordField({
           value={(value as Date) ?? null}
           onChange={(e) => onChange(e.value ?? null)}
           timeOnly
+          disabled={disabled}
         />
       );
     case "datetime":
@@ -137,6 +175,7 @@ function RecordField({
           onChange={(e) => onChange(e.value ?? null)}
           showTime
           dateFormat="yy-mm-dd"
+          disabled={disabled}
         />
       );
     default:
@@ -145,16 +184,24 @@ function RecordField({
           id={id}
           value={(value as string) ?? ""}
           onChange={(e) => onChange(e.target.value)}
+          disabled={disabled}
         />
       );
   }
 }
 
-export function RecordFormDialog({ listUuid, columns, item, visible, onHide }: Props) {
+export function RecordFormDialog({
+  listUuid,
+  columns,
+  form,
+  item,
+  visible,
+  onHide,
+}: Props) {
   const queryClient = useQueryClient();
   const [values, setValues] = useState<Record<string, unknown>>({});
+  const fields = resolveFields(columns, form);
 
-  // Re-seed the form whenever it opens (empty for create, prefilled for edit).
   useEffect(() => {
     if (!visible) return;
     if (!item) {
@@ -172,17 +219,16 @@ export function RecordFormDialog({ listUuid, columns, item, visible, onHide }: P
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, item?.uuid]);
 
-  const save = useMutation({
+  const persist = useMutation({
     mutationFn: () => {
       const data: Record<string, unknown> = {};
-      for (const column of columns) {
+      for (const { column, enabled } of fields) {
+        if (!enabled) continue; // read-only fields keep default/existing value
         const value = values[column.uuid];
         const empty = value === undefined || value === null || value === "";
         if (item) {
-          // Edit: send full state so cleared fields are explicitly cleared.
           data[column.uuid] = empty ? null : serialize(column, value);
         } else if (!empty) {
-          // Create: omit empties so backend defaults/required rules apply.
           data[column.uuid] = serialize(column, value);
         }
       }
@@ -204,19 +250,20 @@ export function RecordFormDialog({ listUuid, columns, item, visible, onHide }: P
       style={{ width: 460 }}
     >
       <div className="flex flex-col gap-4">
-        {save.error instanceof ApiError && (
-          <Message severity="error" text={save.error.message} />
+        {persist.error instanceof ApiError && (
+          <Message severity="error" text={persist.error.message} />
         )}
-        {columns.length === 0 && <p>Add a column first.</p>}
-        {columns.map((column) => (
+        {fields.length === 0 && <p>Add a column first.</p>}
+        {fields.map(({ column, enabled, label }) => (
           <div key={column.uuid} className="flex flex-col gap-2">
             <label htmlFor={`field-${column.uuid}`}>
-              {column.display_name}
+              {label}
               {column.config.required ? " *" : ""}
             </label>
             <RecordField
               column={column}
               value={values[column.uuid]}
+              disabled={!enabled}
               onChange={(v) =>
                 setValues((prev) => ({ ...prev, [column.uuid]: v }))
               }
@@ -227,9 +274,9 @@ export function RecordFormDialog({ listUuid, columns, item, visible, onHide }: P
           <Button label="Cancel" text onClick={onHide} />
           <Button
             label={item ? "Save" : "Add"}
-            onClick={() => save.mutate()}
-            loading={save.isPending}
-            disabled={columns.length === 0}
+            onClick={() => persist.mutate()}
+            loading={persist.isPending}
+            disabled={fields.length === 0}
           />
         </div>
       </div>
