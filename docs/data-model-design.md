@@ -307,13 +307,16 @@ A saved way of looking at a list: sort, filter, group, paging. Config is JSONB (
     {"column_uuid": "a4f0…", "direction": "asc"}
   ],
   "group_by": {"column_uuid": "9d1c…"},   // or null
+  "hidden_columns": ["a4f0…"],            // columns to hide; empty = show all
   "page_size": 50
 }
 ```
 
 Operators are per-type (e.g. `is`, `is_not`, `contains`, `is_empty`, `>`, `<`).
 Validate the operator against the referenced column's `type` in the app layer. Every
-`column_uuid` referenced must belong to the list (enforced on write).
+`column_uuid` referenced must belong to the list (enforced on write) — including the
+entries in `hidden_columns`. An empty `hidden_columns` shows every column, so
+newly-added columns appear automatically until explicitly hidden.
 
 ---
 
