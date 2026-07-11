@@ -15,6 +15,14 @@ class ItemQuery(BaseModel):
     limit: int = Field(100, ge=1, le=1000)
 
 
+class BulkDeleteRequest(BaseModel):
+    uuids: list[UUID] = Field(default_factory=list)
+
+
+class BulkDeleteResult(BaseModel):
+    deleted: int
+
+
 class ListItemCreate(BaseModel):
     # Keys are column uuids (as strings); values are validated per column type.
     data: dict = Field(default_factory=dict)

@@ -59,6 +59,7 @@ export function ListDetailPage() {
     open: boolean;
     item: ListItem | null;
   }>({ open: false, item: null });
+  const [selection, setSelection] = useState<ListItem[]>([]);
 
   const [activeViewUuid, setActiveViewUuid] = useState<string | null>(null);
   const [sortField, setSortField] = useState<string | undefined>(undefined);
@@ -113,6 +114,7 @@ export function ListDetailPage() {
     setGroupBy(view.config.group_by?.column_uuid ?? null);
     setHiddenColumns(view.config.hidden_columns ?? []);
     setColumnOrder(view.config.column_order ?? []);
+    setSelection([]); // selection doesn't carry across views
   }, [activeViewUuid, views.data]);
 
   const deleteItem = useMutation({
@@ -137,6 +139,22 @@ export function ListDetailPage() {
     onError: (err) =>
       toast.error(
         "Could not delete column",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+  const bulkDelete = useMutation({
+    mutationFn: () =>
+      api.post<{ deleted: number }>(`/lists/${listUuid}/items/bulk-delete`, {
+        uuids: selection.map((item) => item.uuid),
+      }),
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      setSelection([]);
+      toast.success("Records deleted", `${res.deleted} record(s)`);
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not delete records",
         err instanceof ApiError ? err.message : undefined,
       ),
   });
@@ -214,6 +232,14 @@ export function ListDetailPage() {
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => deleteItem.mutate(row.uuid),
+    });
+  }
+  function confirmBulkDelete() {
+    confirmDialog({
+      message: `Delete ${selection.length} selected record(s)?`,
+      header: "Confirm",
+      icon: "pi pi-exclamation-triangle",
+      accept: () => bulkDelete.mutate(),
     });
   }
   function confirmDeleteColumn(col: Column) {
@@ -341,10 +367,36 @@ export function ListDetailPage() {
         />
       )}
 
+      {selection.length > 0 && (
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-600">
+            {selection.length} selected
+          </span>
+          <Button
+            label="Delete selected"
+            icon="pi pi-trash"
+            severity="danger"
+            outlined
+            size="small"
+            onClick={confirmBulkDelete}
+            loading={bulkDelete.isPending}
+          />
+          <Button
+            label="Clear"
+            text
+            size="small"
+            onClick={() => setSelection([])}
+          />
+        </div>
+      )}
+
       <DataTable
         value={items.data ?? []}
         loading={columns.isLoading || items.isLoading}
         dataKey="uuid"
+        selectionMode="multiple"
+        selection={selection}
+        onSelectionChange={(e) => setSelection(e.value)}
         stripedRows
         paginator
         rows={pageSize}
@@ -363,6 +415,11 @@ export function ListDetailPage() {
         rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
         emptyMessage="No records yet."
       >
+        <DataColumn
+          selectionMode="multiple"
+          headerStyle={{ width: "3rem" }}
+          exportable={false}
+        />
         {visibleCols.map((col) => (
           <DataColumn
             key={col.uuid}
@@ -397,7 +454,10 @@ export function ListDetailPage() {
                 text
                 size="small"
                 aria-label="Edit record"
-                onClick={() => setRecordDialog({ open: true, item: row })}
+                onClick={(e) => {
+                  e.stopPropagation(); // don't also toggle row selection
+                  setRecordDialog({ open: true, item: row });
+                }}
               />
               <Button
                 icon="pi pi-trash"
@@ -405,7 +465,10 @@ export function ListDetailPage() {
                 severity="danger"
                 size="small"
                 aria-label="Delete record"
-                onClick={() => confirmDeleteItem(row)}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  confirmDeleteItem(row);
+                }}
               />
             </div>
           )}

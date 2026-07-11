@@ -9,7 +9,14 @@ from src.infrastructure.database import get_db
 
 from ..dependencies import get_list_or_404
 from ..models import List
-from .schemas import ItemQuery, ListItemCreate, ListItemRead, ListItemUpdate
+from .schemas import (
+    BulkDeleteRequest,
+    BulkDeleteResult,
+    ItemQuery,
+    ListItemCreate,
+    ListItemRead,
+    ListItemUpdate,
+)
 from .services import ListItemService
 
 
@@ -41,6 +48,16 @@ async def list_items(
     return await ListItemService.list(
         db, lst, view_uuid=view_uuid, skip=skip, limit=limit
     )
+
+
+@router.post("/bulk-delete", response_model=BulkDeleteResult)
+async def bulk_delete_items(
+    payload: BulkDeleteRequest,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    deleted = await ListItemService.bulk_delete(db, lst, payload.uuids)
+    return {"deleted": deleted}
 
 
 @router.post("/query", response_model=list[ListItemRead])

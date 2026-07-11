@@ -33,6 +33,29 @@ async def test_add_column_and_item_roundtrip(client, list_uuid, add_column):
     assert resp.json()["data"][col] == "hello"
 
 
+async def test_bulk_delete_items(client, list_uuid, add_column):
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+
+    async def add(value):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        )
+        return resp.json()["uuid"]
+
+    u1, u2 = await add("a"), await add("b")
+    await add("c")
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete",
+        json={"uuids": [u1, u2, "00000000-0000-0000-0000-000000000000"]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 2  # bogus uuid skipped
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert [i["data"][col] for i in items] == ["c"]
+
+
 async def test_required_rejected_when_missing(client, list_uuid, add_column):
     await add_column(
         list_uuid, name="title", display_name="Title", type="text",

@@ -146,6 +146,26 @@ class ListItemService:
         return True
 
     @classmethod
+    async def bulk_delete(
+        cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
+    ) -> int:
+        """Soft-delete several records in one transaction, scrubbing lookup
+        references for each. Unknown/already-deleted uuids are skipped. Returns
+        the number actually deleted."""
+        now = datetime.now(timezone.utc)
+        deleted = 0
+        for uuid in uuids:
+            item = await cls.get_by_uuid(db, lst.id, uuid)
+            if item is None:
+                continue
+            item.deleted_at = now
+            await cls._scrub_lookup_references(db, lst.uuid, item.uuid)
+            deleted += 1
+        if deleted:
+            await db.commit()
+        return deleted
+
+    @classmethod
     async def _scrub_lookup_references(
         cls, db: AsyncSession, list_uuid: UUID, deleted_item_uuid: UUID
     ) -> None:
