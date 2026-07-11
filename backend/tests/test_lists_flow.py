@@ -53,6 +53,47 @@ async def test_delete_list_cascades_soft_delete(
         assert active == 0, f"{name} not soft-deleted on cascade"
 
 
+async def test_delete_list_scrubs_cross_list_lookup_refs(
+    client, workspace_uuid, add_column
+):
+    async def make_list(name):
+        resp = await client.post(
+            "/api/lists/",
+            json={"name": name, "display_name": name, "workspace_uuid": workspace_uuid},
+        )
+        return resp.json()["uuid"]
+
+    authors = await make_list("authors")
+    aname = await add_column(authors, name="full_name", display_name="Name", type="text")
+    a1 = (
+        await client.post(
+            f"/api/lists/{authors}/items/", json={"data": {aname: "Ursula"}}
+        )
+    ).json()["uuid"]
+
+    books = await make_list("books")
+    author_col = await add_column(
+        books,
+        name="author",
+        display_name="Author",
+        type="lookup",
+        config={"target_list_uuid": authors},
+    )
+    book = (
+        await client.post(
+            f"/api/lists/{books}/items/", json={"data": {author_col: a1}}
+        )
+    ).json()
+    assert book["data"][author_col] == a1
+
+    # Deleting the target list must scrub references held by the surviving list.
+    assert (await client.delete(f"/api/lists/{authors}")).status_code == 204
+
+    items = (await client.get(f"/api/lists/{books}/items/")).json()
+    assert len(items) == 1
+    assert author_col not in items[0]["data"]  # dangling reference removed
+
+
 async def test_delete_workspace_cascades_to_lists_and_descendants(
     client, session_factory, workspace_uuid, list_uuid, add_column
 ):

@@ -12,6 +12,7 @@ from src.core.utils import coerce_uuid
 from src.workspaces.models import Workspace
 from src.workspaces.services import WorkspaceService
 
+from .columns.enums import ColumnType
 from .columns.models import Column
 from .forms.enums import FormType
 from .forms.models import Form
@@ -157,6 +158,7 @@ class ListService:
         now = datetime.now(timezone.utc)
         await cls._cascade_descendants(db, [lst.id], now)
         lst.deleted_at = now
+        await cls._scrub_references_to_lists(db, [lst.uuid])
         await db.commit()
         return True
 
@@ -182,17 +184,56 @@ class ListService:
         """Soft-delete all lists in a workspace and their descendants, in bulk.
         Does not commit — the caller (workspace delete) owns the transaction."""
         result = await db.execute(
-            select(List.id).where(
+            select(List.id, List.uuid).where(
                 List.workspace_id == workspace_id, List.deleted_at.is_(None)
             )
         )
-        list_ids = list(result.scalars().all())
-        if not list_ids:
+        rows = result.all()
+        if not rows:
             return
+        list_ids = [row.id for row in rows]
+        list_uuids = [row.uuid for row in rows]
         await cls._cascade_descendants(db, list_ids, when)
         await db.execute(
             update(List).where(List.id.in_(list_ids)).values(deleted_at=when)
         )
+        await cls._scrub_references_to_lists(db, list_uuids)
+
+    @classmethod
+    async def _scrub_references_to_lists(
+        cls, db: AsyncSession, list_uuids: Sequence[UUID]
+    ) -> None:
+        """Remove dangling lookup references to rows in now-deleted lists.
+
+        Lookup values are raw uuids stored in another row's JSONB, so deleting a
+        target list leaves those pointers unresolvable but present. Since a lookup
+        column targets exactly one list, deleting that list makes *every* value in
+        the column stale — so drop the column's key from the referencing rows.
+        Only columns on surviving lists matter (those on deleted lists are already
+        soft-deleted and thus excluded)."""
+        if not list_uuids:
+            return
+        targets = [str(u) for u in list_uuids]
+        lookup_columns = (
+            await db.execute(
+                select(Column).where(
+                    Column.type == ColumnType.lookup,
+                    Column.deleted_at.is_(None),
+                    Column.config["target_list_uuid"].astext.in_(targets),
+                )
+            )
+        ).scalars().all()
+        for column in lookup_columns:
+            key = str(column.uuid)
+            await db.execute(
+                update(ListItem)
+                .where(
+                    ListItem.list_id == column.list_id,
+                    ListItem.deleted_at.is_(None),
+                    ListItem.data.has_key(key),
+                )
+                .values(data=ListItem.data.op("-")(key))
+            )
 
     @staticmethod
     def _provision_defaults(db: AsyncSession, lst: List) -> None:
