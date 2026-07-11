@@ -375,6 +375,13 @@ each is enabled. Field layout is JSONB (D5).
   boundary (§3) is now in place, so this can be layered on without restructuring.
 - **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
 - **Additional column types:** `email`, `url`, `attachment`, `rating`, `user` (assignee).
+- **Client-streamed export downloads:** export streams server-side (§ items), but the
+  browser still buffers the whole file in memory before saving (an SPA with bearer auth
+  can't stream a plain link to disk). For very large exports, stream to a temp file /
+  object storage and hand back a short-lived signed URL the browser downloads directly.
+- **Incremental (streaming) import parsing:** bulk import inserts row-by-row with batched
+  commits, but reads the whole uploaded file into memory first. For very large uploads,
+  parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), and lookup orphan cleanup on delete (§6).
