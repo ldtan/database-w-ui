@@ -12,6 +12,7 @@ import { api, ApiError } from "../../lib/api";
 import type { Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
+import { ShareDialog } from "../permissions/ShareDialog";
 
 export function WorkspacesPage() {
   const queryClient = useQueryClient();
@@ -38,6 +39,7 @@ export function WorkspacesPage() {
     },
   });
 
+  const [sharing, setSharing] = useState<Workspace | null>(null);
   const [renaming, setRenaming] = useState<Workspace | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const rename = useMutation({
@@ -109,6 +111,12 @@ export function WorkspacesPage() {
               </Link>
               <div className="flex gap-1">
                 <Button
+                  icon="pi pi-share-alt"
+                  text
+                  aria-label="Share workspace"
+                  onClick={() => setSharing(ws)}
+                />
+                <Button
                   icon="pi pi-pencil"
                   text
                   aria-label="Rename workspace"
@@ -129,6 +137,16 @@ export function WorkspacesPage() {
           </Card>
         ))}
       </div>
+
+      {sharing && (
+        <ShareDialog
+          visible={!!sharing}
+          onHide={() => setSharing(null)}
+          resourceType="workspace"
+          resourceUuid={sharing.uuid}
+          resourceLabel={sharing.display_name}
+        />
+      )}
 
       <Dialog
         header="Rename workspace"

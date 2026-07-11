@@ -12,6 +12,7 @@ import { api, ApiError } from "../../lib/api";
 import type { ListRead } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
+import { ShareDialog } from "../permissions/ShareDialog";
 
 export function ListsPage() {
   const { workspaceUuid = "" } = useParams();
@@ -68,6 +69,20 @@ export function ListsPage() {
       ),
   });
 
+  // Share dialog: track by uuid so the inherit toggle reflects fresh data.
+  const [sharingUuid, setSharingUuid] = useState<string | null>(null);
+  const sharing = lists.data?.find((l) => l.uuid === sharingUuid) ?? null;
+  const setInherit = useMutation({
+    mutationFn: (vars: { uuid: string; value: boolean }) =>
+      api.patch(`/lists/${vars.uuid}`, { permissions_inherit: vars.value }),
+    onSuccess: invalidate,
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+
   function onCreate(event: FormEvent) {
     event.preventDefault();
     if (displayName.trim()) create.mutate(displayName.trim());
@@ -115,6 +130,12 @@ export function ListsPage() {
               </Link>
               <div className="flex gap-1">
                 <Button
+                  icon="pi pi-share-alt"
+                  text
+                  aria-label="Share list"
+                  onClick={() => setSharingUuid(list.uuid)}
+                />
+                <Button
                   icon="pi pi-pencil"
                   text
                   aria-label="Rename list"
@@ -135,6 +156,22 @@ export function ListsPage() {
           </Card>
         ))}
       </div>
+
+      {sharing && (
+        <ShareDialog
+          visible={!!sharing}
+          onHide={() => setSharingUuid(null)}
+          resourceType="list"
+          resourceUuid={sharing.uuid}
+          resourceLabel={sharing.display_name}
+          inherit={{
+            value: sharing.permissions_inherit,
+            onChange: (value) =>
+              setInherit.mutate({ uuid: sharing.uuid, value }),
+            busy: setInherit.isPending,
+          }}
+        />
+      )}
 
       <Dialog
         header="Rename list"

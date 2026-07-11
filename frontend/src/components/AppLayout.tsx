@@ -14,6 +14,9 @@ export function AppLayout() {
           Database UI
         </Link>
         <div className="flex items-center gap-2">
+          <Link to="/people" className="no-underline">
+            <Button label="People" icon="pi pi-users" text />
+          </Link>
           <ThemeSwitcher />
           <Button label="Log out" icon="pi pi-sign-out" text onClick={logout} />
         </div>

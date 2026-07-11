@@ -27,6 +27,7 @@ import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { LookupCell } from "../lookups/LookupControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
+import { ShareDialog } from "../permissions/ShareDialog";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
@@ -55,6 +56,8 @@ export function ListDetailPage() {
   const [showAddColumn, setShowAddColumn] = useState(false);
   const [showForms, setShowForms] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showShareList, setShowShareList] = useState(false);
+  const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
     item: ListItem | null;
@@ -142,6 +145,30 @@ export function ListDetailPage() {
         err instanceof ApiError ? err.message : undefined,
       ),
   });
+  const setListInherit = useMutation({
+    mutationFn: (value: boolean) =>
+      api.patch(`/lists/${listUuid}`, { permissions_inherit: value }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["list", listUuid] }),
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+  const setItemInherit = useMutation({
+    mutationFn: (vars: { uuid: string; value: boolean }) =>
+      api.patch(`/lists/${listUuid}/items/${vars.uuid}`, {
+        permissions_inherit: vars.value,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] }),
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
   const bulkDelete = useMutation({
     mutationFn: () =>
       api.post<{ deleted: number }>(`/lists/${listUuid}/items/bulk-delete`, {
@@ -178,6 +205,8 @@ export function ListDetailPage() {
   })();
   const visibleCols = orderedCols.filter((c) => !hiddenColumns.includes(c.uuid));
   const formList = forms.data ?? [];
+  const sharingItem =
+    (items.data ?? []).find((i) => i.uuid === sharingItemUuid) ?? null;
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
     formList.find((f) => f.type === (recordDialog.item ? "update" : "create")) ??
@@ -279,6 +308,13 @@ export function ListDetailPage() {
             outlined
             onClick={() => setShowTransfer(true)}
             disabled={cols.length === 0}
+          />
+          <Button
+            label="Share"
+            icon="pi pi-share-alt"
+            outlined
+            onClick={() => setShowShareList(true)}
+            disabled={!list.data}
           />
           <Button
             label="Add record"
@@ -446,7 +482,7 @@ export function ListDetailPage() {
         ))}
         <DataColumn
           header=""
-          style={{ width: "6rem" }}
+          style={{ width: "9rem" }}
           body={(row: ListItem) => (
             <div className="flex gap-1">
               <Button
@@ -457,6 +493,16 @@ export function ListDetailPage() {
                 onClick={(e) => {
                   e.stopPropagation(); // don't also toggle row selection
                   setRecordDialog({ open: true, item: row });
+                }}
+              />
+              <Button
+                icon="pi pi-share-alt"
+                text
+                size="small"
+                aria-label="Share record"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setSharingItemUuid(row.uuid);
                 }}
               />
               <Button
@@ -511,6 +557,35 @@ export function ListDetailPage() {
           baseConfig={currentConfig}
           visible={showFilter}
           onHide={() => setShowFilter(false)}
+        />
+      )}
+      {showShareList && list.data && (
+        <ShareDialog
+          visible={showShareList}
+          onHide={() => setShowShareList(false)}
+          resourceType="list"
+          resourceUuid={list.data.uuid}
+          resourceLabel={list.data.display_name}
+          inherit={{
+            value: list.data.permissions_inherit,
+            onChange: (value) => setListInherit.mutate(value),
+            busy: setListInherit.isPending,
+          }}
+        />
+      )}
+      {sharingItem && (
+        <ShareDialog
+          visible={!!sharingItem}
+          onHide={() => setSharingItemUuid(null)}
+          resourceType="item"
+          resourceUuid={sharingItem.uuid}
+          resourceLabel="Record"
+          inherit={{
+            value: sharingItem.permissions_inherit,
+            onChange: (value) =>
+              setItemInherit.mutate({ uuid: sharingItem.uuid, value }),
+            busy: setItemInherit.isPending,
+          }}
         />
       )}
     </div>

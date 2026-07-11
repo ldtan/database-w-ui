@@ -21,6 +21,7 @@ export interface ListRead {
   settings: Record<string, unknown>;
   workspace: ResourceLink;
   primary_column?: ResourceLink | null;
+  permissions_inherit: boolean;
 }
 
 export type ColumnType =
@@ -61,6 +62,7 @@ export interface Column {
 export interface ListItem {
   uuid: string;
   data: Record<string, unknown>;
+  permissions_inherit: boolean;
 }
 
 export interface ViewSort {
@@ -94,6 +96,7 @@ export interface View {
   display_name: string;
   position: number;
   config: ViewConfig;
+  permissions_inherit: boolean;
 }
 
 export type FormType = "create" | "update" | "custom";
@@ -117,4 +120,44 @@ export interface Form {
   type: FormType;
   is_default: boolean;
   config: FormConfig;
+  permissions_inherit: boolean;
+}
+
+// ---- Permissions ----
+
+export type ResourceType = "workspace" | "list" | "view" | "form" | "item";
+
+export type PermissionAction =
+  | "view"
+  | "create"
+  | "edit"
+  | "delete"
+  | "configure"
+  | "share"
+  | "manage";
+
+export interface Grant {
+  uuid: string;
+  resource_type: ResourceType;
+  resource_uuid: string;
+  user_uuid?: string | null;
+  user_username?: string | null;
+  group_uuid?: string | null;
+  group_name?: string | null;
+  actions: PermissionAction[];
+}
+
+export interface ApiUser {
+  uuid: string;
+  username: string;
+  email: string;
+  is_active: boolean;
+  groups: ResourceLink[];
+}
+
+export interface ApiUserGroup {
+  uuid: string;
+  name: string;
+  description?: string | null;
+  users: ResourceLink[];
 }

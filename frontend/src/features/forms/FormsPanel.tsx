@@ -10,6 +10,7 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
+import { ShareDialog } from "../permissions/ShareDialog";
 
 interface Row {
   column_uuid: string;
@@ -65,9 +66,24 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
   const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  const [sharing, setSharing] = useState(false);
 
   const activeForm =
     forms.find((f) => f.uuid === selectedUuid) ?? forms[0] ?? null;
+
+  const setInherit = useMutation({
+    mutationFn: (value: boolean) =>
+      api.patch(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+        permissions_inherit: value,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] }),
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
 
   useEffect(() => {
     if (!visible) return;
@@ -118,15 +134,24 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
         {save.error instanceof ApiError && (
           <Message severity="error" text={save.error.message} />
         )}
-        <Dropdown
-          value={activeForm?.uuid ?? null}
-          options={forms.map((f) => ({
-            label: `${f.display_name}${f.is_default ? " (default)" : ""}`,
-            value: f.uuid,
-          }))}
-          onChange={(e) => setSelectedUuid(e.value)}
-          className="w-64"
-        />
+        <div className="flex items-center gap-2">
+          <Dropdown
+            value={activeForm?.uuid ?? null}
+            options={forms.map((f) => ({
+              label: `${f.display_name}${f.is_default ? " (default)" : ""}`,
+              value: f.uuid,
+            }))}
+            onChange={(e) => setSelectedUuid(e.value)}
+            className="w-64"
+          />
+          <Button
+            label="Share"
+            icon="pi pi-share-alt"
+            text
+            onClick={() => setSharing(true)}
+            disabled={!activeForm}
+          />
+        </div>
 
         <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
@@ -191,6 +216,21 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
           />
         </div>
       </div>
+
+      {sharing && activeForm && (
+        <ShareDialog
+          visible={sharing}
+          onHide={() => setSharing(false)}
+          resourceType="form"
+          resourceUuid={activeForm.uuid}
+          resourceLabel={activeForm.display_name}
+          inherit={{
+            value: activeForm.permissions_inherit,
+            onChange: (value) => setInherit.mutate(value),
+            busy: setInherit.isPending,
+          }}
+        />
+      )}
     </Dialog>
   );
 }

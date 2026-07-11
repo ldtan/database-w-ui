@@ -11,6 +11,7 @@ import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
+import { ShareDialog } from "../permissions/ShareDialog";
 
 interface Props {
   listUuid: string;
@@ -66,6 +67,21 @@ export function ViewBar({
     });
   }
 
+  const [sharing, setSharing] = useState(false);
+  const setInherit = useMutation({
+    mutationFn: (value: boolean) =>
+      api.patch(`/lists/${listUuid}/views/${activeUuid}`, {
+        permissions_inherit: value,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["views", listUuid] }),
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState("");
   const create = useMutation({
@@ -103,11 +119,33 @@ export function ViewBar({
         tooltip="Save the current sort and page size to this view"
       />
       <Button
+        label="Share"
+        icon="pi pi-share-alt"
+        text
+        onClick={() => setSharing(true)}
+        disabled={!activeView}
+      />
+      <Button
         label="New view"
         icon="pi pi-plus"
         text
         onClick={() => setCreating(true)}
       />
+
+      {sharing && activeView && (
+        <ShareDialog
+          visible={sharing}
+          onHide={() => setSharing(false)}
+          resourceType="view"
+          resourceUuid={activeView.uuid}
+          resourceLabel={activeView.display_name}
+          inherit={{
+            value: activeView.permissions_inherit,
+            onChange: (value) => setInherit.mutate(value),
+            busy: setInherit.isPending,
+          }}
+        />
+      )}
 
       <Dialog
         header="New view"
