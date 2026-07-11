@@ -59,3 +59,13 @@ TypeScript types in sync with the Python models instead of the hand-written
   access token to memory.)
 - Tailwind is imported without its preflight reset so it doesn't fight PrimeReact's
   component styles; use it for layout utilities only.
+- **Recommended (not yet adopted): generate API types instead of hand-writing them.**
+  `src/lib/types.ts` is currently a hand-maintained mirror of the backend Pydantic
+  schemas, so every backend field change must be copied over by hand — a silent
+  drift risk. `npm run gen:api` already exists and generates exact types from the
+  backend's OpenAPI schema into `src/lib/api-schema.ts`. When the API surface grows
+  or more people touch it, switch `types.ts` to re-export the generated types (level 1),
+  and optionally adopt a typed client (e.g. `openapi-fetch`) so endpoints and their
+  request/response shapes are checked at compile time (level 2). Trade-off: the
+  generated file is more verbose, and `gen:api` must be re-run against a running
+  backend after schema changes.
