@@ -36,6 +36,7 @@ export function AddColumnDialog({
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
+  const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   const [multiple, setMultiple] = useState(false);
 
   // Lists in this workspace are the candidate lookup targets (self included).
@@ -44,6 +45,12 @@ export function AddColumnDialog({
     queryFn: () =>
       api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
     enabled: type === "lookup" && !!workspaceUuid,
+  });
+  // Columns of the chosen target list, offered as the label to show per row.
+  const targetColumns = useQuery({
+    queryKey: ["columns", targetListUuid],
+    queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
+    enabled: type === "lookup" && !!targetListUuid,
   });
 
   function reset() {
@@ -56,6 +63,7 @@ export function AddColumnDialog({
     setIntegerOnly(false);
     setChoices("");
     setTargetListUuid(null);
+    setDisplayColumnUuid(null);
     setMultiple(false);
   }
 
@@ -74,6 +82,7 @@ export function AddColumnDialog({
       if (type === "choice") config.choices = choices;
       if (type === "lookup") {
         config.target_list_uuid = targetListUuid;
+        if (displayColumnUuid) config.display_column_uuid = displayColumnUuid;
         if (multiple) config.multiple = true;
       }
       return api.post<Column>(`/lists/${listUuid}/columns/`, {
@@ -189,11 +198,33 @@ export function AddColumnDialog({
                   label: l.display_name,
                   value: l.uuid,
                 }))}
-                onChange={(e) => setTargetListUuid(e.value)}
+                onChange={(e) => {
+                  setTargetListUuid(e.value);
+                  setDisplayColumnUuid(null); // columns differ per target list
+                }}
                 placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
                 filter
               />
             </div>
+            {targetListUuid && (
+              <div className="flex flex-col gap-2">
+                <label htmlFor="col-display">Column to show</label>
+                <Dropdown
+                  inputId="col-display"
+                  value={displayColumnUuid}
+                  options={(targetColumns.data ?? []).map((c) => ({
+                    label: c.display_name,
+                    value: c.uuid,
+                  }))}
+                  onChange={(e) => setDisplayColumnUuid(e.value)}
+                  placeholder={
+                    targetColumns.isLoading ? "Loading…" : "Primary column"
+                  }
+                  showClear
+                  filter
+                />
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <Checkbox
                 inputId="col-multiple"

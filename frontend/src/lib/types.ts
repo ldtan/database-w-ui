@@ -44,6 +44,7 @@ export interface ColumnConfig {
   required?: boolean;
   options?: ChoiceOption[];
   target_list_uuid?: string;
+  display_column_uuid?: string;
   multiple?: boolean;
   [key: string]: unknown;
 }

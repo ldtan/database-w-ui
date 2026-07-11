@@ -43,6 +43,9 @@ class ColumnConfig(BaseModel):
     multiple: Optional[bool] = None
     # lookup
     target_list_uuid: Optional[UUID] = None
+    # which column of the target list to show as each row's label; defaults to
+    # the target list's primary column when unset
+    display_column_uuid: Optional[UUID] = None
 
     model_config = ConfigDict(extra="forbid")
 

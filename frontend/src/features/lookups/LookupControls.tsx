@@ -13,9 +13,14 @@ interface TargetRows {
 }
 
 // Fetch a target list's schema + rows so lookup values can be shown and picked
-// by their primary-column label instead of a raw row uuid. Queries share the
-// same cache keys the target list's own detail page uses, so they dedupe.
-function useTargetRows(targetListUuid?: string | null): TargetRows {
+// by a chosen label column instead of a raw row uuid. The label column is the
+// lookup's configured display column, falling back to the target's primary
+// column, then its first column. Queries share the same cache keys the target
+// list's own detail page uses, so they dedupe.
+function useTargetRows(
+  targetListUuid?: string | null,
+  displayColumnUuid?: string | null,
+): TargetRows {
   const enabled = !!targetListUuid;
   const list = useQuery({
     queryKey: ["list", targetListUuid],
@@ -34,8 +39,12 @@ function useTargetRows(targetListUuid?: string | null): TargetRows {
   });
 
   const cols = columns.data ?? [];
-  const primary =
-    cols.find((c) => c.uuid === list.data?.primary_column?.uuid) ?? cols[0] ?? null;
+  const label =
+    (displayColumnUuid && cols.find((c) => c.uuid === displayColumnUuid)) ||
+    cols.find((c) => c.uuid === list.data?.primary_column?.uuid) ||
+    cols[0] ||
+    null;
+  const primary = label;
 
   function rowLabel(item: ListItem): string {
     if (!primary) return `Row ${item.uuid.slice(0, 8)}`;
@@ -57,7 +66,8 @@ function useTargetRows(targetListUuid?: string | null): TargetRows {
 
 export function LookupCell({ column, value }: { column: Column; value: unknown }) {
   const target = column.config.target_list_uuid as string | undefined;
-  const { labelFor } = useTargetRows(target);
+  const display = column.config.display_column_uuid as string | undefined;
+  const { labelFor } = useTargetRows(target, display);
   const uuids = Array.isArray(value) ? (value as string[]) : value ? [String(value)] : [];
   if (uuids.length === 0) return <span className="text-gray-300">—</span>;
   return <span>{uuids.map(labelFor).join(", ")}</span>;
@@ -75,8 +85,9 @@ export function LookupField({
   onChange: (v: unknown) => void;
 }) {
   const target = column.config.target_list_uuid as string | undefined;
+  const display = column.config.display_column_uuid as string | undefined;
   const multiple = !!column.config.multiple;
-  const { options, isLoading } = useTargetRows(target);
+  const { options, isLoading } = useTargetRows(target, display);
   const id = `field-${column.uuid}`;
 
   if (multiple) {

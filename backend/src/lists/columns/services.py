@@ -185,10 +185,26 @@ class ColumnService:
                     Workspace.deleted_at.is_(None),
                 )
             )
-            if result.scalars().first() is None:
+            target_list_id = result.scalars().first()
+            if target_list_id is None:
                 raise UnknownReferenceError(
                     "target_list_uuid does not reference a list you own"
                 )
+
+            display_column_uuid = data.get("display_column_uuid")
+            if display_column_uuid is not None:
+                exists = await db.execute(
+                    select(Column.id).where(
+                        Column.list_id == target_list_id,
+                        Column.uuid == coerce_uuid(display_column_uuid),
+                        Column.deleted_at.is_(None),
+                    )
+                )
+                if exists.scalars().first() is None:
+                    raise UnknownReferenceError(
+                        "display_column_uuid does not reference a column of the "
+                        "target list"
+                    )
 
         # Numeric/temporal/text settings must be well-formed (min <= max, ...).
         validate_config_constraints(type_, data)
