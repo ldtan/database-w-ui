@@ -76,13 +76,12 @@ export function ListDetailPage() {
   });
   const items = useQuery({
     queryKey: ["items", listUuid, activeViewUuid],
-    queryFn: () => {
-      // Fetch up to the backend max (1000); without an explicit limit the grid
-      // would silently receive only the default page of 100 records.
-      const params = new URLSearchParams({ limit: "1000" });
-      if (activeViewUuid) params.set("view_uuid", activeViewUuid);
-      return api.get<ListItem[]>(`/lists/${listUuid}/items/?${params}`);
-    },
+    queryFn: () =>
+      api.get<ListItem[]>(
+        `/lists/${listUuid}/items/${
+          activeViewUuid ? `?view_uuid=${activeViewUuid}` : ""
+        }`,
+      ),
   });
   const views = useQuery({
     queryKey: ["views", listUuid],
