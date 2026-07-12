@@ -202,8 +202,12 @@ Notes:
   ids; on update, ids for **unchanged labels are preserved** so records stay valid.
   Explicit `options` (with colors) override the shorthand. A choice `default` may be given
   as an option label and is stored as the id.
-- `lookup` — stores target-row `uuid`s (D4); the label to display comes from the
-  target list's `primary_column_id`. A lookup column cannot have a `default`.
+- `lookup` — stores target-row `uuid`s (D4); the label to display comes from the lookup's
+  `display_column_uuid`, falling back to the target list's `primary_column_id`
+  (`display_column_key`). A lookup column cannot have a `default`. Like `user`/`group`, a cell
+  accepts a uuid **or** a label and stores the uuid — which is what lets an exported file,
+  where the label is what's written, be imported straight back. A label matching more than one
+  row is rejected (row labels are not unique), so ambiguity is an error, never a guess.
 - `link` — **the scheme is a security boundary, not a preference.** The value is rendered as
   an anchor, so a `javascript:` or `data:` URL would be stored XSS. A value must parse as an
   absolute URL whose scheme is in the column's `allowed_schemes`, and a column may only
@@ -238,7 +242,8 @@ Notes:
     from a multi-valued one) — the same treatment `lookup` gets when a target row goes away.
   - **A cell accepts a uuid *or* a name, and always stores the uuid.** The UI sends uuids;
     accepting a name is what lets an exported CSV (which writes names, because a file of
-    uuids is useless to a human) be imported straight back.
+    uuids is useless to a human) be imported straight back. `lookup` does the same with row
+    labels.
 - The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
   **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind

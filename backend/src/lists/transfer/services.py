@@ -16,13 +16,14 @@ from sqlalchemy.orm import selectinload
 
 from src.auth.users.models import User, UserGroup
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
+from src.core.utils import coerce_uuid
 from src.infrastructure import database as db_module
 
 from ..columns.enums import PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
-from ..items.services import ListItemService
+from ..items.services import ListItemService, display_column_key
 from ..models import List
 
 # Commit every N successfully-prepared rows to bound the transaction size.
@@ -63,11 +64,6 @@ async def _principal_names(
 ) -> dict[str, str]:
     """uuid -> username / group name, for the principal columns being exported.
 
-    A file full of uuids is useless to a human, so `user`/`group` cells export the
-    name. Import resolves a name back to a uuid, so the file round-trips. Loaded
-    once for the whole export rather than per row; only the tables actually
-    referenced are read.
-
     Names, not the connected person's real name: person records are private, and
     an export is readable by anyone who can read the list.
     """
@@ -83,12 +79,63 @@ async def _principal_names(
     return names
 
 
-def _export_cell(column: Column, value: object, names: dict[str, str]) -> object:
-    if column.type not in PRINCIPAL_TYPES or value is None:
+async def _lookup_row_labels(db: AsyncSession, column: Column) -> dict[str, str]:
+    """row uuid -> label, for one lookup column's target list.
+
+    The label comes from the same display column the item service matches on when
+    importing (`display_column_key`), so what we write is what we can read back. A
+    row whose label is empty keeps its uuid: it is the only value that identifies
+    it.
+    """
+    config = column.config or {}
+    target_list_id = await db.scalar(
+        select(List.id).where(
+            List.uuid == coerce_uuid(config.get("target_list_uuid")),
+            List.deleted_at.is_(None),
+        )
+    )
+    if target_list_id is None:
+        return {}
+    key = await display_column_key(db, target_list_id, config)
+    if key is None:
+        return {}
+
+    rows = await db.execute(
+        select(ListItem.uuid, ListItem.data[key].astext).where(
+            ListItem.list_id == target_list_id, ListItem.deleted_at.is_(None)
+        )
+    )
+    return {str(uuid): label for uuid, label in rows if label}
+
+
+async def _label_maps(
+    db: AsyncSession, columns: list[Column]
+) -> dict[str, dict[str, str]]:
+    """column uuid -> {stored uuid: label}, for every reference column exported.
+
+    A file full of uuids is useless to a human, so reference cells (`lookup`,
+    `user`, `group`) export the label. Import resolves the label back to the uuid,
+    so the file round-trips. Built once per export rather than per row.
+    """
+    principals = await _principal_names(db, columns)
+    maps: dict[str, dict[str, str]] = {}
+    for column in columns:
+        if column.type in PRINCIPAL_TYPES:
+            maps[str(column.uuid)] = principals
+        elif column.type == ColumnType.lookup:
+            maps[str(column.uuid)] = await _lookup_row_labels(db, column)
+    return maps
+
+
+def _export_cell(
+    column: Column, value: object, maps: dict[str, dict[str, str]]
+) -> object:
+    labels = maps.get(str(column.uuid))
+    if not labels or value is None:
         return value
     if isinstance(value, list):
-        return [names.get(str(v), str(v)) for v in value]
-    return names.get(str(value), value)
+        return [labels.get(str(v), str(v)) for v in value]
+    return labels.get(str(value), value)
 
 
 async def export_rows(
@@ -136,7 +183,7 @@ async def export_rows(
 
         # Resolved before the cursor opens: issuing another query on this session
         # mid-stream would disturb the in-flight result.
-        names = await _principal_names(db, columns)
+        maps = await _label_maps(db, columns)
 
         # Select only the JSONB payload, not whole ORM entities: Core rows do not
         # enter the session identity map, so memory stays flat over a large
@@ -150,7 +197,7 @@ async def export_rows(
             yield "["
             async for data in result:
                 obj = {
-                    c.name: _export_cell(c, (data or {}).get(str(c.uuid)), names)
+                    c.name: _export_cell(c, (data or {}).get(str(c.uuid)), maps)
                     for c in columns
                 }
                 yield ("" if first else ",") + json.dumps(obj, default=str)
@@ -172,7 +219,7 @@ async def export_rows(
                 row = data or {}
                 writer.writerow(
                     [
-                        _csv_cell(_export_cell(c, row.get(str(c.uuid)), names))
+                        _csv_cell(_export_cell(c, row.get(str(c.uuid)), maps))
                         for c in columns
                     ]
                 )

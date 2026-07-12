@@ -24,6 +24,33 @@ from .schemas import ListItemCreate, ListItemUpdate
 _UNIQUE_LOCK_NS = 0x4C495354  # "LIST"
 
 
+async def display_column_key(
+    db: AsyncSession, target_list_id: int, config: dict
+) -> Optional[str]:
+    """Which column of a lookup's target list supplies a row's label.
+
+    The lookup's configured `display_column_uuid`, else the target list's primary
+    column. Shared by the item service (resolving a label on write) and the export
+    formatter (writing one out) so the two cannot disagree about what a label is —
+    if they did, a file this app exported would not import back into it.
+    """
+    explicit = config.get("display_column_uuid")
+    if explicit:
+        return str(explicit)
+
+    primary_id = await db.scalar(
+        select(List.primary_column_id).where(List.id == target_list_id)
+    )
+    if primary_id is None:
+        return None
+    key = await db.scalar(
+        select(Column.uuid).where(
+            Column.id == primary_id, Column.deleted_at.is_(None)
+        )
+    )
+    return str(key) if key is not None else None
+
+
 class ListItemService:
     @staticmethod
     def _select(list_id: int):
@@ -327,7 +354,7 @@ class ListItemService:
         itself; reference types normalize to a uuid string)."""
         # References need the database; every other type is a pure scalar check.
         if column.type == ColumnType.lookup:
-            await cls._validate_lookup(db, lst, column, value)
+            return await cls._validate_lookup(db, lst, column, value)
         elif column.type in PRINCIPAL_TYPES:
             return await cls._validate_principal(db, column, value)
         else:
@@ -393,21 +420,21 @@ class ListItemService:
     @classmethod
     async def _validate_lookup(
         cls, db: AsyncSession, lst: List, column: Column, value
-    ) -> None:
+    ):
+        """Resolve a lookup cell to target-row uuid(s).
+
+        Accepts a row uuid (what the UI sends) or the row's **label** — the value
+        of the lookup's display column — which is what our own export writes, so a
+        file round-trips. A label matching more than one row is an error rather
+        than a guess: unlike a username, a row label is not unique.
+        """
         config = column.config or {}
         multiple = bool(config.get("multiple"))
         if multiple and not isinstance(value, list):
-            cls._type_error(column, "a list of row uuids")
+            cls._type_error(column, "a list of rows")
         raw_values = value if multiple else [value]
-
-        parsed: list[UUID] = []
-        for raw in raw_values:
-            parsed_uuid = coerce_uuid(raw)
-            if parsed_uuid is None:
-                cls._type_error(column, "a row uuid")
-            parsed.append(parsed_uuid)
-        if not parsed:
-            return
+        if not raw_values:
+            return [] if multiple else None
 
         target_list_uuid = config.get("target_list_uuid")
         target = await db.execute(
@@ -426,20 +453,69 @@ class ListItemService:
                 f"Lookup column '{column.name}' points at a missing target list"
             )
 
-        found = await db.execute(
-            select(ListItem.uuid).where(
-                ListItem.list_id == target_list_id,
-                ListItem.uuid.in_(parsed),
-                ListItem.deleted_at.is_(None),
+        resolved: list[str] = []
+        for raw in raw_values:
+            if not isinstance(raw, str):
+                cls._type_error(column, "a row uuid or label")
+            parsed = coerce_uuid(raw)
+            if parsed is not None:
+                found = (
+                    await db.execute(
+                        select(ListItem.uuid).where(
+                            ListItem.list_id == target_list_id,
+                            ListItem.uuid == parsed,
+                            ListItem.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().first()
+                if found is None:
+                    raise UnknownReferenceError(
+                        f"Lookup column '{column.name}' references an unknown row: {raw}"
+                    )
+                resolved.append(str(found))
+                continue
+
+            resolved.append(
+                str(await cls._row_by_label(db, target_list_id, column, config, raw))
             )
-        )
-        found_uuids = set(found.scalars().all())
-        missing = [str(u) for u in parsed if u not in found_uuids]
-        if missing:
+
+        return resolved if multiple else resolved[0]
+
+    @classmethod
+    async def _row_by_label(
+        cls, db: AsyncSession, target_list_id: int, column: Column, config: dict, label: str
+    ) -> UUID:
+        key = await display_column_key(db, target_list_id, config)
+        if key is None:
             raise UnknownReferenceError(
-                f"Lookup column '{column.name}' references unknown row(s): "
-                f"{', '.join(missing)}"
+                f"Lookup column '{column.name}' can only be set by row uuid: its "
+                f"target list has no display column to match '{label}' against"
             )
+
+        matches = (
+            await db.execute(
+                select(ListItem.uuid)
+                .where(
+                    ListItem.list_id == target_list_id,
+                    ListItem.deleted_at.is_(None),
+                    ListItem.data[key].astext == label,
+                )
+                .limit(2)
+            )
+        ).scalars().all()
+
+        if not matches:
+            raise UnknownReferenceError(
+                f"Lookup column '{column.name}' references an unknown row: {label}"
+            )
+        if len(matches) > 1:
+            # Row labels are not unique (usernames are), so there is no defensible
+            # way to pick one — say so instead of silently linking the wrong row.
+            raise ValidationError(
+                f"Lookup column '{column.name}': '{label}' matches more than one row "
+                f"in the target list; use the row uuid instead"
+            )
+        return matches[0]
 
     @staticmethod
     def _type_error(column: Column, expected: str) -> None:

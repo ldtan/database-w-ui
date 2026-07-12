@@ -96,6 +96,93 @@ async def test_import_extension_wins_over_format_field(client, list_uuid, add_co
     assert resp.json()["created"] == 1
 
 
+async def _seed_lookup(client, add_column, workspace_uuid, list_uuid, row_names):
+    """A target list labelled by its primary column, and a lookup column at it.
+
+    Returns (lookup column uuid, {row label: row uuid})."""
+    target = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "schools",
+                "display_name": "Schools",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    label_col = await add_column(
+        target, name="name", display_name="Name", type="text"
+    )
+    resp = await client.patch(
+        f"/api/lists/{target}", json={"primary_column_uuid": label_col}
+    )
+    assert resp.status_code == 200, resp.text
+
+    rows = {}
+    for row_name in row_names:
+        created = await client.post(
+            f"/api/lists/{target}/items/", json={"data": {label_col: row_name}}
+        )
+        assert created.status_code == 201, created.text
+        rows[row_name] = created.json()["uuid"]
+
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    return lookup, rows
+
+
+async def test_export_writes_lookup_labels_and_import_reads_them_back(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """A row uuid in a CSV means nothing to a human, so a lookup exports the row's
+    label — the value of the column it is displayed by — and import resolves it."""
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    lookup, rows = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, ["Springfield High"]
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {name: "Ann", lookup: rows["Springfield High"]}},
+    )
+
+    export = await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
+    assert export.status_code == 200, export.text
+    csv = export.text
+    assert "Springfield High" in csv
+    assert rows["Springfield High"] not in csv  # the uuid must not leak into the file
+
+    reimport = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", csv, "text/csv")}
+    )
+    assert reimport.status_code == 200, reimport.text
+    assert reimport.json()["created"] == 1
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    # Both the original row and the re-imported one point at the same target row.
+    assert [i["data"][lookup] for i in items] == [rows["Springfield High"]] * 2
+
+
+async def test_import_rejects_an_ambiguous_lookup_label(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Row labels are not unique, so a label matching two rows has no right answer:
+    it must be an error, not a coin flip."""
+    lookup, _ = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, ["Twin", "Twin"]
+    )
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {lookup: "Twin"}}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "more than one row" in resp.json()["detail"]
+
+
 async def test_import_json_typed_values(client, list_uuid, add_column):
     name, age = await _seed(client, list_uuid, add_column)
     resp = await client.post(

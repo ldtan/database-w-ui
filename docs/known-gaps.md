@@ -183,11 +183,16 @@ private — owner or superuser only. So `user` columns label by **username**, in
 reads nicer would hand every viewer of a list the personal details of everyone referenced
 from it.
 
-**`user`/`group` cells export as names, `lookup` cells export as raw row uuids.** The
-principal columns resolve on export and accept a name back on import, so a CSV round-trips
-and is legible. `lookup` does neither — it writes the target row's uuid, which is at least
-self-consistent (import expects the same uuid) but unreadable. Worth aligning; it would mean
-resolving each lookup's display column during export and matching on that value at import.
+**Every reference column exports its label, and the two sides must agree on what the label
+is.** `lookup`, `user` and `group` all store a uuid and export the human-readable label
+(row label / username / group name); import resolves it back. The load-bearing detail is
+that export and import both call `display_column_key` to decide *which* column of the target
+list supplies a row's label — if they ever picked differently, a file this app exported would
+not import back into it. A label matching two rows is rejected rather than guessed (row
+labels, unlike usernames, are not unique), and a row whose label is empty exports as its uuid,
+because that is the only thing that identifies it. One consequence to know about: a
+multi-valued cell is serialized to CSV as `a;b`, so a label containing `;` will not survive a
+CSV round-trip (it does in JSON).
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
