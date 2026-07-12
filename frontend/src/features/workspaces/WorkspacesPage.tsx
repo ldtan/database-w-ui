@@ -9,7 +9,7 @@ import { Dialog } from "primereact/dialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import type { Workspace } from "../../lib/types";
+import type { ListRead, Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
@@ -30,6 +30,14 @@ export function WorkspacesPage() {
     "workspace",
     (workspaces.data ?? []).map((ws) => ws.uuid),
   );
+
+  // A list can be shared without its workspace, which then stays invisible — so
+  // these lists have no workspace to browse into and would otherwise be
+  // unreachable.
+  const shared = useQuery({
+    queryKey: ["lists", "shared"],
+    queryFn: () => api.get<ListRead[]>("/lists/?shared=true"),
+  });
 
   const [displayName, setDisplayName] = useState("");
   const create = useMutation({
@@ -149,6 +157,20 @@ export function WorkspacesPage() {
           </Card>
         ))}
       </div>
+
+      {shared.data && shared.data.length > 0 && (
+        <section className="flex flex-col gap-2 mt-2">
+          <h2 className="text-lg font-medium">Shared with me</h2>
+          {shared.data.map((list) => (
+            <Card key={list.uuid}>
+              <Link to={`/lists/${list.uuid}`} className="no-underline">
+                <div className="font-medium">{list.display_name}</div>
+                <div className="text-sm text-gray-500">{list.name}</div>
+              </Link>
+            </Card>
+          ))}
+        </section>
+      )}
 
       {sharing && (
         <ShareDialog

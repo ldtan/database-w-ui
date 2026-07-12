@@ -377,6 +377,42 @@ async def test_http_non_sharer_cannot_grant(make_client, session_factory):
         assert resp.status_code == 403
 
 
+async def test_http_shared_with_me(make_client, session_factory):
+    """A directly-granted list sits in a workspace the grantee cannot open, so it
+    is only reachable through the shared listing."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        workspace_uuid = str(ws.uuid)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        list_uuid = str(lst.uuid)
+
+    async with make_client(other) as client:
+        # Only the list was shared, so the workspace holding it stays invisible;
+        # the grantee still sees their own auto-provisioned personal workspace.
+        resp = await client.get("/api/workspaces/")
+        assert workspace_uuid not in [w["uuid"] for w in resp.json()]
+
+        resp = await client.get("/api/lists/?shared=true")
+        assert [item["uuid"] for item in resp.json()] == [list_uuid]
+
+    # The owner owns everything they can see, so nothing is "shared with" them.
+    async with make_client(owner) as client:
+        resp = await client.get("/api/lists/?shared=true")
+        assert resp.json() == []
+        # ...but the list is still there unfiltered, under its workspace.
+        resp = await client.get(f"/api/lists/?workspace_uuid={workspace_uuid}")
+        assert [item["uuid"] for item in resp.json()] == [list_uuid]
+
+
 async def test_http_effective_batch(make_client, session_factory):
     """The batch endpoint backs the UI's per-row control gating: one call must
     return the caller's actions per resource, mixing inherited and direct grants."""

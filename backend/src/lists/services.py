@@ -73,11 +73,18 @@ class ListService:
         db: AsyncSession,
         user,
         workspace_uuid: Optional[Union[str, UUID]] = None,
+        shared_only: bool = False,
         skip: int = 0,
         limit: int = 100,
     ) -> Sequence[List]:
         """Lists the user can view (owned, directly granted, or inherited from a
-        workspace grant), optionally scoped to one workspace."""
+        workspace grant), optionally scoped to one workspace.
+
+        ``shared_only`` keeps just the lists the user does not own. A list can be
+        granted without its workspace being visible, so those lists sit inside a
+        workspace the user cannot open — this is what backs the "Shared with me"
+        section, the only way to reach them.
+        """
         from src.permissions.services import PermissionService
 
         condition = await PermissionService.list_query_filter(db, user)
@@ -94,6 +101,8 @@ class ListService:
         if workspace_uuid is not None:
             parsed = coerce_uuid(workspace_uuid)
             stmt = stmt.where(Workspace.uuid == parsed)
+        if shared_only:
+            stmt = stmt.where(Workspace.owner_id != user.id)
         result = await db.execute(stmt.order_by(List.id).offset(skip).limit(limit))
         return result.scalars().all()
 
