@@ -11,6 +11,7 @@ import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { linkLabel, safeHref } from "../../lib/links";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
@@ -52,6 +53,23 @@ function renderCell(column: Column, row: ListItem) {
   if (column.type === "choice") {
     const option = column.config.options?.find((o) => o.id === value);
     return option?.label ?? String(value);
+  }
+  if (column.type === "link") {
+    const href = safeHref(column, value);
+    // A value the scheme check rejects is shown as plain text, never an anchor.
+    if (!href) return String(value);
+    return (
+      <a
+        href={href}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="hover:underline"
+        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+      >
+        {linkLabel(column, href)}
+      </a>
+    );
   }
   // Otherwise a datetime renders as its raw stored string, seconds and all.
   if (isTemporal(column.type)) {

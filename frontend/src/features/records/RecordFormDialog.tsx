@@ -159,6 +159,17 @@ function RecordField({
           disabled={disabled}
         />
       );
+    case "link":
+      return (
+        <InputText
+          id={id}
+          type="url"
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://example.com"
+          disabled={disabled}
+        />
+      );
     case "lookup":
       return (
         <LookupField

@@ -10,5 +10,6 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Date", value: "date" },
   { label: "Time", value: "time" },
   { label: "Date & time", value: "datetime" },
+  { label: "Link (URL)", value: "link" },
   { label: "Lookup (link to another list)", value: "lookup" },
 ];

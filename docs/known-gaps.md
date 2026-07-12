@@ -176,5 +176,12 @@ correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. An
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
 
+**A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
+scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
+(`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows
+predating a config change, or an odd import, mean the frontend re-checks: build every anchor
+through `safeHref` in `lib/links.ts`, which falls back to rendering plain text. Any *new*
+surface that renders link cells needs the same call; a raw `href={value}` is stored XSS.
+
 **`POST /permissions/effective` is capped at 500 resources per call** (`max_length` on
 `EffectiveActionsQuery.resources`). A page showing more rows than that needs to chunk.

@@ -31,6 +31,7 @@ export type ColumnType =
   | "checkbox"
   | "choice"
   | "lookup"
+  | "link"
   | "date"
   | "time"
   | "datetime";
@@ -47,6 +48,8 @@ export interface ColumnConfig {
   target_list_uuid?: string;
   display_column_uuid?: string;
   multiple?: boolean;
+  allowed_schemes?: string[];
+  label?: string;
   [key: string]: unknown;
 }
 

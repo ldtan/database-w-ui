@@ -37,6 +37,7 @@ export function AddColumnDialog({
   const [max, setMax] = useState<number | null>(null);
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
+  const [linkText, setLinkText] = useState("");
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   const [multiple, setMultiple] = useState(false);
@@ -64,6 +65,7 @@ export function AddColumnDialog({
     setMax(null);
     setIntegerOnly(false);
     setChoices("");
+    setLinkText("");
     setTargetListUuid(null);
     setDisplayColumnUuid(null);
     setMultiple(false);
@@ -82,6 +84,7 @@ export function AddColumnDialog({
         if (integerOnly) config.integer_only = true;
       }
       if (type === "choice") config.choices = choices;
+      if (type === "link" && linkText.trim()) config.label = linkText.trim();
       if (type === "lookup") {
         config.target_list_uuid = targetListUuid;
         if (displayColumnUuid) config.display_column_uuid = displayColumnUuid;
@@ -186,6 +189,18 @@ export function AddColumnDialog({
               value={choices}
               onChange={(e) => setChoices(e.target.value)}
               placeholder="Todo;Doing;Done"
+            />
+          </div>
+        )}
+
+        {type === "link" && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor="col-linktext">Link text (optional)</label>
+            <InputText
+              id="col-linktext"
+              value={linkText}
+              onChange={(e) => setLinkText(e.target.value)}
+              placeholder="Shown instead of the URL"
             />
           </div>
         )}

@@ -7,6 +7,7 @@ validation needs the database and stays in the item service.
 import re
 from datetime import date, datetime, time
 from typing import Optional
+from urllib.parse import urlsplit
 
 from src.core.exceptions import ValidationError
 
@@ -20,6 +21,21 @@ _TEMPORAL = {
     ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
 }
 _NUMBER_FORMATS = {"plain", "currency", "percent"}
+
+# A link cell is rendered as an anchor, so its scheme is a security boundary,
+# not a preference: `javascript:`/`data:` URLs would be stored XSS. Columns may
+# narrow this set via `allowed_schemes` but never widen it — whoever configures
+# a column is an ordinary list editor, not a trusted admin.
+SAFE_LINK_SCHEMES = ("http", "https", "mailto", "tel")
+_DEFAULT_LINK_SCHEMES = ("http", "https")
+# Schemes that address a host, so a bare "https:" with no site is meaningless.
+_HOST_LINK_SCHEMES = ("http", "https")
+
+
+def link_schemes(config: dict) -> list[str]:
+    """The schemes a link column accepts, defaulting to http(s)."""
+    schemes = config.get("allowed_schemes")
+    return list(schemes) if schemes else list(_DEFAULT_LINK_SCHEMES)
 
 # Special `default` tokens for temporal columns, resolved at record-insert time.
 _DYNAMIC_DEFAULTS = {
@@ -136,6 +152,27 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
                 f"'number_format' must be one of {sorted(_NUMBER_FORMATS)}"
             )
 
+    elif column_type == ColumnType.link:
+        schemes = config.get("allowed_schemes")
+        if schemes is not None:
+            if not isinstance(schemes, list) or not schemes:
+                raise ValidationError(
+                    "'allowed_schemes' must be a non-empty list of schemes"
+                )
+            unsafe = [s for s in schemes if s not in SAFE_LINK_SCHEMES]
+            if unsafe:
+                raise ValidationError(
+                    f"Unsupported link scheme(s) {', '.join(map(str, unsafe))}; "
+                    f"allowed: {', '.join(SAFE_LINK_SCHEMES)}"
+                )
+        max_length = config.get("max_length")
+        if max_length is not None and (
+            isinstance(max_length, bool)
+            or not isinstance(max_length, int)
+            or max_length < 1
+        ):
+            raise ValidationError("'max_length' must be a positive integer")
+
     elif column_type in _TEMPORAL:
         expected = _TEMPORAL[column_type][1]
         for key in ("min", "max"):
@@ -201,6 +238,29 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
                 raise ValidationError(
                     f"'{item}' is not a valid option for column '{name}'"
                 )
+
+    elif column_type == ColumnType.link:
+        if not isinstance(value, str):
+            _expect(name, "a URL string")
+        allowed = link_schemes(config)
+        # urlsplit lowercases the scheme and strips the ASCII whitespace that
+        # would otherwise smuggle "java\nscript:" past a naive prefix check.
+        parts = urlsplit(value.strip())
+        if parts.scheme == "":
+            raise ValidationError(
+                f"Column '{name}' must be a full URL including the scheme "
+                f"(e.g. https://example.com)"
+            )
+        if parts.scheme not in allowed:
+            raise ValidationError(
+                f"Column '{name}' only accepts {', '.join(allowed)} links, "
+                f"not '{parts.scheme}:'"
+            )
+        if parts.scheme in _HOST_LINK_SCHEMES and not parts.netloc:
+            raise ValidationError(f"Column '{name}' must include a host")
+        hi = config.get("max_length")
+        if hi is not None and len(value) > hi:
+            raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
 
     elif column_type in _TEMPORAL:
         if not isinstance(value, str):

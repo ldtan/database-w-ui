@@ -8,6 +8,7 @@ class ColumnType(str, enum.Enum):
     checkbox = "checkbox"
     choice = "choice"
     lookup = "lookup"
+    link = "link"
     date = "date"
     time = "time"
     datetime = "datetime"

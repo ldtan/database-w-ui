@@ -168,6 +168,7 @@ Common `config` keys (all optional unless noted):
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option `id` (or `[id, …]` if multi)        | `choices?` (shorthand) **or** `options: [{id, label, color}]`; `multiple?` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?` |
+| `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
 | `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | `min?`, `max?` (ISO time); `default: "now"` |
 | `datetime`    | ISO-8601 date-time `string`                | `min?`, `max?` (ISO date-time); `default: "now"` |
@@ -201,6 +202,14 @@ Notes:
   as an option label and is stored as the id.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the
   target list's `primary_column_id`. A lookup column cannot have a `default`.
+- `link` — **the scheme is a security boundary, not a preference.** The value is rendered as
+  an anchor, so a `javascript:` or `data:` URL would be stored XSS. A value must parse as an
+  absolute URL whose scheme is in the column's `allowed_schemes`, and a column may only
+  *narrow* that set — `SAFE_LINK_SCHEMES` (`http`, `https`, `mailto`, `tel`) is the ceiling,
+  because whoever configures a column is an ordinary list editor, not a trusted admin.
+  Enforced in `validate_scalar`, so import and the column's own `default` go through it too;
+  the frontend re-checks before it builds an `href` (`lib/links.ts`). `label` is optional
+  fixed anchor text shown instead of the raw URL.
 - **Config updates merge:** a `PATCH` to a column's `config` merges onto the stored
   config — settings you don't resend are preserved (rather than the whole config being
   replaced). To change a choice column's option set, resend `choices` or `options`.
@@ -214,27 +223,25 @@ Notes:
   (The `ColumnType` **enum itself** does need a migration; see the warning under
   "Planned types" below.)
 
-### Planned types: `user`, `group`, `link` (not built yet)
+### Planned types: `user`, `group` (not built yet)
 
 | `type`   | Stored value in `data`                | Type-specific `config` |
 |----------|---------------------------------------|------------------------|
 | `user`   | `users.uuid` (or `[uuid, …]` if multi)| `multiple?` |
 | `group`  | `user_groups.uuid` (or `[uuid, …]`)   | `multiple?` |
-| `link`   | URL `string`                          | `allowed_schemes?` (default `["http", "https"]`), `label?` |
 
-`user` and `group` are **`lookup` with a fixed target**: same soft-reference shape (store a
-uuid, resolve the label on read), but pointing at the `users` / `user_groups` tables instead
-of a list, so there is no `target_list_uuid`. An assignee field is the motivating case.
-`link` is a plain string with scheme validation.
+Both are **`lookup` with a fixed target**: same soft-reference shape (store a uuid, resolve
+the label on read), but pointing at the `users` / `user_groups` tables instead of a list, so
+there is no `target_list_uuid`. An assignee field is the motivating case.
 
-What each needs, and the parts that are easy to get wrong:
+What they need, and the parts that are easy to get wrong:
 
 - **The `ColumnType` enum is a Postgres enum, and Alembic's autogenerate cannot see new
-  enum values.** Adding `user`/`group`/`link` produces a migration whose `upgrade()` is
-  `pass`, and the app then 500s with `invalid input value for enum column_type: "user"` —
-  this has already happened once, with `time`. Hand-write the revision:
-  `with op.get_context().autocommit_block(): op.execute("ALTER TYPE column_type ADD VALUE …")`.
-  The startup drift guard (`src/infrastructure/schema_check.py`) catches a forgotten one.
+  enum values.** Adding `user`/`group` produces a migration whose `upgrade()` is `pass`, and
+  the app then 500s with `invalid input value for enum column_type: "user"` — this has
+  already happened once, with `time`. Hand-write the revision, as
+  `migrations/versions/b1f7c4a90e12_add_link_column_type.py` does for `link`. The startup
+  drift guard (`src/infrastructure/schema_check.py`) catches a forgotten one.
 
 - **Dangling references on delete.** These are soft references (a uuid in JSONB, no FK), the
   same trade as `lookup` (D4). Deleting a user or group would leave unresolvable ids behind.
@@ -248,11 +255,6 @@ What each needs, and the parts that are easy to get wrong:
   records are private** (owner or superuser only, see §11 and `src/people`). A `user` column
   resolving to "Grace Hopper" would leak personal data to every viewer of the list. Resolve
   to `username`.
-
-- **`link` must reject non-`http(s)` schemes.** The value is rendered as an anchor, so
-  `javascript:` / `data:` URLs are stored XSS. Validate on write (in
-  `ColumnService`/`ListItemService._validate_data`, where every other constraint is
-  enforced) rather than trusting the client, and validate the column's own `default` too.
 
 - **Frontend touchpoints** (each type must be added to all of them, or it half-works):
   `lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `renderCell` in `ListDetailPage.tsx`,
@@ -424,12 +426,12 @@ each is enabled. Field layout is JSONB (D5).
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
 - **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
-- **New column types — `user`, `group`, `link`:** designed in §5 ("Planned types"). `user`
-  and `group` are `lookup` with a fixed target (users / user_groups) rather than a list;
-  `link` is a validated URL. Note the three traps recorded there: the `ColumnType` enum
-  needs a **hand-written** migration (autogenerate is blind to enum values), deleted
-  users/groups leave dangling references that need scrubbing, and a `user` column must
-  display the **username** — resolving to the person's real name would leak private data.
+- **New column types — `user`, `group`:** designed in §5 ("Planned types"); both are `lookup`
+  with a fixed target (users / user_groups) rather than a list. Note the traps recorded
+  there: the `ColumnType` enum needs a **hand-written** migration (autogenerate is blind to
+  enum values), deleted users/groups leave dangling references that need scrubbing, and a
+  `user` column must display the **username** — resolving to the person's real name would
+  leak private data. (`link`, planned alongside them, is built.)
 - **Further column types:** `email`, `attachment`, `rating`.
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth

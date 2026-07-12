@@ -37,6 +37,9 @@ class ColumnConfig(BaseModel):
     precision: Optional[int] = None
     number_format: Optional[str] = None  # plain | currency | percent
     integer_only: Optional[bool] = None
+    # link
+    allowed_schemes: Optional[list[str]] = None  # defaults to ["http", "https"]
+    label: Optional[str] = None  # fixed anchor text; falls back to the URL itself
     # choice
     choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
     options: Optional[list[ChoiceOption]] = None  # full control (ids, colors)
