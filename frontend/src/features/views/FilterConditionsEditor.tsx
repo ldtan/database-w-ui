@@ -7,6 +7,7 @@ import { Button } from "primereact/button";
 
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import type { Column, FilterCondition } from "../../lib/types";
+import { LookupFilterValue } from "../lookups/LookupControls";
 import { PrincipalFilterValue } from "../principals/PrincipalControls";
 
 export const OPERATORS = [
@@ -35,6 +36,7 @@ export function cleanConditions(conditions: FilterCondition[]): FilterCondition[
 }
 
 interface Props {
+  listUuid: string;
   columns: Column[];
   conjunction: "and" | "or";
   onConjunctionChange: (value: "and" | "or") => void;
@@ -43,6 +45,7 @@ interface Props {
 }
 
 export function FilterConditionsEditor({
+  listUuid,
   columns,
   conjunction,
   onConjunctionChange,
@@ -114,6 +117,14 @@ export function FilterConditionsEditor({
                 // Cells store a uuid, so a text box here could only ever be
                 // filled by pasting one — pick the principal instead.
                 <PrincipalFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
+                />
+              ) : col?.type === "lookup" ? (
+                // Same: a lookup cell stores a target-row uuid, not its label.
+                <LookupFilterValue
+                  listUuid={listUuid}
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}

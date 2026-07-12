@@ -251,6 +251,7 @@ export function ImportExportDialog({
           </div>
           <span className="text-sm text-gray-500">Filters (optional)</span>
           <FilterConditionsEditor
+            listUuid={listUuid}
             columns={columns}
             conjunction={conjunction}
             onConjunctionChange={setConjunction}

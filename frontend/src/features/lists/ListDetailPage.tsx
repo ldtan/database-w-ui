@@ -28,7 +28,11 @@ import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
-import { LookupCell } from "../lookups/LookupControls";
+import {
+  LookupCell,
+  useLookupLabels,
+  type LookupLabelMap,
+} from "../lookups/LookupControls";
 import {
   PrincipalCell,
   collectPrincipalUuids,
@@ -50,10 +54,12 @@ function renderCell(
   column: Column,
   row: ListItem,
   principalLabels: Record<PrincipalType, PrincipalLabels>,
+  lookupLabels: LookupLabelMap,
 ) {
   const value = row.data?.[column.uuid];
   if (column.type === "lookup") {
-    return <LookupCell column={column} value={value} />;
+    // Like principals, resolved once for the whole page rather than per cell.
+    return <LookupCell value={value} labels={lookupLabels.get(column.uuid)} />;
   }
   if (column.type === "user" || column.type === "group") {
     // Names are resolved once for the whole page (see principalLabels below),
@@ -311,6 +317,7 @@ export function ListDetailPage() {
     user: usePrincipalLabels("user", principalUuids.user),
     group: usePrincipalLabels("group", principalUuids.group),
   };
+  const lookupLabels = useLookupLabels(listUuid, cols, items.data ?? []);
 
   const formList = forms.data ?? [];
   const sharingItem =
@@ -358,7 +365,7 @@ export function ListDetailPage() {
     if (!groupColumn) return null;
     return (
       <span className="font-semibold">
-        {groupColumn.display_name}: {renderCell(groupColumn, row, principalLabels)}
+        {groupColumn.display_name}: {renderCell(groupColumn, row, principalLabels, lookupLabels)}
       </span>
     );
   }
@@ -604,7 +611,7 @@ export function ListDetailPage() {
                 )}
               </div>
             }
-            body={(row: ListItem) => renderCell(col, row, principalLabels)}
+            body={(row: ListItem) => renderCell(col, row, principalLabels, lookupLabels)}
           />
         ))}
         <DataColumn

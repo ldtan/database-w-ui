@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { AutoComplete } from "primereact/autocomplete";
 
 import { api } from "../../lib/api";
@@ -70,6 +70,9 @@ export function usePrincipalLabels(
       );
     },
     enabled: keys.length > 0,
+    // The key is the uuid set, so a view swap that briefly empties the grid would
+    // otherwise discard the names and re-fetch them. Keep what we resolved.
+    placeholderData: keepPreviousData,
   });
 
   return useMemo(() => {

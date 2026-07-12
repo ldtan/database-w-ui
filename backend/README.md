@@ -159,7 +159,7 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 | Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD |
 | Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}` |
 | Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}` |
-| Columns | `…/lists/{list_uuid}/columns` CRUD |
+| Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side) |
 | Records | `…/lists/{list_uuid}/items` CRUD |
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |

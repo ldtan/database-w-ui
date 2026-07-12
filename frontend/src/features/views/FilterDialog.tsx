@@ -59,6 +59,7 @@ export function FilterDialog({
         )}
 
         <FilterConditionsEditor
+          listUuid={listUuid}
           columns={columns}
           conjunction={conjunction}
           onConjunctionChange={setConjunction}

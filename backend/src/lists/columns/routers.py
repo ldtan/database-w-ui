@@ -1,6 +1,7 @@
+from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -12,7 +13,7 @@ from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
-from .schemas import ColumnCreate, ColumnRead, ColumnUpdate
+from .schemas import ColumnCreate, ColumnRead, ColumnUpdate, LookupOption
 from .services import ColumnService
 
 
@@ -55,6 +56,40 @@ async def get_column(
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     return column
+
+
+@router.get("/{uuid}/options", response_model=list[LookupOption])
+async def lookup_options(
+    uuid: UUID,
+    q: Optional[str] = Query(None, description="Match rows by their label"),
+    row_uuid: Optional[list[UUID]] = Query(
+        None,
+        max_length=500,
+        alias="uuid",
+        description="Resolve specific rows, e.g. the ones a page's cells hold",
+    ),
+    limit: int = Query(25, ge=1, le=500),
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The rows a lookup column can point at, searched server-side.
+
+    The picker is a typeahead over this, and the grid resolves the uuids it holds
+    through it — so neither has to fetch a whole target list, which stops working
+    once the target has more rows than the fetch's limit.
+    """
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
+    if column is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
+    try:
+        return await ColumnService.lookup_options(
+            db, lst, column, current_user, q=q, uuids=row_uuid, limit=limit
+        )
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except UnknownReferenceError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
 @router.patch("/{uuid}", response_model=ColumnRead)

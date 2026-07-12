@@ -2,14 +2,16 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import null as sa_null, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
-from src.core.utils import coerce_uuid
+from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from src.workspaces.models import Workspace
 
+from ..items.models import ListItem
 from ..models import List
 from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column
@@ -129,6 +131,73 @@ class ColumnService:
             lst.primary_column_id = None
         await db.commit()
         return True
+
+    @classmethod
+    async def lookup_options(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        column: Column,
+        user,
+        q: Optional[str] = None,
+        uuids: Optional[Sequence[UUID]] = None,
+        limit: int = 25,
+    ) -> list[dict]:
+        """Rows of a lookup's target list, as ``{uuid, label}`` options.
+
+        Two callers, one endpoint: a picker searching by label (``q``), and a grid
+        resolving the uuids it already holds (``uuids``). Resolved server-side
+        because only the server knows which column supplies a row's label — the
+        same `display_column_key` the export and the import use, so a label means
+        the same thing everywhere.
+
+        Sees exactly what the caller may see: `view` on the target list, then the
+        per-record filter. A picker must never offer a row its user cannot read.
+        """
+        # Deferred like the other permission call sites: a module-level import
+        # cycles back through auth/workspaces services.
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
+        from ..items.services import display_column_key
+
+        if column.type != ColumnType.lookup:
+            raise ValidationError(f"Column '{column.name}' is not a lookup column")
+
+        config = column.config or {}
+        target = (
+            await db.execute(
+                select(List)
+                .options(selectinload(List.workspace))
+                .where(
+                    List.uuid == coerce_uuid(config.get("target_list_uuid")),
+                    List.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if target is None:
+            raise UnknownReferenceError(
+                f"Lookup column '{column.name}' points at a missing target list"
+            )
+        await PermissionService.require(
+            db, user, ResourceType.list, target.id, Action.view
+        )
+
+        key = await display_column_key(db, target.id, config)
+        label = ListItem.data[key].astext if key else sa_null()
+
+        stmt = select(ListItem.uuid, label.label("label")).where(
+            ListItem.list_id == target.id,
+            ListItem.deleted_at.is_(None),
+            await PermissionService.item_view_filter(db, user, target),
+        )
+        if uuids is not None:
+            stmt = stmt.where(ListItem.uuid.in_(uuids))
+        if q and q.strip() and key:
+            stmt = stmt.where(label.ilike(like_pattern(q.strip()), escape=LIKE_ESCAPE))
+
+        rows = await db.execute(stmt.order_by(label, ListItem.id).limit(limit))
+        return [{"uuid": uuid, "label": text} for uuid, text in rows]
 
     @staticmethod
     async def _validate_config(

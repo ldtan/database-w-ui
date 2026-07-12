@@ -68,6 +68,18 @@ class ColumnUpdate(BaseModel):
     config: Optional[ColumnConfig] = None
 
 
+class LookupOption(BaseModel):
+    """One selectable row of a lookup's target list.
+
+    ``label`` is the value of the lookup's display column; it is null when the row
+    has none, in which case the caller shows the uuid — the only thing left that
+    identifies it.
+    """
+
+    uuid: UUID
+    label: Optional[str] = None
+
+
 class ColumnRead(BaseModel):
     uuid: UUID
     name: str

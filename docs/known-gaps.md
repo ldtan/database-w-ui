@@ -194,14 +194,27 @@ because that is the only thing that identifies it. One consequence to know about
 multi-valued cell is serialized to CSV as `a;b`, so a label containing `;` will not survive a
 CSV round-trip (it does in JSON).
 
-**Three pickers still fetch their whole option set with `?limit=1000`.** `LookupControls`
-(target rows), `GroupDialog` (the member picker) and `PeoplePage` (person-name annotations)
-each pull one big page and filter it client-side, so past the limit they silently stop
-offering options that exist. The `user`/`group` picker used to do this too and no longer
-does: `PrincipalControls` searches server-side as you type, and resolves the uuids a page is
-actually showing through `GET /auth/users/?uuid=…&uuid=…` (batched, capped at 500, one
-request per kind per page — not one per cell). That is the pattern to copy; the lookup picker
-is the one that most wants it, since a target list is unbounded.
+**Reference pickers search server-side; two stragglers still fetch `?limit=1000`.** Every
+picker over an unbounded set has the same two jobs, and they need different answers:
+
+- *Search* — a typeahead (`q=…`), because a dropdown listing every option silently stops
+  offering the ones past its fetch limit.
+- *Resolve* — turn the uuids a page already holds into labels, batched: `?uuid=…&uuid=…`
+  (capped at 500), **one request per column per page, never one per cell**.
+
+`PrincipalControls` (users/groups) and `LookupControls` (target rows) both do this now; the
+lookup one goes through `GET /lists/{list}/columns/{column}/options`, which is server-side
+precisely because only the server knows a row's label (`display_column_key`) — and it applies
+`view` on the target list plus the per-record filter, so a picker can never offer a row its
+user cannot read. Still to convert: `GroupDialog` (member picker) and `PeoplePage`
+(person-name annotations).
+
+Two traps worth knowing if you touch these hooks. The query key is the **uuid set**, so it
+changes whenever the records do — including the blip where a view swap empties the grid
+mid-refetch; without `placeholderData: keepPreviousData` the labels drop out and every cell
+falls back to a stub. And "not resolved yet" must never render like "row/account is gone":
+an in-flight uuid shows `…`, and only a settled request with no match shows `unknown user` /
+the row stub.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

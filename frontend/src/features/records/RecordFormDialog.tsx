@@ -70,11 +70,13 @@ function deserialize(column: Column, raw: unknown): unknown {
 }
 
 function RecordField({
+  listUuid,
   column,
   value,
   disabled,
   onChange,
 }: {
+  listUuid: string;
   column: Column;
   value: unknown;
   disabled: boolean;
@@ -174,6 +176,7 @@ function RecordField({
     case "lookup":
       return (
         <LookupField
+          listUuid={listUuid}
           column={column}
           value={value}
           disabled={disabled}
@@ -279,6 +282,7 @@ export function RecordFormDialog({
               {column.config.required ? " *" : ""}
             </label>
             <RecordField
+              listUuid={listUuid}
               column={column}
               value={values[column.uuid]}
               disabled={!enabled}
