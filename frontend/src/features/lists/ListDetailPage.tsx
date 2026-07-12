@@ -11,6 +11,7 @@ import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { displayTemporal, isTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import type {
@@ -51,6 +52,10 @@ function renderCell(column: Column, row: ListItem) {
   if (column.type === "choice") {
     const option = column.config.options?.find((o) => o.id === value);
     return option?.label ?? String(value);
+  }
+  // Otherwise a datetime renders as its raw stored string, seconds and all.
+  if (isTemporal(column.type)) {
+    return displayTemporal(column.type, value);
   }
   return String(value);
 }

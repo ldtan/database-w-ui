@@ -11,6 +11,7 @@ import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
@@ -54,39 +55,17 @@ function resolveFields(columns: Column[], form: Form | null): ResolvedField[] {
   return columns.map((c) => ({ column: c, enabled: true, label: c.display_name }));
 }
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-function fmtDate(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-function fmtTime(d: Date): string {
-  return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
-}
-
 function serialize(column: Column, value: unknown): unknown {
   if (value instanceof Date) {
-    if (column.type === "date") return fmtDate(value);
-    if (column.type === "time") return fmtTime(value);
-    if (column.type === "datetime") return `${fmtDate(value)}T${fmtTime(value)}`;
+    return serializeTemporal(column.type, value);
   }
   return value;
 }
 
 function deserialize(column: Column, raw: unknown): unknown {
-  const s = String(raw);
-  if (column.type === "date" || column.type === "datetime") {
-    const [datePart, timePart] = s.split("T");
-    const [y, mo, da] = datePart.split("-").map(Number);
-    if (column.type === "date") return new Date(y, mo - 1, da);
-    const [h, mi, se] = (timePart ?? "00:00:00").split(":").map(Number);
-    return new Date(y, mo - 1, da, h, mi, se || 0);
-  }
-  if (column.type === "time") {
-    const [h, mi, se] = s.split(":").map(Number);
-    return new Date(1970, 0, 1, h, mi, se || 0);
-  }
-  return raw;
+  if (!isTemporal(column.type)) return raw;
+  // A value we cannot parse stays as-is rather than becoming an Invalid Date.
+  return parseTemporal(column.type, raw) ?? raw;
 }
 
 function RecordField({

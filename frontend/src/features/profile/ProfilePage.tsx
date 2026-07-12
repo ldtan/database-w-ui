@@ -9,22 +9,10 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
+import { fmtDate, parseTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { Person } from "../../lib/types";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
-
-// A birth date is a calendar date, not an instant. toISOString() would convert
-// through UTC and land on the previous day for anyone west of Greenwich, so
-// format and parse in local time.
-function toIsoDate(date: Date): string {
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${date.getFullYear()}-${month}-${day}`;
-}
-function fromIsoDate(value: string): Date {
-  const [year, month, day] = value.split("-").map(Number);
-  return new Date(year, month - 1, day);
-}
 
 export function ProfilePage() {
   const queryClient = useQueryClient();
@@ -56,7 +44,7 @@ export function ProfilePage() {
     setFirstName(data?.first_name ?? "");
     setMiddleName(data?.middle_name ?? "");
     setLastName(data?.last_name ?? "");
-    setBirthDate(data?.birth_date ? fromIsoDate(data.birth_date) : null);
+    setBirthDate(parseTemporal("date", data?.birth_date));
   }, [person.data]);
 
   const invalidate = () =>
@@ -69,7 +57,7 @@ export function ProfilePage() {
         // Sending null (not "") clears the field server-side.
         middle_name: middleName.trim() || null,
         last_name: lastName.trim(),
-        birth_date: birthDate ? toIsoDate(birthDate) : null,
+        birth_date: birthDate ? fmtDate(birthDate) : null,
       };
       return person.data
         ? api.patch<Person>(`/people/${person.data.uuid}`, body)

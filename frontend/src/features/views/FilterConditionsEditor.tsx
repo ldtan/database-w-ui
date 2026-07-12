@@ -1,9 +1,11 @@
+import { Calendar } from "primereact/calendar";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
 import { InputNumber } from "primereact/inputnumber";
 import { SelectButton } from "primereact/selectbutton";
 import { Button } from "primereact/button";
 
+import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import type { Column, FilterCondition } from "../../lib/types";
 
 export const OPERATORS = [
@@ -106,6 +108,24 @@ export function FilterConditionsEditor({
                   onChange={(e) => update(i, { value: e.value })}
                   placeholder="Value"
                   style={{ width: 120 }}
+                />
+              ) : col && isTemporal(col.type) ? (
+                // Otherwise this is a bare text box: you would have to hand-type the
+                // exact stored format, and a near-miss silently matches nothing.
+                <Calendar
+                  value={parseTemporal(col.type, cond.value)}
+                  onChange={(e) =>
+                    update(i, {
+                      value: e.value
+                        ? serializeTemporal(col.type, e.value as Date)
+                        : null,
+                    })
+                  }
+                  dateFormat="yy-mm-dd"
+                  timeOnly={col.type === "time"}
+                  showTime={col.type === "datetime"}
+                  showButtonBar
+                  style={{ width: 170 }}
                 />
               ) : (
                 <InputText
