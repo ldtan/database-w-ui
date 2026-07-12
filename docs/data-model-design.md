@@ -209,8 +209,60 @@ Notes:
 - `date` / `time` / `datetime` — stored as ISO-8601 strings and validated via Python's
   `fromisoformat`. The three separate types replace a single date type with an
   `include_time` flag.
-- The set is extensible: adding e.g. `email`, `url`, `attachment`, `rating` is just a
-  new enum member + `config` convention, no migration.
+- The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
+  member + `config` convention — no migration of the *records*, since `data` is JSONB.
+  (The `ColumnType` **enum itself** does need a migration; see the warning under
+  "Planned types" below.)
+
+### Planned types: `user`, `group`, `link` (not built yet)
+
+| `type`   | Stored value in `data`                | Type-specific `config` |
+|----------|---------------------------------------|------------------------|
+| `user`   | `users.uuid` (or `[uuid, …]` if multi)| `multiple?` |
+| `group`  | `user_groups.uuid` (or `[uuid, …]`)   | `multiple?` |
+| `link`   | URL `string`                          | `allowed_schemes?` (default `["http", "https"]`), `label?` |
+
+`user` and `group` are **`lookup` with a fixed target**: same soft-reference shape (store a
+uuid, resolve the label on read), but pointing at the `users` / `user_groups` tables instead
+of a list, so there is no `target_list_uuid`. An assignee field is the motivating case.
+`link` is a plain string with scheme validation.
+
+What each needs, and the parts that are easy to get wrong:
+
+- **The `ColumnType` enum is a Postgres enum, and Alembic's autogenerate cannot see new
+  enum values.** Adding `user`/`group`/`link` produces a migration whose `upgrade()` is
+  `pass`, and the app then 500s with `invalid input value for enum column_type: "user"` —
+  this has already happened once, with `time`. Hand-write the revision:
+  `with op.get_context().autocommit_block(): op.execute("ALTER TYPE column_type ADD VALUE …")`.
+  The startup drift guard (`src/infrastructure/schema_check.py`) catches a forgotten one.
+
+- **Dangling references on delete.** These are soft references (a uuid in JSONB, no FK), the
+  same trade as `lookup` (D4). Deleting a user or group would leave unresolvable ids behind.
+  `lookup` already solves this — `ListService._scrub_references_to_lists` drops the key from
+  referencing records when a target list is deleted — and `user`/`group` need the equivalent
+  hooked into `UserService.delete` / `UserGroupService.delete`. Until then, render an
+  unresolvable id as "unknown user" rather than a raw uuid.
+
+- **Display the username, never the person's name.** `/auth/users` is readable by any
+  authenticated user precisely so the Share dialog can list principals — but **person
+  records are private** (owner or superuser only, see §11 and `src/people`). A `user` column
+  resolving to "Grace Hopper" would leak personal data to every viewer of the list. Resolve
+  to `username`.
+
+- **`link` must reject non-`http(s)` schemes.** The value is rendered as an anchor, so
+  `javascript:` / `data:` URLs are stored XSS. Validate on write (in
+  `ColumnService`/`ListItemService._validate_data`, where every other constraint is
+  enforced) rather than trusting the client, and validate the column's own `default` too.
+
+- **Frontend touchpoints** (each type must be added to all of them, or it half-works):
+  `lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `renderCell` in `ListDetailPage.tsx`,
+  `RecordField` in `RecordFormDialog.tsx`, `FilterConditionsEditor.tsx`, and the export
+  formatter (`src/lists/transfer/services.py`) — `user`/`group` should export the resolved
+  username/name, not the uuid. `LookupControls.tsx` is the closest existing model to copy.
+
+- **Uniqueness and filtering** fall out of the existing machinery for single values; the
+  `multiple?` (list-valued) case is skipped by the `unique` check today, as it is for
+  `choice` and `lookup`.
 
 **Example — a "Status" choice column**
 
@@ -372,7 +424,13 @@ each is enabled. Field layout is JSONB (D5).
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
 - **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
-- **Additional column types:** `email`, `url`, `attachment`, `rating`, `user` (assignee).
+- **New column types — `user`, `group`, `link`:** designed in §5 ("Planned types"). `user`
+  and `group` are `lookup` with a fixed target (users / user_groups) rather than a list;
+  `link` is a validated URL. Note the three traps recorded there: the `ColumnType` enum
+  needs a **hand-written** migration (autogenerate is blind to enum values), deleted
+  users/groups leave dangling references that need scrubbing, and a `user` column must
+  display the **username** — resolving to the person's real name would leak private data.
+- **Further column types:** `email`, `attachment`, `rating`.
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /
