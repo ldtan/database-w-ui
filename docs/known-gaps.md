@@ -5,16 +5,19 @@ bite whoever touches the code next. Ordered by how much they matter.
 
 ---
 
-## 1. User and group management has no role gating
+## 1. There is no public registration
 
-`/api/auth/users` and `/api/auth/groups` are protected by `get_current_user` and nothing
-else. **Any authenticated user can create, rename, and delete users and groups** —
-including adding themselves to a group that holds grants, which is a privilege-escalation
-path into other people's data.
+`POST /auth/users/` is **administrative** — superuser-only — and it is the only way to
+create an account. The first account exists solely because `seed.py` seeds it into an
+empty users table. So today a superuser onboards everyone by hand.
 
-There is no role/superuser concept in the model yet; `FIRST_SUPERUSER_*` only seeds the
-bootstrap account. Adding one is the prerequisite for gating these routes and the
-People & Groups page.
+Adding public self-signup means a **new** unauthenticated route (`POST /auth/register`),
+not loosening the admin one. It needs its own narrower schema: `UserCreate` extends
+`UserBase`, so the caller can already set `is_active`, and the model now carries
+`is_superuser` — a public route accepting those fields would let a stranger self-promote.
+It would also want rate limiting and email verification. Note `UserService.create` already
+auto-provisions a personal workspace for every new user, which is the right behavior for
+signup.
 
 ## 2. A record shared without its list can't be viewed in the UI
 
@@ -54,7 +57,27 @@ a real problem the moment anything hard-deletes, or if ids are ever reused.
 
 ## Behavior that surprises people
 
-**The workspace owner is an implicit superuser.** `effective_actions` short-circuits to all
+**`is_superuser` and the permission model are orthogonal.** A superuser administers
+*identities* — creating users, promoting them, editing group membership. It does **not**
+grant access to anyone else's workspaces, lists, or records; that is entirely the grant
+system's business. The reason identity administration has to be locked down at all is that
+it sits *underneath* permissions: groups are principals in the grant table, so whoever can
+edit membership can hand themselves any grant a group holds, and whoever can reset a
+password can simply become the workspace owner. (Both were open to any authenticated user
+until this was fixed; `tests/test_account_security.py` keeps them shut.)
+
+**The last superuser cannot be deleted or demoted.** Superusers are only ever minted two
+ways — seeded into an empty users table, or promoted by an existing superuser — so losing
+the last one locks account administration out permanently, with no migration tool to undo
+it by hand. `UserService._guard_last_superuser` refuses; promote a replacement first.
+
+**Changing your own password requires `current_password`; a superuser resetting someone
+else's does not.** The first stops a stolen access token becoming a permanent takeover.
+The second is a deliberate admin capability — a superuser genuinely *can* take over any
+account, which is inherent to the role, not a hole.
+
+**The workspace owner is an implicit superuser** *of their own data* (unrelated to the
+`is_superuser` flag above). `effective_actions` short-circuits to all
 actions when `user.id == workspace.owner_id`, before any grant lookup. Owners cannot lock
 themselves out of their own data no matter how the grants are arranged, and no grant can
 *reduce* an owner's access. This is also why the whole pre-existing test suite stayed green
@@ -82,8 +105,15 @@ section shows the list's own slug as its subtitle rather than "in «Workspace»"
 
 **There is no Alembic.** The schema comes from `Base.metadata.create_all` over the models
 imported in `main.py`'s lifespan and `tests/conftest.py`. A new model needs importing in
-*both*. Adding a column to an existing table means **recreating the dev DB by hand** —
-nothing migrates it for you.
+*both*. `create_all` only ever *creates missing tables* — it will not add a column to a
+table that already exists, so an existing dev DB silently keeps the old shape and then
+errors at query time. Either recreate the DB, or apply the column by hand; additive
+columns are safe to `ALTER` in and keep your data. For example, `is_superuser` landed as:
+
+```sql
+ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser boolean NOT NULL DEFAULT false;
+UPDATE users SET is_superuser = true WHERE username = 'admin';  -- seed.py only fires on an empty table
+```
 
 **Never lazy-load a relationship after a commit.** The session factory sets
 `expire_on_commit=False` precisely because a lazy reload under asyncpg raises

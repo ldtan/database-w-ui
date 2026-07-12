@@ -44,3 +44,18 @@ async def get_current_user(
         )
 
     return user
+
+
+async def require_superuser(current_user: User = Depends(get_current_user)) -> User:
+    """Guards account and group administration.
+
+    Note this is orthogonal to the permission model in src/permissions: a superuser
+    administers *identities*, and is not thereby granted access to other people's
+    workspaces, lists, or records.
+    """
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This action requires a superuser",
+        )
+    return current_user

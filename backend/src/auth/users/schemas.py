@@ -21,13 +21,18 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
-    # Setting `password` requires proving you know the current one, so a stolen
-    # access token cannot be turned into a permanent account takeover.
+    # Promotion/demotion. The router rejects this from non-superusers, otherwise
+    # any account could promote itself.
+    is_superuser: Optional[bool] = None
+    # Changing your *own* password requires proving you know the current one, so a
+    # stolen access token cannot be turned into a permanent account takeover. A
+    # superuser resetting someone else's password does not need it.
     current_password: Optional[str] = None
 
 
 class UserRead(UserBase):
     uuid: UUID
+    is_superuser: bool = False
     groups: List[ResourceLink] = Field(default_factory=list)
     model_config = ConfigDict(from_attributes=True)
 

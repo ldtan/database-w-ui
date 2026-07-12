@@ -45,5 +45,10 @@ async def seed_initial_data(db: AsyncSession) -> Optional[User]:
         logger.info("First user already created by another process")
         return None
 
-    logger.info("Created first user %r", user.username)
+    # The bootstrap account is the only superuser the system ever creates on its
+    # own; every later one has to be promoted by an existing superuser.
+    user.is_superuser = True
+    await db.commit()
+
+    logger.info("Created first user %r (superuser)", user.username)
     return user

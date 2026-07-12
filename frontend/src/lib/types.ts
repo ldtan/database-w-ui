@@ -152,6 +152,8 @@ export interface ApiUser {
   username: string;
   email: string;
   is_active: boolean;
+  // Administers accounts and groups — not a grant of access to other people's data.
+  is_superuser: boolean;
   groups: ResourceLink[];
 }
 

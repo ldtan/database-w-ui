@@ -32,6 +32,12 @@ class User(BaseModel):
     email: Mapped[str] = mapped_column(sa.String(120), unique=True)
     password: Mapped[str] = mapped_column(sa.String(255))
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
+    # Administers accounts and groups. Orthogonal to the permission model, which
+    # governs workspaces/lists/records — a superuser is not automatically granted
+    # access to other people's data.
+    is_superuser: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, server_default=sa.false(), nullable=False
+    )
     groups: Mapped[list["UserGroup"]] = relationship(
         "UserGroup",
         secondary=user_group_association,

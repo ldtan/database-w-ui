@@ -3,7 +3,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..dependencies import get_current_user
+from ..dependencies import get_current_user, require_superuser
 from .models import User
 from .schemas import (
     UserCreate,
@@ -14,10 +14,14 @@ from .schemas import (
     UserUpdate,
 )
 from .services import UserGroupService, UserService
-from src.core.exceptions import ConflictError
+from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.infrastructure.database import get_db
 
 
+# Reads stay open to any authenticated user: the Share dialog lists users and
+# groups to grant to, so gating them would break sharing. Writes are superuser-only
+# — accounts and group membership sit *under* the permission model (groups are
+# principals in the grant table), so whoever can edit them can route around it.
 router = APIRouter(
     prefix="/users",
     tags=["users"],
@@ -30,30 +34,16 @@ group_router = APIRouter(
     dependencies=[Depends(get_current_user)],
 )
 
-# Until a superuser role exists there is no principal that may safely administer
-# other accounts or groups, so these writes are closed to everyone. Group
-# membership is the sharper edge: groups are principals in the grant table, so an
-# open PATCH lets anyone add themselves to a group and inherit its grants.
-_NEEDS_ADMIN = "Administering users and groups requires a superuser role, which does not exist yet"
-
-
-def _forbid_admin_action() -> None:
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_NEEDS_ADMIN)
-
-
-def _require_self(current_user: User, uuid: UUID) -> None:
-    if current_user.uuid != uuid:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You may only modify your own account",
-        )
-
 
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 async def create_user(
     payload: UserCreate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
 ):
+    """Administrative account creation. Public self-signup, if it is ever added,
+    belongs on its own unauthenticated route with its own narrower schema — not
+    here, where the caller can set fields like is_active."""
     try:
         return await UserService.create(db, payload)
     except ConflictError as exc:
@@ -67,6 +57,14 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
 ):
     return await UserService.list(db, skip=skip, limit=limit)
+
+
+# Declared before /{uuid} so "me" is not parsed as a uuid.
+@router.get("/me", response_model=UserRead)
+async def get_me(current_user: User = Depends(get_current_user)):
+    """Who the caller is. The frontend has only a token otherwise, so it needs this
+    to know whether to show the account-administration UI."""
+    return current_user
 
 
 @router.get("/{uuid}", response_model=UserRead)
@@ -87,11 +85,24 @@ async def update_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Self-service only. This route used to accept a new password for *any* user
-    # from *any* authenticated caller, which was a full account takeover.
-    _require_self(current_user, uuid)
+    is_self = current_user.uuid == uuid
+    if not (is_self or current_user.is_superuser):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You may only modify your own account",
+        )
+    # Otherwise any account could promote itself to superuser.
+    if payload.is_superuser is not None and not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a superuser may change superuser status",
+        )
     try:
-        user = await UserService.update(db, uuid, payload)
+        # Changing your own password means proving you know it; a superuser resetting
+        # someone else's cannot be expected to.
+        user = await UserService.update(
+            db, uuid, payload, verify_current_password=is_self
+        )
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
@@ -106,7 +117,11 @@ async def delete_user(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    _require_self(current_user, uuid)
+    if not (current_user.uuid == uuid or current_user.is_superuser):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You may only delete your own account",
+        )
     if not await UserService.delete(db, uuid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
@@ -115,8 +130,14 @@ async def delete_user(
 async def create_group(
     payload: UserGroupCreate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
 ):
-    _forbid_admin_action()
+    try:
+        return await UserGroupService.create(db, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except UnknownReferenceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @group_router.get("/", response_model=list[UserGroupRead])
@@ -144,13 +165,27 @@ async def update_group(
     uuid: UUID,
     payload: UserGroupUpdate,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
 ):
-    _forbid_admin_action()
+    # Membership is the sharp edge: groups are principals in the grant table, so
+    # whoever can edit this can hand themselves any grant the group holds.
+    try:
+        group = await UserGroupService.update(db, uuid, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except UnknownReferenceError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if group is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    return group
 
 
 @group_router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_group(
     uuid: UUID,
     db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
 ):
-    _forbid_admin_action()
+    if not await UserGroupService.delete(db, uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")

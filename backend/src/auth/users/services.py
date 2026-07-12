@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -88,8 +88,14 @@ class UserService:
 
     @classmethod
     async def update(
-        cls, db: AsyncSession, uuid: Union[str, UUID], payload: UserUpdate
+        cls,
+        db: AsyncSession,
+        uuid: Union[str, UUID],
+        payload: UserUpdate,
+        verify_current_password: bool = True,
     ) -> Optional[User]:
+        """``verify_current_password`` is False only when a superuser is resetting
+        someone else's password — they cannot be expected to know it."""
         user = await cls.get_by_uuid(db, uuid)
         if user is None:
             return None
@@ -100,11 +106,18 @@ class UserService:
         if password is not None:
             # Knowing the current password is what proves this is the account holder
             # and not someone who merely got hold of a token.
-            if current_password is None or not verify_password(
-                current_password, user.password
+            if verify_current_password and (
+                current_password is None
+                or not verify_password(current_password, user.password)
             ):
                 raise PermissionDeniedError("current_password is incorrect")
             user.password = get_password_hash(password)
+
+        if data.get("is_superuser") is False and user.is_superuser:
+            await cls._guard_last_superuser(db, user)
+        if data.get("is_active") is False and user.is_superuser:
+            await cls._guard_last_superuser(db, user)
+
         for field, value in data.items():
             setattr(user, field, value)
 
@@ -124,11 +137,38 @@ class UserService:
         if user is None:
             return False
 
+        if user.is_superuser:
+            await cls._guard_last_superuser(db, user)
+
         user.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the user stops appearing in UserGroupRead.users.
         user.groups.clear()
         await db.commit()
         return True
+
+    @staticmethod
+    async def _guard_last_superuser(db: AsyncSession, user: User) -> None:
+        """Refuse to remove the system's only administrator.
+
+        Superusers are only ever minted two ways: seeded into an empty users table,
+        or promoted by an existing superuser. Losing the last one is therefore
+        unrecoverable through the API — and with no migration tool, awkward to undo
+        by hand.
+        """
+        remaining = await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(
+                User.is_superuser.is_(True),
+                User.is_active.is_(True),
+                User.deleted_at.is_(None),
+                User.id != user.id,
+            )
+        )
+        if not remaining:
+            raise PermissionDeniedError(
+                "This is the only superuser; promote another before removing this one"
+            )
 
 
 class UserGroupService:

@@ -12,19 +12,19 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import type { ApiUser, ApiUserGroup } from "../../lib/types";
 import { useToast } from "../../lib/toast";
-
-// Group administration is closed until a superuser role exists: groups are
-// principals in the grant table, so an open membership PATCH let anyone add
-// themselves to a group and inherit its grants. The backend 403s these writes;
-// hiding the controls keeps the page honest until the role lands, at which point
-// this becomes a check on the current user's is_superuser.
-const CAN_ADMINISTER = false;
+import { useCurrentUser } from "../../lib/auth";
 
 export function PeoplePage() {
   const queryClient = useQueryClient();
   const toast = useToast();
   const invalidateGroups = () =>
     queryClient.invalidateQueries({ queryKey: ["groups"] });
+
+  // Groups are principals in the grant table, so whoever can edit membership can
+  // hand themselves any grant a group holds — hence superuser-only, matching the
+  // backend. Reads stay open so everyone can see who is in what.
+  const me = useCurrentUser();
+  const canAdminister = me?.is_superuser ?? false;
 
   const users = useQuery({
     queryKey: ["users"],
@@ -118,16 +118,16 @@ export function PeoplePage() {
       </Link>
       <h1 className="text-xl font-semibold">People &amp; Groups</h1>
 
-      {!CAN_ADMINISTER && (
+      {!canAdminister && (
         <Message
           severity="info"
-          text="Groups are read-only. Creating and editing them will require a superuser role, which does not exist yet."
+          text="Read-only. Creating groups and changing membership requires a superuser."
         />
       )}
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Groups</h2>
-        {CAN_ADMINISTER && (
+        {canAdminister && (
           <form onSubmit={onCreate} className="flex gap-2">
             <InputText
               placeholder="New group name"
@@ -152,7 +152,7 @@ export function PeoplePage() {
             <Card key={group.uuid}>
               <div className="flex items-center justify-between gap-2">
                 <div className="font-medium">{group.name}</div>
-                {CAN_ADMINISTER && (
+                {canAdminister && (
                   <div className="flex gap-1">
                     <Button
                       icon="pi pi-pencil"
@@ -177,7 +177,7 @@ export function PeoplePage() {
                 <span className="text-sm" style={{ color: "var(--text-muted)" }}>
                   Members
                 </span>
-                {CAN_ADMINISTER ? (
+                {canAdminister ? (
                   <MultiSelect
                     value={group.users.map((u) => u.uuid)}
                     options={userOptions}
@@ -223,11 +223,18 @@ export function PeoplePage() {
                     {user.email}
                   </div>
                 </div>
-                {!user.is_active && (
-                  <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    inactive
-                  </span>
-                )}
+                <div className="flex items-center gap-2">
+                  {user.is_superuser && (
+                    <span className="text-sm font-medium" style={{ color: "var(--brand)" }}>
+                      superuser
+                    </span>
+                  )}
+                  {!user.is_active && (
+                    <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+                      inactive
+                    </span>
+                  )}
+                </div>
               </div>
             </Card>
           ))}

@@ -17,10 +17,14 @@ from src.auth.users.services import UserGroupService, UserService
 from src.infrastructure import database as db_module
 
 
-async def _make_user(db, name: str):
-    return await UserService.create(
+async def _make_user(db, name: str, superuser: bool = False):
+    user = await UserService.create(
         db, UserCreate(username=name, email=f"{name}@example.com", password="origpw123")
     )
+    if superuser:
+        user.is_superuser = True
+        await db.commit()
+    return user
 
 
 @pytest_asyncio.fixture
@@ -126,6 +130,93 @@ async def test_cannot_self_add_to_a_group(make_client, session_factory):
 
         assert (await client.post("/api/auth/groups/", json={"name": "mine"})).status_code == 403
         assert (await client.delete(f"/api/auth/groups/{group_uuid}")).status_code == 403
+
+
+async def test_cannot_promote_self_to_superuser(make_client, session_factory):
+    """Otherwise the role is worth nothing — anyone could grant it to themselves."""
+    async with session_factory() as db:
+        user = await _make_user(db, "climber")
+        user_uuid = str(user.uuid)
+
+    async with make_client(user) as client:
+        resp = await client.patch(
+            f"/api/auth/users/{user_uuid}", json={"is_superuser": True}
+        )
+        assert resp.status_code == 403
+
+        resp = await client.get("/api/auth/users/me")
+        assert resp.json()["is_superuser"] is False
+
+
+async def test_superuser_administers_users_and_groups(make_client, session_factory):
+    async with session_factory() as db:
+        admin = await _make_user(db, "root", superuser=True)
+        member = await _make_user(db, "member")
+        member_uuid = str(member.uuid)
+
+    async with make_client(admin) as client:
+        assert (await client.get("/api/auth/users/me")).json()["is_superuser"] is True
+
+        # Create a user, and a group with a member in it.
+        resp = await client.post(
+            "/api/auth/users/",
+            json={"username": "hired", "email": "hired@example.com", "password": "pw123456"},
+        )
+        assert resp.status_code == 201
+
+        resp = await client.post("/api/auth/groups/", json={"name": "team"})
+        assert resp.status_code == 201
+        group_uuid = resp.json()["uuid"]
+
+        resp = await client.patch(
+            f"/api/auth/groups/{group_uuid}", json={"user_uuids": [member_uuid]}
+        )
+        assert resp.status_code == 200
+        assert len(resp.json()["users"]) == 1
+
+        # Reset someone else's password without knowing the old one, and promote them.
+        resp = await client.patch(
+            f"/api/auth/users/{member_uuid}", json={"password": "resetpw123"}
+        )
+        assert resp.status_code == 200
+
+        resp = await client.patch(
+            f"/api/auth/users/{member_uuid}", json={"is_superuser": True}
+        )
+        assert resp.json()["is_superuser"] is True
+
+        assert (await client.delete(f"/api/auth/groups/{group_uuid}")).status_code == 204
+
+
+async def test_the_last_superuser_cannot_be_removed(make_client, session_factory):
+    """Superusers are only seeded into an empty table or promoted by another, so
+    losing the last one locks account administration out for good."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "onlyroot", superuser=True)
+        admin_uuid = str(admin.uuid)
+
+    async with make_client(admin) as client:
+        assert (await client.delete(f"/api/auth/users/{admin_uuid}")).status_code == 403
+        resp = await client.patch(
+            f"/api/auth/users/{admin_uuid}", json={"is_superuser": False}
+        )
+        assert resp.status_code == 403
+
+        # With a second superuser in place, stepping down is allowed.
+        resp = await client.post(
+            "/api/auth/users/",
+            json={"username": "heir", "email": "heir@example.com", "password": "pw123456"},
+        )
+        heir_uuid = resp.json()["uuid"]
+        assert (
+            await client.patch(
+                f"/api/auth/users/{heir_uuid}", json={"is_superuser": True}
+            )
+        ).status_code == 200
+        resp = await client.patch(
+            f"/api/auth/users/{admin_uuid}", json={"is_superuser": False}
+        )
+        assert resp.status_code == 200
 
 
 async def test_reads_stay_open_so_sharing_still_works(make_client, session_factory):
