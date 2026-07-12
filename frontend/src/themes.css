@@ -430,6 +430,34 @@ a {
 }
 
 /* ============================================================
+   Breadcrumb
+   ============================================================ */
+.p-breadcrumb {
+  background: transparent;
+  border: none;
+  padding: 0;
+}
+/* The current page is the last crumb: plain text, no link. */
+.p-breadcrumb .p-menuitem-text {
+  color: var(--text);
+}
+.p-breadcrumb .p-menuitem-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: var(--radius);
+}
+.p-breadcrumb .p-menuitem-link:hover {
+  color: var(--brand);
+}
+.p-breadcrumb .p-menuitem-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.p-breadcrumb .p-menuitem-separator {
+  color: var(--text-muted);
+}
+
+/* ============================================================
    Menus / FileUpload / misc surfaces
    ============================================================ */
 .p-menu,

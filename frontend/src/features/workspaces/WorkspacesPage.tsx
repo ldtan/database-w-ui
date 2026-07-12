@@ -9,6 +9,7 @@ import { Dialog } from "primereact/dialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { Breadcrumbs } from "../../components/Breadcrumbs";
 import type { ListRead, Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
@@ -97,6 +98,7 @@ export function WorkspacesPage() {
   return (
     <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
       <ConfirmDialog />
+      <Breadcrumbs items={[{ label: "Workspaces" }]} />
       <h1 className="text-xl font-semibold">Workspaces</h1>
 
       <form onSubmit={onCreate} className="flex gap-2">

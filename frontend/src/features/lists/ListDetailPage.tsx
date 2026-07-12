@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
@@ -12,6 +12,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
+import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import type {
   Column,
   Form,
@@ -19,6 +20,7 @@ import type {
   ListRead,
   View,
   ViewConfig,
+  Workspace,
 } from "../../lib/types";
 import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
@@ -102,6 +104,28 @@ export function ListDetailPage() {
     queryKey: ["forms", listUuid],
     queryFn: () => api.get<Form[]>(`/lists/${listUuid}/forms/`),
   });
+
+  // A list can be shared without its workspace, in which case this 403s and the
+  // workspace simply drops out of the breadcrumb trail — there is nothing the
+  // caller could navigate to anyway.
+  const workspaceUuid = list.data?.workspace.uuid;
+  const workspace = useQuery({
+    queryKey: ["workspace", workspaceUuid],
+    queryFn: () => api.get<Workspace>(`/workspaces/${workspaceUuid}`),
+    enabled: !!workspaceUuid,
+    retry: false,
+  });
+  const crumbs: Crumb[] = [
+    ...(workspace.data
+      ? [
+          {
+            label: workspace.data.display_name,
+            to: `/workspaces/${workspace.data.uuid}`,
+          },
+        ]
+      : []),
+    { label: list.data?.display_name ?? "List" },
+  ];
 
   // Records and views can each carry their own grants, so row- and view-level
   // controls are gated separately from the list as a whole.
@@ -311,9 +335,7 @@ export function ListDetailPage() {
       <ConfirmDialog />
 
       <div className="flex items-center justify-between">
-        <Link to="/" className="no-underline text-sm text-gray-500">
-          ← Workspaces
-        </Link>
+        <Breadcrumbs items={crumbs} />
         <div className="flex gap-2">
           {listActions.has("configure") && (
             <Button

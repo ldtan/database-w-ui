@@ -9,7 +9,8 @@ import { Dialog } from "primereact/dialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import type { ListRead } from "../../lib/types";
+import { Breadcrumbs } from "../../components/Breadcrumbs";
+import type { ListRead, Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
@@ -31,6 +32,10 @@ export function ListsPage() {
     queryKey: ["lists", workspaceUuid],
     queryFn: () =>
       api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
+  });
+  const workspace = useQuery({
+    queryKey: ["workspace", workspaceUuid],
+    queryFn: () => api.get<Workspace>(`/workspaces/${workspaceUuid}`),
   });
   // Adding a list is a workspace-level change; the rest is gated per list.
   const workspaceActions = useEffectiveActions("workspace", workspaceUuid);
@@ -111,10 +116,10 @@ export function ListsPage() {
   return (
     <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
       <ConfirmDialog />
-      <Link to="/" className="no-underline text-sm text-gray-500">
-        ← Workspaces
-      </Link>
-      <h1 className="text-xl font-semibold">Lists</h1>
+      <Breadcrumbs items={[{ label: workspace.data?.display_name ?? "Lists" }]} />
+      <h1 className="text-xl font-semibold">
+        {workspace.data?.display_name ?? "Lists"}
+      </h1>
 
       {workspaceActions.has("configure") && (
         <form onSubmit={onCreate} className="flex gap-2">

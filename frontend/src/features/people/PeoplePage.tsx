@@ -1,5 +1,4 @@
 import { useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
@@ -10,6 +9,7 @@ import { Dialog } from "primereact/dialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { Breadcrumbs } from "../../components/Breadcrumbs";
 import type { ApiUser, ApiUserGroup } from "../../lib/types";
 import { useToast } from "../../lib/toast";
 import { useCurrentUser } from "../../lib/auth";
@@ -113,9 +113,7 @@ export function PeoplePage() {
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 820 }}>
       <ConfirmDialog />
-      <Link to="/" className="no-underline text-sm text-gray-500">
-        ← Workspaces
-      </Link>
+      <Breadcrumbs items={[{ label: "People & Groups" }]} />
       <h1 className="text-xl font-semibold">People &amp; Groups</h1>
 
       {!canAdminister && (
