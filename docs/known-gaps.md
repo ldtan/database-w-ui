@@ -194,6 +194,15 @@ because that is the only thing that identifies it. One consequence to know about
 multi-valued cell is serialized to CSV as `a;b`, so a label containing `;` will not survive a
 CSV round-trip (it does in JSON).
 
+**Three pickers still fetch their whole option set with `?limit=1000`.** `LookupControls`
+(target rows), `GroupDialog` (the member picker) and `PeoplePage` (person-name annotations)
+each pull one big page and filter it client-side, so past the limit they silently stop
+offering options that exist. The `user`/`group` picker used to do this too and no longer
+does: `PrincipalControls` searches server-side as you type, and resolves the uuids a page is
+actually showing through `GET /auth/users/?uuid=…&uuid=…` (batched, capped at 500, one
+request per kind per page — not one per cell). That is the pattern to copy; the lookup picker
+is the one that most wants it, since a target list is unbounded.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows

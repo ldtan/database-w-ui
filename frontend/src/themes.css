@@ -258,24 +258,48 @@ a {
   color: var(--text-muted);
 }
 
-/* Overlay panels for dropdowns / multiselects */
+/* AutoComplete (the principal typeahead) — the base theme hardcodes its colors,
+   so every piece needs a themed counterpart, exactly like the dropdown above. */
+.p-autocomplete-multiple-container {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-autocomplete:not(.p-disabled):hover .p-autocomplete-multiple-container {
+  border-color: var(--brand);
+}
+.p-autocomplete:not(.p-disabled).p-focus .p-autocomplete-multiple-container {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+.p-autocomplete-multiple-container .p-autocomplete-token {
+  background: var(--brand-tint);
+  color: var(--text);
+}
+
+/* Overlay panels for dropdowns / multiselects / autocompletes */
 .p-dropdown-panel,
-.p-multiselect-panel {
+.p-multiselect-panel,
+.p-autocomplete-panel {
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
 }
 .p-dropdown-panel .p-dropdown-items .p-dropdown-item,
-.p-multiselect-panel .p-multiselect-items .p-multiselect-item {
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item,
+.p-autocomplete-panel .p-autocomplete-items .p-autocomplete-item {
   color: var(--text);
 }
 .p-dropdown-panel .p-dropdown-items .p-dropdown-item:not(.p-highlight):not(.p-disabled):hover,
-.p-multiselect-panel .p-multiselect-items .p-multiselect-item:not(.p-highlight):not(.p-disabled):hover {
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item:not(.p-highlight):not(.p-disabled):hover,
+.p-autocomplete-panel .p-autocomplete-items .p-autocomplete-item:not(.p-highlight):not(.p-disabled):hover {
   background: var(--hover);
   color: var(--text);
 }
 .p-dropdown-panel .p-dropdown-items .p-dropdown-item.p-highlight,
-.p-multiselect-panel .p-multiselect-items .p-multiselect-item.p-highlight {
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item.p-highlight,
+.p-autocomplete-panel .p-autocomplete-items .p-autocomplete-item.p-highlight {
   background: var(--brand-tint);
   color: var(--text);
 }

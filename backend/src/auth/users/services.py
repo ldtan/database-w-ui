@@ -109,9 +109,17 @@ class UserService:
         limit: int = 100,
         q: Optional[str] = None,
         search_person_names: bool = False,
+        uuids: Optional[Sequence[UUID]] = None,
     ) -> Sequence[User]:
-        """Matched server-side so a search can find users beyond the first page."""
+        """Matched server-side so a search can find users beyond the first page.
+
+        ``uuids`` restricts the result to specific accounts — what a page showing
+        `user` cells needs to turn the uuids it holds into names, without pulling
+        the whole users table down to do it.
+        """
         stmt = cls._apply_search(cls._select(), q, search_person_names)
+        if uuids is not None:
+            stmt = stmt.where(User.uuid.in_(uuids))
         result = await db.execute(stmt.order_by(User.id).offset(skip).limit(limit))
         return result.scalars().all()
 
@@ -309,8 +317,11 @@ class UserGroupService:
         skip: int = 0,
         limit: int = 100,
         q: Optional[str] = None,
+        uuids: Optional[Sequence[UUID]] = None,
     ) -> Sequence[UserGroup]:
         stmt = cls._apply_search(cls._select(), q)
+        if uuids is not None:
+            stmt = stmt.where(UserGroup.uuid.in_(uuids))
         result = await db.execute(
             stmt.order_by(UserGroup.id).offset(skip).limit(limit)
         )

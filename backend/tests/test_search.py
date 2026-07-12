@@ -213,3 +213,37 @@ async def test_person_search_by_name(make_client, session_factory):
         found = (await client.get("/api/people/?q=hopp")).json()
         assert [p["last_name"] for p in found] == ["Hopper"]
         assert (await client.get("/api/people/?q=turing")).json() == []
+
+
+async def test_users_can_be_resolved_by_uuid(make_client, session_factory):
+    """A page rendering `user` cells holds uuids and needs names for exactly those.
+
+    Without this it would have to fetch the whole users table and match client-side,
+    which silently stops working once there are more users than the fetch's limit.
+    """
+    async with session_factory() as db:
+        caller = await _make_user(db, "root", superuser=True)
+        a = await _make_user(db, "ana")
+        b = await _make_user(db, "bo")
+        await _make_user(db, "cy")
+
+    async with make_client(caller) as client:
+        found = (
+            await client.get(f"/api/auth/users/?uuid={a.uuid}&uuid={b.uuid}")
+        ).json()
+        assert sorted(u["username"] for u in found) == ["ana", "bo"]  # not "cy"
+
+        # An unknown uuid simply isn't in the result; it is not an error.
+        missing = "019f0000-0000-0000-0000-000000000000"
+        assert (await client.get(f"/api/auth/users/?uuid={missing}")).json() == []
+
+
+async def test_groups_can_be_resolved_by_uuid(make_client, session_factory):
+    async with session_factory() as db:
+        caller = await _make_user(db, "root", superuser=True)
+        wanted = await UserGroupService.create(db, UserGroupCreate(name="editors"))
+        await UserGroupService.create(db, UserGroupCreate(name="viewers"))
+
+    async with make_client(caller) as client:
+        found = (await client.get(f"/api/auth/groups/?uuid={wanted.uuid}")).json()
+        assert [g["name"] for g in found] == ["editors"]

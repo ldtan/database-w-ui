@@ -59,6 +59,11 @@ async def list_users(
     q: Optional[str] = Query(
         None, description="Match username or email (and person name, for superusers)"
     ),
+    uuid: Optional[list[UUID]] = Query(
+        None,
+        max_length=500,
+        description="Resolve specific accounts, e.g. the ones a page's `user` cells hold",
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -76,7 +81,12 @@ async def list_users(
         await UserService.count(db, q=q, search_person_names=search_names)
     )
     return await UserService.list(
-        db, skip=skip, limit=limit, q=q, search_person_names=search_names
+        db,
+        skip=skip,
+        limit=limit,
+        q=q,
+        search_person_names=search_names,
+        uuids=uuid,
     )
 
 
@@ -167,10 +177,15 @@ async def list_groups(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match name or description"),
+    uuid: Optional[list[UUID]] = Query(
+        None,
+        max_length=500,
+        description="Resolve specific groups, e.g. the ones a page's `group` cells hold",
+    ),
     db: AsyncSession = Depends(get_db),
 ):
     response.headers["X-Total-Count"] = str(await UserGroupService.count(db, q=q))
-    return await UserGroupService.list(db, skip=skip, limit=limit, q=q)
+    return await UserGroupService.list(db, skip=skip, limit=limit, q=q, uuids=uuid)
 
 
 @group_router.get("/{uuid}", response_model=UserGroupRead)

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
@@ -29,7 +29,13 @@ import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { LookupCell } from "../lookups/LookupControls";
-import { PrincipalCell } from "../principals/PrincipalControls";
+import {
+  PrincipalCell,
+  collectPrincipalUuids,
+  usePrincipalLabels,
+  type PrincipalLabels,
+  type PrincipalType,
+} from "../principals/PrincipalControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
@@ -40,13 +46,25 @@ import {
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
-function renderCell(column: Column, row: ListItem) {
+function renderCell(
+  column: Column,
+  row: ListItem,
+  principalLabels: Record<PrincipalType, PrincipalLabels>,
+) {
   const value = row.data?.[column.uuid];
   if (column.type === "lookup") {
     return <LookupCell column={column} value={value} />;
   }
   if (column.type === "user" || column.type === "group") {
-    return <PrincipalCell column={column} value={value} />;
+    // Names are resolved once for the whole page (see principalLabels below),
+    // not per cell — otherwise every row would fire its own request.
+    return (
+      <PrincipalCell
+        column={column}
+        value={value}
+        labels={principalLabels[column.type]}
+      />
+    );
   }
   if (value === null || value === undefined || value === "") {
     return <span className="text-gray-300">—</span>;
@@ -281,6 +299,19 @@ export function ListDetailPage() {
     return result;
   })();
   const visibleCols = orderedCols.filter((c) => !hiddenColumns.includes(c.uuid));
+
+  // Resolve every user/group uuid on this page of records in one request per kind,
+  // rather than letting each cell fetch for itself (or pulling down the whole users
+  // table, which stops working once there are more users than the fetch's limit).
+  const principalUuids = useMemo(
+    () => collectPrincipalUuids(cols, items.data ?? []),
+    [cols, items.data],
+  );
+  const principalLabels: Record<PrincipalType, PrincipalLabels> = {
+    user: usePrincipalLabels("user", principalUuids.user),
+    group: usePrincipalLabels("group", principalUuids.group),
+  };
+
   const formList = forms.data ?? [];
   const sharingItem =
     (items.data ?? []).find((i) => i.uuid === sharingItemUuid) ?? null;
@@ -327,7 +358,7 @@ export function ListDetailPage() {
     if (!groupColumn) return null;
     return (
       <span className="font-semibold">
-        {groupColumn.display_name}: {renderCell(groupColumn, row)}
+        {groupColumn.display_name}: {renderCell(groupColumn, row, principalLabels)}
       </span>
     );
   }
@@ -573,7 +604,7 @@ export function ListDetailPage() {
                 )}
               </div>
             }
-            body={(row: ListItem) => renderCell(col, row)}
+            body={(row: ListItem) => renderCell(col, row, principalLabels)}
           />
         ))}
         <DataColumn
