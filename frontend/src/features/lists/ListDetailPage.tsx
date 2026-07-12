@@ -24,9 +24,8 @@ import type {
   ViewConfig,
   Workspace,
 } from "../../lib/types";
-import { AddColumnDialog } from "../columns/AddColumnDialog";
+import { ListSettingsDialog } from "./ListSettingsDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
-import { FormsPanel } from "../forms/FormsPanel";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { LookupCell, collectLookupUuids } from "../lookups/LookupControls";
 import {
@@ -114,10 +113,8 @@ export function ListDetailPage() {
   const { listUuid = "" } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const [showAddColumn, setShowAddColumn] = useState(false);
-  const [showForms, setShowForms] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
-  const [showShareList, setShowShareList] = useState(false);
   const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
@@ -224,19 +221,6 @@ export function ListDetailPage() {
     onError: (err) =>
       toast.error(
         "Could not delete record",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-  const deleteColumn = useMutation({
-    mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/columns/${uuid}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
-      toast.success("Column deleted");
-    },
-    onError: (err) =>
-      toast.error(
-        "Could not delete column",
         err instanceof ApiError ? err.message : undefined,
       ),
   });
@@ -389,14 +373,6 @@ export function ListDetailPage() {
       accept: () => bulkDelete.mutate(),
     });
   }
-  function confirmDeleteColumn(col: Column) {
-    confirmDialog({
-      message: `Delete column "${col.display_name}"? Its values stay in existing records but are hidden.`,
-      header: "Confirm",
-      icon: "pi pi-exclamation-triangle",
-      accept: () => deleteColumn.mutate(col.uuid),
-    });
-  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -405,20 +381,14 @@ export function ListDetailPage() {
       <div className="flex items-center justify-between">
         <Breadcrumbs items={crumbs} />
         <div className="flex gap-2">
-          {listActions.has("configure") && (
-            <Button
-              label="Add column"
-              icon="pi pi-plus"
-              outlined
-              onClick={() => setShowAddColumn(true)}
-            />
-          )}
+          {/* Columns, permissions and forms all configure the *list*, so they live
+              together behind one button; the toolbar is then about the data. */}
           <Button
-            label="Forms"
-            icon="pi pi-file-edit"
+            label="Settings"
+            icon="pi pi-cog"
             outlined
-            onClick={() => setShowForms(true)}
-            disabled={formList.length === 0}
+            onClick={() => setShowSettings(true)}
+            disabled={!list.data}
           />
           <Button
             label="Import / Export"
@@ -427,15 +397,6 @@ export function ListDetailPage() {
             onClick={() => setShowTransfer(true)}
             disabled={cols.length === 0}
           />
-          {listActions.has("share") && (
-            <Button
-              label="Share"
-              icon="pi pi-share-alt"
-              outlined
-              onClick={() => setShowShareList(true)}
-              disabled={!list.data}
-            />
-          )}
           {listActions.has("create") && (
             <Button
               label="Add record"
@@ -526,7 +487,7 @@ export function ListDetailPage() {
           severity="info"
           text={
             listActions.has("configure")
-              ? "This list has no columns yet. Use “Add column” to define fields, then add records."
+              ? "This list has no columns yet. Add them under Settings → Columns, then add records."
               : "This list has no columns yet."
           }
         />
@@ -596,24 +557,9 @@ export function ListDetailPage() {
             key={col.uuid}
             field={`data.${col.uuid}`}
             sortable={!groupColumn}
-            header={
-              <div className="flex items-center gap-2">
-                <span>{col.display_name}</span>
-                {listActions.has("configure") && (
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    size="small"
-                    aria-label={`Delete column ${col.display_name}`}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      confirmDeleteColumn(col);
-                    }}
-                  />
-                )}
-              </div>
-            }
+            // Deleting a column moved into List settings: a trash button on every
+            // header crowded out the thing the grid is for.
+            header={col.display_name}
             body={(row: ListItem) => renderCell(col, row, listUuid, principalUuids, lookupUuids)}
           />
         ))}
@@ -664,12 +610,24 @@ export function ListDetailPage() {
         />
       </DataTable>
 
-      <AddColumnDialog
-        listUuid={listUuid}
-        workspaceUuid={list.data?.workspace.uuid ?? null}
-        visible={showAddColumn}
-        onHide={() => setShowAddColumn(false)}
-      />
+      {list.data && (
+        <ListSettingsDialog
+          listUuid={listUuid}
+          listName={list.data.display_name}
+          workspaceUuid={list.data.workspace.uuid ?? null}
+          columns={cols}
+          forms={formList}
+          canConfigure={listActions.has("configure")}
+          canShare={listActions.has("share")}
+          inherit={{
+            value: list.data.permissions_inherit,
+            onChange: (value) => setListInherit.mutate(value),
+            busy: setListInherit.isPending,
+          }}
+          visible={showSettings}
+          onHide={() => setShowSettings(false)}
+        />
+      )}
       <RecordFormDialog
         listUuid={listUuid}
         columns={cols}
@@ -677,13 +635,6 @@ export function ListDetailPage() {
         item={recordDialog.item}
         visible={recordDialog.open}
         onHide={() => setRecordDialog({ open: false, item: null })}
-      />
-      <FormsPanel
-        listUuid={listUuid}
-        columns={cols}
-        forms={formList}
-        visible={showForms}
-        onHide={() => setShowForms(false)}
       />
       <ImportExportDialog
         listUuid={listUuid}
@@ -701,20 +652,6 @@ export function ListDetailPage() {
           baseConfig={currentConfig}
           visible={showFilter}
           onHide={() => setShowFilter(false)}
-        />
-      )}
-      {showShareList && list.data && (
-        <ShareDialog
-          visible={showShareList}
-          onHide={() => setShowShareList(false)}
-          resourceType="list"
-          resourceUuid={list.data.uuid}
-          resourceLabel={list.data.display_name}
-          inherit={{
-            value: list.data.permissions_inherit,
-            onChange: (value) => setListInherit.mutate(value),
-            busy: setListInherit.isPending,
-          }}
         />
       )}
       {sharingItem && (

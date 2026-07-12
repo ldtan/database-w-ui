@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
 import { InputText } from "primereact/inputtext";
@@ -58,11 +57,14 @@ interface Props {
   listUuid: string;
   columns: Column[];
   forms: Form[];
-  visible: boolean;
-  onHide: () => void;
+  // False while the tab is not showing, so it does not seed its editor from a form
+  // nobody is looking at.
+  active: boolean;
 }
 
-export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props) {
+/** Per-list form layouts. The body of what used to be its own dialog; it now lives
+ *  as a tab in List settings. */
+export function FormsEditor({ listUuid, columns, forms, active }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
@@ -98,10 +100,10 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
   });
 
   useEffect(() => {
-    if (!visible) return;
+    if (!active) return;
     if (!selectedUuid && forms.length > 0) setSelectedUuid(forms[0].uuid);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, forms]);
+  }, [active, forms]);
 
   useEffect(() => {
     if (activeForm) setRows(seedRows(activeForm, columns));
@@ -140,8 +142,12 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
+  if (forms.length === 0) {
+    return <Message severity="info" text="This list has no forms." />;
+  }
+
   return (
-    <Dialog header="Forms" visible={visible} onHide={onHide} style={{ width: 640 }}>
+    <>
       <div className="flex flex-col gap-4">
         {save.error instanceof ApiError && (
           <Message severity="error" text={save.error.message} />
@@ -222,7 +228,6 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
         </div>
 
         <div className="flex justify-end gap-2">
-          <Button label="Close" text onClick={onHide} />
           {canEdit && (
             <Button
               label="Save"
@@ -248,6 +253,6 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
           }}
         />
       )}
-    </Dialog>
+    </>
   );
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
@@ -12,23 +12,31 @@ import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
-import type { Column, ColumnType, ListRead } from "../../lib/types";
+import type { ChoiceOption, Column, ColumnType, ListRead } from "../../lib/types";
 
 interface Props {
   listUuid: string;
   workspaceUuid: string | null;
+  // null => create a new column; otherwise edit this one.
+  column: Column | null;
   visible: boolean;
   onHide: () => void;
 }
 
-export function AddColumnDialog({
+/** Add or modify a column. The two are one dialog because they take the same
+ *  settings — with one exception the API enforces: a column's **type is immutable**
+ *  once records hold values shaped by it, so it is shown but locked when editing. */
+export function ColumnDialog({
   listUuid,
   workspaceUuid,
+  column,
   visible,
   onHide,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const editing = column !== null;
+
   const [displayName, setDisplayName] = useState("");
   const [type, setType] = useState<ColumnType>("text");
   const [required, setRequired] = useState(false);
@@ -41,6 +49,43 @@ export function AddColumnDialog({
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   const [multiple, setMultiple] = useState(false);
+
+  // Seed the form from the column being edited (or clear it for a new one) each
+  // time the dialog opens.
+  useEffect(() => {
+    if (!visible) return;
+    if (!column) {
+      setDisplayName("");
+      setType("text");
+      setRequired(false);
+      setMaxLength(null);
+      setMin(null);
+      setMax(null);
+      setIntegerOnly(false);
+      setChoices("");
+      setLinkText("");
+      setTargetListUuid(null);
+      setDisplayColumnUuid(null);
+      setMultiple(false);
+      return;
+    }
+    const config = column.config ?? {};
+    setDisplayName(column.display_name);
+    setType(column.type);
+    setRequired(!!config.required);
+    setMaxLength((config.max_length as number) ?? null);
+    setMin((config.min as number) ?? null);
+    setMax((config.max as number) ?? null);
+    setIntegerOnly(!!config.integer_only);
+    // Options carry stable ids; resend them as labels so unchanged ones keep theirs.
+    setChoices(
+      ((config.options as ChoiceOption[]) ?? []).map((o) => o.label).join(";"),
+    );
+    setLinkText((config.label as string) ?? "");
+    setTargetListUuid((config.target_list_uuid as string) ?? null);
+    setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
+    setMultiple(!!config.multiple);
+  }, [visible, column]);
 
   // Lists in this workspace are the candidate lookup targets (self included).
   const lists = useQuery({
@@ -56,40 +101,34 @@ export function AddColumnDialog({
     enabled: type === "lookup" && !!targetListUuid,
   });
 
-  function reset() {
-    setDisplayName("");
-    setType("text");
-    setRequired(false);
-    setMaxLength(null);
-    setMin(null);
-    setMax(null);
-    setIntegerOnly(false);
-    setChoices("");
-    setLinkText("");
-    setTargetListUuid(null);
-    setDisplayColumnUuid(null);
-    setMultiple(false);
-  }
-
-  const create = useMutation({
+  const save = useMutation({
     mutationFn: () => {
-      const config: Record<string, unknown> = {};
-      if (required) config.required = true;
-      if ((type === "text" || type === "long_text") && maxLength != null) {
+      const config: Record<string, unknown> = { required };
+      if (type === "text" || type === "long_text") {
         config.max_length = maxLength;
       }
       if (type === "number") {
-        if (min != null) config.min = min;
-        if (max != null) config.max = max;
-        if (integerOnly) config.integer_only = true;
+        config.min = min;
+        config.max = max;
+        config.integer_only = integerOnly;
       }
       if (type === "choice") config.choices = choices;
-      if (type === "link" && linkText.trim()) config.label = linkText.trim();
-      if ((type === "user" || type === "group") && multiple) config.multiple = true;
+      if (type === "link") config.label = linkText.trim() || null;
+      if (type === "user" || type === "group") config.multiple = multiple;
       if (type === "lookup") {
         config.target_list_uuid = targetListUuid;
-        if (displayColumnUuid) config.display_column_uuid = displayColumnUuid;
-        if (multiple) config.multiple = true;
+        config.display_column_uuid = displayColumnUuid;
+        config.multiple = multiple;
+      }
+
+      if (editing) {
+        // `name` is deliberately left alone: it is the code-facing slug, and an
+        // export's column headers are keyed by it — renaming the label should not
+        // break a file someone already has.
+        return api.patch<Column>(
+          `/lists/${listUuid}/columns/${column.uuid}`,
+          { display_name: displayName, config },
+        );
       }
       return api.post<Column>(`/lists/${listUuid}/columns/`, {
         name: slugify(displayName),
@@ -98,24 +137,24 @@ export function AddColumnDialog({
         config,
       });
     },
-    onSuccess: (column) => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
-      toast.success("Column added", column.display_name);
-      reset();
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success(editing ? "Column updated" : "Column added", saved.display_name);
       onHide();
     },
   });
 
   return (
     <Dialog
-      header="Add column"
+      header={editing ? `Edit “${column.display_name}”` : "Add column"}
       visible={visible}
       onHide={onHide}
       style={{ width: 420 }}
     >
       <div className="flex flex-col gap-4">
-        {create.error instanceof ApiError && (
-          <Message severity="error" text={create.error.message} />
+        {save.error instanceof ApiError && (
+          <Message severity="error" text={save.error.message} />
         )}
         <div className="flex flex-col gap-2">
           <label htmlFor="col-name">Name</label>
@@ -133,7 +172,14 @@ export function AddColumnDialog({
             value={type}
             options={COLUMN_TYPE_OPTIONS}
             onChange={(e) => setType(e.value as ColumnType)}
+            disabled={editing}
           />
+          {editing && (
+            <small style={{ color: "var(--text-muted)" }}>
+              A column's type cannot change: existing records already hold values in
+              its shape.
+            </small>
+          )}
         </div>
 
         {(type === "text" || type === "long_text") && (
@@ -150,36 +196,36 @@ export function AddColumnDialog({
         )}
 
         {type === "number" && (
-          <div className="flex gap-3">
-            <div className="flex flex-col gap-2 flex-1">
-              <label htmlFor="col-min">Min</label>
-              <InputNumber
-                inputId="col-min"
-                value={min}
-                onValueChange={(e) => setMin(e.value ?? null)}
-                useGrouping={false}
-              />
+          <>
+            <div className="flex gap-3">
+              <div className="flex flex-col gap-2 flex-1">
+                <label htmlFor="col-min">Min</label>
+                <InputNumber
+                  inputId="col-min"
+                  value={min}
+                  onValueChange={(e) => setMin(e.value ?? null)}
+                  useGrouping={false}
+                />
+              </div>
+              <div className="flex flex-col gap-2 flex-1">
+                <label htmlFor="col-max">Max</label>
+                <InputNumber
+                  inputId="col-max"
+                  value={max}
+                  onValueChange={(e) => setMax(e.value ?? null)}
+                  useGrouping={false}
+                />
+              </div>
             </div>
-            <div className="flex flex-col gap-2 flex-1">
-              <label htmlFor="col-max">Max</label>
-              <InputNumber
-                inputId="col-max"
-                value={max}
-                onValueChange={(e) => setMax(e.value ?? null)}
-                useGrouping={false}
+            <div className="flex items-center gap-2">
+              <Checkbox
+                inputId="col-int"
+                checked={integerOnly}
+                onChange={(e) => setIntegerOnly(!!e.checked)}
               />
+              <label htmlFor="col-int">Integers only</label>
             </div>
-          </div>
-        )}
-        {type === "number" && (
-          <div className="flex items-center gap-2">
-            <Checkbox
-              inputId="col-int"
-              checked={integerOnly}
-              onChange={(e) => setIntegerOnly(!!e.checked)}
-            />
-            <label htmlFor="col-int">Integers only</label>
-          </div>
+          </>
         )}
 
         {type === "choice" && (
@@ -191,6 +237,12 @@ export function AddColumnDialog({
               onChange={(e) => setChoices(e.target.value)}
               placeholder="Todo;Doing;Done"
             />
+            {editing && (
+              <small style={{ color: "var(--text-muted)" }}>
+                Renaming an option keeps records pointing at it; removing one leaves
+                records holding a value the column no longer offers.
+              </small>
+            )}
           </div>
         )}
 
@@ -280,9 +332,9 @@ export function AddColumnDialog({
         <div className="flex justify-end gap-2">
           <Button label="Cancel" text onClick={onHide} />
           <Button
-            label="Add"
-            onClick={() => create.mutate()}
-            loading={create.isPending}
+            label={editing ? "Save" : "Add"}
+            onClick={() => save.mutate()}
+            loading={save.isPending}
             disabled={
               !displayName.trim() || (type === "lookup" && !targetListUuid)
             }
