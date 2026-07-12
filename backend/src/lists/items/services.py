@@ -394,6 +394,11 @@ class ListItemService:
         Blank strings are dropped rather than resolved: an empty cell means "no
         reference", and passing "" through to a label match would silently link the
         record to whichever target row happens to have a blank label.
+
+        Values are otherwise passed through **verbatim**. Trimming them here would
+        be a silent rewrite of the thing we then match on: a target row labelled
+        " Springfield High" exports with its leading space, and a trimmed import
+        would fail to find it — breaking the round-trip on a file this app wrote.
         """
         multiple = bool((column.config or {}).get("multiple"))
         if multiple and not isinstance(value, list):
@@ -405,8 +410,17 @@ class ListItemService:
                 continue
             if not isinstance(raw, str):
                 cls._type_error(column, f"a {noun} uuid or name")
-            raws.append(raw.strip())
+            raws.append(raw)
         return multiple, raws
+
+    @staticmethod
+    def _as_uuid(raw: str) -> Optional[UUID]:
+        """A reference value read as a uuid, or None if it is a name/label.
+
+        Trimmed only for the *parse*: surrounding space around a uuid is noise, but
+        around a label it is part of the label (see `_reference_inputs`).
+        """
+        return coerce_uuid(raw.strip())
 
     @classmethod
     async def _validate_value(
@@ -447,15 +461,17 @@ class ListItemService:
         if not raws:
             return [] if multiple else None
 
-        by_uuid = {coerce_uuid(raw): raw for raw in raws if coerce_uuid(raw)}
-        names = [raw for raw in raws if coerce_uuid(raw) is None]
+        # Parsed once per value, not once per use.
+        parsed = [(raw, cls._as_uuid(raw)) for raw in raws]
+        uuids = [uuid for _, uuid in parsed if uuid is not None]
+        names = [raw for raw, uuid in parsed if uuid is None]
 
         rows = (
             await db.execute(
                 select(model.uuid, name_field).where(
                     model.deleted_at.is_(None),
                     sa.or_(
-                        model.uuid.in_(list(by_uuid)) if by_uuid else sa.false(),
+                        model.uuid.in_(uuids) if uuids else sa.false(),
                         name_field.in_(names) if names else sa.false(),
                     ),
                 )
@@ -465,9 +481,8 @@ class ListItemService:
         by_name = {name: str(uuid) for uuid, name in rows}
 
         resolved: list[str] = []
-        for raw in raws:
-            parsed = coerce_uuid(raw)
-            hit = str(parsed) if parsed and str(parsed) in found_uuids else by_name.get(raw)
+        for raw, uuid in parsed:
+            hit = str(uuid) if uuid and str(uuid) in found_uuids else by_name.get(raw)
             if hit is None:
                 raise UnknownReferenceError(
                     f"Column '{column.name}' references an unknown {noun}: {raw}"
@@ -513,8 +528,9 @@ class ListItemService:
 
         target_list_id = await cls._lookup_target_id(db, lst, column, config)
 
-        uuids = [u for u in (coerce_uuid(raw) for raw in raws) if u is not None]
-        labels = [raw for raw in raws if coerce_uuid(raw) is None]
+        parsed = [(raw, cls._as_uuid(raw)) for raw in raws]
+        uuids = [uuid for _, uuid in parsed if uuid is not None]
+        labels = [raw for raw, uuid in parsed if uuid is None]
 
         # Two queries for the whole cell — one for the uuids, one for the labels —
         # rather than one per value. Import calls this per row, so per-value queries
@@ -530,43 +546,55 @@ class ListItemService:
             )
             found_uuids = {str(u) for u in rows.scalars().all()}
 
-        by_label: dict[str, list[str]] = {}
+        by_label: dict[str, tuple[str, int]] = {}
         if labels:
             key = await cls._lookup_display_key(db, target_list_id, column, config)
+            label_col = ListItem.data[key].astext
+            # Grouped, so a label shared by a million rows costs one row of result
+            # rather than a million: all we need is *one* match and whether there
+            # was more than one.
             rows = await db.execute(
-                select(ListItem.data[key].astext, ListItem.uuid).where(
+                # Postgres has no min(uuid); the text form is what gets stored anyway.
+                select(
+                    label_col,
+                    func.min(sa.cast(ListItem.uuid, sa.Text)),
+                    func.count(),
+                )
+                .where(
                     ListItem.list_id == target_list_id,
                     ListItem.deleted_at.is_(None),
-                    ListItem.data[key].astext.in_(labels),
+                    label_col.in_(labels),
                 )
+                .group_by(label_col)
             )
-            for label, row_uuid in rows.all():
-                by_label.setdefault(label, []).append(str(row_uuid))
+            by_label = {
+                label: (row_uuid, count) for label, row_uuid, count in rows.all()
+            }
 
         resolved: list[str] = []
-        for raw in raws:
-            parsed = coerce_uuid(raw)
-            if parsed is not None:
-                if str(parsed) not in found_uuids:
+        for raw, uuid in parsed:
+            if uuid is not None:
+                if str(uuid) not in found_uuids:
                     raise UnknownReferenceError(
                         f"Lookup column '{column.name}' references an unknown row: {raw}"
                     )
-                resolved.append(str(parsed))
+                resolved.append(str(uuid))
                 continue
 
-            matches = by_label.get(raw, [])
-            if not matches:
+            match = by_label.get(raw)
+            if match is None:
                 raise UnknownReferenceError(
                     f"Lookup column '{column.name}' references an unknown row: {raw}"
                 )
-            if len(matches) > 1:
+            row_uuid, count = match
+            if count > 1:
                 # Row labels are not unique (usernames are), so there is no defensible
                 # way to pick one — say so instead of silently linking the wrong row.
                 raise ValidationError(
                     f"Lookup column '{column.name}': '{raw}' matches more than one row "
                     f"in the target list; use the row uuid instead"
                 )
-            resolved.append(matches[0])
+            resolved.append(row_uuid)
 
         return resolved if multiple else resolved[0]
 

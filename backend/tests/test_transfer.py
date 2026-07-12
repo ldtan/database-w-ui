@@ -200,3 +200,73 @@ async def test_import_json_typed_values(client, list_uuid, add_column):
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     ages = sorted(it["data"][age] for it in items)
     assert ages == [25, 30]  # numbers, not strings
+
+
+async def test_a_label_with_surrounding_space_round_trips(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Export writes a row's label verbatim, so import must match it verbatim. A
+    value trimmed on the way in would fail to find the row it came from — breaking
+    the round-trip on a file this app itself wrote."""
+    lookup, rows = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, [" Springfield High"]
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {lookup: rows[" Springfield High"]}},
+    )
+
+    csv = (
+        await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
+    ).text
+    assert " Springfield High" in csv
+
+    reimport = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", csv, "text/csv")}
+    )
+    assert reimport.status_code == 200, reimport.text
+    assert reimport.json() == {"created": 1, "errors": []}
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert [i["data"][lookup] for i in items] == [rows[" Springfield High"]] * 2
+
+
+async def test_ambiguity_is_detected_without_loading_every_match(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Detecting "this label is ambiguous" needs one row of result, not one per
+    match: a label shared by a million target rows must not be materialized just to
+    raise the error."""
+    lookup, _ = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, ["Twin"] * 50
+    )
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {lookup: "Twin"}}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "more than one row" in resp.json()["detail"]
+
+
+async def test_export_larger_than_a_batch_resolves_labels_mid_stream(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Labels are fetched on the export's own session, between fetches from an open
+    server-side cursor — a second session would double the connections each export
+    holds, which is how concurrent exports deadlock the pool. This drives more rows
+    than one export batch, so the resolver really does query mid-stream."""
+    lookup, rows = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, [f"School {i}" for i in range(20)]
+    )
+    # More than _EXPORT_BATCH (500), so labels load repeatedly while streaming.
+    body = "school\n" + "".join(f"School {i % 20}\n" for i in range(1200))
+    imported = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+    assert imported.json()["created"] == 1200, imported.text
+
+    export = await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
+    assert export.status_code == 200, export.text
+    lines = export.text.strip().splitlines()
+    assert len(lines) == 1201  # header + every row
+    assert all(line.startswith("School ") for line in lines[1:])  # no uuid leaked

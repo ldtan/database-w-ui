@@ -77,8 +77,9 @@ class _LabelResolver:
     cache is dropped if it grows past ``_LABEL_CACHE_MAX``, so a pathological export
     stays bounded too.
 
-    It reads on its own session: the export's cursor is open on the caller's, and
-    issuing a query there mid-stream would disturb the in-flight result.
+    It reads on the export's own session, between fetches from the streaming cursor.
+    A session of its own would double the connections an export holds, which is how a
+    handful of concurrent exports deadlock the pool.
     """
 
     def __init__(self, db: AsyncSession, columns: list[Column], user):
@@ -245,6 +246,15 @@ async def export_rows(
         if limit is not None:
             stmt = stmt.limit(limit)
 
+        # Labels resolve on this same session, deliberately. Giving the resolver a
+        # session of its own would have one export holding two pooled connections for
+        # its whole duration — and enough concurrent exports, each holding one and
+        # waiting on a second, exhaust the pool and stall until they time out. The
+        # label queries run *between* fetches from the server-side cursor, never
+        # during one, which asyncpg serves happily on the same connection.
+        labels = _LabelResolver(db, columns, user)
+        await labels.prepare()
+
         # Select only the JSONB payload, not whole ORM entities: Core rows do not
         # enter the session identity map, so memory stays flat over a large
         # export. yield_per bounds the client-side row buffer too.
@@ -252,57 +262,57 @@ async def export_rows(
             stmt.with_only_columns(ListItem.data).execution_options(yield_per=1000)
         )
 
-        # Labels are resolved per batch, on their own session: this one has a cursor
-        # open, and querying it mid-stream would disturb the in-flight result.
-        async with db_module.SessionLocal() as label_db:
-            labels = _LabelResolver(label_db, columns, user)
-            await labels.prepare()
+        async def batches() -> AsyncIterator[list[dict]]:
+            """The stream in fixed-size chunks, each with its labels loaded.
 
-            async def batches() -> AsyncIterator[list[dict]]:
-                """The stream in fixed-size chunks, each with its labels loaded."""
-                batch: list[dict] = []
-                async for data in result:
-                    batch.append(data or {})
-                    if len(batch) >= _EXPORT_BATCH:
-                        await labels.load(batch)
-                        yield batch
-                        batch = []
-                if batch:
+            Batching exists to resolve labels in one round trip per chunk; the
+            rows are still serialized (and yielded) one at a time.
+            """
+            batch: list[dict] = []
+            async for data in result:
+                batch.append(data or {})
+                if len(batch) >= _EXPORT_BATCH:
                     await labels.load(batch)
                     yield batch
+                    batch = []
+            if batch:
+                await labels.load(batch)
+                yield batch
 
-            if fmt == "json":
-                first = True
-                yield "["
-                async for batch in batches():
-                    for row in batch:
-                        obj = {
-                            c.name: labels.cell(c, row.get(str(c.uuid)))
+        if fmt == "json":
+            first = True
+            yield "["
+            async for batch in batches():
+                for row in batch:
+                    obj = {
+                        c.name: labels.cell(c, row.get(str(c.uuid)))
+                        for c in columns
+                    }
+                    yield ("" if first else ",") + json.dumps(obj, default=str)
+                    first = False
+            yield "]"
+        else:
+            buffer = io.StringIO()
+            writer = csv.writer(buffer)
+
+            def flush() -> str:
+                text = buffer.getvalue()
+                buffer.seek(0)
+                buffer.truncate(0)
+                return text
+
+            writer.writerow([c.name for c in columns])
+            yield flush()
+            async for batch in batches():
+                for row in batch:
+                    writer.writerow(
+                        [
+                            _csv_cell(labels.cell(c, row.get(str(c.uuid))))
                             for c in columns
-                        }
-                        yield ("" if first else ",") + json.dumps(obj, default=str)
-                        first = False
-                yield "]"
-            else:
-                buffer = io.StringIO()
-                writer = csv.writer(buffer)
-
-                def flush() -> str:
-                    text = buffer.getvalue()
-                    buffer.seek(0)
-                    buffer.truncate(0)
-                    return text
-
-                writer.writerow([c.name for c in columns])
-                yield flush()
-                async for batch in batches():
-                    for row in batch:
-                        writer.writerow(
-                            [
-                                _csv_cell(labels.cell(c, row.get(str(c.uuid))))
-                                for c in columns
-                            ]
-                        )
+                        ]
+                    )
+                    # Per row, not per batch: the buffer holds one row, and the
+                    # client starts receiving bytes immediately.
                     yield flush()
 
 

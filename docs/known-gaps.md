@@ -168,6 +168,17 @@ returns an empty set until the request resolves, so buttons appear a beat after 
 rather than showing and then vanishing (which would let someone click a control they don't
 have). Grant and inheritance changes invalidate the cached `["effective"]` queries.
 
+**A request must never hold two pooled connections at once.** Export streams rows on a
+server-side cursor *and* resolves reference labels — the obvious way to write that is a second
+session for the label queries, because "you can't query a session mid-stream". You can: the
+label queries run **between** fetches from the cursor, never during one, and asyncpg serves
+them on the same connection (`test_export_larger_than_a_batch_resolves_labels_mid_stream`
+drives 1200 rows through it). Taking a second session instead would have each export hold two
+connections for its whole duration, and enough concurrent exports — each holding one, each
+waiting on a second — exhaust the pool and stall until `pool_timeout`. Reordering the
+acquisitions does not help: a session grabs its connection at its *first query*, not at its
+first stream.
+
 **Every read path over records must apply `item_view_filter`.** Per-record permissions are
 only as strong as the weakest path that returns records. Export used to miss this — it
 streamed rows filtered on `list_id` alone, so a list-viewer could export records whose
