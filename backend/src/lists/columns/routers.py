@@ -68,7 +68,12 @@ async def lookup_options(
         alias="uuid",
         description="Resolve specific rows, e.g. the ones a page's cells hold",
     ),
-    limit: int = Query(25, ge=1, le=500),
+    limit: Optional[int] = Query(
+        None,
+        ge=1,
+        le=500,
+        description="Defaults to the number of uuids asked for, else a page of suggestions",
+    ),
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),

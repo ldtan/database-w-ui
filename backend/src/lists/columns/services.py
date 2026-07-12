@@ -24,6 +24,10 @@ from .validation import (
 )
 
 
+# Suggestions returned when a picker searches (rather than resolving known rows).
+_OPTIONS_PAGE = 25
+
+
 class ColumnService:
     @staticmethod
     def _select(list_id: int):
@@ -141,7 +145,7 @@ class ColumnService:
         user,
         q: Optional[str] = None,
         uuids: Optional[Sequence[UUID]] = None,
-        limit: int = 25,
+        limit: Optional[int] = None,
     ) -> list[dict]:
         """Rows of a lookup's target list, as ``{uuid, label}`` options.
 
@@ -182,6 +186,12 @@ class ColumnService:
         await PermissionService.require(
             db, user, ResourceType.list, target.id, Action.view
         )
+
+        # Asking for specific rows means wanting all of them: a search's page size
+        # would silently drop the labels past it, and the caller would render row
+        # stubs with no indication anything was truncated.
+        if limit is None:
+            limit = len(uuids) if uuids else _OPTIONS_PAGE
 
         key = await display_column_key(db, target.id, config)
         label = ListItem.data[key].astext if key else sa_null()
@@ -279,6 +289,11 @@ class ColumnService:
             # A default would have to name a specific account or group, which then
             # rots when that account is deleted. Same call as lookup makes.
             raise ValidationError(f"A {type_.value} column cannot have a default value")
+
+        if type_ == ColumnType.link and isinstance(data.get("default"), str):
+            # Stored stripped, like a link value, so the default that is written into
+            # records is byte-for-byte the one that was validated.
+            data["default"] = data["default"].strip()
 
         # Numeric/temporal/text settings must be well-formed (min <= max, ...).
         validate_config_constraints(type_, data)

@@ -180,3 +180,19 @@ async def test_export_writes_names_and_import_reads_them_back(
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert [i["data"][col] for i in items] == [alice["uuid"], alice["uuid"]]
+
+
+async def test_a_blank_value_clears_the_cell(client, list_uuid, alice):
+    """An empty string means "no reference". Treating it as a name to match would
+    silently link the record to whichever row/account has a blank label."""
+    col = await _add(client, list_uuid, "user")
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: alice["uuid"]}}
+    )
+    item = created.json()["uuid"]
+
+    cleared = await client.patch(
+        f"/api/lists/{list_uuid}/items/{item}", json={"data": {col: "   "}}
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["data"][col] is None

@@ -294,3 +294,29 @@ async def test_export_does_not_leak_labels_from_an_unreadable_target(
     # The owner, who can read the target, still gets the readable label.
     mine = await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
     assert "Springfield High" in mine.text
+
+
+async def test_resolving_more_rows_than_a_search_page_is_not_truncated(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Asking for specific rows means wanting all of them. A search's page size
+    would silently drop the labels past it, and the caller would render row stubs
+    with nothing to say anything had been cut."""
+    names = [f"School {i:02d}" for i in range(30)]  # > the 25-row suggestion page
+    target, rows = await _target_with_rows(client, workspace_uuid, add_column, names)
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+
+    wanted = "&".join(f"uuid={uuid}" for uuid in rows.values())
+    resp = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options?{wanted}")
+    assert resp.status_code == 200, resp.text
+    assert len(resp.json()) == 30
+
+    # A search, by contrast, still returns one page of suggestions.
+    page = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options")
+    assert len(page.json()) == 25

@@ -108,3 +108,15 @@ async def test_import_cannot_smuggle_an_unsafe_url(client, list_uuid):
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert [i["data"][col] for i in items] == ["https://example.com"]
+
+
+async def test_a_url_is_stored_trimmed(client, list_uuid):
+    """The check parses the trimmed URL, so the trimmed URL is what gets stored —
+    otherwise `unique` and `max_length` see padding the validator never did."""
+    col = await _add_link_column(client, list_uuid)
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {col: "  https://example.com  "}},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][col] == "https://example.com"

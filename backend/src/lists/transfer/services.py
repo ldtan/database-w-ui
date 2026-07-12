@@ -28,6 +28,10 @@ from ..models import List
 
 # Commit every N successfully-prepared rows to bound the transaction size.
 _IMPORT_BATCH = 500
+# Rows whose labels are resolved in one round trip while streaming an export.
+_EXPORT_BATCH = 500
+# Cap on labels held across batches, so an enormous export stays bounded.
+_LABEL_CACHE_MAX = 50_000
 
 _SKIP = object()  # sentinel: leave this cell out of the record entirely
 
@@ -59,106 +63,143 @@ def _csv_cell(value: object) -> str:
     return str(value)
 
 
-async def _principal_names(
-    db: AsyncSession, columns: list[Column]
-) -> dict[str, str]:
-    """uuid -> username / group name, for the principal columns being exported.
-
-    Names, not the connected person's real name: person records are private, and
-    an export is readable by anyone who can read the list.
-    """
-    types = {c.type for c in columns} & PRINCIPAL_TYPES
-    names: dict[str, str] = {}
-    for column_type in types:
-        model = User if column_type == ColumnType.user else UserGroup
-        label = User.username if column_type == ColumnType.user else UserGroup.name
-        rows = await db.execute(
-            select(model.uuid, label).where(model.deleted_at.is_(None))
-        )
-        names.update({str(uuid): name for uuid, name in rows})
-    return names
-
-
-async def _lookup_row_labels(
-    db: AsyncSession, column: Column, user
-) -> dict[str, str]:
-    """row uuid -> label, for one lookup column's target list.
-
-    Resolving a label means *reading the target list*, so it obeys the target's
-    permissions, not the exported list's: `view` on the target, then the same
-    per-record filter every other read path applies. A caller who cannot read the
-    target gets no labels and the cells export as uuids — which is what they saw
-    before labels existed, and leaks nothing. Granting `view` on a list must not
-    hand over the contents of a *different* list it happens to point at.
-
-    The label comes from the same display column the item service matches on when
-    importing (`display_column_key`), so what we write is what we can read back. A
-    row whose label is empty keeps its uuid: it is the only value that identifies
-    it.
-    """
-    from src.permissions.enums import Action, ResourceType
-    from src.permissions.services import PermissionService
-
-    config = column.config or {}
-    target = (
-        await db.execute(
-            select(List)
-            .options(selectinload(List.workspace))
-            .where(
-                List.uuid == coerce_uuid(config.get("target_list_uuid")),
-                List.deleted_at.is_(None),
-            )
-        )
-    ).scalars().first()
-    if target is None:
-        return {}
-    if not await PermissionService.has(
-        db, user, ResourceType.list, target.id, Action.view
-    ):
-        return {}
-
-    key = await display_column_key(db, target.id, config)
-    if key is None:
-        return {}
-
-    rows = await db.execute(
-        select(ListItem.uuid, ListItem.data[key].astext).where(
-            ListItem.list_id == target.id,
-            ListItem.deleted_at.is_(None),
-            await PermissionService.item_view_filter(db, user, target),
-        )
-    )
-    return {str(uuid): label for uuid, label in rows if label}
-
-
-async def _label_maps(
-    db: AsyncSession, columns: list[Column], user
-) -> dict[str, dict[str, str]]:
-    """column uuid -> {stored uuid: label}, for every reference column exported.
+class _LabelResolver:
+    """Turns the reference uuids in a batch of rows into labels.
 
     A file full of uuids is useless to a human, so reference cells (`lookup`,
-    `user`, `group`) export the label. Import resolves the label back to the uuid,
-    so the file round-trips. Built once per export rather than per row.
+    `user`, `group`) export the label, and import resolves the label back to the
+    uuid so the file round-trips.
+
+    Resolved **a batch at a time, for only the uuids that batch actually holds** —
+    never by loading the target list (or the users table) up front. Export exists to
+    stream: server memory has to stay flat regardless of how big the list, or the
+    list it points at, happens to be. Labels are cached across batches, and the
+    cache is dropped if it grows past ``_LABEL_CACHE_MAX``, so a pathological export
+    stays bounded too.
+
+    It reads on its own session: the export's cursor is open on the caller's, and
+    issuing a query there mid-stream would disturb the in-flight result.
     """
-    principals = await _principal_names(db, columns)
-    maps: dict[str, dict[str, str]] = {}
-    for column in columns:
-        if column.type in PRINCIPAL_TYPES:
-            maps[str(column.uuid)] = principals
-        elif column.type == ColumnType.lookup:
-            maps[str(column.uuid)] = await _lookup_row_labels(db, column, user)
-    return maps
 
+    def __init__(self, db: AsyncSession, columns: list[Column], user):
+        self._db = db
+        self._user = user
+        self._columns = [
+            c for c in columns if c.type in PRINCIPAL_TYPES or c.type == ColumnType.lookup
+        ]
+        # column uuid -> how to resolve it (None once we know we cannot)
+        self._plan: dict[str, Optional[dict]] = {}
+        # column uuid -> {row/principal uuid: label}
+        self._cache: dict[str, dict[str, str]] = {}
 
-def _export_cell(
-    column: Column, value: object, maps: dict[str, dict[str, str]]
-) -> object:
-    labels = maps.get(str(column.uuid))
-    if not labels or value is None:
-        return value
-    if isinstance(value, list):
-        return [labels.get(str(v), str(v)) for v in value]
-    return labels.get(str(value), value)
+    async def prepare(self) -> None:
+        """Work out, once, how each reference column resolves — and whether it may."""
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
+        for column in self._columns:
+            key = str(column.uuid)
+            self._cache[key] = {}
+
+            if column.type in PRINCIPAL_TYPES:
+                model = User if column.type == ColumnType.user else UserGroup
+                label = (
+                    User.username if column.type == ColumnType.user else UserGroup.name
+                )
+                # Usernames, not the connected person's real name: person records are
+                # private, and an export is readable by anyone who can read the list.
+                self._plan[key] = {"model": model, "label": label}
+                continue
+
+            # Resolving a lookup label means *reading the target list*, so it obeys
+            # the target's permissions, not the exported list's. A caller who cannot
+            # read the target gets uuids — what they saw before labels existed.
+            # Granting `view` on a list must not hand over the contents of a
+            # *different* list it happens to point at.
+            config = column.config or {}
+            target = (
+                await self._db.execute(
+                    select(List)
+                    .options(selectinload(List.workspace))
+                    .where(
+                        List.uuid == coerce_uuid(config.get("target_list_uuid")),
+                        List.deleted_at.is_(None),
+                    )
+                )
+            ).scalars().first()
+            if target is None or not await PermissionService.has(
+                self._db, self._user, ResourceType.list, target.id, Action.view
+            ):
+                self._plan[key] = None
+                continue
+
+            display_key = await display_column_key(self._db, target.id, config)
+            if display_key is None:
+                self._plan[key] = None
+                continue
+
+            self._plan[key] = {
+                "list_id": target.id,
+                "display_key": display_key,
+                "visible": await PermissionService.item_view_filter(
+                    self._db, self._user, target
+                ),
+            }
+
+    async def load(self, batch: list[dict]) -> None:
+        """Fetch the labels this batch of records needs and not one row more."""
+        for column in self._columns:
+            key = str(column.uuid)
+            plan = self._plan.get(key)
+            if plan is None:
+                continue
+
+            known = self._cache[key]
+            if len(known) > _LABEL_CACHE_MAX:
+                known.clear()  # bound the memory an enormous export can hold
+
+            wanted: set[str] = set()
+            for row in batch:
+                value = (row or {}).get(key)
+                for uuid in value if isinstance(value, list) else [value]:
+                    if uuid is not None and str(uuid) not in known:
+                        wanted.add(str(uuid))
+            if not wanted:
+                continue
+
+            parsed = [u for u in (coerce_uuid(w) for w in wanted) if u is not None]
+            if not parsed:
+                continue
+
+            if "model" in plan:
+                rows = await self._db.execute(
+                    select(plan["model"].uuid, plan["label"]).where(
+                        plan["model"].deleted_at.is_(None),
+                        plan["model"].uuid.in_(parsed),
+                    )
+                )
+            else:
+                rows = await self._db.execute(
+                    select(
+                        ListItem.uuid, ListItem.data[plan["display_key"]].astext
+                    ).where(
+                        ListItem.list_id == plan["list_id"],
+                        ListItem.deleted_at.is_(None),
+                        ListItem.uuid.in_(parsed),
+                        plan["visible"],
+                    )
+                )
+            known.update({str(uuid): label for uuid, label in rows if label})
+
+    def cell(self, column: Column, value: object) -> object:
+        """The value to write: the label if we have one, else the uuid — which for a
+        row with an empty label is the only thing that identifies it."""
+        labels = self._cache.get(str(column.uuid))
+        if not labels or value is None:
+            return value
+        if isinstance(value, list):
+            return [labels.get(str(v), str(v)) for v in value]
+        return labels.get(str(value), value)
 
 
 async def export_rows(
@@ -204,10 +245,6 @@ async def export_rows(
         if limit is not None:
             stmt = stmt.limit(limit)
 
-        # Resolved before the cursor opens: issuing another query on this session
-        # mid-stream would disturb the in-flight result.
-        maps = await _label_maps(db, columns, user)
-
         # Select only the JSONB payload, not whole ORM entities: Core rows do not
         # enter the session identity map, so memory stays flat over a large
         # export. yield_per bounds the client-side row buffer too.
@@ -215,38 +252,58 @@ async def export_rows(
             stmt.with_only_columns(ListItem.data).execution_options(yield_per=1000)
         )
 
-        if fmt == "json":
-            first = True
-            yield "["
-            async for data in result:
-                obj = {
-                    c.name: _export_cell(c, (data or {}).get(str(c.uuid)), maps)
-                    for c in columns
-                }
-                yield ("" if first else ",") + json.dumps(obj, default=str)
-                first = False
-            yield "]"
-        else:
-            buffer = io.StringIO()
-            writer = csv.writer(buffer)
+        # Labels are resolved per batch, on their own session: this one has a cursor
+        # open, and querying it mid-stream would disturb the in-flight result.
+        async with db_module.SessionLocal() as label_db:
+            labels = _LabelResolver(label_db, columns, user)
+            await labels.prepare()
 
-            def flush() -> str:
-                text = buffer.getvalue()
-                buffer.seek(0)
-                buffer.truncate(0)
-                return text
+            async def batches() -> AsyncIterator[list[dict]]:
+                """The stream in fixed-size chunks, each with its labels loaded."""
+                batch: list[dict] = []
+                async for data in result:
+                    batch.append(data or {})
+                    if len(batch) >= _EXPORT_BATCH:
+                        await labels.load(batch)
+                        yield batch
+                        batch = []
+                if batch:
+                    await labels.load(batch)
+                    yield batch
 
-            writer.writerow([c.name for c in columns])
-            yield flush()
-            async for data in result:
-                row = data or {}
-                writer.writerow(
-                    [
-                        _csv_cell(_export_cell(c, row.get(str(c.uuid)), maps))
-                        for c in columns
-                    ]
-                )
+            if fmt == "json":
+                first = True
+                yield "["
+                async for batch in batches():
+                    for row in batch:
+                        obj = {
+                            c.name: labels.cell(c, row.get(str(c.uuid)))
+                            for c in columns
+                        }
+                        yield ("" if first else ",") + json.dumps(obj, default=str)
+                        first = False
+                yield "]"
+            else:
+                buffer = io.StringIO()
+                writer = csv.writer(buffer)
+
+                def flush() -> str:
+                    text = buffer.getvalue()
+                    buffer.seek(0)
+                    buffer.truncate(0)
+                    return text
+
+                writer.writerow([c.name for c in columns])
                 yield flush()
+                async for batch in batches():
+                    for row in batch:
+                        writer.writerow(
+                            [
+                                _csv_cell(labels.cell(c, row.get(str(c.uuid))))
+                                for c in columns
+                            ]
+                        )
+                    yield flush()
 
 
 # -- import --------------------------------------------------------------

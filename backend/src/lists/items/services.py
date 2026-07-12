@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -244,31 +245,54 @@ class ListItemService:
         db: AsyncSession, columns: Sequence[Column], target: str
     ) -> None:
         """Remove a now-dangling uuid from every record held by these columns.
-        Does not commit."""
+
+        One UPDATE per column, matched by a JSONB containment predicate, rather
+        than hydrating every referencing record into Python to rewrite it: a
+        column on a large list would otherwise pull the whole list into memory
+        inside the delete's transaction. Does not commit.
+        """
+        # The caller has typically just set deleted_at on an ORM object. Flush it
+        # first: these are Core UPDATEs, and a later flush would otherwise reorder
+        # them after statements that assume the delete already landed.
+        await db.flush()
+
         for column in columns:
             key = str(column.uuid)
             multiple = bool((column.config or {}).get("multiple"))
-            items = (
-                await db.execute(
-                    select(ListItem).where(
-                        ListItem.list_id == column.list_id,
-                        ListItem.deleted_at.is_(None),
-                        ListItem.data.has_key(key),
-                    )
-                )
-            ).scalars().all()
+            params = {"list_id": column.list_id, "key": key, "target": target}
 
-            for item in items:
-                value = (item.data or {}).get(key)
-                if multiple:
-                    if isinstance(value, list) and target in value:
-                        new_data = dict(item.data)
-                        new_data[key] = [v for v in value if v != target]
-                        item.data = new_data
-                elif value == target:
-                    new_data = dict(item.data)
-                    new_data[key] = None
-                    item.data = new_data
+            if multiple:
+                # Rebuild the array without the dangling uuid. `- to_jsonb(text)`
+                # is not an array-element delete, so filter and re-aggregate.
+                stmt = sa.text(
+                    """
+                    UPDATE list_items SET data = jsonb_set(
+                        data,
+                        ARRAY[:key],
+                        COALESCE(
+                            (SELECT jsonb_agg(elem)
+                               FROM jsonb_array_elements(data -> :key) AS elem
+                              WHERE elem <> to_jsonb(CAST(:target AS text))),
+                            '[]'::jsonb
+                        )
+                    )
+                    WHERE list_id = :list_id
+                      AND deleted_at IS NULL
+                      AND jsonb_typeof(data -> :key) = 'array'
+                      AND data -> :key @> to_jsonb(ARRAY[CAST(:target AS text)])
+                    """
+                )
+            else:
+                stmt = sa.text(
+                    """
+                    UPDATE list_items
+                       SET data = jsonb_set(data, ARRAY[:key], 'null'::jsonb)
+                     WHERE list_id = :list_id
+                       AND deleted_at IS NULL
+                       AND data ->> :key = :target
+                    """
+                )
+            await db.execute(stmt, params)
 
     # -- validation ---------------------------------------------------------
 
@@ -364,6 +388,27 @@ class ListItemService:
         return value is None or value == "" or value == []
 
     @classmethod
+    def _reference_inputs(cls, column: Column, value, noun: str):
+        """The raw values of a reference cell, as (multiple?, [non-empty values]).
+
+        Blank strings are dropped rather than resolved: an empty cell means "no
+        reference", and passing "" through to a label match would silently link the
+        record to whichever target row happens to have a blank label.
+        """
+        multiple = bool((column.config or {}).get("multiple"))
+        if multiple and not isinstance(value, list):
+            cls._type_error(column, f"a list of {noun}s")
+
+        raws = []
+        for raw in value if multiple else [value]:
+            if raw is None or (isinstance(raw, str) and not raw.strip()):
+                continue
+            if not isinstance(raw, str):
+                cls._type_error(column, f"a {noun} uuid or name")
+            raws.append(raw.strip())
+        return multiple, raws
+
+    @classmethod
     async def _validate_value(
         cls, db: AsyncSession, lst: List, column: Column, value
     ):
@@ -372,10 +417,14 @@ class ListItemService:
         # References need the database; every other type is a pure scalar check.
         if column.type == ColumnType.lookup:
             return await cls._validate_lookup(db, lst, column, value)
-        elif column.type in PRINCIPAL_TYPES:
+        if column.type in PRINCIPAL_TYPES:
             return await cls._validate_principal(db, column, value)
-        else:
-            validate_scalar(column.type, column.config or {}, column.name, value)
+        if column.type == ColumnType.link and isinstance(value, str):
+            # Store what was validated: the check parses the trimmed URL, so
+            # trimming here keeps the stored string and the checked string the
+            # same one — otherwise `unique` and `max_length` see the padding.
+            value = value.strip()
+        validate_scalar(column.type, column.config or {}, column.name, value)
         return value
 
     @classmethod
@@ -385,33 +434,45 @@ class ListItemService:
         Accepts a uuid (what the UI sends) or a username / group name (what a CSV
         written by our own export contains, so an export round-trips). Stores the
         uuid either way, since names are mutable.
+
+        Resolved in one query for the whole cell, not one per value: import runs
+        this per row, so a query per value turns a bulk import into thousands of
+        sequential round-trips.
         """
         model = User if column.type == ColumnType.user else UserGroup
         name_field = User.username if column.type == ColumnType.user else UserGroup.name
         noun = "user" if column.type == ColumnType.user else "group"
 
-        multiple = bool((column.config or {}).get("multiple"))
-        if multiple and not isinstance(value, list):
-            cls._type_error(column, f"a list of {noun}s")
-        raw_values = value if multiple else [value]
-        if not raw_values:
+        multiple, raws = cls._reference_inputs(column, value, noun)
+        if not raws:
             return [] if multiple else None
 
-        resolved: list[str] = []
-        for raw in raw_values:
-            if not isinstance(raw, str):
-                cls._type_error(column, f"a {noun} uuid or name")
-            parsed = coerce_uuid(raw)
-            stmt = select(model.uuid).where(model.deleted_at.is_(None))
-            stmt = stmt.where(
-                model.uuid == parsed if parsed is not None else name_field == raw
+        by_uuid = {coerce_uuid(raw): raw for raw in raws if coerce_uuid(raw)}
+        names = [raw for raw in raws if coerce_uuid(raw) is None]
+
+        rows = (
+            await db.execute(
+                select(model.uuid, name_field).where(
+                    model.deleted_at.is_(None),
+                    sa.or_(
+                        model.uuid.in_(list(by_uuid)) if by_uuid else sa.false(),
+                        name_field.in_(names) if names else sa.false(),
+                    ),
+                )
             )
-            found = (await db.execute(stmt)).scalars().first()
-            if found is None:
+        ).all()
+        found_uuids = {str(uuid) for uuid, _ in rows}
+        by_name = {name: str(uuid) for uuid, name in rows}
+
+        resolved: list[str] = []
+        for raw in raws:
+            parsed = coerce_uuid(raw)
+            hit = str(parsed) if parsed and str(parsed) in found_uuids else by_name.get(raw)
+            if hit is None:
                 raise UnknownReferenceError(
                     f"Column '{column.name}' references an unknown {noun}: {raw}"
                 )
-            resolved.append(str(found))
+            resolved.append(hit)
 
         return resolved if multiple else resolved[0]
 
@@ -446,93 +507,115 @@ class ListItemService:
         than a guess: unlike a username, a row label is not unique.
         """
         config = column.config or {}
-        multiple = bool(config.get("multiple"))
-        if multiple and not isinstance(value, list):
-            cls._type_error(column, "a list of rows")
-        raw_values = value if multiple else [value]
-        if not raw_values:
+        multiple, raws = cls._reference_inputs(column, value, "row")
+        if not raws:
             return [] if multiple else None
 
-        target_list_uuid = config.get("target_list_uuid")
-        target = await db.execute(
-            select(List.id)
-            .join(Workspace, List.workspace_id == Workspace.id)
-            .where(
-                List.uuid == coerce_uuid(target_list_uuid),
-                Workspace.owner_id == lst.workspace.owner_id,
-                List.deleted_at.is_(None),
-                Workspace.deleted_at.is_(None),
+        target_list_id = await cls._lookup_target_id(db, lst, column, config)
+
+        uuids = [u for u in (coerce_uuid(raw) for raw in raws) if u is not None]
+        labels = [raw for raw in raws if coerce_uuid(raw) is None]
+
+        # Two queries for the whole cell — one for the uuids, one for the labels —
+        # rather than one per value. Import calls this per row, so per-value queries
+        # turn a bulk import into thousands of sequential round-trips.
+        found_uuids: set[str] = set()
+        if uuids:
+            rows = await db.execute(
+                select(ListItem.uuid).where(
+                    ListItem.list_id == target_list_id,
+                    ListItem.uuid.in_(uuids),
+                    ListItem.deleted_at.is_(None),
+                )
             )
-        )
-        target_list_id = target.scalars().first()
+            found_uuids = {str(u) for u in rows.scalars().all()}
+
+        by_label: dict[str, list[str]] = {}
+        if labels:
+            key = await cls._lookup_display_key(db, target_list_id, column, config)
+            rows = await db.execute(
+                select(ListItem.data[key].astext, ListItem.uuid).where(
+                    ListItem.list_id == target_list_id,
+                    ListItem.deleted_at.is_(None),
+                    ListItem.data[key].astext.in_(labels),
+                )
+            )
+            for label, row_uuid in rows.all():
+                by_label.setdefault(label, []).append(str(row_uuid))
+
+        resolved: list[str] = []
+        for raw in raws:
+            parsed = coerce_uuid(raw)
+            if parsed is not None:
+                if str(parsed) not in found_uuids:
+                    raise UnknownReferenceError(
+                        f"Lookup column '{column.name}' references an unknown row: {raw}"
+                    )
+                resolved.append(str(parsed))
+                continue
+
+            matches = by_label.get(raw, [])
+            if not matches:
+                raise UnknownReferenceError(
+                    f"Lookup column '{column.name}' references an unknown row: {raw}"
+                )
+            if len(matches) > 1:
+                # Row labels are not unique (usernames are), so there is no defensible
+                # way to pick one — say so instead of silently linking the wrong row.
+                raise ValidationError(
+                    f"Lookup column '{column.name}': '{raw}' matches more than one row "
+                    f"in the target list; use the row uuid instead"
+                )
+            resolved.append(matches[0])
+
+        return resolved if multiple else resolved[0]
+
+    # A lookup's target list and display column are fixed by its config, but a row
+    # write resolves them — so an import would re-run these lookups for every row.
+    # Cache them on the session, which is scoped to exactly one request.
+    @classmethod
+    async def _lookup_target_id(
+        cls, db: AsyncSession, lst: List, column: Column, config: dict
+    ) -> int:
+        cache = db.info.setdefault("lookup_target_ids", {})
+        cache_key = (lst.workspace.owner_id, str(config.get("target_list_uuid")))
+        if cache_key not in cache:
+            cache[cache_key] = (
+                await db.execute(
+                    select(List.id)
+                    .join(Workspace, List.workspace_id == Workspace.id)
+                    .where(
+                        List.uuid == coerce_uuid(config.get("target_list_uuid")),
+                        Workspace.owner_id == lst.workspace.owner_id,
+                        List.deleted_at.is_(None),
+                        Workspace.deleted_at.is_(None),
+                    )
+                )
+            ).scalars().first()
+
+        target_list_id = cache[cache_key]
         if target_list_id is None:
             raise UnknownReferenceError(
                 f"Lookup column '{column.name}' points at a missing target list"
             )
-
-        resolved: list[str] = []
-        for raw in raw_values:
-            if not isinstance(raw, str):
-                cls._type_error(column, "a row uuid or label")
-            parsed = coerce_uuid(raw)
-            if parsed is not None:
-                found = (
-                    await db.execute(
-                        select(ListItem.uuid).where(
-                            ListItem.list_id == target_list_id,
-                            ListItem.uuid == parsed,
-                            ListItem.deleted_at.is_(None),
-                        )
-                    )
-                ).scalars().first()
-                if found is None:
-                    raise UnknownReferenceError(
-                        f"Lookup column '{column.name}' references an unknown row: {raw}"
-                    )
-                resolved.append(str(found))
-                continue
-
-            resolved.append(
-                str(await cls._row_by_label(db, target_list_id, column, config, raw))
-            )
-
-        return resolved if multiple else resolved[0]
+        return target_list_id
 
     @classmethod
-    async def _row_by_label(
-        cls, db: AsyncSession, target_list_id: int, column: Column, config: dict, label: str
-    ) -> UUID:
-        key = await display_column_key(db, target_list_id, config)
+    async def _lookup_display_key(
+        cls, db: AsyncSession, target_list_id: int, column: Column, config: dict
+    ) -> str:
+        cache = db.info.setdefault("lookup_display_keys", {})
+        cache_key = (target_list_id, str(config.get("display_column_uuid")))
+        if cache_key not in cache:
+            cache[cache_key] = await display_column_key(db, target_list_id, config)
+
+        key = cache[cache_key]
         if key is None:
             raise UnknownReferenceError(
                 f"Lookup column '{column.name}' can only be set by row uuid: its "
-                f"target list has no display column to match '{label}' against"
+                f"target list has no column to match a label against"
             )
-
-        matches = (
-            await db.execute(
-                select(ListItem.uuid)
-                .where(
-                    ListItem.list_id == target_list_id,
-                    ListItem.deleted_at.is_(None),
-                    ListItem.data[key].astext == label,
-                )
-                .limit(2)
-            )
-        ).scalars().all()
-
-        if not matches:
-            raise UnknownReferenceError(
-                f"Lookup column '{column.name}' references an unknown row: {label}"
-            )
-        if len(matches) > 1:
-            # Row labels are not unique (usernames are), so there is no defensible
-            # way to pick one — say so instead of silently linking the wrong row.
-            raise ValidationError(
-                f"Lookup column '{column.name}': '{label}' matches more than one row "
-                f"in the target list; use the row uuid instead"
-            )
-        return matches[0]
+        return key
 
     @staticmethod
     def _type_error(column: Column, expected: str) -> None:

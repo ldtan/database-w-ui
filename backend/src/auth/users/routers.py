@@ -78,7 +78,9 @@ async def list_users(
     """
     search_names = current_user.is_superuser
     response.headers["X-Total-Count"] = str(
-        await UserService.count(db, q=q, search_person_names=search_names)
+        await UserService.count(
+            db, q=q, search_person_names=search_names, uuids=uuid
+        )
     )
     return await UserService.list(
         db,
@@ -184,7 +186,9 @@ async def list_groups(
     ),
     db: AsyncSession = Depends(get_db),
 ):
-    response.headers["X-Total-Count"] = str(await UserGroupService.count(db, q=q))
+    response.headers["X-Total-Count"] = str(
+        await UserGroupService.count(db, q=q, uuids=uuid)
+    )
     return await UserGroupService.list(db, skip=skip, limit=limit, q=q, uuids=uuid)
 
 

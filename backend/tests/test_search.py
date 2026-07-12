@@ -247,3 +247,21 @@ async def test_groups_can_be_resolved_by_uuid(make_client, session_factory):
     async with make_client(caller) as client:
         found = (await client.get(f"/api/auth/groups/?uuid={wanted.uuid}")).json()
         assert [g["name"] for g in found] == ["editors"]
+
+
+async def test_total_count_respects_the_uuid_filter(make_client, session_factory):
+    """The header describes the query it is sent with. A total that ignored the
+    filter would tell a paginator there are 100 more pages of a 2-row result."""
+    async with session_factory() as db:
+        caller = await _make_user(db, "root", superuser=True)
+        a = await _make_user(db, "ana")
+        await _make_user(db, "bo")
+        await _make_user(db, "cy")
+
+    async with make_client(caller) as client:
+        resp = await client.get(f"/api/auth/users/?uuid={a.uuid}")
+        assert len(resp.json()) == 1
+        assert resp.headers["X-Total-Count"] == "1"  # not the 4 accounts that exist
+
+        every = await client.get("/api/auth/users/")
+        assert every.headers["X-Total-Count"] == "4"

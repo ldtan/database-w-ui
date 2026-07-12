@@ -129,11 +129,18 @@ class UserService:
         db: AsyncSession,
         q: Optional[str] = None,
         search_person_names: bool = False,
+        uuids: Optional[Sequence[UUID]] = None,
     ) -> int:
-        """Total matching rows, ignoring skip/limit — what the paginator needs."""
+        """Total matching rows, ignoring skip/limit — what the paginator needs.
+
+        Takes the same filters as ``list``: a total that ignored one of them would
+        describe a different query than the page it is sent with.
+        """
         stmt = select(func.count(func.distinct(User.id))).select_from(User).where(
             User.deleted_at.is_(None)
         )
+        if uuids is not None:
+            stmt = stmt.where(User.uuid.in_(uuids))
         return await db.scalar(cls._apply_search(stmt, q, search_person_names)) or 0
 
     @classmethod
@@ -328,10 +335,17 @@ class UserGroupService:
         return result.scalars().all()
 
     @classmethod
-    async def count(cls, db: AsyncSession, q: Optional[str] = None) -> int:
+    async def count(
+        cls,
+        db: AsyncSession,
+        q: Optional[str] = None,
+        uuids: Optional[Sequence[UUID]] = None,
+    ) -> int:
         stmt = select(func.count(UserGroup.id)).select_from(UserGroup).where(
             UserGroup.deleted_at.is_(None)
         )
+        if uuids is not None:
+            stmt = stmt.where(UserGroup.uuid.in_(uuids))
         return await db.scalar(cls._apply_search(stmt, q)) or 0
 
     @classmethod
