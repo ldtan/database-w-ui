@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
@@ -6,6 +6,7 @@ import { IconField } from "primereact/iconfield";
 import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { Paginator } from "primereact/paginator";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
@@ -17,11 +18,10 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
 
-// One page of results. Searching happens server-side, so a term always finds a
-// match no matter how far down the list it sits — filtering a single fetched page
-// client-side would report "no match" for anything past this limit, which is worse
-// than no search at all.
-const PAGE = 100;
+// Searching and paging both happen server-side, so a term finds a match no matter
+// how far down the list it sits. Filtering one fetched page in the browser would
+// report "no match" for anything past the limit, which is worse than no search.
+const ROWS = 10;
 
 export function PeoplePage() {
   const queryClient = useQueryClient();
@@ -38,19 +38,33 @@ export function PeoplePage() {
   const userQ = useDebounced(userSearch);
   const groupQ = useDebounced(groupSearch);
 
+  const [userFirst, setUserFirst] = useState(0);
+  const [groupFirst, setGroupFirst] = useState(0);
+  const [userRows, setUserRows] = useState(ROWS);
+  const [groupRows, setGroupRows] = useState(ROWS);
+
+  // A new search re-ranks everything, so page 3 of the old results is meaningless.
+  // Without this you can land on an empty page and think there are no matches.
+  useEffect(() => setUserFirst(0), [userQ]);
+  useEffect(() => setGroupFirst(0), [groupQ]);
+
   const users = useQuery({
-    queryKey: ["users", "search", userQ],
+    queryKey: ["users", "search", userQ, userFirst, userRows],
     queryFn: () =>
-      api.get<ApiUser[]>(
-        `/auth/users/?limit=${PAGE}&q=${encodeURIComponent(userQ.trim())}`,
+      api.getPage<ApiUser>(
+        `/auth/users/?skip=${userFirst}&limit=${userRows}` +
+          `&q=${encodeURIComponent(userQ.trim())}`,
       ),
+    placeholderData: (prev) => prev, // don't blank the list while paging
   });
   const groups = useQuery({
-    queryKey: ["groups", "search", groupQ],
+    queryKey: ["groups", "search", groupQ, groupFirst, groupRows],
     queryFn: () =>
-      api.get<ApiUserGroup[]>(
-        `/auth/groups/?limit=${PAGE}&q=${encodeURIComponent(groupQ.trim())}`,
+      api.getPage<ApiUserGroup>(
+        `/auth/groups/?skip=${groupFirst}&limit=${groupRows}` +
+          `&q=${encodeURIComponent(groupQ.trim())}`,
       ),
+    placeholderData: (prev) => prev,
   });
   // Person records are personal data: only a superuser may list them. Used to
   // annotate each user with their connected person and to seed the edit dialog.
@@ -96,12 +110,10 @@ export function PeoplePage() {
     });
   }
 
-  const shownUsers = users.data ?? [];
-  const shownGroups = groups.data ?? [];
-  // A full page back means there are probably more; say so instead of pretending
-  // this is everything.
-  const usersCapped = shownUsers.length === PAGE;
-  const groupsCapped = shownGroups.length === PAGE;
+  const shownUsers = users.data?.items ?? [];
+  const shownGroups = groups.data?.items ?? [];
+  const userTotal = users.data?.total ?? 0;
+  const groupTotal = groups.data?.total ?? 0;
 
   const usernameByUuid = new Map(
     shownUsers.map((user) => [user.uuid, user.username]),
@@ -160,10 +172,18 @@ export function PeoplePage() {
             text={userSearch ? "No users match that search." : "No users yet."}
           />
         )}
-        {usersCapped && (
-          <Message
-            severity="info"
-            text={`Showing the first ${PAGE} users. Search to narrow them down.`}
+        {userTotal > 0 && (
+          <Paginator
+            first={userFirst}
+            rows={userRows}
+            totalRecords={userTotal}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={(e) => {
+              setUserFirst(e.first);
+              setUserRows(e.rows);
+            }}
+            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+            currentPageReportTemplate="{first}–{last} of {totalRecords}"
           />
         )}
 
@@ -246,10 +266,18 @@ export function PeoplePage() {
             text={groupSearch ? "No groups match that search." : "No groups yet."}
           />
         )}
-        {groupsCapped && (
-          <Message
-            severity="info"
-            text={`Showing the first ${PAGE} groups. Search to narrow them down.`}
+        {groupTotal > 0 && (
+          <Paginator
+            first={groupFirst}
+            rows={groupRows}
+            totalRecords={groupTotal}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={(e) => {
+              setGroupFirst(e.first);
+              setGroupRows(e.rows);
+            }}
+            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+            currentPageReportTemplate="{first}–{last} of {totalRecords}"
           />
         )}
 

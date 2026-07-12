@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_current_user, require_superuser
@@ -53,6 +53,7 @@ async def create_user(
 
 @router.get("/", response_model=list[UserRead])
 async def list_users(
+    response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(
@@ -61,15 +62,21 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Searching server-side, so a search box can find users past the first page.
-    # Person names are only searchable by a superuser — they are private, and this
-    # route is open to any authenticated user.
+    """Searching and paging server-side, so a search finds users past the first page.
+
+    The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
+    which is what a paginator needs. Keeping it in a header leaves the body a plain
+    array, so callers that just want the list are unaffected.
+
+    Person names are only searchable by a superuser — they are private, and this
+    route is open to any authenticated user.
+    """
+    search_names = current_user.is_superuser
+    response.headers["X-Total-Count"] = str(
+        await UserService.count(db, q=q, search_person_names=search_names)
+    )
     return await UserService.list(
-        db,
-        skip=skip,
-        limit=limit,
-        q=q,
-        search_person_names=current_user.is_superuser,
+        db, skip=skip, limit=limit, q=q, search_person_names=search_names
     )
 
 
@@ -156,11 +163,13 @@ async def create_group(
 
 @group_router.get("/", response_model=list[UserGroupRead])
 async def list_groups(
+    response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match name or description"),
     db: AsyncSession = Depends(get_db),
 ):
+    response.headers["X-Total-Count"] = str(await UserGroupService.count(db, q=q))
     return await UserGroupService.list(db, skip=skip, limit=limit, q=q)
 
 

@@ -56,6 +56,36 @@ class UserService:
         result = await db.execute(cls._select().where(User.email == email))
         return result.scalars().first()
 
+    @staticmethod
+    def _apply_search(stmt, q: Optional[str], search_person_names: bool):
+        """Shared by list() and count() so the page and its total can never disagree.
+
+        ``search_person_names`` widens the match to the user's connected person.
+        Only pass it for a superuser: /auth/users is readable by any authenticated
+        user, and person records are private — otherwise anyone could probe for
+        someone's real name by watching which searches return a hit.
+        """
+        from src.people.models import Person
+
+        if not (q and q.strip()):
+            return stmt
+        pattern = like_pattern(q.strip())
+        conditions = [
+            User.username.ilike(pattern, escape=LIKE_ESCAPE),
+            User.email.ilike(pattern, escape=LIKE_ESCAPE),
+        ]
+        if search_person_names:
+            stmt = stmt.outerjoin(
+                Person,
+                (Person.user_id == User.id) & (Person.deleted_at.is_(None)),
+            )
+            conditions += [
+                Person.first_name.ilike(pattern, escape=LIKE_ESCAPE),
+                Person.middle_name.ilike(pattern, escape=LIKE_ESCAPE),
+                Person.last_name.ilike(pattern, escape=LIKE_ESCAPE),
+            ]
+        return stmt.where(or_(*conditions))
+
     @classmethod
     async def list(
         cls,
@@ -65,35 +95,23 @@ class UserService:
         q: Optional[str] = None,
         search_person_names: bool = False,
     ) -> Sequence[User]:
-        """Matched server-side so a search can find users beyond the first page.
-
-        ``search_person_names`` widens the match to the user's connected person.
-        Only pass it for a superuser: /auth/users is readable by any authenticated
-        user, and person records are private — otherwise anyone could probe for
-        someone's real name by watching which searches return a hit.
-        """
-        from src.people.models import Person
-
-        stmt = cls._select()
-        if q and q.strip():
-            pattern = like_pattern(q.strip())
-            conditions = [
-                User.username.ilike(pattern, escape=LIKE_ESCAPE),
-                User.email.ilike(pattern, escape=LIKE_ESCAPE),
-            ]
-            if search_person_names:
-                stmt = stmt.outerjoin(
-                    Person,
-                    (Person.user_id == User.id) & (Person.deleted_at.is_(None)),
-                )
-                conditions += [
-                    Person.first_name.ilike(pattern, escape=LIKE_ESCAPE),
-                    Person.middle_name.ilike(pattern, escape=LIKE_ESCAPE),
-                    Person.last_name.ilike(pattern, escape=LIKE_ESCAPE),
-                ]
-            stmt = stmt.where(or_(*conditions))
+        """Matched server-side so a search can find users beyond the first page."""
+        stmt = cls._apply_search(cls._select(), q, search_person_names)
         result = await db.execute(stmt.order_by(User.id).offset(skip).limit(limit))
         return result.scalars().all()
+
+    @classmethod
+    async def count(
+        cls,
+        db: AsyncSession,
+        q: Optional[str] = None,
+        search_person_names: bool = False,
+    ) -> int:
+        """Total matching rows, ignoring skip/limit — what the paginator needs."""
+        stmt = select(func.count(func.distinct(User.id))).select_from(User).where(
+            User.deleted_at.is_(None)
+        )
+        return await db.scalar(cls._apply_search(stmt, q, search_person_names)) or 0
 
     @classmethod
     async def create(cls, db: AsyncSession, payload: UserCreate) -> User:
@@ -214,6 +232,19 @@ class UserGroupService:
         )
 
     @staticmethod
+    def _apply_search(stmt, q: Optional[str]):
+        """Shared by list() and count() so the page and its total cannot drift."""
+        if not (q and q.strip()):
+            return stmt
+        pattern = like_pattern(q.strip())
+        return stmt.where(
+            or_(
+                UserGroup.name.ilike(pattern, escape=LIKE_ESCAPE),
+                UserGroup.description.ilike(pattern, escape=LIKE_ESCAPE),
+            )
+        )
+
+    @staticmethod
     async def _resolve_users(
         db: AsyncSession, user_uuids: Optional[Sequence[Union[str, UUID]]]
     ) -> list[User]:
@@ -261,19 +292,18 @@ class UserGroupService:
         limit: int = 100,
         q: Optional[str] = None,
     ) -> Sequence[UserGroup]:
-        stmt = cls._select()
-        if q and q.strip():
-            pattern = like_pattern(q.strip())
-            stmt = stmt.where(
-                or_(
-                    UserGroup.name.ilike(pattern, escape=LIKE_ESCAPE),
-                    UserGroup.description.ilike(pattern, escape=LIKE_ESCAPE),
-                )
-            )
+        stmt = cls._apply_search(cls._select(), q)
         result = await db.execute(
             stmt.order_by(UserGroup.id).offset(skip).limit(limit)
         )
         return result.scalars().all()
+
+    @classmethod
+    async def count(cls, db: AsyncSession, q: Optional[str] = None) -> int:
+        stmt = select(func.count(UserGroup.id)).select_from(UserGroup).where(
+            UserGroup.deleted_at.is_(None)
+        )
+        return await db.scalar(cls._apply_search(stmt, q)) or 0
 
     @classmethod
     async def create(cls, db: AsyncSession, payload: UserGroupCreate) -> UserGroup:

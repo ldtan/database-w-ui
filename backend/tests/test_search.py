@@ -128,6 +128,50 @@ async def test_group_search(make_client, session_factory):
         assert [g["name"] for g in found] == ["engineering"]
 
 
+async def test_pagination_and_total_count(make_client, session_factory):
+    """The paginator needs the total number of *matches*, not of rows returned."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "root", superuser=True)
+        for i in range(24):
+            await _make_user(db, f"user{i:02d}")
+
+    async with make_client(admin) as client:
+        resp = await client.get("/api/auth/users/?skip=0&limit=10")
+        assert len(resp.json()) == 10
+        assert resp.headers["x-total-count"] == "25"  # 24 + root
+
+        # Paging walks the whole set without repeats or gaps.
+        seen = []
+        for skip in (0, 10, 20):
+            page = (await client.get(f"/api/auth/users/?skip={skip}&limit=10")).json()
+            seen += [u["username"] for u in page]
+        assert len(seen) == 25
+        assert len(set(seen)) == 25
+        assert len(page) == 5  # the last page is partial
+
+        # The total must reflect the search, or the paginator invents empty pages.
+        resp = await client.get("/api/auth/users/?q=user1&limit=5")
+        assert resp.headers["x-total-count"] == "10"  # user10..user19
+        assert len(resp.json()) == 5
+
+        # Past the end: empty page, but the total still tells the truth.
+        resp = await client.get("/api/auth/users/?skip=100&limit=10")
+        assert resp.json() == []
+        assert resp.headers["x-total-count"] == "25"
+
+
+async def test_group_pagination_total(make_client, session_factory):
+    async with session_factory() as db:
+        admin = await _make_user(db, "root", superuser=True)
+        for i in range(7):
+            await UserGroupService.create(db, UserGroupCreate(name=f"group{i}"))
+
+    async with make_client(admin) as client:
+        resp = await client.get("/api/auth/groups/?skip=0&limit=3")
+        assert len(resp.json()) == 3
+        assert resp.headers["x-total-count"] == "7"
+
+
 async def test_person_names_are_searchable_only_by_a_superuser(
     make_client, session_factory
 ):

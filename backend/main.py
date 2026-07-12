@@ -52,6 +52,10 @@ def create_app() -> FastAPI:
         allow_origins=settings.allowed_origins,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Custom response headers are invisible to cross-origin JS unless exposed.
+        # Dev goes through the Vite proxy (same-origin) and would work regardless,
+        # so without this the paginator breaks only in production.
+        expose_headers=["X-Total-Count"],
     )
 
     # Map permission failures raised anywhere in the service layer onto 403.

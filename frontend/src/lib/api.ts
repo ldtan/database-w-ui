@@ -92,8 +92,22 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface Page<T> {
+  items: T[];
+  total: number;
+}
+
 export const api = {
   get: <T>(path: string) => request<T>(path),
+  // A listing plus its total match count, which the server returns in a header so
+  // the body stays a plain array. Falls back to the page length if the header is
+  // missing — a paginator that thinks there is one page beats one that crashes.
+  getPage: async <T>(path: string): Promise<Page<T>> => {
+    const res = await requestRaw(path);
+    const items = (await res.json()) as T[];
+    const total = Number(res.headers.get("X-Total-Count"));
+    return { items, total: Number.isFinite(total) ? total : items.length };
+  },
   post: <T>(path: string, body?: unknown) =>
     request<T>(path, {
       method: "POST",
