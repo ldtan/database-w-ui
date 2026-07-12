@@ -103,16 +103,35 @@ section shows the list's own slug as its subtitle rather than "in «Workspace»"
 
 ## Gotchas for whoever edits this next
 
-**There is no Alembic.** The schema comes from `Base.metadata.create_all` over the models
-imported in `main.py`'s lifespan and `tests/conftest.py`. A new model needs importing in
-*both*. `create_all` only ever *creates missing tables* — it will not add a column to a
-table that already exists, so an existing dev DB silently keeps the old shape and then
-errors at query time. Either recreate the DB, or apply the column by hand; additive
-columns are safe to `ALTER` in and keep your data. For example, `is_superuser` landed as:
+**There is no Alembic, and `create_all` only creates things that are *missing*.** The
+schema comes from `Base.metadata.create_all` over the models imported in `main.py`'s
+lifespan and `tests/conftest.py` — a new model needs importing in *both*. `create_all`
+creates absent tables and types, and **never alters an existing one**. So a new *table*
+appears by itself, while a new **column** or a new **enum value** is silently ignored on
+any database that already exists: the DB keeps its old shape and blows up at query time,
+not at startup. Tests never catch this — they run against a fresh database, where
+everything is "missing" and therefore created correctly.
+
+Both halves of that have already bitten:
 
 ```sql
+-- a new column (is_superuser). ALTER is additive and keeps your data.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser boolean NOT NULL DEFAULT false;
 UPDATE users SET is_superuser = true WHERE username = 'admin';  -- seed.py only fires on an empty table
+
+-- new enum values (ColumnType.time/datetime, added after the type was created).
+-- Symptom: 500 with `invalid input value for enum column_type: "time"`.
+ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'time';
+ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'datetime';
+```
+
+`ALTER TYPE ... ADD VALUE` cannot run in a transaction block that then uses the value, so
+apply it on an autocommit connection. After adding an enum member in Python, check the
+live enum:
+
+```sql
+SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
+WHERE t.typname = 'column_type' ORDER BY enumsortorder;
 ```
 
 **Never lazy-load a relationship after a commit.** The session factory sets
