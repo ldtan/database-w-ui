@@ -8,6 +8,7 @@ import { Checkbox } from "primereact/checkbox";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import { ACTIONS, ROLE_PRESETS } from "../../lib/permissions";
 import type {
@@ -56,14 +57,24 @@ export function ShareDialog({
       ),
     enabled: visible,
   });
+  // Typed into the principal dropdown. Searching server-side matters here beyond
+  // convenience: with a client-filtered single page, a user past the page limit
+  // could not be granted anything at all.
+  const [search, setSearch] = useState("");
+  const q = useDebounced(search);
+
   const users = useQuery({
-    queryKey: ["users"],
-    queryFn: () => api.get<ApiUser[]>("/auth/users/"),
+    queryKey: ["users", "search", q],
+    queryFn: () =>
+      api.get<ApiUser[]>(`/auth/users/?limit=50&q=${encodeURIComponent(q.trim())}`),
     enabled: visible,
   });
   const groups = useQuery({
-    queryKey: ["groups"],
-    queryFn: () => api.get<ApiUserGroup[]>("/auth/groups/"),
+    queryKey: ["groups", "search", q],
+    queryFn: () =>
+      api.get<ApiUserGroup[]>(
+        `/auth/groups/?limit=50&q=${encodeURIComponent(q.trim())}`,
+      ),
     enabled: visible,
   });
 
@@ -170,6 +181,12 @@ export function ShareDialog({
             onChange={(e) => setPrincipal(e.value)}
             placeholder="Select a user or group…"
             filter
+            // Drive the server-side query; the options are already narrowed, so
+            // don't also filter them locally.
+            filterMatchMode="contains"
+            onFilter={(e) => setSearch(e.filter)}
+            resetFilterOnHide
+            emptyFilterMessage="No matching users or groups"
             className="w-full"
           />
           <div className="flex flex-wrap items-center gap-2">

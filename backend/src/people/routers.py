@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -65,11 +66,12 @@ async def create_person(
 async def list_people(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(None, description="Match first, middle, or last name"),
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_superuser),
 ):
     """Superuser-only: this returns everyone's personal data."""
-    return await PersonService.list(db, skip=skip, limit=limit)
+    return await PersonService.list(db, skip=skip, limit=limit, q=q)
 
 
 # Declared before /{uuid} so "me" is not parsed as a uuid.

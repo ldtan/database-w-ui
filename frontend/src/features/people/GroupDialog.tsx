@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
@@ -15,13 +15,20 @@ interface Props {
   onHide: () => void;
   /** null = create a new group. */
   group: ApiUserGroup | null;
-  users: ApiUser[];
 }
 
-export function GroupDialog({ visible, onHide, group, users }: Props) {
+export function GroupDialog({ visible, onHide, group }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const editing = !!group;
+
+  // Its own fetch, not the page's: that list is filtered by the page's search box,
+  // and the member picker must offer every user regardless of what is typed there.
+  const users = useQuery({
+    queryKey: ["users", "all"],
+    queryFn: () => api.get<ApiUser[]>("/auth/users/?limit=1000"),
+    enabled: visible,
+  });
 
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -57,7 +64,10 @@ export function GroupDialog({ visible, onHide, group, users }: Props) {
       ),
   });
 
-  const userOptions = users.map((u) => ({ label: u.username, value: u.uuid }));
+  const userOptions = (users.data ?? []).map((u) => ({
+    label: u.username,
+    value: u.uuid,
+  }));
 
   return (
     <Dialog

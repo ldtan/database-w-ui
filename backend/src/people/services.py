@@ -2,13 +2,13 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError
-from src.core.utils import coerce_uuid
+from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from .models import Person
 from .schemas import PersonCreate, PersonUpdate
@@ -43,10 +43,25 @@ class PersonService:
 
     @classmethod
     async def list(
-        cls, db: AsyncSession, skip: int = 0, limit: int = 100
+        cls,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
     ) -> Sequence[Person]:
+        stmt = cls._select()
+        if q and q.strip():
+            # Safe to search names here: the route is superuser-only.
+            pattern = like_pattern(q.strip())
+            stmt = stmt.where(
+                or_(
+                    Person.first_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    Person.middle_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    Person.last_name.ilike(pattern, escape=LIKE_ESCAPE),
+                )
+            )
         result = await db.execute(
-            cls._select().order_by(Person.id).offset(skip).limit(limit)
+            stmt.order_by(Person.id).offset(skip).limit(limit)
         )
         return result.scalars().all()
 

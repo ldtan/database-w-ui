@@ -2,11 +2,12 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.core.utils import LIKE_ESCAPE, like_pattern
 from src.core.exceptions import (
     ConflictError,
     PermissionDeniedError,
@@ -56,10 +57,42 @@ class UserService:
         return result.scalars().first()
 
     @classmethod
-    async def list(cls, db: AsyncSession, skip: int = 0, limit: int = 100) -> Sequence[User]:
-        result = await db.execute(
-            cls._select().order_by(User.id).offset(skip).limit(limit)
-        )
+    async def list(
+        cls,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
+        search_person_names: bool = False,
+    ) -> Sequence[User]:
+        """Matched server-side so a search can find users beyond the first page.
+
+        ``search_person_names`` widens the match to the user's connected person.
+        Only pass it for a superuser: /auth/users is readable by any authenticated
+        user, and person records are private — otherwise anyone could probe for
+        someone's real name by watching which searches return a hit.
+        """
+        from src.people.models import Person
+
+        stmt = cls._select()
+        if q and q.strip():
+            pattern = like_pattern(q.strip())
+            conditions = [
+                User.username.ilike(pattern, escape=LIKE_ESCAPE),
+                User.email.ilike(pattern, escape=LIKE_ESCAPE),
+            ]
+            if search_person_names:
+                stmt = stmt.outerjoin(
+                    Person,
+                    (Person.user_id == User.id) & (Person.deleted_at.is_(None)),
+                )
+                conditions += [
+                    Person.first_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    Person.middle_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    Person.last_name.ilike(pattern, escape=LIKE_ESCAPE),
+                ]
+            stmt = stmt.where(or_(*conditions))
+        result = await db.execute(stmt.order_by(User.id).offset(skip).limit(limit))
         return result.scalars().all()
 
     @classmethod
@@ -222,10 +255,23 @@ class UserGroupService:
 
     @classmethod
     async def list(
-        cls, db: AsyncSession, skip: int = 0, limit: int = 100
+        cls,
+        db: AsyncSession,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
     ) -> Sequence[UserGroup]:
+        stmt = cls._select()
+        if q and q.strip():
+            pattern = like_pattern(q.strip())
+            stmt = stmt.where(
+                or_(
+                    UserGroup.name.ilike(pattern, escape=LIKE_ESCAPE),
+                    UserGroup.description.ilike(pattern, escape=LIKE_ESCAPE),
+                )
+            )
         result = await db.execute(
-            cls._select().order_by(UserGroup.id).offset(skip).limit(limit)
+            stmt.order_by(UserGroup.id).offset(skip).limit(limit)
         )
         return result.scalars().all()
 

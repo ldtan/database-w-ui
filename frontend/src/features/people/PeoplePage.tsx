@@ -10,17 +10,18 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
+import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup, Person } from "../../lib/types";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
 
-function matches(haystack: (string | null | undefined)[], needle: string): boolean {
-  const q = needle.trim().toLowerCase();
-  if (!q) return true;
-  return haystack.some((value) => (value ?? "").toLowerCase().includes(q));
-}
+// One page of results. Searching happens server-side, so a term always finds a
+// match no matter how far down the list it sits — filtering a single fetched page
+// client-side would report "no match" for anything past this limit, which is worse
+// than no search at all.
+const PAGE = 100;
 
 export function PeoplePage() {
   const queryClient = useQueryClient();
@@ -32,19 +33,30 @@ export function PeoplePage() {
   const me = useCurrentUser();
   const canAdminister = me?.is_superuser ?? false;
 
+  const [userSearch, setUserSearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+  const userQ = useDebounced(userSearch);
+  const groupQ = useDebounced(groupSearch);
+
   const users = useQuery({
-    queryKey: ["users"],
-    queryFn: () => api.get<ApiUser[]>("/auth/users/"),
+    queryKey: ["users", "search", userQ],
+    queryFn: () =>
+      api.get<ApiUser[]>(
+        `/auth/users/?limit=${PAGE}&q=${encodeURIComponent(userQ.trim())}`,
+      ),
   });
   const groups = useQuery({
-    queryKey: ["groups"],
-    queryFn: () => api.get<ApiUserGroup[]>("/auth/groups/"),
+    queryKey: ["groups", "search", groupQ],
+    queryFn: () =>
+      api.get<ApiUserGroup[]>(
+        `/auth/groups/?limit=${PAGE}&q=${encodeURIComponent(groupQ.trim())}`,
+      ),
   });
-  // Person records are personal data: only a superuser may list them. Used to show
-  // each user's connected person and to seed the edit dialog.
+  // Person records are personal data: only a superuser may list them. Used to
+  // annotate each user with their connected person and to seed the edit dialog.
   const people = useQuery({
-    queryKey: ["people"],
-    queryFn: () => api.get<Person[]>("/people/"),
+    queryKey: ["people", "map"],
+    queryFn: () => api.get<Person[]>("/people/?limit=1000"),
     enabled: canAdminister,
   });
 
@@ -52,9 +64,6 @@ export function PeoplePage() {
   for (const person of people.data ?? []) {
     personByUser.set(person.user.uuid, person);
   }
-
-  const [userSearch, setUserSearch] = useState("");
-  const [groupSearch, setGroupSearch] = useState("");
 
   const [userDialog, setUserDialog] = useState<{
     open: boolean;
@@ -87,25 +96,15 @@ export function PeoplePage() {
     });
   }
 
-  const shownUsers = (users.data ?? []).filter((user) => {
-    const person = personByUser.get(user.uuid);
-    return matches(
-      [
-        user.username,
-        user.email,
-        person?.first_name,
-        person?.middle_name,
-        person?.last_name,
-      ],
-      userSearch,
-    );
-  });
-  const shownGroups = (groups.data ?? []).filter((group) =>
-    matches([group.name, group.description], groupSearch),
-  );
+  const shownUsers = users.data ?? [];
+  const shownGroups = groups.data ?? [];
+  // A full page back means there are probably more; say so instead of pretending
+  // this is everything.
+  const usersCapped = shownUsers.length === PAGE;
+  const groupsCapped = shownGroups.length === PAGE;
 
   const usernameByUuid = new Map(
-    (users.data ?? []).map((user) => [user.uuid, user.username]),
+    shownUsers.map((user) => [user.uuid, user.username]),
   );
 
   function fullName(person: Person): string {
@@ -145,7 +144,11 @@ export function PeoplePage() {
           <InputText
             value={userSearch}
             onChange={(e) => setUserSearch(e.target.value)}
-            placeholder="Search users by name or email…"
+            placeholder={
+              canAdminister
+                ? "Search users by username, email, or person name…"
+                : "Search users by username or email…"
+            }
             className="w-full"
           />
         </IconField>
@@ -155,6 +158,12 @@ export function PeoplePage() {
           <Message
             severity="info"
             text={userSearch ? "No users match that search." : "No users yet."}
+          />
+        )}
+        {usersCapped && (
+          <Message
+            severity="info"
+            text={`Showing the first ${PAGE} users. Search to narrow them down.`}
           />
         )}
 
@@ -237,6 +246,12 @@ export function PeoplePage() {
             text={groupSearch ? "No groups match that search." : "No groups yet."}
           />
         )}
+        {groupsCapped && (
+          <Message
+            severity="info"
+            text={`Showing the first ${PAGE} groups. Search to narrow them down.`}
+          />
+        )}
 
         <div className="flex flex-col gap-2">
           {shownGroups.map((group) => (
@@ -297,7 +312,6 @@ export function PeoplePage() {
         visible={groupDialog.open}
         onHide={() => setGroupDialog({ open: false, group: null })}
         group={groupDialog.group}
-        users={users.data ?? []}
       />
     </div>
   );

@@ -1,3 +1,4 @@
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -54,9 +55,22 @@ async def create_user(
 async def list_users(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(
+        None, description="Match username or email (and person name, for superusers)"
+    ),
     db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
 ):
-    return await UserService.list(db, skip=skip, limit=limit)
+    # Searching server-side, so a search box can find users past the first page.
+    # Person names are only searchable by a superuser — they are private, and this
+    # route is open to any authenticated user.
+    return await UserService.list(
+        db,
+        skip=skip,
+        limit=limit,
+        q=q,
+        search_person_names=current_user.is_superuser,
+    )
 
 
 # Declared before /{uuid} so "me" is not parsed as a uuid.
@@ -144,9 +158,10 @@ async def create_group(
 async def list_groups(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(None, description="Match name or description"),
     db: AsyncSession = Depends(get_db),
 ):
-    return await UserGroupService.list(db, skip=skip, limit=limit)
+    return await UserGroupService.list(db, skip=skip, limit=limit, q=q)
 
 
 @group_router.get("/{uuid}", response_model=UserGroupRead)
