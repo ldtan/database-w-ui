@@ -41,5 +41,11 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 async def init_db():
+    from src.infrastructure.schema_check import raise_on_drift
+
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all only creates what is missing; it never alters an existing table
+        # or enum type. Catch that here rather than letting it surface as a 500 mid
+        # request. Deferred import: schema_check imports Base from this module.
+        await conn.run_sync(raise_on_drift)

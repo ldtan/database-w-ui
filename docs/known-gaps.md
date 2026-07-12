@@ -112,7 +112,11 @@ any database that already exists: the DB keeps its old shape and blows up at que
 not at startup. Tests never catch this — they run against a fresh database, where
 everything is "missing" and therefore created correctly.
 
-Both halves of that have already bitten:
+**A startup guard now catches it** (`src/infrastructure/schema_check.py`, run from
+`init_db`). It compares the models against the live database and **refuses to start**,
+printing the exact SQL to run. Drift is reported, never applied — schema is not mutated
+behind your back. So the failure mode below is now a clear message on boot rather than a
+500 mid-request; the remediation is still yours to apply:
 
 ```sql
 -- a new column (is_superuser). ALTER is additive and keeps your data.
