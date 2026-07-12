@@ -1,24 +1,30 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
+import { IconField } from "primereact/iconfield";
+import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
-import { MultiSelect } from "primereact/multiselect";
 import { Message } from "primereact/message";
-import { Dialog } from "primereact/dialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { Breadcrumbs } from "../../components/Breadcrumbs";
-import type { ApiUser, ApiUserGroup } from "../../lib/types";
-import { useToast } from "../../lib/toast";
 import { useCurrentUser } from "../../lib/auth";
+import { useToast } from "../../lib/toast";
+import type { ApiUser, ApiUserGroup, Person } from "../../lib/types";
+import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { GroupDialog } from "./GroupDialog";
+import { UserDialog } from "./UserDialog";
+
+function matches(haystack: (string | null | undefined)[], needle: string): boolean {
+  const q = needle.trim().toLowerCase();
+  if (!q) return true;
+  return haystack.some((value) => (value ?? "").toLowerCase().includes(q));
+}
 
 export function PeoplePage() {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const invalidateGroups = () =>
-    queryClient.invalidateQueries({ queryKey: ["groups"] });
 
   // Groups are principals in the grant table, so whoever can edit membership can
   // hand themselves any grant a group holds — hence superuser-only, matching the
@@ -34,43 +40,35 @@ export function PeoplePage() {
     queryKey: ["groups"],
     queryFn: () => api.get<ApiUserGroup[]>("/auth/groups/"),
   });
-
-  const userOptions = (users.data ?? []).map((u) => ({
-    label: u.username,
-    value: u.uuid,
-  }));
-
-  const [groupName, setGroupName] = useState("");
-  const createGroup = useMutation({
-    mutationFn: (name: string) =>
-      api.post<ApiUserGroup>("/auth/groups/", { name }),
-    onSuccess: (g) => {
-      setGroupName("");
-      invalidateGroups();
-      toast.success("Group created", g.name);
-    },
-    onError: (err) =>
-      toast.error(
-        "Could not create group",
-        err instanceof ApiError ? err.message : undefined,
-      ),
+  // Person records are personal data: only a superuser may list them. Used to show
+  // each user's connected person and to seed the edit dialog.
+  const people = useQuery({
+    queryKey: ["people"],
+    queryFn: () => api.get<Person[]>("/people/"),
+    enabled: canAdminister,
   });
 
-  const setMembers = useMutation({
-    mutationFn: (vars: { uuid: string; user_uuids: string[] }) =>
-      api.patch(`/auth/groups/${vars.uuid}`, { user_uuids: vars.user_uuids }),
-    onSuccess: invalidateGroups,
-    onError: (err) =>
-      toast.error(
-        "Could not update members",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
+  const personByUser = new Map<string, Person>();
+  for (const person of people.data ?? []) {
+    personByUser.set(person.user.uuid, person);
+  }
+
+  const [userSearch, setUserSearch] = useState("");
+  const [groupSearch, setGroupSearch] = useState("");
+
+  const [userDialog, setUserDialog] = useState<{
+    open: boolean;
+    user: ApiUser | null;
+  }>({ open: false, user: null });
+  const [groupDialog, setGroupDialog] = useState<{
+    open: boolean;
+    group: ApiUserGroup | null;
+  }>({ open: false, group: null });
 
   const removeGroup = useMutation({
     mutationFn: (uuid: string) => api.del(`/auth/groups/${uuid}`),
     onSuccess: () => {
-      invalidateGroups();
+      queryClient.invalidateQueries({ queryKey: ["groups"] });
       toast.success("Group deleted");
     },
     onError: (err) =>
@@ -80,59 +78,40 @@ export function PeoplePage() {
       ),
   });
 
-  const [renaming, setRenaming] = useState<ApiUserGroup | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const rename = useMutation({
-    mutationFn: () =>
-      api.patch(`/auth/groups/${renaming!.uuid}`, { name: renameValue }),
-    onSuccess: () => {
-      setRenaming(null);
-      invalidateGroups();
-      toast.success("Group renamed");
-    },
-    onError: (err) =>
-      toast.error(
-        "Could not rename group",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-
-  const emptyUser = { username: "", email: "", password: "" };
-  const [newUser, setNewUser] = useState(emptyUser);
-  const createUser = useMutation({
-    mutationFn: (payload: typeof emptyUser) =>
-      api.post<ApiUser>("/auth/users/", payload),
-    onSuccess: (user) => {
-      setNewUser(emptyUser);
-      queryClient.invalidateQueries({ queryKey: ["users"] });
-      toast.success("User created", user.username);
-    },
-    onError: (err) =>
-      toast.error(
-        "Could not create user",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-
-  function onCreate(event: FormEvent) {
-    event.preventDefault();
-    if (groupName.trim()) createGroup.mutate(groupName.trim());
-  }
-  function onCreateUser(event: FormEvent) {
-    event.preventDefault();
-    createUser.mutate({
-      username: newUser.username.trim(),
-      email: newUser.email.trim(),
-      password: newUser.password,
-    });
-  }
-  function confirmDelete(group: ApiUserGroup) {
+  function confirmDeleteGroup(group: ApiUserGroup) {
     confirmDialog({
       message: `Delete group "${group.name}"? Its grants are removed too.`,
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => removeGroup.mutate(group.uuid),
     });
+  }
+
+  const shownUsers = (users.data ?? []).filter((user) => {
+    const person = personByUser.get(user.uuid);
+    return matches(
+      [
+        user.username,
+        user.email,
+        person?.first_name,
+        person?.middle_name,
+        person?.last_name,
+      ],
+      userSearch,
+    );
+  });
+  const shownGroups = (groups.data ?? []).filter((group) =>
+    matches([group.name, group.description], groupSearch),
+  );
+
+  const usernameByUuid = new Map(
+    (users.data ?? []).map((user) => [user.uuid, user.username]),
+  );
+
+  function fullName(person: Person): string {
+    return [person.first_name, person.middle_name, person.last_name]
+      .filter(Boolean)
+      .join(" ");
   }
 
   return (
@@ -148,203 +127,178 @@ export function PeoplePage() {
         />
       )}
 
+      {/* ---------------------------------------------------------- Users */}
       <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">Groups</h2>
-        {canAdminister && (
-          <form onSubmit={onCreate} className="flex gap-2">
-            <InputText
-              placeholder="New group name"
-              value={groupName}
-              onChange={(e) => setGroupName(e.target.value)}
-              className="flex-1"
-            />
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-medium">Users</h2>
+          {canAdminister && (
             <Button
-              type="submit"
-              label="Create group"
-              icon="pi pi-plus"
-              loading={createGroup.isPending}
+              label="Add user"
+              icon="pi pi-user-plus"
+              onClick={() => setUserDialog({ open: true, user: null })}
             />
-          </form>
+          )}
+        </div>
+
+        <IconField iconPosition="left">
+          <InputIcon className="pi pi-search" />
+          <InputText
+            value={userSearch}
+            onChange={(e) => setUserSearch(e.target.value)}
+            placeholder="Search users by name or email…"
+            className="w-full"
+          />
+        </IconField>
+
+        {users.isLoading && <p>Loading…</p>}
+        {!users.isLoading && shownUsers.length === 0 && (
+          <Message
+            severity="info"
+            text={userSearch ? "No users match that search." : "No users yet."}
+          />
         )}
 
+        <div className="flex flex-col gap-2">
+          {shownUsers.map((user) => {
+            const person = personByUser.get(user.uuid);
+            return (
+              <Card key={user.uuid}>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <div className="font-medium">{user.username}</div>
+                    <div
+                      className="text-sm truncate"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {user.email}
+                      {person && ` · ${fullName(person)}`}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {user.is_superuser && (
+                      <span
+                        className="text-sm font-medium"
+                        style={{ color: "var(--brand)" }}
+                      >
+                        superuser
+                      </span>
+                    )}
+                    {!user.is_active && (
+                      <span
+                        className="text-sm"
+                        style={{ color: "var(--text-muted)" }}
+                      >
+                        inactive
+                      </span>
+                    )}
+                    {canAdminister && (
+                      <Button
+                        icon="pi pi-pencil"
+                        text
+                        aria-label={`Edit ${user.username}`}
+                        onClick={() => setUserDialog({ open: true, user })}
+                      />
+                    )}
+                  </div>
+                </div>
+              </Card>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* --------------------------------------------------------- Groups */}
+      <section className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
+          <h2 className="text-lg font-medium">Groups</h2>
+          {canAdminister && (
+            <Button
+              label="New group"
+              icon="pi pi-plus"
+              onClick={() => setGroupDialog({ open: true, group: null })}
+            />
+          )}
+        </div>
+
+        <IconField iconPosition="left">
+          <InputIcon className="pi pi-search" />
+          <InputText
+            value={groupSearch}
+            onChange={(e) => setGroupSearch(e.target.value)}
+            placeholder="Search groups…"
+            className="w-full"
+          />
+        </IconField>
+
         {groups.isLoading && <p>Loading…</p>}
-        {groups.data?.length === 0 && <p>No groups yet.</p>}
+        {!groups.isLoading && shownGroups.length === 0 && (
+          <Message
+            severity="info"
+            text={groupSearch ? "No groups match that search." : "No groups yet."}
+          />
+        )}
 
         <div className="flex flex-col gap-2">
-          {groups.data?.map((group) => (
+          {shownGroups.map((group) => (
             <Card key={group.uuid}>
               <div className="flex items-center justify-between gap-2">
-                <div className="font-medium">{group.name}</div>
+                <div className="min-w-0">
+                  <div className="font-medium">{group.name}</div>
+                  {group.description && (
+                    <div
+                      className="text-sm truncate"
+                      style={{ color: "var(--text-muted)" }}
+                    >
+                      {group.description}
+                    </div>
+                  )}
+                </div>
                 {canAdminister && (
                   <div className="flex gap-1">
                     <Button
                       icon="pi pi-pencil"
                       text
-                      aria-label="Rename group"
-                      onClick={() => {
-                        setRenaming(group);
-                        setRenameValue(group.name);
-                      }}
+                      aria-label={`Edit ${group.name}`}
+                      onClick={() => setGroupDialog({ open: true, group })}
                     />
                     <Button
                       icon="pi pi-trash"
                       text
                       severity="danger"
-                      aria-label="Delete group"
-                      onClick={() => confirmDelete(group)}
+                      aria-label={`Delete ${group.name}`}
+                      onClick={() => confirmDeleteGroup(group)}
                     />
                   </div>
                 )}
               </div>
-              <div className="mt-2 flex items-center gap-2">
-                <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                  Members
-                </span>
-                {canAdminister ? (
-                  <MultiSelect
-                    value={group.users.map((u) => u.uuid)}
-                    options={userOptions}
-                    onChange={(e) =>
-                      setMembers.mutate({ uuid: group.uuid, user_uuids: e.value })
-                    }
-                    placeholder="Add members…"
-                    display="chip"
-                    filter
-                    className="flex-1"
-                  />
-                ) : (
-                  <span className="text-sm">
-                    {group.users.length === 0
-                      ? "No members"
-                      : group.users
-                          .map(
-                            (u) =>
-                              users.data?.find((full) => full.uuid === u.uuid)
-                                ?.username ?? u.uuid,
-                          )
-                          .join(", ")}
-                  </span>
-                )}
+              <div className="mt-2 text-sm">
+                <span style={{ color: "var(--text-muted)" }}>Members: </span>
+                {group.users.length === 0
+                  ? "none"
+                  : group.users
+                      .map((u) => usernameByUuid.get(u.uuid) ?? u.uuid)
+                      .join(", ")}
               </div>
             </Card>
           ))}
         </div>
       </section>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-lg font-medium">Users</h2>
-        {/* There is no public signup: creating an account is an admin action, and
-            this is the only way to onboard anyone. */}
-        {canAdminister && (
-          <form onSubmit={onCreateUser} className="flex flex-wrap items-end gap-2">
-            <div className="flex flex-col gap-1">
-              <label htmlFor="new-username" className="text-sm font-medium">
-                Username
-              </label>
-              <InputText
-                id="new-username"
-                value={newUser.username}
-                onChange={(e) =>
-                  setNewUser((prev) => ({ ...prev, username: e.target.value }))
-                }
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="new-email" className="text-sm font-medium">
-                Email
-              </label>
-              <InputText
-                id="new-email"
-                type="email"
-                value={newUser.email}
-                onChange={(e) =>
-                  setNewUser((prev) => ({ ...prev, email: e.target.value }))
-                }
-              />
-            </div>
-            <div className="flex flex-col gap-1">
-              <label htmlFor="new-password" className="text-sm font-medium">
-                Password
-              </label>
-              <InputText
-                id="new-password"
-                type="password"
-                value={newUser.password}
-                onChange={(e) =>
-                  setNewUser((prev) => ({ ...prev, password: e.target.value }))
-                }
-              />
-            </div>
-            <Button
-              type="submit"
-              label="Add user"
-              icon="pi pi-user-plus"
-              loading={createUser.isPending}
-              disabled={
-                !newUser.username.trim() ||
-                !newUser.email.trim() ||
-                !newUser.password
-              }
-            />
-          </form>
-        )}
-        {users.data?.length === 0 && (
-          <Message severity="info" text="No users yet." />
-        )}
-        <div className="flex flex-col gap-2">
-          {users.data?.map((user) => (
-            <Card key={user.uuid}>
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="font-medium">{user.username}</div>
-                  <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-                    {user.email}
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {user.is_superuser && (
-                    <span className="text-sm font-medium" style={{ color: "var(--brand)" }}>
-                      superuser
-                    </span>
-                  )}
-                  {!user.is_active && (
-                    <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-                      inactive
-                    </span>
-                  )}
-                </div>
-              </div>
-            </Card>
-          ))}
-        </div>
-      </section>
-
-      <Dialog
-        header="Rename group"
-        visible={!!renaming}
-        onHide={() => setRenaming(null)}
-        style={{ width: 380 }}
-      >
-        <div className="flex flex-col gap-4">
-          {rename.error instanceof ApiError && (
-            <Message severity="error" text={rename.error.message} />
-          )}
-          <InputText
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <Button label="Cancel" text onClick={() => setRenaming(null)} />
-            <Button
-              label="Save"
-              onClick={() => rename.mutate()}
-              loading={rename.isPending}
-              disabled={!renameValue.trim()}
-            />
-          </div>
-        </div>
-      </Dialog>
+      <UserDialog
+        visible={userDialog.open}
+        onHide={() => setUserDialog({ open: false, user: null })}
+        user={userDialog.user}
+        person={
+          userDialog.user ? personByUser.get(userDialog.user.uuid) ?? null : null
+        }
+        isSelf={!!me && userDialog.user?.uuid === me.uuid}
+      />
+      <GroupDialog
+        visible={groupDialog.open}
+        onHide={() => setGroupDialog({ open: false, group: null })}
+        group={groupDialog.group}
+        users={users.data ?? []}
+      />
     </div>
   );
 }
