@@ -453,6 +453,70 @@ a {
 }
 
 /* ============================================================
+   Calendar / date picker
+   Selectors mirror the base theme's so ours win on source order — see the note
+   at the top of this file.
+   ============================================================ */
+.p-datepicker,
+.p-datepicker:not(.p-datepicker-inline) {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+.p-datepicker .p-datepicker-header,
+.p-datepicker:not(.p-datepicker-inline) .p-datepicker-header {
+  background: var(--surface);
+  color: var(--text);
+  border-bottom: var(--border-width) solid var(--border);
+}
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year {
+  color: var(--text);
+}
+.p-datepicker .p-datepicker-header .p-datepicker-prev,
+.p-datepicker .p-datepicker-header .p-datepicker-next {
+  color: var(--text-muted);
+}
+.p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:hover,
+.p-datepicker .p-datepicker-header .p-datepicker-next:enabled:hover {
+  background: var(--hover);
+  color: var(--brand);
+}
+.p-datepicker table th {
+  color: var(--text-muted);
+}
+.p-datepicker table td > span {
+  color: var(--text);
+  border-radius: var(--radius);
+}
+.p-datepicker table td > span.p-highlight,
+.p-datepicker table td.p-datepicker-today > span.p-highlight,
+.p-datepicker .p-monthpicker .p-monthpicker-month.p-highlight,
+.p-datepicker .p-yearpicker .p-yearpicker-year.p-highlight {
+  background: var(--brand);
+  color: var(--brand-contrast);
+}
+/* Today, when not selected: a tint rather than a fill. */
+.p-datepicker table td.p-datepicker-today > span {
+  background: var(--brand-tint);
+  color: var(--text);
+}
+.p-datepicker:not(.p-disabled) table td span:not(.p-highlight):not(.p-disabled):hover,
+.p-datepicker:not(.p-disabled)
+  .p-monthpicker
+  .p-monthpicker-month:not(.p-disabled):not(.p-highlight):hover,
+.p-datepicker:not(.p-disabled)
+  .p-yearpicker
+  .p-yearpicker-year:not(.p-disabled):not(.p-highlight):hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.p-datepicker .p-datepicker-buttonbar {
+  border-top: var(--border-width) solid var(--border);
+}
+
+/* ============================================================
    Breadcrumb
    ============================================================ */
 .p-breadcrumb {

@@ -97,9 +97,34 @@ export function PeoplePage() {
       ),
   });
 
+  const emptyUser = { username: "", email: "", password: "" };
+  const [newUser, setNewUser] = useState(emptyUser);
+  const createUser = useMutation({
+    mutationFn: (payload: typeof emptyUser) =>
+      api.post<ApiUser>("/auth/users/", payload),
+    onSuccess: (user) => {
+      setNewUser(emptyUser);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      toast.success("User created", user.username);
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not create user",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+
   function onCreate(event: FormEvent) {
     event.preventDefault();
     if (groupName.trim()) createGroup.mutate(groupName.trim());
+  }
+  function onCreateUser(event: FormEvent) {
+    event.preventDefault();
+    createUser.mutate({
+      username: newUser.username.trim(),
+      email: newUser.email.trim(),
+      password: newUser.password,
+    });
   }
   function confirmDelete(group: ApiUserGroup) {
     confirmDialog({
@@ -119,7 +144,7 @@ export function PeoplePage() {
       {!canAdminister && (
         <Message
           severity="info"
-          text="Read-only. Creating groups and changing membership requires a superuser."
+          text="Read-only. Creating users and groups, and changing membership, requires a superuser."
         />
       )}
 
@@ -208,6 +233,61 @@ export function PeoplePage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Users</h2>
+        {/* There is no public signup: creating an account is an admin action, and
+            this is the only way to onboard anyone. */}
+        {canAdminister && (
+          <form onSubmit={onCreateUser} className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-username" className="text-sm font-medium">
+                Username
+              </label>
+              <InputText
+                id="new-username"
+                value={newUser.username}
+                onChange={(e) =>
+                  setNewUser((prev) => ({ ...prev, username: e.target.value }))
+                }
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-email" className="text-sm font-medium">
+                Email
+              </label>
+              <InputText
+                id="new-email"
+                type="email"
+                value={newUser.email}
+                onChange={(e) =>
+                  setNewUser((prev) => ({ ...prev, email: e.target.value }))
+                }
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="new-password" className="text-sm font-medium">
+                Password
+              </label>
+              <InputText
+                id="new-password"
+                type="password"
+                value={newUser.password}
+                onChange={(e) =>
+                  setNewUser((prev) => ({ ...prev, password: e.target.value }))
+                }
+              />
+            </div>
+            <Button
+              type="submit"
+              label="Add user"
+              icon="pi pi-user-plus"
+              loading={createUser.isPending}
+              disabled={
+                !newUser.username.trim() ||
+                !newUser.email.trim() ||
+                !newUser.password
+              }
+            />
+          </form>
+        )}
         {users.data?.length === 0 && (
           <Message severity="info" text="No users yet." />
         )}

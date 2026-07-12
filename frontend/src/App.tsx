@@ -8,6 +8,7 @@ import { WorkspacesPage } from "./features/workspaces/WorkspacesPage";
 import { ListsPage } from "./features/lists/ListsPage";
 import { ListDetailPage } from "./features/lists/ListDetailPage";
 import { PeoplePage } from "./features/people/PeoplePage";
+import { ProfilePage } from "./features/profile/ProfilePage";
 
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
@@ -27,6 +28,7 @@ export function App() {
       >
         <Route index element={<WorkspacesPage />} />
         <Route path="people" element={<PeoplePage />} />
+        <Route path="profile" element={<ProfilePage />} />
         <Route path="workspaces/:workspaceUuid" element={<ListsPage />} />
         <Route path="lists/:listUuid" element={<ListDetailPage />} />
       </Route>

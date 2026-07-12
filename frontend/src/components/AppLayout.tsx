@@ -17,6 +17,9 @@ export function AppLayout() {
           <Link to="/people" className="no-underline">
             <Button label="People" icon="pi pi-users" text />
           </Link>
+          <Link to="/profile" className="no-underline">
+            <Button label="Profile" icon="pi pi-user" text />
+          </Link>
           <ThemeSwitcher />
           <Button label="Log out" icon="pi pi-sign-out" text onClick={logout} />
         </div>

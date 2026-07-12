@@ -157,6 +157,16 @@ export interface ApiUser {
   groups: ResourceLink[];
 }
 
+// A user's personal details. Optional — an account can exist without one.
+export interface Person {
+  uuid: string;
+  first_name: string;
+  middle_name?: string | null;
+  last_name: string;
+  birth_date?: string | null; // ISO date, no time component
+  user: ResourceLink;
+}
+
 export interface ApiUserGroup {
   uuid: string;
   name: string;
