@@ -117,8 +117,11 @@ FIRST_SUPERUSER_PASSWORD=change-me
 uv run python main.py
 ```
 
-The API serves on `http://localhost:5000`. On startup the app creates any missing tables
-(`Base.metadata.create_all`) and seeds the bootstrap superuser if no users exist.
+Run `uv run alembic upgrade head` first — Alembic owns the schema, and the app no longer
+creates tables. On startup it **verifies** that the database matches the models and refuses
+to boot if it is behind (printing what is missing), then seeds the bootstrap superuser if no
+users exist. See "Database migrations" in the root README for the workflow and its two
+autogenerate caveats.
 
 - Interactive docs: `http://localhost:5000/docs`
 - ReDoc: `http://localhost:5000/redoc`
@@ -196,8 +199,9 @@ test gets a freshly created/dropped schema, and requests run with auth disabled 
 single seeded user. `tests/test_unique_concurrency.py` verifies the per-list advisory lock
 by asserting a concurrent record `create` blocks while the lock is held.
 
-Model registration: new SQLAlchemy models must be imported in `main.py`'s `lifespan` so
-they register with `Base.metadata` before `create_all` runs.
+Model registration: a new SQLAlchemy model must be added to
+`src/infrastructure/model_registry.py` — the one import list shared by the app, the tests,
+and Alembic's `env.py`. Leave it out and autogenerate will emit a `DROP TABLE` for it.
 
 ## Notes & roadmap
 

@@ -1,23 +1,27 @@
 """Startup guard against schema drift.
 
-There is no migration tool here: the schema comes from ``Base.metadata.create_all``,
-which only ever creates things that are *missing* and never alters what already
-exists. A brand-new table appears by itself, but a new **column** or a new **enum
-value** is silently skipped on a database that already exists — so the DB keeps its
-old shape and fails at query time (a 500 deep in a request) rather than at startup.
+Alembic owns the schema, but it does not close every hole:
 
-Tests cannot catch this: they run against a fresh database, where everything is
-missing and therefore created correctly. Only long-lived databases drift.
+- **Autogenerate cannot see new enum values.** It diffs tables and columns, not enum
+  labels, so adding a ``ColumnType`` member produces an *empty* migration. That is
+  exactly how `invalid input value for enum column_type: "time"` reached a running
+  server — the enum kept its old labels and blew up at query time.
+- A revision can simply be forgotten, or hand-written wrong.
 
 So compare the models against the live database on boot and refuse to start, naming
-the exact SQL to run. Drift is reported, never applied — mutating a schema on boot
-is not something that should happen behind your back.
+what is missing. Drift is reported, never applied — mutating a schema on boot is not
+something that should happen behind your back, and with several workers it races.
+
+Tests cannot catch drift on their own: they run against a fresh database, which is
+always built correctly. Only long-lived databases drift. ``tests/test_migrations.py``
+covers the other half — that the migrations reproduce the models' schema.
 """
 import sqlalchemy as sa
 from sqlalchemy import Connection
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.schema import CreateColumn
 
+import src.infrastructure.model_registry  # noqa: F401  (populates Base.metadata)
 from src.infrastructure.database import Base
 
 
@@ -43,6 +47,15 @@ def find_drift(conn: Connection) -> list[str]:
     additions — a column or enum value present in the DB but absent from the models
     is harmless leftovers, not drift that breaks anything.
     """
+    # A guard that compares against empty metadata would report "no drift" for every
+    # database, forever. That cannot happen while model_registry is imported above,
+    # but the failure would be silent, so make it loud instead.
+    if not Base.metadata.tables:
+        raise SchemaDriftError(
+            "Base.metadata is empty — no model modules were imported, so there is "
+            "nothing to check against. See src/infrastructure/model_registry.py."
+        )
+
     inspector = sa.inspect(conn)
     dialect = postgresql.dialect()
     remedies: list[str] = []
@@ -85,11 +98,23 @@ def raise_on_drift(conn: Connection) -> None:
     remedies = find_drift(conn)
     if not remedies:
         return
+
+    inspector = sa.inspect(conn)
+    tables = set(inspector.get_table_names())
+    if not tables or tables == {"alembic_version"}:
+        raise SchemaDriftError(
+            "The database has no schema. Run `alembic upgrade head` before starting "
+            "the app — the app no longer creates tables itself."
+        )
+
     statements = "\n".join(f"  {line}" for line in remedies)
     raise SchemaDriftError(
-        "The database is missing schema the models expect. create_all does not "
-        "alter existing tables or enum types, so this must be applied by hand "
-        "(all of it is additive and preserves data):\n\n"
+        "The database is behind the models. Usually this means a migration is "
+        "missing: run `alembic upgrade head`.\n\n"
+        "If you are already at head, the revision is incomplete — most likely a new "
+        "enum value, which autogenerate cannot see and you must write by hand. "
+        "Everything below is additive and preserves data:\n\n"
         f"{statements}\n\n"
-        "Apply the ALTER TYPE statements on an autocommit connection."
+        "ALTER TYPE ... ADD VALUE cannot run inside a transaction that then uses the "
+        "value; in a migration wrap it in `with op.get_context().autocommit_block():`."
     )

@@ -14,17 +14,9 @@ async def lifespan(app: FastAPI):
     # Initialize database
     from src.infrastructure.database import init_db, SessionLocal
 
-    # Explicitly import models to ensure they are registered with Base.metadata
-    import src.auth.users.models
-    import src.auth.tokens.models
-    import src.workspaces.models
-    import src.lists.models
-    import src.lists.columns.models
-    import src.lists.items.models
-    import src.lists.views.models
-    import src.lists.forms.models
-    import src.permissions.models
-    import src.people.models
+    # Registers every model on Base.metadata (one list, shared with the tests and
+    # with Alembic's env.py — see src/infrastructure/model_registry.py).
+    import src.infrastructure.model_registry  # noqa: F401
 
     await init_db()
 

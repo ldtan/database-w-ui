@@ -23,6 +23,7 @@ Run the backend and frontend together:
 # backend — http://localhost:5000 (docs at /docs)
 cd backend
 uv sync
+uv run alembic upgrade head    # the app does not create tables; it verifies them
 uv run python main.py
 
 # frontend — http://localhost:5173 (proxies /api to the backend)
@@ -33,6 +34,42 @@ npm run dev
 
 See [`backend/README.md`](backend/README.md) and [`frontend/README.md`](frontend/README.md)
 for prerequisites, environment configuration, and the full API/UI overview.
+
+## Database migrations
+
+Alembic owns the schema. The app **verifies** it on startup and refuses to boot if the
+database is behind, printing what is missing — it never creates or alters anything itself
+(that would race across workers). Deploys run `alembic upgrade head` before starting.
+
+After changing a model:
+
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "what changed"
+#  ^ then READ the generated script before applying it (see the caveats below)
+uv run alembic upgrade head
+```
+
+Two things autogenerate gets wrong, both of which have already bitten this project:
+
+- **It cannot see new enum values.** Adding a member to `ColumnType` produces a migration
+  whose `upgrade()` is `pass`, and the app then 500s with
+  `invalid input value for enum column_type: "..."`. Write it by hand:
+
+  ```python
+  with op.get_context().autocommit_block():   # ADD VALUE cannot run in a transaction
+      op.execute("ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'time'")
+  ```
+
+- **It omits `use_alter` foreign keys** (the circular `lists.primary_column_id → columns.id`),
+  so they must be added with an explicit `op.create_foreign_key`.
+
+Add a new model? Register it in `src/infrastructure/model_registry.py` — the single import
+list shared by the app, the tests, and Alembic. A model missing from it makes autogenerate
+emit a `DROP TABLE` for its table.
+
+`tests/test_migrations.py` builds a database *through the migrations* and asserts it matches
+the models, so a missing or wrong revision fails CI rather than production.
 
 ## Documentation
 

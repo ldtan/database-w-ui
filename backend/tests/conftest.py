@@ -19,17 +19,8 @@ from src.core.config import settings
 # Requests act as the first user (no token needed).
 settings.DISABLE_AUTH = True
 
-# Import every model so Base.metadata is complete for create_all/drop_all.
-import src.auth.tokens.models  # noqa: E402,F401
-import src.auth.users.models  # noqa: E402,F401
-import src.lists.columns.models  # noqa: E402,F401
-import src.lists.forms.models  # noqa: E402,F401
-import src.lists.items.models  # noqa: E402,F401
-import src.lists.models  # noqa: E402,F401
-import src.lists.views.models  # noqa: E402,F401
-import src.people.models  # noqa: E402,F401
-import src.permissions.models  # noqa: E402,F401
-import src.workspaces.models  # noqa: E402,F401
+# Registers every model so Base.metadata is complete for create_all/drop_all.
+import src.infrastructure.model_registry  # noqa: E402,F401
 
 from main import create_app  # noqa: E402
 from src.auth.users.schemas import UserCreate  # noqa: E402

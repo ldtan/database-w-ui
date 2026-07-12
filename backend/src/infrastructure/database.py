@@ -41,11 +41,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 async def init_db():
+    """Verify the database matches the models. Does not create or alter anything.
+
+    Alembic owns the schema now: run `alembic upgrade head` before starting the app.
+    Migrating here instead would race across workers, and silently mutating a schema
+    on boot is the very thing this check exists to prevent.
+
+    The check still earns its keep alongside Alembic, because autogenerate cannot see
+    new *enum values* — it diffs tables and columns, not enum labels. A forgotten or
+    incomplete revision fails startup with the exact SQL rather than a 500 mid-request.
+    """
     from src.infrastructure.schema_check import raise_on_drift
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # create_all only creates what is missing; it never alters an existing table
-        # or enum type. Catch that here rather than letting it surface as a 500 mid
-        # request. Deferred import: schema_check imports Base from this module.
         await conn.run_sync(raise_on_drift)

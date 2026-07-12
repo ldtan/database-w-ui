@@ -103,40 +103,43 @@ section shows the list's own slug as its subtitle rather than "in «Workspace»"
 
 ## Gotchas for whoever edits this next
 
-**There is no Alembic, and `create_all` only creates things that are *missing*.** The
-schema comes from `Base.metadata.create_all` over the models imported in `main.py`'s
-lifespan and `tests/conftest.py` — a new model needs importing in *both*. `create_all`
-creates absent tables and types, and **never alters an existing one**. So a new *table*
-appears by itself, while a new **column** or a new **enum value** is silently ignored on
-any database that already exists: the DB keeps its old shape and blows up at query time,
-not at startup. Tests never catch this — they run against a fresh database, where
-everything is "missing" and therefore created correctly.
+**Alembic owns the schema — but autogenerate is blind to new enum values.** The app no
+longer creates tables (`init_db` only *verifies*); run `alembic upgrade head` first. The
+workflow is in the README. The trap:
 
-**A startup guard now catches it** (`src/infrastructure/schema_check.py`, run from
-`init_db`). It compares the models against the live database and **refuses to start**,
-printing the exact SQL to run. Drift is reported, never applied — schema is not mutated
-behind your back. So the failure mode below is now a clear message on boot rather than a
-500 mid-request; the remediation is still yours to apply:
+> `alembic revision --autogenerate` diffs **tables and columns, not enum labels**. Adding
+> a member to `ColumnType` produces a migration whose `upgrade()` is literally `pass`.
+> This is exactly how `invalid input value for enum column_type: "time"` reached a running
+> server. Verified: add an enum member and autogenerate emits nothing.
 
-```sql
--- a new column (is_superuser). ALTER is additive and keeps your data.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS is_superuser boolean NOT NULL DEFAULT false;
-UPDATE users SET is_superuser = true WHERE username = 'admin';  -- seed.py only fires on an empty table
+So an enum change must be hand-written, and `ALTER TYPE ... ADD VALUE` cannot run inside a
+transaction that then uses the value — it needs Alembic's autocommit escape:
 
--- new enum values (ColumnType.time/datetime, added after the type was created).
--- Symptom: 500 with `invalid input value for enum column_type: "time"`.
-ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'time';
-ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'datetime';
+```python
+def upgrade() -> None:
+    with op.get_context().autocommit_block():
+        op.execute("ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'time'")
 ```
 
-`ALTER TYPE ... ADD VALUE` cannot run in a transaction block that then uses the value, so
-apply it on an autocommit connection. After adding an enum member in Python, check the
-live enum:
+Postgres has no `DROP VALUE`, so these are effectively one-way; a downgrade would have to
+rebuild the type.
 
-```sql
-SELECT enumlabel FROM pg_enum e JOIN pg_type t ON t.oid = e.enumtypid
-WHERE t.typname = 'column_type' ORDER BY enumsortorder;
-```
+**The startup drift guard is the backstop for exactly that.**
+`src/infrastructure/schema_check.py`, run from `init_db`, compares the models against the
+live database and **refuses to start**, printing the SQL to run. It catches a forgotten
+migration, an incomplete one, and the enum hole above. Drift is reported, never applied —
+schema is not mutated behind your back, and with several workers that would race.
+
+**`use_alter` foreign keys need hand-holding in migrations.**
+`lists.primary_column_id → columns.id` is circular (`columns.list_id → lists.id`), so the
+model marks it `use_alter=True`. SQLAlchemy omits such keys from `CREATE TABLE`, and
+autogenerate does **not** emit the follow-up `ALTER` — so the generated baseline silently
+had no such constraint until it was added by hand. `tests/test_migrations.py` pins it.
+
+**Every model must be listed in `src/infrastructure/model_registry.py`.** That one module
+is imported by `main.py`, `tests/conftest.py`, and `migrations/env.py`. A model missing
+from it fails three different silent ways — worst of all in `env.py`, where autogenerate
+sees the table as absent from the models and emits a **`DROP TABLE`**.
 
 **Never lazy-load a relationship after a commit.** The session factory sets
 `expire_on_commit=False` precisely because a lazy reload under asyncpg raises
