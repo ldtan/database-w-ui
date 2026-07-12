@@ -28,16 +28,10 @@ import { AddColumnDialog } from "../columns/AddColumnDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
-import {
-  LookupCell,
-  useLookupLabels,
-  type LookupLabelMap,
-} from "../lookups/LookupControls";
+import { LookupCell, collectLookupUuids } from "../lookups/LookupControls";
 import {
   PrincipalCell,
   collectPrincipalUuids,
-  usePrincipalLabels,
-  type PrincipalLabels,
   type PrincipalType,
 } from "../principals/PrincipalControls";
 import { ViewBar } from "../views/ViewBar";
@@ -53,22 +47,32 @@ type SortOrder = 1 | 0 | -1 | null | undefined;
 function renderCell(
   column: Column,
   row: ListItem,
-  principalLabels: Record<PrincipalType, PrincipalLabels>,
-  lookupLabels: LookupLabelMap,
+  listUuid: string,
+  principalUuids: Record<PrincipalType, string[]>,
+  lookupUuids: Map<string, string[]>,
 ) {
   const value = row.data?.[column.uuid];
+  // Reference cells are handed the uuids the *whole page* holds, and resolve them
+  // themselves. They share one query key per column, so it is still one request —
+  // but each cell subscribes to it, which a map passed down as a prop cannot do:
+  // DataTable re-renders only when its `value` changes, so the labels would land
+  // after an edit and never reach the DOM.
   if (column.type === "lookup") {
-    // Like principals, resolved once for the whole page rather than per cell.
-    return <LookupCell value={value} labels={lookupLabels.get(column.uuid)} />;
+    return (
+      <LookupCell
+        listUuid={listUuid}
+        column={column}
+        value={value}
+        pageUuids={lookupUuids.get(column.uuid) ?? []}
+      />
+    );
   }
   if (column.type === "user" || column.type === "group") {
-    // Names are resolved once for the whole page (see principalLabels below),
-    // not per cell — otherwise every row would fire its own request.
     return (
       <PrincipalCell
         column={column}
         value={value}
-        labels={principalLabels[column.type]}
+        pageUuids={principalUuids[column.type]}
       />
     );
   }
@@ -306,18 +310,17 @@ export function ListDetailPage() {
   })();
   const visibleCols = orderedCols.filter((c) => !hiddenColumns.includes(c.uuid));
 
-  // Resolve every user/group uuid on this page of records in one request per kind,
-  // rather than letting each cell fetch for itself (or pulling down the whole users
-  // table, which stops working once there are more users than the fetch's limit).
+  // The reference uuids this page of records holds. The cells resolve them (one
+  // shared request per column — see renderCell); the page only has to gather them,
+  // so that the query key covers the whole page rather than a single row.
   const principalUuids = useMemo(
     () => collectPrincipalUuids(cols, items.data ?? []),
     [cols, items.data],
   );
-  const principalLabels: Record<PrincipalType, PrincipalLabels> = {
-    user: usePrincipalLabels("user", principalUuids.user),
-    group: usePrincipalLabels("group", principalUuids.group),
-  };
-  const lookupLabels = useLookupLabels(listUuid, cols, items.data ?? []);
+  const lookupUuids = useMemo(
+    () => collectLookupUuids(cols, items.data ?? []),
+    [cols, items.data],
+  );
 
   const formList = forms.data ?? [];
   const sharingItem =
@@ -365,7 +368,7 @@ export function ListDetailPage() {
     if (!groupColumn) return null;
     return (
       <span className="font-semibold">
-        {groupColumn.display_name}: {renderCell(groupColumn, row, principalLabels, lookupLabels)}
+        {groupColumn.display_name}: {renderCell(groupColumn, row, listUuid, principalUuids, lookupUuids)}
       </span>
     );
   }
@@ -611,7 +614,7 @@ export function ListDetailPage() {
                 )}
               </div>
             }
-            body={(row: ListItem) => renderCell(col, row, principalLabels, lookupLabels)}
+            body={(row: ListItem) => renderCell(col, row, listUuid, principalUuids, lookupUuids)}
           />
         ))}
         <DataColumn

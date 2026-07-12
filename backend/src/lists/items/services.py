@@ -30,9 +30,16 @@ async def display_column_key(
     """Which column of a lookup's target list supplies a row's label.
 
     The lookup's configured `display_column_uuid`, else the target list's primary
-    column. Shared by the item service (resolving a label on write) and the export
-    formatter (writing one out) so the two cannot disagree about what a label is —
-    if they did, a file this app exported would not import back into it.
+    column, else its **first** column. That last fallback is load-bearing, not
+    politeness: `primary_column_id` is only ever set by an explicit PATCH, and is
+    nulled again when that column is deleted, so most lists have none. Without it
+    a lookup at such a list has no label at all — every cell renders as a row stub,
+    the picker's search matches nothing, and the export writes uuids.
+
+    Shared by the item service (resolving a label on write), the export formatter
+    (writing one out) and the options endpoint (the picker), so the three cannot
+    disagree about what a label is — if they did, a file this app exported would
+    not import back into it.
     """
     explicit = config.get("display_column_uuid")
     if explicit:
@@ -41,14 +48,24 @@ async def display_column_key(
     primary_id = await db.scalar(
         select(List.primary_column_id).where(List.id == target_list_id)
     )
-    if primary_id is None:
-        return None
-    key = await db.scalar(
-        select(Column.uuid).where(
-            Column.id == primary_id, Column.deleted_at.is_(None)
+    if primary_id is not None:
+        key = await db.scalar(
+            select(Column.uuid).where(
+                Column.id == primary_id, Column.deleted_at.is_(None)
+            )
         )
+        if key is not None:
+            return str(key)
+
+    # Same order the grid shows, so the label is the column a person would read
+    # first — matching what the UI did before this moved server-side.
+    first = await db.scalar(
+        select(Column.uuid)
+        .where(Column.list_id == target_list_id, Column.deleted_at.is_(None))
+        .order_by(Column.position, Column.id)
+        .limit(1)
     )
-    return str(key) if key is not None else None
+    return str(first) if first is not None else None
 
 
 class ListItemService:

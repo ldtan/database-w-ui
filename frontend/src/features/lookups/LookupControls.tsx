@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { keepPreviousData, useQueries, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { AutoComplete } from "primereact/autocomplete";
 
 import { api } from "../../lib/api";
@@ -19,13 +19,8 @@ export interface LookupLabels {
   // otherwise render as a stub id on every page load.
   isResolving: boolean;
 }
-/** Per lookup column (keyed by its uuid). */
-export type LookupLabelMap = Map<string, LookupLabels>;
-
 const RESOLVE_CHUNK = 500; // the endpoint's cap on `uuid` params
 const SUGGESTION_LIMIT = 25;
-
-const EMPTY: LookupLabels = { names: new Map(), isResolving: false };
 
 /** A row with no label has nothing else to identify it by. */
 function fallback(uuid: string): string {
@@ -50,12 +45,15 @@ function toNames(rows: LookupOption[] | undefined): Map<string, string> {
   return names;
 }
 
-/** The uuids each lookup column holds across `rows`, deduped. */
-function collectLookupUuids(
+/** column uuid -> every target-row uuid that column holds across `rows`, deduped.
+ *
+ *  Sorted so the set is a stable query key however the rows are ordered; every
+ *  cell of a column is handed the same array and therefore shares one request. */
+export function collectLookupUuids(
   columns: Column[],
   rows: ListItem[],
-): [string, string[]][] {
-  const found: [string, string[]][] = [];
+): Map<string, string[]> {
+  const found = new Map<string, string[]>();
   for (const column of columns) {
     if (column.type !== "lookup") continue;
     const uuids = new Set<string>();
@@ -64,14 +62,13 @@ function collectLookupUuids(
       const list = Array.isArray(value) ? value : value ? [value] : [];
       for (const uuid of list) uuids.add(String(uuid));
     }
-    found.push([column.uuid, [...uuids].sort().slice(0, RESOLVE_CHUNK)]);
+    found.set(column.uuid, [...uuids].sort().slice(0, RESOLVE_CHUNK));
   }
   return found;
 }
 
-// One query definition, used two ways: many at once for a grid (useQueries, since
-// the number of lookup columns is only known at render), and one at a time for a
-// picker resolving its own value.
+// One query definition, shared by every cell of a column and by the picker. They
+// pass the same uuid set, so react-query serves them all from one request.
 function labelQuery(listUuid: string, columnUuid: string, uuids: string[]) {
   return {
     queryKey: ["lookup-labels", listUuid, columnUuid, uuids],
@@ -97,47 +94,39 @@ function labelQuery(listUuid: string, columnUuid: string, uuids: string[]) {
 
 function toLabels(
   uuids: string[],
-  result: { data?: LookupOption[]; isPending: boolean } | undefined,
+  result:
+    | { data?: LookupOption[]; isPending: boolean; isFetching: boolean }
+    | undefined,
 ): LookupLabels {
   return {
     names: toNames(result?.data),
-    isResolving: uuids.length > 0 && !!result?.isPending,
+    // isFetching, not isPending: with placeholderData the status is already
+    // "success" while the new uuid set is still in flight, so a row linked a
+    // moment ago would render as a stub id rather than "…". A label we already
+    // hold wins over this flag (see nameFor), so "…" only shows for uuids we
+    // genuinely cannot name yet.
+    isResolving: uuids.length > 0 && !!(result?.isPending || result?.isFetching),
   };
 }
 
-/** Resolve the labels a page's lookup cells need: one request per lookup column,
- *  not one per cell, and never the whole target list. */
-export function useLookupLabels(
-  listUuid: string,
-  columns: Column[],
-  rows: ListItem[],
-): LookupLabelMap {
-  const perColumn = useMemo(
-    () => collectLookupUuids(columns, rows),
-    [columns, rows],
-  );
-
-  const results = useQueries({
-    queries: perColumn.map(([columnUuid, uuids]) =>
-      labelQuery(listUuid, columnUuid, uuids),
-    ),
-  });
-
-  const map: LookupLabelMap = new Map();
-  perColumn.forEach(([columnUuid, uuids], i) => {
-    map.set(columnUuid, toLabels(uuids, results[i]));
-  });
-  return map;
-}
-
 export function LookupCell({
+  listUuid,
+  column,
   value,
-  labels,
+  pageUuids,
 }: {
+  listUuid: string;
+  column: Column;
   value: unknown;
-  labels: LookupLabels | undefined;
+  // Every row uuid this column holds across the page. The cell subscribes to the
+  // query itself rather than taking a finished map as a prop — see the note on
+  // PrincipalCell: DataTable only re-renders when its `value` changes, so a map
+  // passed down would freeze and the cell would sit on "…" after an edit. All the
+  // column's cells share one query key, so it stays one request per column.
+  pageUuids: string[];
 }) {
-  const resolved = labels ?? EMPTY;
+  const result = useQuery(labelQuery(listUuid, column.uuid, pageUuids));
+  const resolved = toLabels(pageUuids, result);
   const uuids = Array.isArray(value)
     ? (value as string[])
     : value

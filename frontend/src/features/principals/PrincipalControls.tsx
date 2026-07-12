@@ -78,8 +78,16 @@ export function usePrincipalLabels(
   return useMemo(() => {
     const names = new Map<string, string>();
     for (const row of query.data ?? []) names.set(row.uuid, labelOf(kind, row));
-    return { names, isResolving: keys.length > 0 && query.isPending };
-  }, [query.data, query.isPending, keys.length, kind]);
+    // isFetching, not isPending: with placeholderData the status is already
+    // "success" while the new uuid set is still in flight, so isPending would be
+    // false and a just-assigned account would render as "unknown user" until the
+    // response landed. A name we already hold wins over this flag anyway (see
+    // nameFor), so it only ever shows "…" for uuids we genuinely cannot name yet.
+    return {
+      names,
+      isResolving: keys.length > 0 && (query.isPending || query.isFetching),
+    };
+  }, [query.data, query.isPending, query.isFetching, keys.length, kind]);
 }
 
 /** One principal's display name: its own name, "…" while resolving, and only then
@@ -114,13 +122,20 @@ export function collectPrincipalUuids(
 export function PrincipalCell({
   column,
   value,
-  labels,
+  pageUuids,
 }: {
   column: Column;
   value: unknown;
-  labels: PrincipalLabels;
+  // Every principal uuid on this page, for this kind of column. The cell resolves
+  // through it rather than being handed a finished map, so that it *subscribes* to
+  // the query: PrimeReact's DataTable only re-renders when its `value` changes, so
+  // a map passed down as a prop would freeze at whatever was resolved when the rows
+  // last changed — cells would sit on "…" forever after an edit. Every cell shares
+  // one query key, so this is still a single request for the page, not one per cell.
+  pageUuids: string[];
 }) {
   const kind = column.type as PrincipalType;
+  const labels = usePrincipalLabels(kind, pageUuids);
   const uuids = Array.isArray(value)
     ? (value as string[])
     : value

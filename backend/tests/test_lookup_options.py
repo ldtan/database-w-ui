@@ -207,3 +207,90 @@ async def test_options_require_view_on_the_target_list(
     async with make_client(other) as partial:
         resp = await partial.get(f"/api/lists/{list_uuid}/columns/{lookup}/options")
         assert resp.status_code == 403, resp.text
+
+
+async def test_labels_fall_back_to_the_first_column(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Most lists have no primary column — it is only ever set by an explicit
+    PATCH, and cleared when that column is deleted. Without a fallback a lookup at
+    such a list has no label at all: stub ids in the grid and a search box that
+    matches nothing."""
+    target = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "schools",
+                "display_name": "Schools",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    # Deliberately no primary_column_uuid PATCH: the default state of a new list.
+    name_col = await add_column(target, name="name", display_name="Name", type="text")
+    await client.post(
+        f"/api/lists/{target}/items/", json={"data": {name_col: "Springfield High"}}
+    )
+
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+
+    resp = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options?q=spring")
+    assert resp.status_code == 200, resp.text
+    assert [o["label"] for o in resp.json()] == ["Springfield High"]
+
+
+async def test_export_does_not_leak_labels_from_an_unreadable_target(
+    client, make_client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """Resolving a label means reading the target list, so it obeys the *target's*
+    permissions. Granting view on a list must not hand over the contents of a
+    different list it happens to point at — the caller gets uuids instead."""
+    target, rows = await _target_with_rows(
+        client, workspace_uuid, add_column, ["Springfield High"]
+    )
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {lookup: rows["Springfield High"]}},
+    )
+
+    async with session_factory() as db:
+        other = await UserService.create(
+            db, UserCreate(username="peeker", email="peeker@example.com", password="pw")
+        )
+        other_uuid = str(other.uuid)
+
+    granted = await client.post(  # the list, but deliberately not its lookup target
+        "/api/permissions/grants",
+        json={
+            "resource_type": "list",
+            "resource_uuid": list_uuid,
+            "user_uuid": other_uuid,
+            "actions": ["view"],
+        },
+    )
+    assert granted.status_code == 201, granted.text
+
+    async with make_client(other) as peeker:
+        export = await peeker.post(
+            f"/api/lists/{list_uuid}/export", json={"format": "csv"}
+        )
+        assert export.status_code == 200, export.text
+        assert "Springfield High" not in export.text  # the name is not theirs to see
+        assert rows["Springfield High"] in export.text  # an opaque uuid, as before
+
+    # The owner, who can read the target, still gets the readable label.
+    mine = await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
+    assert "Springfield High" in mine.text

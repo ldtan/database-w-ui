@@ -209,12 +209,37 @@ precisely because only the server knows a row's label (`display_column_key`) —
 user cannot read. Still to convert: `GroupDialog` (member picker) and `PeoplePage`
 (person-name annotations).
 
-Two traps worth knowing if you touch these hooks. The query key is the **uuid set**, so it
-changes whenever the records do — including the blip where a view swap empties the grid
-mid-refetch; without `placeholderData: keepPreviousData` the labels drop out and every cell
-falls back to a stub. And "not resolved yet" must never render like "row/account is gone":
-an in-flight uuid shows `…`, and only a settled request with no match shows `unknown user` /
-the row stub.
+**Resolving a label means reading the target list, so it obeys the *target's* permissions,
+not the exported/edited list's.** `view` on a list must not hand over the contents of a
+different list it happens to point at. The options endpoint enforces this, and so does export
+(`_lookup_row_labels`) — a caller who cannot read the target gets uuids instead of labels,
+which is what they saw before labels existed. Any new surface that resolves a lookup label
+needs the same check; `test_export_does_not_leak_labels_from_an_unreadable_target` pins it.
+
+**A row's label falls back: the lookup's `display_column_uuid`, else the target's primary
+column, else its *first* column.** That last step is load-bearing — `primary_column_id` is
+only ever set by an explicit PATCH and is nulled when that column is deleted, so most lists
+have none. Drop it and every lookup at such a list silently degrades to uuid stubs *and* its
+picker's search matches nothing.
+
+Three traps worth knowing if you touch these hooks.
+
+**A cell must subscribe to its own label query — never take a resolved map as a prop.**
+PrimeReact's `DataTable` re-renders its body only when `value` (the rows) changes. Labels
+arrive *after* that, so a map computed in the page and passed down freezes at whatever was
+resolved when the rows last changed: assign a user to a record and the cell sits on `…`
+forever, even though the page-level hook has the name. `PrincipalCell`/`LookupCell` therefore
+take the page's *uuid list* and call the hook themselves. Every cell of a column passes the
+same list, so react-query serves them all from one request — the batching survives.
+
+**The query key is the uuid set**, so it changes whenever the records do — including the blip
+where a view swap empties the grid mid-refetch. Without `placeholderData: keepPreviousData`
+the labels drop out and every cell falls back to a stub.
+
+**"Not resolved yet" must never render like "row/account is gone".** An in-flight uuid shows
+`…`; only a settled request with no match shows `unknown user` / the row stub. Note this must
+key off `isFetching`, **not** `isPending` — with `placeholderData` the status is already
+`success` while the new uuid set is still in flight.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

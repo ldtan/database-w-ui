@@ -79,37 +79,60 @@ async def _principal_names(
     return names
 
 
-async def _lookup_row_labels(db: AsyncSession, column: Column) -> dict[str, str]:
+async def _lookup_row_labels(
+    db: AsyncSession, column: Column, user
+) -> dict[str, str]:
     """row uuid -> label, for one lookup column's target list.
+
+    Resolving a label means *reading the target list*, so it obeys the target's
+    permissions, not the exported list's: `view` on the target, then the same
+    per-record filter every other read path applies. A caller who cannot read the
+    target gets no labels and the cells export as uuids — which is what they saw
+    before labels existed, and leaks nothing. Granting `view` on a list must not
+    hand over the contents of a *different* list it happens to point at.
 
     The label comes from the same display column the item service matches on when
     importing (`display_column_key`), so what we write is what we can read back. A
     row whose label is empty keeps its uuid: it is the only value that identifies
     it.
     """
+    from src.permissions.enums import Action, ResourceType
+    from src.permissions.services import PermissionService
+
     config = column.config or {}
-    target_list_id = await db.scalar(
-        select(List.id).where(
-            List.uuid == coerce_uuid(config.get("target_list_uuid")),
-            List.deleted_at.is_(None),
+    target = (
+        await db.execute(
+            select(List)
+            .options(selectinload(List.workspace))
+            .where(
+                List.uuid == coerce_uuid(config.get("target_list_uuid")),
+                List.deleted_at.is_(None),
+            )
         )
-    )
-    if target_list_id is None:
+    ).scalars().first()
+    if target is None:
         return {}
-    key = await display_column_key(db, target_list_id, config)
+    if not await PermissionService.has(
+        db, user, ResourceType.list, target.id, Action.view
+    ):
+        return {}
+
+    key = await display_column_key(db, target.id, config)
     if key is None:
         return {}
 
     rows = await db.execute(
         select(ListItem.uuid, ListItem.data[key].astext).where(
-            ListItem.list_id == target_list_id, ListItem.deleted_at.is_(None)
+            ListItem.list_id == target.id,
+            ListItem.deleted_at.is_(None),
+            await PermissionService.item_view_filter(db, user, target),
         )
     )
     return {str(uuid): label for uuid, label in rows if label}
 
 
 async def _label_maps(
-    db: AsyncSession, columns: list[Column]
+    db: AsyncSession, columns: list[Column], user
 ) -> dict[str, dict[str, str]]:
     """column uuid -> {stored uuid: label}, for every reference column exported.
 
@@ -123,7 +146,7 @@ async def _label_maps(
         if column.type in PRINCIPAL_TYPES:
             maps[str(column.uuid)] = principals
         elif column.type == ColumnType.lookup:
-            maps[str(column.uuid)] = await _lookup_row_labels(db, column)
+            maps[str(column.uuid)] = await _lookup_row_labels(db, column, user)
     return maps
 
 
@@ -183,7 +206,7 @@ async def export_rows(
 
         # Resolved before the cursor opens: issuing another query on this session
         # mid-stream would disturb the in-flight result.
-        maps = await _label_maps(db, columns)
+        maps = await _label_maps(db, columns, user)
 
         # Select only the JSONB payload, not whole ORM entities: Core rows do not
         # enter the session identity map, so memory stays flat over a large
