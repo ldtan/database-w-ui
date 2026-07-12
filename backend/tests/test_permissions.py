@@ -5,6 +5,7 @@ logic is exercised directly against the service layer with several distinct user
 and HTTP enforcement is checked via a `make_client` helper that overrides
 get_current_user to act as a chosen user.
 """
+import json
 from contextlib import asynccontextmanager
 
 import pytest
@@ -411,6 +412,54 @@ async def test_http_shared_with_me(make_client, session_factory):
         # ...but the list is still there unfiltered, under its workspace.
         resp = await client.get(f"/api/lists/?workspace_uuid={workspace_uuid}")
         assert [item["uuid"] for item in resp.json()] == [list_uuid]
+
+
+async def test_http_export_respects_item_permissions(make_client, session_factory):
+    """Export is a read of the records, so it must hide the same rows the grid does.
+    It previously streamed every row in the list, leaking records whose inheritance
+    was broken and were never granted to the caller."""
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        await ListItemService.create(db, lst, ListItemCreate(data={}))
+        hidden = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        # other can view the list...
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        # ...but the second record goes "unique" with no grant of its own, so the
+        # list grant no longer reaches it.
+        hidden.permissions_inherit = False
+        await db.commit()
+        list_uuid = str(lst.uuid)
+
+    body = {
+        "format": "json",
+        "columns": [],
+        "filters": {"conjunction": "and", "conditions": []},
+        "sorts": [],
+        "limit": None,
+    }
+
+    async with make_client(other) as client:
+        # The grid already hid the unique row; the export must agree with it.
+        resp = await client.get(f"/api/lists/{list_uuid}/items/")
+        assert len(resp.json()) == 1
+        resp = await client.post(f"/api/lists/{list_uuid}/export", json=body)
+        assert resp.status_code == 200
+        assert len(json.loads(resp.text)) == 1
+
+    # The owner still exports everything.
+    async with make_client(owner) as client:
+        resp = await client.post(f"/api/lists/{list_uuid}/export", json=body)
+        assert len(json.loads(resp.text)) == 2
 
 
 async def test_http_effective_batch(make_client, session_factory):

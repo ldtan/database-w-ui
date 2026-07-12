@@ -25,9 +25,13 @@ router = APIRouter(prefix="/{list_uuid}", tags=["transfer"])
 async def export_list(
     payload: ExportRequest,
     lst: List = Depends(get_list_or_404),
+    current_user: User = Depends(get_current_user),
 ):
+    # get_list_or_404 establishes 'view' on the list; the caller is threaded through
+    # so the stream can also filter out records they cannot see individually.
     generator = export_rows(
         list_id=lst.id,
+        user=current_user,
         fmt=payload.format,
         column_names=payload.columns,
         filters=payload.filters.model_dump(),

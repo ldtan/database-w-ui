@@ -40,6 +40,5 @@ for prerequisites, environment configuration, and the full API/UI overview.
   list_items, views, forms), the JSONB record strategy, column types, and the decisions
   behind them.
 - [Known gaps, gotchas, and follow-ups](docs/known-gaps.md) — what is deliberately
-  unfinished (including a **permission leak in export**), behavior that surprises people,
-  and the traps waiting for whoever edits the code next. **Read before touching
-  permissions, theming, or the schema.**
+  unfinished, behavior that surprises people, and the traps waiting for whoever edits the
+  code next. **Read before touching permissions, theming, or the schema.**

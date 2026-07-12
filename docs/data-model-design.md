@@ -479,7 +479,8 @@ to decide which controls to render:
 
 User and group CRUD already exist under `/api/auth/users` and `/api/auth/groups`.
 
-Not yet done: admin-gating of user/group management, grant scrubbing on hard delete,
-and permission-filtering of streamed exports — the last of these is a **live data leak**
-(a list-viewer can export records they cannot see). See
-[Known gaps](known-gaps.md) for these and the rest.
+Exports stream through `item_view_filter` too, so they hide exactly the records the grid
+hides.
+
+Not yet done: admin-gating of user/group management and grant scrubbing on hard delete.
+See [Known gaps](known-gaps.md) for these and the rest.

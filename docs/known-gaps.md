@@ -5,23 +5,7 @@ bite whoever touches the code next. Ordered by how much they matter.
 
 ---
 
-## 1. Export bypasses item-level permissions (data leak)
-
-**Verified.** `TransferService.export_rows` selects records with only
-`ListItem.deleted_at IS NULL AND ListItem.list_id == list_id` — it never applies
-`PermissionService.item_view_filter`, which every other read path does.
-
-So a user with `view` on a list exports **every row in it**, including records whose
-inheritance was broken (`permissions_inherit = false`) and which were never granted to
-them. Reproduced against the dev DB: the grid correctly showed such a user 1 of 2 rows,
-while `POST /lists/{uuid}/export` handed them both.
-
-Anything that relies on per-record permissions is only as strong as its weakest read
-path, and export is currently that path. **Fix:** apply `item_view_filter` in
-`export_rows` the way `ListItemService.list`/`query` do. Small change; the filter already
-exists.
-
-## 2. User and group management has no role gating
+## 1. User and group management has no role gating
 
 `/api/auth/users` and `/api/auth/groups` are protected by `get_current_user` and nothing
 else. **Any authenticated user can create, rename, and delete users and groups** —
@@ -32,7 +16,7 @@ There is no role/superuser concept in the model yet; `FIRST_SUPERUSER_*` only se
 bootstrap account. Adding one is the prerequisite for gating these routes and the
 People & Groups page.
 
-## 3. A record shared without its list can't be viewed in the UI
+## 2. A record shared without its list can't be viewed in the UI
 
 The API supports this on purpose — item routes use `resolve_list_or_404` (existence only)
 rather than `get_list_or_404` (which requires list `view`). Verified: a user with `edit`
@@ -58,7 +42,7 @@ Both also need two fallbacks that are easy to miss: `RecordFormDialog` renders f
 by fetching a **different** list — so lookups must degrade to an unresolved value when the
 target list isn't visible.
 
-## 4. Grants are not scrubbed on hard delete
+## 3. Grants are not scrubbed on hard delete
 
 `permission_grants` points at resources polymorphically via `(resource_type, resource_id)`
 with **no foreign key**, so nothing cleans up a grant when its resource goes away. This is
@@ -127,6 +111,14 @@ and deferred, so backend schema changes do not propagate — update `types.ts` y
 returns an empty set until the request resolves, so buttons appear a beat after page load
 rather than showing and then vanishing (which would let someone click a control they don't
 have). Grant and inheritance changes invalidate the cached `["effective"]` queries.
+
+**Every read path over records must apply `item_view_filter`.** Per-record permissions are
+only as strong as the weakest path that returns records. Export used to miss this — it
+streamed rows filtered on `list_id` alone, so a list-viewer could export records whose
+inheritance was broken and were never granted to them, even though the grid hid them
+correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. Any *new*
+endpoint that returns record data needs the same filter; a list-level `view` check is not
+sufficient.
 
 **`POST /permissions/effective` is capped at 500 resources per call** (`max_length` on
 `EffectiveActionsQuery.resources`). A page showing more rows than that needs to chunk.

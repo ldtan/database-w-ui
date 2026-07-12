@@ -12,6 +12,7 @@ from typing import AsyncIterator, Iterable, Optional, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.infrastructure import database as db_module
@@ -58,6 +59,7 @@ def _csv_cell(value: object) -> str:
 
 async def export_rows(
     list_id: int,
+    user,
     fmt: str,
     column_names: list[str],
     filters: Optional[dict],
@@ -68,12 +70,30 @@ async def export_rows(
     independent of the request's dependency lifecycle while streaming.
     ``db_module.SessionLocal`` is read at call time so tests that repoint it at
     the test database are honored."""
+    # Deferred like the other permission call sites: importing PermissionService at
+    # module level would cycle back through auth/workspaces services.
+    from src.permissions.services import PermissionService
+
     async with db_module.SessionLocal() as db:
         columns = await _ordered_columns(db, list_id, column_names)
         all_columns = await ListItemService._columns_by_key(db, list_id)
 
+        # An export is a read of the records, so it must honor exactly the same
+        # per-record visibility as the grid — otherwise a list-viewer could export
+        # rows whose inheritance was broken and never granted to them.
+        lst = (
+            await db.execute(
+                select(List)
+                .where(List.id == list_id)
+                .options(selectinload(List.workspace))
+            )
+        ).scalars().first()
+        if lst is None:
+            return
+        visible = await PermissionService.item_view_filter(db, user, lst)
+
         stmt = select(ListItem).where(
-            ListItem.deleted_at.is_(None), ListItem.list_id == list_id
+            ListItem.deleted_at.is_(None), ListItem.list_id == list_id, visible
         )
         stmt = apply_filters(stmt, filters, all_columns)
         stmt = apply_sorts(stmt, sorts, all_columns)
