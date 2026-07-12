@@ -1,0 +1,139 @@
+"""Account-administration guards.
+
+The permission model is only as strong as the identity layer under it. These
+routes were previously open to any authenticated caller, which meant an ordinary
+user could reset another user's password and log in as them -- bypassing
+permissions entirely -- or add themselves to a group and inherit its grants.
+"""
+from contextlib import asynccontextmanager
+
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from main import create_app
+from src.auth.dependencies import get_current_user
+from src.auth.users.schemas import UserCreate, UserGroupCreate
+from src.auth.users.services import UserGroupService, UserService
+from src.infrastructure import database as db_module
+
+
+async def _make_user(db, name: str):
+    return await UserService.create(
+        db, UserCreate(username=name, email=f"{name}@example.com", password="origpw123")
+    )
+
+
+@pytest_asyncio.fixture
+def make_client(engine, session_factory):
+    @asynccontextmanager
+    async def _make(user):
+        orig_engine, orig_factory = db_module.engine, db_module.SessionLocal
+        db_module.engine = engine
+        db_module.SessionLocal = session_factory
+        app = create_app()
+
+        async def _current_user():
+            return user
+
+        app.dependency_overrides[get_current_user] = _current_user
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer test"},
+            ) as client:
+                yield client
+        finally:
+            db_module.engine, db_module.SessionLocal = orig_engine, orig_factory
+
+    return _make
+
+
+async def test_cannot_take_over_another_account(make_client, session_factory):
+    """The original exploit: reset someone else's password, then log in as them."""
+    async with session_factory() as db:
+        victim = await _make_user(db, "victim")
+        attacker = await _make_user(db, "attacker")
+        victim_uuid = str(victim.uuid)
+
+    async with make_client(attacker) as client:
+        resp = await client.patch(
+            f"/api/auth/users/{victim_uuid}", json={"password": "pwned"}
+        )
+        assert resp.status_code == 403
+
+        resp = await client.delete(f"/api/auth/users/{victim_uuid}")
+        assert resp.status_code == 403
+
+    # The victim's password is untouched, so their original credentials still work.
+    async with make_client(attacker) as client:
+        resp = await client.post(
+            "/api/auth/tokens/login",
+            data={"username": "victim", "password": "pwned"},
+        )
+        assert resp.status_code != 200
+
+
+async def test_password_change_requires_the_current_password(
+    make_client, session_factory
+):
+    async with session_factory() as db:
+        user = await _make_user(db, "selfserve")
+        user_uuid = str(user.uuid)
+
+    async with make_client(user) as client:
+        # Own account, but no proof of the current password.
+        resp = await client.patch(
+            f"/api/auth/users/{user_uuid}", json={"password": "newpw123"}
+        )
+        assert resp.status_code == 403
+
+        resp = await client.patch(
+            f"/api/auth/users/{user_uuid}",
+            json={"password": "newpw123", "current_password": "wrong"},
+        )
+        assert resp.status_code == 403
+
+        # With the current password it goes through.
+        resp = await client.patch(
+            f"/api/auth/users/{user_uuid}",
+            json={"password": "newpw123", "current_password": "origpw123"},
+        )
+        assert resp.status_code == 200
+
+    async with make_client(user) as client:
+        resp = await client.post(
+            "/api/auth/tokens/login",
+            data={"username": "selfserve", "password": "newpw123"},
+        )
+        assert resp.status_code == 200
+
+
+async def test_cannot_self_add_to_a_group(make_client, session_factory):
+    """Groups are principals in the grant table, so joining one inherits its grants."""
+    async with session_factory() as db:
+        outsider = await _make_user(db, "outsider")
+        group = await UserGroupService.create(db, UserGroupCreate(name="privileged"))
+        group_uuid = str(group.uuid)
+        outsider_uuid = str(outsider.uuid)
+
+    async with make_client(outsider) as client:
+        resp = await client.patch(
+            f"/api/auth/groups/{group_uuid}", json={"user_uuids": [outsider_uuid]}
+        )
+        assert resp.status_code == 403
+
+        assert (await client.post("/api/auth/groups/", json={"name": "mine"})).status_code == 403
+        assert (await client.delete(f"/api/auth/groups/{group_uuid}")).status_code == 403
+
+
+async def test_reads_stay_open_so_sharing_still_works(make_client, session_factory):
+    """The Share dialog lists users and groups to grant to, so reads must not be gated."""
+    async with session_factory() as db:
+        user = await _make_user(db, "sharer")
+        await UserGroupService.create(db, UserGroupCreate(name="team"))
+
+    async with make_client(user) as client:
+        assert (await client.get("/api/auth/users/")).status_code == 200
+        assert (await client.get("/api/auth/groups/")).status_code == 200

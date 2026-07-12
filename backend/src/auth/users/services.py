@@ -7,10 +7,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from src.core.exceptions import ConflictError, UnknownReferenceError
+from src.core.exceptions import (
+    ConflictError,
+    PermissionDeniedError,
+    UnknownReferenceError,
+)
 from src.workspaces.services import WorkspaceService
 
-from ..helpers import get_password_hash
+from ..helpers import get_password_hash, verify_password
 from .models import User, UserGroup
 from .schemas import UserCreate, UserGroupCreate, UserGroupUpdate, UserUpdate
 
@@ -92,7 +96,14 @@ class UserService:
 
         data = payload.model_dump(exclude_unset=True, exclude_none=True)
         password = data.pop("password", None)
+        current_password = data.pop("current_password", None)
         if password is not None:
+            # Knowing the current password is what proves this is the account holder
+            # and not someone who merely got hold of a token.
+            if current_password is None or not verify_password(
+                current_password, user.password
+            ):
+                raise PermissionDeniedError("current_password is incorrect")
             user.password = get_password_hash(password)
         for field, value in data.items():
             setattr(user, field, value)

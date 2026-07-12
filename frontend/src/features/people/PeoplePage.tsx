@@ -13,6 +13,13 @@ import { api, ApiError } from "../../lib/api";
 import type { ApiUser, ApiUserGroup } from "../../lib/types";
 import { useToast } from "../../lib/toast";
 
+// Group administration is closed until a superuser role exists: groups are
+// principals in the grant table, so an open membership PATCH let anyone add
+// themselves to a group and inherit its grants. The backend 403s these writes;
+// hiding the controls keeps the page honest until the role lands, at which point
+// this becomes a check on the current user's is_superuser.
+const CAN_ADMINISTER = false;
+
 export function PeoplePage() {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -111,22 +118,31 @@ export function PeoplePage() {
       </Link>
       <h1 className="text-xl font-semibold">People &amp; Groups</h1>
 
+      {!CAN_ADMINISTER && (
+        <Message
+          severity="info"
+          text="Groups are read-only. Creating and editing them will require a superuser role, which does not exist yet."
+        />
+      )}
+
       <section className="flex flex-col gap-3">
         <h2 className="text-lg font-medium">Groups</h2>
-        <form onSubmit={onCreate} className="flex gap-2">
-          <InputText
-            placeholder="New group name"
-            value={groupName}
-            onChange={(e) => setGroupName(e.target.value)}
-            className="flex-1"
-          />
-          <Button
-            type="submit"
-            label="Create group"
-            icon="pi pi-plus"
-            loading={createGroup.isPending}
-          />
-        </form>
+        {CAN_ADMINISTER && (
+          <form onSubmit={onCreate} className="flex gap-2">
+            <InputText
+              placeholder="New group name"
+              value={groupName}
+              onChange={(e) => setGroupName(e.target.value)}
+              className="flex-1"
+            />
+            <Button
+              type="submit"
+              label="Create group"
+              icon="pi pi-plus"
+              loading={createGroup.isPending}
+            />
+          </form>
+        )}
 
         {groups.isLoading && <p>Loading…</p>}
         {groups.data?.length === 0 && <p>No groups yet.</p>}
@@ -136,40 +152,56 @@ export function PeoplePage() {
             <Card key={group.uuid}>
               <div className="flex items-center justify-between gap-2">
                 <div className="font-medium">{group.name}</div>
-                <div className="flex gap-1">
-                  <Button
-                    icon="pi pi-pencil"
-                    text
-                    aria-label="Rename group"
-                    onClick={() => {
-                      setRenaming(group);
-                      setRenameValue(group.name);
-                    }}
-                  />
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    aria-label="Delete group"
-                    onClick={() => confirmDelete(group)}
-                  />
-                </div>
+                {CAN_ADMINISTER && (
+                  <div className="flex gap-1">
+                    <Button
+                      icon="pi pi-pencil"
+                      text
+                      aria-label="Rename group"
+                      onClick={() => {
+                        setRenaming(group);
+                        setRenameValue(group.name);
+                      }}
+                    />
+                    <Button
+                      icon="pi pi-trash"
+                      text
+                      severity="danger"
+                      aria-label="Delete group"
+                      onClick={() => confirmDelete(group)}
+                    />
+                  </div>
+                )}
               </div>
               <div className="mt-2 flex items-center gap-2">
                 <span className="text-sm" style={{ color: "var(--text-muted)" }}>
                   Members
                 </span>
-                <MultiSelect
-                  value={group.users.map((u) => u.uuid)}
-                  options={userOptions}
-                  onChange={(e) =>
-                    setMembers.mutate({ uuid: group.uuid, user_uuids: e.value })
-                  }
-                  placeholder="Add members…"
-                  display="chip"
-                  filter
-                  className="flex-1"
-                />
+                {CAN_ADMINISTER ? (
+                  <MultiSelect
+                    value={group.users.map((u) => u.uuid)}
+                    options={userOptions}
+                    onChange={(e) =>
+                      setMembers.mutate({ uuid: group.uuid, user_uuids: e.value })
+                    }
+                    placeholder="Add members…"
+                    display="chip"
+                    filter
+                    className="flex-1"
+                  />
+                ) : (
+                  <span className="text-sm">
+                    {group.users.length === 0
+                      ? "No members"
+                      : group.users
+                          .map(
+                            (u) =>
+                              users.data?.find((full) => full.uuid === u.uuid)
+                                ?.username ?? u.uuid,
+                          )
+                          .join(", ")}
+                  </span>
+                )}
               </div>
             </Card>
           ))}

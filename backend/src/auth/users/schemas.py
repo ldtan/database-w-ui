@@ -21,6 +21,9 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    # Setting `password` requires proving you know the current one, so a stolen
+    # access token cannot be turned into a permanent account takeover.
+    current_password: Optional[str] = None
 
 
 class UserRead(UserBase):
