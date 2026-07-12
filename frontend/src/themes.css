@@ -294,15 +294,38 @@ a {
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
 }
-.p-checkbox .p-checkbox-box.p-highlight {
+/* PrimeReact puts p-highlight on the checkbox *root*, not on the box — targeting
+   .p-checkbox-box.p-highlight matches nothing, which left every checked box
+   unfilled. Same for the radio button. */
+.p-checkbox.p-highlight .p-checkbox-box,
+.p-radiobutton.p-highlight .p-radiobutton-box {
   background: var(--brand);
   border-color: var(--brand);
 }
-.p-checkbox .p-checkbox-box.p-highlight .p-checkbox-icon {
+.p-checkbox.p-highlight .p-checkbox-icon,
+.p-radiobutton.p-highlight .p-radiobutton-icon {
   color: var(--brand-contrast);
 }
-.p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box:hover {
+.p-radiobutton.p-highlight .p-radiobutton-icon {
+  background: var(--brand-contrast);
+}
+/* The base theme drives hover/focus off the hidden input via :has(), at a higher
+   specificity than a plain :hover — so these must mirror its selectors exactly or
+   it repaints the box in its own cyan. */
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:hover) .p-checkbox-box,
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:hover) .p-radiobutton-box {
   border-color: var(--brand);
+}
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:hover).p-highlight .p-checkbox-box,
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:hover).p-highlight .p-radiobutton-box {
+  background: var(--brand-hover);
+  border-color: var(--brand-hover);
+  color: var(--brand-contrast);
+}
+.p-checkbox:not(.p-disabled):has(.p-checkbox-input:focus-visible) .p-checkbox-box,
+.p-radiobutton:not(.p-disabled):has(.p-radiobutton-input:focus-visible) .p-radiobutton-box {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
 }
 
 /* ============================================================
