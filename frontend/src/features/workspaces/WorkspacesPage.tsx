@@ -13,6 +13,7 @@ import type { Workspace } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
+import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 
 export function WorkspacesPage() {
   const queryClient = useQueryClient();
@@ -24,6 +25,11 @@ export function WorkspacesPage() {
     queryKey: ["workspaces"],
     queryFn: () => api.get<Workspace[]>("/workspaces/"),
   });
+  // A shared workspace may be view-only, so gate its controls per row.
+  const can = useEffectiveActionsMap(
+    "workspace",
+    (workspaces.data ?? []).map((ws) => ws.uuid),
+  );
 
   const [displayName, setDisplayName] = useState("");
   const create = useMutation({
@@ -110,28 +116,34 @@ export function WorkspacesPage() {
                 <div className="text-sm text-gray-500">{ws.name}</div>
               </Link>
               <div className="flex gap-1">
-                <Button
-                  icon="pi pi-share-alt"
-                  text
-                  aria-label="Share workspace"
-                  onClick={() => setSharing(ws)}
-                />
-                <Button
-                  icon="pi pi-pencil"
-                  text
-                  aria-label="Rename workspace"
-                  onClick={() => {
-                    setRenaming(ws);
-                    setRenameValue(ws.display_name);
-                  }}
-                />
-                <Button
-                  icon="pi pi-trash"
-                  text
-                  severity="danger"
-                  aria-label="Delete workspace"
-                  onClick={() => confirmDelete(ws)}
-                />
+                {can(ws.uuid, "share") && (
+                  <Button
+                    icon="pi pi-share-alt"
+                    text
+                    aria-label="Share workspace"
+                    onClick={() => setSharing(ws)}
+                  />
+                )}
+                {can(ws.uuid, "configure") && (
+                  <Button
+                    icon="pi pi-pencil"
+                    text
+                    aria-label="Rename workspace"
+                    onClick={() => {
+                      setRenaming(ws);
+                      setRenameValue(ws.display_name);
+                    }}
+                  />
+                )}
+                {can(ws.uuid, "delete") && (
+                  <Button
+                    icon="pi pi-trash"
+                    text
+                    severity="danger"
+                    aria-label="Delete workspace"
+                    onClick={() => confirmDelete(ws)}
+                  />
+                )}
               </div>
             </div>
           </Card>

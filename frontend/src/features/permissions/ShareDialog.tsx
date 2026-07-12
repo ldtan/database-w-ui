@@ -41,7 +41,12 @@ export function ShareDialog({
   const queryClient = useQueryClient();
   const toast = useToast();
   const grantsKey = ["grants", resourceType, resourceUuid];
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: grantsKey });
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: grantsKey });
+    // Changing a grant changes what the caller (and everyone else) may do, so
+    // drop the cached effective-action sets that gate the UI's controls.
+    queryClient.invalidateQueries({ queryKey: ["effective"] });
+  };
 
   const grants = useQuery({
     queryKey: grantsKey,

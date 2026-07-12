@@ -375,3 +375,57 @@ async def test_http_non_sharer_cannot_grant(make_client, session_factory):
             },
         )
         assert resp.status_code == 403
+
+
+async def test_http_effective_batch(make_client, session_factory):
+    """The batch endpoint backs the UI's per-row control gating: one call must
+    return the caller's actions per resource, mixing inherited and direct grants."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        editable = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        readonly = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        # View on the list (inherited by both rows), edit on just one of them.
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.item,
+                resource_uuid=editable.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.edit],
+            ),
+        )
+        payload = {
+            "resources": [
+                {"resource_type": "list", "resource_uuid": str(lst.uuid)},
+                {"resource_type": "item", "resource_uuid": str(editable.uuid)},
+                {"resource_type": "item", "resource_uuid": str(readonly.uuid)},
+            ]
+        }
+
+    async with make_client(other) as client:
+        resp = await client.post("/api/permissions/effective", json=payload)
+        assert resp.status_code == 200, resp.text
+        actions = {row["resource_uuid"]: set(row["actions"]) for row in resp.json()}
+
+    assert actions[str(lst.uuid)] == {"view"}
+    assert actions[str(editable.uuid)] == {"view", "edit"}
+    assert actions[str(readonly.uuid)] == {"view"}
+
+    # The owner short-circuits to full access on every resource in the batch.
+    async with make_client(owner) as client:
+        resp = await client.post("/api/permissions/effective", json=payload)
+        assert resp.status_code == 200
+        for row in resp.json():
+            assert set(row["actions"]) == {a.value for a in ALL_ACTIONS}

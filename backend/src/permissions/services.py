@@ -157,6 +157,89 @@ class PermissionService:
         return await cls.effective_actions(db, user, resource_type, resource_id)
 
     @classmethod
+    async def effective_actions_bulk(
+        cls,
+        db: AsyncSession,
+        user: User,
+        refs: Sequence[tuple[ResourceType, UUID]],
+    ) -> dict[tuple[ResourceType, UUID], set[Action]]:
+        """Resolve effective actions for many resources at once.
+
+        Resources are loaded in one query per type, which also warms the identity
+        map so the per-resource chain walk below is served from memory; group
+        membership and the grant rows are then fetched once for the whole batch.
+        Unknown/deleted resources are absent from the result.
+        """
+        by_type: dict[ResourceType, set[UUID]] = {}
+        for resource_type, resource_uuid in refs:
+            parsed = coerce_uuid(resource_uuid)
+            if parsed is not None:
+                by_type.setdefault(ResourceType(resource_type), set()).add(parsed)
+
+        ids: dict[tuple[ResourceType, UUID], int] = {}
+        for rt, uuids in by_type.items():
+            model = _MODELS.get(rt)
+            if model is None:
+                continue
+            rows = await db.execute(
+                select(model).where(
+                    model.uuid.in_(uuids), model.deleted_at.is_(None)
+                )
+            )
+            for obj in rows.scalars().all():
+                ids[(rt, obj.uuid)] = obj.id
+
+        contexts: dict[tuple[ResourceType, UUID], tuple[list, int]] = {}
+        for ref, resource_id in ids.items():
+            ctx = await cls._security_context(db, ref[0], resource_id)
+            if ctx is not None:
+                contexts[ref] = ctx
+
+        out: dict[tuple[ResourceType, UUID], set[Action]] = {}
+        pending: dict[tuple[ResourceType, UUID], list] = {}
+        for ref, (chain, owner_id) in contexts.items():
+            if user.id == owner_id:
+                out[ref] = set(ALL_ACTIONS)
+            else:
+                out[ref] = set()
+                pending[ref] = chain
+
+        nodes = {node for chain in pending.values() for node in chain}
+        if not nodes:
+            return out
+
+        group_ids = await cls._group_ids(db, user.id)
+        rows = await db.execute(
+            select(
+                PermissionGrant.resource_type,
+                PermissionGrant.resource_id,
+                PermissionGrant.actions,
+            ).where(
+                or_(
+                    *[
+                        and_(
+                            PermissionGrant.resource_type == rt,
+                            PermissionGrant.resource_id == rid,
+                        )
+                        for rt, rid in nodes
+                    ]
+                ),
+                cls._principal_condition(user.id, group_ids),
+            )
+        )
+        by_node: dict[tuple[ResourceType, int], set[Action]] = {}
+        for rt, rid, actions in rows.all():
+            node = (ResourceType(rt), rid)
+            by_node.setdefault(node, set()).update(expand_actions(actions or []))
+
+        for ref, chain in pending.items():
+            granted: set[Action] = set()
+            for node in chain:
+                granted |= by_node.get(node, set())
+            out[ref] = granted
+        return out
+
+    @classmethod
     async def has(
         cls,
         db: AsyncSession,

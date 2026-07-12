@@ -12,6 +12,10 @@ import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
 import { ShareDialog } from "../permissions/ShareDialog";
+import {
+  useEffectiveActions,
+  useEffectiveActionsMap,
+} from "../permissions/useEffectiveActions";
 
 interface Props {
   listUuid: string;
@@ -34,9 +38,19 @@ export function ViewBar({
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
     // Sort/filter are applied server-side by view, so records must refetch too.
     queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+    queryClient.invalidateQueries({ queryKey: ["effective"] });
   };
 
   const activeView = views.find((v) => v.uuid === activeUuid) ?? null;
+  // Adding a view is a list-level change; saving or sharing one is scoped to
+  // that view, which may carry its own grants.
+  const listActions = useEffectiveActions("list", listUuid);
+  const canView = useEffectiveActionsMap(
+    "view",
+    views.map((view) => view.uuid),
+  );
+  const canSave = !!activeView && canView(activeView.uuid, "configure");
+  const canShare = !!activeView && canView(activeView.uuid, "share");
 
   const save = useMutation({
     mutationFn: () =>
@@ -109,28 +123,32 @@ export function ViewBar({
         placeholder="View"
         className="w-56"
       />
-      <Button
-        label="Save view"
-        icon="pi pi-save"
-        text
-        onClick={confirmSave}
-        loading={save.isPending}
-        disabled={!activeUuid}
-        tooltip="Save the current sort and page size to this view"
-      />
-      <Button
-        label="Share"
-        icon="pi pi-share-alt"
-        text
-        onClick={() => setSharing(true)}
-        disabled={!activeView}
-      />
-      <Button
-        label="New view"
-        icon="pi pi-plus"
-        text
-        onClick={() => setCreating(true)}
-      />
+      {canSave && (
+        <Button
+          label="Save view"
+          icon="pi pi-save"
+          text
+          onClick={confirmSave}
+          loading={save.isPending}
+          tooltip="Save the current sort and page size to this view"
+        />
+      )}
+      {canShare && (
+        <Button
+          label="Share"
+          icon="pi pi-share-alt"
+          text
+          onClick={() => setSharing(true)}
+        />
+      )}
+      {listActions.has("configure") && (
+        <Button
+          label="New view"
+          icon="pi pi-plus"
+          text
+          onClick={() => setCreating(true)}
+        />
+      )}
 
       {sharing && activeView && (
         <ShareDialog

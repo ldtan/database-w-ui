@@ -28,6 +28,10 @@ import { LookupCell } from "../lookups/LookupControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
+import {
+  useEffectiveActions,
+  useEffectiveActionsMap,
+} from "../permissions/useEffectiveActions";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
@@ -99,6 +103,18 @@ export function ListDetailPage() {
     queryFn: () => api.get<Form[]>(`/lists/${listUuid}/forms/`),
   });
 
+  // Records and views can each carry their own grants, so row- and view-level
+  // controls are gated separately from the list as a whole.
+  const listActions = useEffectiveActions("list", listUuid);
+  const canItem = useEffectiveActionsMap(
+    "item",
+    (items.data ?? []).map((item) => item.uuid),
+  );
+  const canView = useEffectiveActionsMap(
+    "view",
+    (views.data ?? []).map((view) => view.uuid),
+  );
+
   // Default to the first view once loaded.
   useEffect(() => {
     if (!activeViewUuid && views.data && views.data.length > 0) {
@@ -148,8 +164,10 @@ export function ListDetailPage() {
   const setListInherit = useMutation({
     mutationFn: (value: boolean) =>
       api.patch(`/lists/${listUuid}`, { permissions_inherit: value }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["list", listUuid] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["list", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["effective"] });
+    },
     onError: (err) =>
       toast.error(
         "Could not update inheritance",
@@ -161,18 +179,26 @@ export function ListDetailPage() {
       api.patch(`/lists/${listUuid}/items/${vars.uuid}`, {
         permissions_inherit: vars.value,
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["effective"] });
+    },
     onError: (err) =>
       toast.error(
         "Could not update inheritance",
         err instanceof ApiError ? err.message : undefined,
       ),
   });
+  // A selection can mix rows the caller may delete with rows they may not (the
+  // server ignores the latter anyway), so only send — and only count — the ones
+  // that will actually go.
+  const deletableSelection = selection.filter((item) =>
+    canItem(item.uuid, "delete"),
+  );
   const bulkDelete = useMutation({
     mutationFn: () =>
       api.post<{ deleted: number }>(`/lists/${listUuid}/items/bulk-delete`, {
-        uuids: selection.map((item) => item.uuid),
+        uuids: deletableSelection.map((item) => item.uuid),
       }),
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
@@ -265,7 +291,7 @@ export function ListDetailPage() {
   }
   function confirmBulkDelete() {
     confirmDialog({
-      message: `Delete ${selection.length} selected record(s)?`,
+      message: `Delete ${deletableSelection.length} selected record(s)?`,
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => bulkDelete.mutate(),
@@ -289,12 +315,14 @@ export function ListDetailPage() {
           ← Workspaces
         </Link>
         <div className="flex gap-2">
-          <Button
-            label="Add column"
-            icon="pi pi-plus"
-            outlined
-            onClick={() => setShowAddColumn(true)}
-          />
+          {listActions.has("configure") && (
+            <Button
+              label="Add column"
+              icon="pi pi-plus"
+              outlined
+              onClick={() => setShowAddColumn(true)}
+            />
+          )}
           <Button
             label="Forms"
             icon="pi pi-file-edit"
@@ -309,19 +337,23 @@ export function ListDetailPage() {
             onClick={() => setShowTransfer(true)}
             disabled={cols.length === 0}
           />
-          <Button
-            label="Share"
-            icon="pi pi-share-alt"
-            outlined
-            onClick={() => setShowShareList(true)}
-            disabled={!list.data}
-          />
-          <Button
-            label="Add record"
-            icon="pi pi-plus"
-            onClick={() => setRecordDialog({ open: true, item: null })}
-            disabled={cols.length === 0}
-          />
+          {listActions.has("share") && (
+            <Button
+              label="Share"
+              icon="pi pi-share-alt"
+              outlined
+              onClick={() => setShowShareList(true)}
+              disabled={!list.data}
+            />
+          )}
+          {listActions.has("create") && (
+            <Button
+              label="Add record"
+              icon="pi pi-plus"
+              onClick={() => setRecordDialog({ open: true, item: null })}
+              disabled={cols.length === 0}
+            />
+          )}
         </div>
       </div>
 
@@ -334,13 +366,16 @@ export function ListDetailPage() {
             onSelect={setActiveViewUuid}
             currentConfig={currentConfig}
           />
-          <Button
-            label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
-            icon="pi pi-filter"
-            text
-            onClick={() => setShowFilter(true)}
-            disabled={!activeViewUuid || cols.length === 0}
-          />
+          {/* Filters are stored on the view, so editing them is a view change. */}
+          {!!activeViewUuid && canView(activeViewUuid, "configure") && (
+            <Button
+              label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
+              icon="pi pi-filter"
+              text
+              onClick={() => setShowFilter(true)}
+              disabled={cols.length === 0}
+            />
+          )}
           <Dropdown
             value={groupBy}
             options={cols.map((c) => ({ label: c.display_name, value: c.uuid }))}
@@ -399,7 +434,11 @@ export function ListDetailPage() {
       {cols.length === 0 && !columns.isLoading && (
         <Message
           severity="info"
-          text="This list has no columns yet. Use “Add column” to define fields, then add records."
+          text={
+            listActions.has("configure")
+              ? "This list has no columns yet. Use “Add column” to define fields, then add records."
+              : "This list has no columns yet."
+          }
         />
       )}
 
@@ -408,15 +447,21 @@ export function ListDetailPage() {
           <span className="text-sm text-gray-600">
             {selection.length} selected
           </span>
-          <Button
-            label="Delete selected"
-            icon="pi pi-trash"
-            severity="danger"
-            outlined
-            size="small"
-            onClick={confirmBulkDelete}
-            loading={bulkDelete.isPending}
-          />
+          {deletableSelection.length > 0 && (
+            <Button
+              label={
+                deletableSelection.length === selection.length
+                  ? "Delete selected"
+                  : `Delete ${deletableSelection.length} of ${selection.length}`
+              }
+              icon="pi pi-trash"
+              severity="danger"
+              outlined
+              size="small"
+              onClick={confirmBulkDelete}
+              loading={bulkDelete.isPending}
+            />
+          )}
           <Button
             label="Clear"
             text
@@ -464,17 +509,19 @@ export function ListDetailPage() {
             header={
               <div className="flex items-center gap-2">
                 <span>{col.display_name}</span>
-                <Button
-                  icon="pi pi-trash"
-                  text
-                  severity="danger"
-                  size="small"
-                  aria-label={`Delete column ${col.display_name}`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    confirmDeleteColumn(col);
-                  }}
-                />
+                {listActions.has("configure") && (
+                  <Button
+                    icon="pi pi-trash"
+                    text
+                    severity="danger"
+                    size="small"
+                    aria-label={`Delete column ${col.display_name}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      confirmDeleteColumn(col);
+                    }}
+                  />
+                )}
               </div>
             }
             body={(row: ListItem) => renderCell(col, row)}
@@ -485,37 +532,43 @@ export function ListDetailPage() {
           style={{ width: "9rem" }}
           body={(row: ListItem) => (
             <div className="flex gap-1">
-              <Button
-                icon="pi pi-pencil"
-                text
-                size="small"
-                aria-label="Edit record"
-                onClick={(e) => {
-                  e.stopPropagation(); // don't also toggle row selection
-                  setRecordDialog({ open: true, item: row });
-                }}
-              />
-              <Button
-                icon="pi pi-share-alt"
-                text
-                size="small"
-                aria-label="Share record"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setSharingItemUuid(row.uuid);
-                }}
-              />
-              <Button
-                icon="pi pi-trash"
-                text
-                severity="danger"
-                size="small"
-                aria-label="Delete record"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  confirmDeleteItem(row);
-                }}
-              />
+              {canItem(row.uuid, "edit") && (
+                <Button
+                  icon="pi pi-pencil"
+                  text
+                  size="small"
+                  aria-label="Edit record"
+                  onClick={(e) => {
+                    e.stopPropagation(); // don't also toggle row selection
+                    setRecordDialog({ open: true, item: row });
+                  }}
+                />
+              )}
+              {canItem(row.uuid, "share") && (
+                <Button
+                  icon="pi pi-share-alt"
+                  text
+                  size="small"
+                  aria-label="Share record"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setSharingItemUuid(row.uuid);
+                  }}
+                />
+              )}
+              {canItem(row.uuid, "delete") && (
+                <Button
+                  icon="pi pi-trash"
+                  text
+                  severity="danger"
+                  size="small"
+                  aria-label="Delete record"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    confirmDeleteItem(row);
+                  }}
+                />
+              )}
             </div>
           )}
         />
@@ -546,6 +599,7 @@ export function ListDetailPage() {
         listUuid={listUuid}
         listName={list.data?.name ?? "records"}
         columns={cols}
+        canImport={listActions.has("create") && listActions.has("edit")}
         visible={showTransfer}
         onHide={() => setShowTransfer(false)}
       />

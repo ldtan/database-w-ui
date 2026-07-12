@@ -9,7 +9,13 @@ from src.core.exceptions import UnknownReferenceError
 from src.infrastructure.database import get_db
 
 from .enums import Action, ResourceType
-from .schemas import EffectiveActions, GrantCreate, GrantRead
+from .schemas import (
+    EffectiveActions,
+    EffectiveActionsQuery,
+    GrantCreate,
+    GrantRead,
+    ResourceActions,
+)
 from .services import PermissionService
 
 # PermissionDeniedError is turned into a 403 by an app-level exception handler.
@@ -77,4 +83,31 @@ async def effective_actions(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Resource not found"
         )
-    return EffectiveActions(actions=sorted(actions, key=lambda a: a.value))
+    return EffectiveActions(actions=_sorted(actions))
+
+
+@router.post("/effective", response_model=list[ResourceActions])
+async def effective_actions_batch(
+    payload: EffectiveActionsQuery,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Effective actions for many resources at once, so the UI can gate per-row
+    controls without one request per row. Unknown resources are omitted."""
+    resolved = await PermissionService.effective_actions_bulk(
+        db,
+        current_user,
+        [(ref.resource_type, ref.resource_uuid) for ref in payload.resources],
+    )
+    return [
+        ResourceActions(
+            resource_type=resource_type,
+            resource_uuid=resource_uuid,
+            actions=_sorted(actions),
+        )
+        for (resource_type, resource_uuid), actions in resolved.items()
+    ]
+
+
+def _sorted(actions: set[Action]) -> list[Action]:
+    return sorted(actions, key=lambda action: action.value)

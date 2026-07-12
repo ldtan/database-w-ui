@@ -13,19 +13,31 @@ import type { ListRead } from "../../lib/types";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
+import {
+  useEffectiveActions,
+  useEffectiveActionsMap,
+} from "../permissions/useEffectiveActions";
 
 export function ListsPage() {
   const { workspaceUuid = "" } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
-  const invalidate = () =>
+  const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["lists", workspaceUuid] });
+    queryClient.invalidateQueries({ queryKey: ["effective"] });
+  };
 
   const lists = useQuery({
     queryKey: ["lists", workspaceUuid],
     queryFn: () =>
       api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
   });
+  // Adding a list is a workspace-level change; the rest is gated per list.
+  const workspaceActions = useEffectiveActions("workspace", workspaceUuid);
+  const can = useEffectiveActionsMap(
+    "list",
+    (lists.data ?? []).map((list) => list.uuid),
+  );
 
   const [displayName, setDisplayName] = useState("");
   const create = useMutation({
@@ -104,15 +116,17 @@ export function ListsPage() {
       </Link>
       <h1 className="text-xl font-semibold">Lists</h1>
 
-      <form onSubmit={onCreate} className="flex gap-2">
-        <InputText
-          placeholder="New list name"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          className="flex-1"
-        />
-        <Button type="submit" label="Create" icon="pi pi-plus" loading={create.isPending} />
-      </form>
+      {workspaceActions.has("configure") && (
+        <form onSubmit={onCreate} className="flex gap-2">
+          <InputText
+            placeholder="New list name"
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            className="flex-1"
+          />
+          <Button type="submit" label="Create" icon="pi pi-plus" loading={create.isPending} />
+        </form>
+      )}
       {create.error instanceof ApiError && (
         <Message severity="error" text={create.error.message} />
       )}
@@ -129,28 +143,34 @@ export function ListsPage() {
                 <div className="text-sm text-gray-500">{list.name}</div>
               </Link>
               <div className="flex gap-1">
-                <Button
-                  icon="pi pi-share-alt"
-                  text
-                  aria-label="Share list"
-                  onClick={() => setSharingUuid(list.uuid)}
-                />
-                <Button
-                  icon="pi pi-pencil"
-                  text
-                  aria-label="Rename list"
-                  onClick={() => {
-                    setRenaming(list);
-                    setRenameValue(list.display_name);
-                  }}
-                />
-                <Button
-                  icon="pi pi-trash"
-                  text
-                  severity="danger"
-                  aria-label="Delete list"
-                  onClick={() => confirmDelete(list)}
-                />
+                {can(list.uuid, "share") && (
+                  <Button
+                    icon="pi pi-share-alt"
+                    text
+                    aria-label="Share list"
+                    onClick={() => setSharingUuid(list.uuid)}
+                  />
+                )}
+                {can(list.uuid, "configure") && (
+                  <Button
+                    icon="pi pi-pencil"
+                    text
+                    aria-label="Rename list"
+                    onClick={() => {
+                      setRenaming(list);
+                      setRenameValue(list.display_name);
+                    }}
+                  />
+                )}
+                {can(list.uuid, "delete") && (
+                  <Button
+                    icon="pi pi-trash"
+                    text
+                    severity="danger"
+                    aria-label="Delete list"
+                    onClick={() => confirmDelete(list)}
+                  />
+                )}
               </div>
             </div>
           </Card>

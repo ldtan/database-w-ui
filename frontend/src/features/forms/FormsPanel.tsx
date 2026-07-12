@@ -11,6 +11,7 @@ import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
 import { ShareDialog } from "../permissions/ShareDialog";
+import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 
 interface Row {
   column_uuid: string;
@@ -71,13 +72,24 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
   const activeForm =
     forms.find((f) => f.uuid === selectedUuid) ?? forms[0] ?? null;
 
+  // A form can be targeted at a specific audience, so its own grants — not the
+  // list's — decide who may edit or re-share it.
+  const canForm = useEffectiveActionsMap(
+    "form",
+    forms.map((form) => form.uuid),
+  );
+  const canEdit = !!activeForm && canForm(activeForm.uuid, "configure");
+  const canShare = !!activeForm && canForm(activeForm.uuid, "share");
+
   const setInherit = useMutation({
     mutationFn: (value: boolean) =>
       api.patch(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
         permissions_inherit: value,
       }),
-    onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["effective"] });
+    },
     onError: (err) =>
       toast.error(
         "Could not update inheritance",
@@ -144,13 +156,14 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
             onChange={(e) => setSelectedUuid(e.value)}
             className="w-64"
           />
-          <Button
-            label="Share"
-            icon="pi pi-share-alt"
-            text
-            onClick={() => setSharing(true)}
-            disabled={!activeForm}
-          />
+          {canShare && (
+            <Button
+              label="Share"
+              icon="pi pi-share-alt"
+              text
+              onClick={() => setSharing(true)}
+            />
+          )}
         </div>
 
         <div className="flex flex-col gap-1">
@@ -169,7 +182,7 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
                   text
                   size="small"
                   aria-label="Move up"
-                  disabled={i === 0}
+                  disabled={!canEdit || i === 0}
                   onClick={() => move(i, -1)}
                 />
                 <Button
@@ -177,7 +190,7 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
                   text
                   size="small"
                   aria-label="Move down"
-                  disabled={i === rows.length - 1}
+                  disabled={!canEdit || i === rows.length - 1}
                   onClick={() => move(i, 1)}
                 />
               </div>
@@ -185,13 +198,14 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
               <span style={{ width: 70 }}>
                 <Checkbox
                   checked={row.included}
+                  disabled={!canEdit}
                   onChange={(e) => update(i, { included: !!e.checked })}
                 />
               </span>
               <span style={{ width: 76 }}>
                 <Checkbox
                   checked={row.enabled}
-                  disabled={!row.included}
+                  disabled={!canEdit || !row.included}
                   onChange={(e) => update(i, { enabled: !!e.checked })}
                 />
               </span>
@@ -199,6 +213,7 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
                 value={row.label_override}
                 onChange={(e) => update(i, { label_override: e.target.value })}
                 placeholder={row.display_name}
+                disabled={!canEdit}
                 style={{ width: 150 }}
               />
             </div>
@@ -208,12 +223,14 @@ export function FormsPanel({ listUuid, columns, forms, visible, onHide }: Props)
 
         <div className="flex justify-end gap-2">
           <Button label="Close" text onClick={onHide} />
-          <Button
-            label="Save"
-            onClick={() => save.mutate()}
-            loading={save.isPending}
-            disabled={!activeForm || rows.length === 0}
-          />
+          {canEdit && (
+            <Button
+              label="Save"
+              onClick={() => save.mutate()}
+              loading={save.isPending}
+              disabled={rows.length === 0}
+            />
+          )}
         </div>
       </div>
 

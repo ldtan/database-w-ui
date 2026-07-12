@@ -467,9 +467,17 @@ owner short-circuits to all actions.
   shared directly), then enforce per item.
 - `PermissionDeniedError` is mapped to HTTP 403 by an app-level handler.
 
-Grant management + a `GET /permissions/effective` (the caller's actions on a
-resource, for the future UI) live under `/api/permissions`. User and group CRUD
-already exist under `/api/auth/users` and `/api/auth/groups`.
+Grant management lives under `/api/permissions`, alongside two endpoints the UI uses
+to decide which controls to render:
 
-Not yet done: a sharing UI, admin-gating of user/group management, grant scrubbing
-on hard delete, and permission-filtering of streamed exports.
+- `GET /permissions/effective` — the caller's actions on one resource.
+- `POST /permissions/effective` — the same for a batch of resources. Permissions vary
+  per row (a record or view can carry its own grants), so the UI would otherwise need
+  one request per row to gate a table. The batch resolver loads each type in a single
+  query — which also warms the identity map for the chain walk — and fetches the
+  caller's group membership and grant rows once for the whole batch.
+
+User and group CRUD already exist under `/api/auth/users` and `/api/auth/groups`.
+
+Not yet done: admin-gating of user/group management, grant scrubbing on hard delete,
+and permission-filtering of streamed exports.

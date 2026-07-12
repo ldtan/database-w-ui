@@ -35,3 +35,19 @@ class GrantRead(BaseModel):
 
 class EffectiveActions(BaseModel):
     actions: list[Action]
+
+
+class ResourceRef(BaseModel):
+    resource_type: ResourceType
+    resource_uuid: UUID
+
+
+class EffectiveActionsQuery(BaseModel):
+    """Ask for the caller's actions on many resources in one round trip — the UI
+    gates per-row controls (a page of records, a workspace's lists)."""
+
+    resources: list[ResourceRef] = Field(default_factory=list, max_length=500)
+
+
+class ResourceActions(ResourceRef):
+    actions: list[Action]

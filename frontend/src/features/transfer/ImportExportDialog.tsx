@@ -27,6 +27,8 @@ interface Props {
   listUuid: string;
   listName: string;
   columns: Column[];
+  // Import writes records; export only reads them.
+  canImport: boolean;
   visible: boolean;
   onHide: () => void;
 }
@@ -42,6 +44,7 @@ export function ImportExportDialog({
   listUuid,
   listName,
   columns,
+  canImport,
   visible,
   onHide,
 }: Props) {
@@ -274,42 +277,46 @@ export function ImportExportDialog({
           />
         </div>
 
-        <Divider />
+        {canImport && (
+          <>
+            <Divider />
 
-        <div className="flex flex-col gap-2">
-          <span className="font-semibold">Import records</span>
-          <p className="text-sm text-gray-500 m-0">
-            Upload a .csv or .json file whose headers/keys are column names.
-            Unknown columns are ignored; each row is validated on the server.
-          </p>
-          <FileUpload
-            mode="basic"
-            customUpload
-            auto
-            accept=".csv,.json"
-            chooseLabel="Choose file"
-            uploadHandler={handleImport}
-            disabled={busy}
-          />
-          {result && (
-            <Message
-              severity={result.errors.length === 0 ? "success" : "warn"}
-              text={`Imported ${result.created} record(s)${
-                result.errors.length ? `, ${result.errors.length} skipped` : ""
-              }.`}
-            />
-          )}
-          {result && result.errors.length > 0 && (
-            <ul className="text-sm text-red-600 m-0 pl-4 max-h-40 overflow-auto">
-              {result.errors.map((e, i) => (
-                <li key={i}>
-                  {e.row ? `Row ${e.row}: ` : ""}
-                  {e.message}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+            <div className="flex flex-col gap-2">
+              <span className="font-semibold">Import records</span>
+              <p className="text-sm text-gray-500 m-0">
+                Upload a .csv or .json file whose headers/keys are column names.
+                Unknown columns are ignored; each row is validated on the server.
+              </p>
+              <FileUpload
+                mode="basic"
+                customUpload
+                auto
+                accept=".csv,.json"
+                chooseLabel="Choose file"
+                uploadHandler={handleImport}
+                disabled={busy}
+              />
+              {result && (
+                <Message
+                  severity={result.errors.length === 0 ? "success" : "warn"}
+                  text={`Imported ${result.created} record(s)${
+                    result.errors.length ? `, ${result.errors.length} skipped` : ""
+                  }.`}
+                />
+              )}
+              {result && result.errors.length > 0 && (
+                <ul className="text-sm text-red-600 m-0 pl-4 max-h-40 overflow-auto">
+                  {result.errors.map((e, i) => (
+                    <li key={i}>
+                      {e.row ? `Row ${e.row}: ` : ""}
+                      {e.message}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </Dialog>
   );
