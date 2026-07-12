@@ -290,3 +290,33 @@ async def test_deleting_row_scrubs_lookup_reference(client, list_uuid, workspace
     assert (await client.delete(f"/api/lists/{target}/items/{target_row}")).status_code == 204
     refreshed = (await client.get(f"/api/lists/{list_uuid}/items/{row['uuid']}")).json()
     assert refreshed["data"][link] is None
+
+
+async def test_blank_means_empty_for_every_column_type(client, list_uuid, add_column):
+    """Decided once, centrally: a whitespace-only value clears the cell whatever the
+    column is. Per-type handling had "" clear a reference cell but 400 a link cell,
+    so the same payload meant different things depending on where it landed."""
+    cols = {
+        "text": await add_column(list_uuid, name="t", display_name="T", type="text"),
+        "link": await add_column(list_uuid, name="l", display_name="L", type="link"),
+        "date": await add_column(list_uuid, name="d", display_name="D", type="date"),
+    }
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={
+            "data": {
+                cols["text"]: "hello",
+                cols["link"]: "https://example.com",
+                cols["date"]: "2026-07-01",
+            }
+        },
+    )
+    assert created.status_code == 201, created.text
+    item = created.json()["uuid"]
+
+    cleared = await client.patch(
+        f"/api/lists/{list_uuid}/items/{item}",
+        json={"data": {uuid: "   " for uuid in cols.values()}},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert all(cleared.json()["data"][uuid] is None for uuid in cols.values())

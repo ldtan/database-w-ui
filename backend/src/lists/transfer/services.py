@@ -73,9 +73,14 @@ class _LabelResolver:
     Resolved **a batch at a time, for only the uuids that batch actually holds** —
     never by loading the target list (or the users table) up front. Export exists to
     stream: server memory has to stay flat regardless of how big the list, or the
-    list it points at, happens to be. Labels are cached across batches, and the
-    cache is dropped if it grows past ``_LABEL_CACHE_MAX``, so a pathological export
-    stays bounded too.
+    list it points at, happens to be.
+
+    Labels are cached by **what they resolve against** — the users table, the groups
+    table, one target list — not by the column that happens to reference it, so two
+    `user` columns on the same list share one cache and one query. A uuid that does
+    not resolve is cached as a miss, or every batch would re-ask the same dead
+    question. The cache evicts oldest-first past ``_LABEL_CACHE_MAX``, so an
+    enormous export stays bounded without throwing away what it just learned.
 
     It reads on the export's own session, between fetches from the streaming cursor.
     A session of its own would double the connections an export holds, which is how a
@@ -88,10 +93,14 @@ class _LabelResolver:
         self._columns = [
             c for c in columns if c.type in PRINCIPAL_TYPES or c.type == ColumnType.lookup
         ]
-        # column uuid -> how to resolve it (None once we know we cannot)
-        self._plan: dict[str, Optional[dict]] = {}
-        # column uuid -> {row/principal uuid: label}
-        self._cache: dict[str, dict[str, str]] = {}
+        # column uuid -> the scope it resolves against ("user" / "group" / a target
+        # list id), or None once we know it cannot be resolved at all.
+        self._scope_of: dict[str, Optional[str]] = {}
+        # scope -> how to query it
+        self._plan: dict[str, dict] = {}
+        # scope -> {uuid: label or None for a known miss}; insertion-ordered, so the
+        # oldest entries are the first to go when it has to be trimmed.
+        self._cache: dict[str, dict[str, Optional[str]]] = {}
 
     async def prepare(self) -> None:
         """Work out, once, how each reference column resolves — and whether it may."""
@@ -100,16 +109,22 @@ class _LabelResolver:
 
         for column in self._columns:
             key = str(column.uuid)
-            self._cache[key] = {}
 
             if column.type in PRINCIPAL_TYPES:
-                model = User if column.type == ColumnType.user else UserGroup
-                label = (
-                    User.username if column.type == ColumnType.user else UserGroup.name
-                )
-                # Usernames, not the connected person's real name: person records are
-                # private, and an export is readable by anyone who can read the list.
-                self._plan[key] = {"model": model, "label": label}
+                scope = column.type.value  # every user column shares one scope
+                self._scope_of[key] = scope
+                if scope not in self._plan:
+                    model = User if column.type == ColumnType.user else UserGroup
+                    label = (
+                        User.username
+                        if column.type == ColumnType.user
+                        else UserGroup.name
+                    )
+                    # Usernames, not the connected person's real name: person records
+                    # are private, and an export is readable by anyone who can read
+                    # the list.
+                    self._plan[scope] = {"model": model, "label": label}
+                    self._cache[scope] = {}
                 continue
 
             # Resolving a lookup label means *reading the target list*, so it obeys
@@ -131,47 +146,50 @@ class _LabelResolver:
             if target is None or not await PermissionService.has(
                 self._db, self._user, ResourceType.list, target.id, Action.view
             ):
-                self._plan[key] = None
+                self._scope_of[key] = None
                 continue
 
             display_key = await display_column_key(self._db, target.id, config)
             if display_key is None:
-                self._plan[key] = None
+                self._scope_of[key] = None
                 continue
 
-            self._plan[key] = {
-                "list_id": target.id,
-                "display_key": display_key,
-                "visible": await PermissionService.item_view_filter(
-                    self._db, self._user, target
-                ),
-            }
+            # Two lookups at the same list with the same display column resolve
+            # identically, so they share a scope.
+            scope = f"list:{target.id}:{display_key}"
+            self._scope_of[key] = scope
+            if scope not in self._plan:
+                self._plan[scope] = {
+                    "list_id": target.id,
+                    "display_key": display_key,
+                    "visible": await PermissionService.item_view_filter(
+                        self._db, self._user, target
+                    ),
+                }
+                self._cache[scope] = {}
 
     async def load(self, batch: list[dict]) -> None:
         """Fetch the labels this batch of records needs and not one row more."""
+        wanted: dict[str, set[str]] = {}
         for column in self._columns:
             key = str(column.uuid)
-            plan = self._plan.get(key)
-            if plan is None:
+            scope = self._scope_of.get(key)
+            if scope is None:
                 continue
 
-            known = self._cache[key]
-            if len(known) > _LABEL_CACHE_MAX:
-                known.clear()  # bound the memory an enormous export can hold
-
-            wanted: set[str] = set()
+            known = self._cache[scope]
             for row in batch:
                 value = (row or {}).get(key)
                 for uuid in value if isinstance(value, list) else [value]:
                     if uuid is not None and str(uuid) not in known:
-                        wanted.add(str(uuid))
-            if not wanted:
-                continue
+                        wanted.setdefault(scope, set()).add(str(uuid))
 
-            parsed = [u for u in (coerce_uuid(w) for w in wanted) if u is not None]
+        for scope, uuids in wanted.items():
+            parsed = [u for u in (coerce_uuid(w) for w in uuids) if u is not None]
             if not parsed:
                 continue
 
+            plan = self._plan[scope]
             if "model" in plan:
                 rows = await self._db.execute(
                     select(plan["model"].uuid, plan["label"]).where(
@@ -190,17 +208,34 @@ class _LabelResolver:
                         plan["visible"],
                     )
                 )
-            known.update({str(uuid): label for uuid, label in rows if label})
+
+            found = {str(uuid): label for uuid, label in rows if label}
+            known = self._cache[scope]
+            # Misses are cached too (as None): a cell pointing at a deleted row, or a
+            # row this caller cannot see, must not be re-queried on every batch.
+            known.update({uuid: found.get(uuid) for uuid in uuids})
+            self._trim(known)
+
+    @staticmethod
+    def _trim(known: dict[str, Optional[str]]) -> None:
+        """Evict oldest-first, rather than clearing: an export whose references
+        exceed the cap would otherwise refill from scratch on every batch."""
+        excess = len(known) - _LABEL_CACHE_MAX
+        for uuid in [*known][:excess]:
+            del known[uuid]
 
     def cell(self, column: Column, value: object) -> object:
         """The value to write: the label if we have one, else the uuid — which for a
         row with an empty label is the only thing that identifies it."""
-        labels = self._cache.get(str(column.uuid))
+        scope = self._scope_of.get(str(column.uuid))
+        labels = self._cache.get(scope) if scope else None
         if not labels or value is None:
             return value
+        # `or str(v)`, not `.get(v, str(v))`: a cached miss is stored as None, and it
+        # means the same as never having asked — write the uuid.
         if isinstance(value, list):
-            return [labels.get(str(v), str(v)) for v in value]
-        return labels.get(str(value), value)
+            return [labels.get(str(v)) or str(v) for v in value]
+        return labels.get(str(value)) or value
 
 
 async def export_rows(

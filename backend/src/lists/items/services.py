@@ -322,7 +322,11 @@ class ListItemService:
             column = columns.get(key)
             if column is None:
                 raise ValidationError(f"Unknown column '{key}' for this list")
-            if value is None:
+            # Blank means empty, whatever the column type. Decided once, here, rather
+            # than per type: otherwise "" clears a user cell but 400s a link cell
+            # ("not a full URL"), and the same payload means different things
+            # depending on which column it lands in.
+            if value is None or (isinstance(value, str) and not value.strip()):
                 result[key] = None
                 continue
             # Validation may normalize (a user column accepts a username and
