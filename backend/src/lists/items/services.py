@@ -9,7 +9,9 @@ from src.core.exceptions import ConflictError, UnknownReferenceError, Validation
 from src.core.utils import coerce_uuid
 from src.workspaces.models import Workspace
 
-from ..columns.enums import ColumnType
+from src.auth.users.models import User, UserGroup
+
+from ..columns.enums import PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
@@ -191,9 +193,15 @@ class ListItemService:
                 )
             )
         ).scalars().all()
+        await cls._drop_reference(db, lookup_columns, str(deleted_item_uuid))
 
-        target = str(deleted_item_uuid)
-        for column in lookup_columns:
+    @staticmethod
+    async def _drop_reference(
+        db: AsyncSession, columns: Sequence[Column], target: str
+    ) -> None:
+        """Remove a now-dangling uuid from every record held by these columns.
+        Does not commit."""
+        for column in columns:
             key = str(column.uuid)
             multiple = bool((column.config or {}).get("multiple"))
             items = (
@@ -249,8 +257,9 @@ class ListItemService:
             if value is None:
                 result[key] = None
                 continue
-            await cls._validate_value(db, lst, column, value)
-            result[key] = value
+            # Validation may normalize (a user column accepts a username and
+            # stores the uuid), so the checked value is what gets written.
+            result[key] = await cls._validate_value(db, lst, column, value)
 
         # Apply defaults and enforce required, over the final merged record.
         for key, column in columns.items():
@@ -313,12 +322,73 @@ class ListItemService:
     @classmethod
     async def _validate_value(
         cls, db: AsyncSession, lst: List, column: Column, value
-    ) -> None:
-        # Lookups need the database; every other type is a pure scalar check.
+    ):
+        """Validate a value and return what should be stored (usually the value
+        itself; reference types normalize to a uuid string)."""
+        # References need the database; every other type is a pure scalar check.
         if column.type == ColumnType.lookup:
             await cls._validate_lookup(db, lst, column, value)
+        elif column.type in PRINCIPAL_TYPES:
+            return await cls._validate_principal(db, column, value)
         else:
             validate_scalar(column.type, column.config or {}, column.name, value)
+        return value
+
+    @classmethod
+    async def _validate_principal(cls, db: AsyncSession, column: Column, value):
+        """Resolve a `user`/`group` cell to the referenced uuid(s).
+
+        Accepts a uuid (what the UI sends) or a username / group name (what a CSV
+        written by our own export contains, so an export round-trips). Stores the
+        uuid either way, since names are mutable.
+        """
+        model = User if column.type == ColumnType.user else UserGroup
+        name_field = User.username if column.type == ColumnType.user else UserGroup.name
+        noun = "user" if column.type == ColumnType.user else "group"
+
+        multiple = bool((column.config or {}).get("multiple"))
+        if multiple and not isinstance(value, list):
+            cls._type_error(column, f"a list of {noun}s")
+        raw_values = value if multiple else [value]
+        if not raw_values:
+            return [] if multiple else None
+
+        resolved: list[str] = []
+        for raw in raw_values:
+            if not isinstance(raw, str):
+                cls._type_error(column, f"a {noun} uuid or name")
+            parsed = coerce_uuid(raw)
+            stmt = select(model.uuid).where(model.deleted_at.is_(None))
+            stmt = stmt.where(
+                model.uuid == parsed if parsed is not None else name_field == raw
+            )
+            found = (await db.execute(stmt)).scalars().first()
+            if found is None:
+                raise UnknownReferenceError(
+                    f"Column '{column.name}' references an unknown {noun}: {raw}"
+                )
+            resolved.append(str(found))
+
+        return resolved if multiple else resolved[0]
+
+    @classmethod
+    async def scrub_principal_references(
+        cls, db: AsyncSession, column_type: ColumnType, principal_uuid: UUID
+    ) -> None:
+        """Drop references to a deleted user/group from every record that holds one.
+
+        These are soft references (a uuid in JSONB, no FK), so nothing cleans them
+        up automatically — the same trade lookup makes, and the same fix. Called
+        from UserService.delete / UserGroupService.delete; does not commit.
+        """
+        columns = (
+            await db.execute(
+                select(Column).where(
+                    Column.type == column_type, Column.deleted_at.is_(None)
+                )
+            )
+        ).scalars().all()
+        await cls._drop_reference(db, columns, str(principal_uuid))
 
     @classmethod
     async def _validate_lookup(

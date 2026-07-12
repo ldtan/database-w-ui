@@ -11,7 +11,7 @@ from src.core.utils import coerce_uuid
 from src.workspaces.models import Workspace
 
 from ..models import List
-from .enums import ColumnType
+from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
@@ -206,15 +206,22 @@ class ColumnService:
                         "target list"
                     )
 
+        if type_ in PRINCIPAL_TYPES and data.get("default") is not None:
+            # A default would have to name a specific account or group, which then
+            # rots when that account is deleted. Same call as lookup makes.
+            raise ValidationError(f"A {type_.value} column cannot have a default value")
+
         # Numeric/temporal/text settings must be well-formed (min <= max, ...).
         validate_config_constraints(type_, data)
 
         # A configured default must itself be a valid value for the column
         # (dynamic tokens like "today"/"now" are resolved at insert time).
+        # Reference types are excluded: their values are checked against the
+        # database, which the pure validators cannot do.
         default = data.get("default")
         if (
             default is not None
-            and type_ != ColumnType.lookup
+            and type_ not in REFERENCE_TYPES
             and not is_dynamic_default(type_, default)
         ):
             validate_scalar(type_, data, "default", default)

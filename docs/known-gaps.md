@@ -176,6 +176,19 @@ correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. An
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
 
+**A `user` cell must never resolve to a person's real name.** `/auth/users` is readable by
+any authenticated user (the Share dialog needs to list principals), but person records are
+private — owner or superuser only. So `user` columns label by **username**, in both
+`PrincipalControls.tsx` and the export formatter. Swapping in "first + last name" because it
+reads nicer would hand every viewer of a list the personal details of everyone referenced
+from it.
+
+**`user`/`group` cells export as names, `lookup` cells export as raw row uuids.** The
+principal columns resolve on export and accept a name back on import, so a CSV round-trips
+and is legible. `lookup` does neither — it writes the target row's uuid, which is at least
+self-consistent (import expects the same uuid) but unreadable. Worth aligning; it would mean
+resolving each lookup's display column during export and matching on that value at import.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows

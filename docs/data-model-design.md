@@ -169,6 +169,8 @@ Common `config` keys (all optional unless noted):
 | `choice`      | option `id` (or `[id, …]` if multi)        | `choices?` (shorthand) **or** `options: [{id, label, color}]`; `multiple?` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
+| `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
+| `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
 | `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | `min?`, `max?` (ISO time); `default: "now"` |
 | `datetime`    | ISO-8601 date-time `string`                | `min?`, `max?` (ISO date-time); `default: "now"` |
@@ -218,53 +220,36 @@ Notes:
 - `date` / `time` / `datetime` — stored as ISO-8601 strings and validated via Python's
   `fromisoformat`. The three separate types replace a single date type with an
   `include_time` flag.
+- `user` / `group` — **`lookup` with a fixed target**: same soft-reference shape (store a
+  uuid, resolve the label on read), but pointing at the `users` / `user_groups` table instead
+  of a list, so there is no `target_list_uuid`. An assignee field is the motivating case.
+  Neither can have a `default` (it would name an account that later gets deleted), and both
+  live in `REFERENCE_TYPES` — the set the pure validators skip because their values are
+  checked against the database. Three things about them are load-bearing:
+  - **The label is the `username` / group name, never the connected person's real name.**
+    `/auth/users` is readable by any authenticated user precisely so the Share dialog can
+    list principals — but **person records are private** (owner or superuser only, see §11
+    and `src/people`). A cell rendering "Grace Hopper" would leak personal data to every
+    viewer of the list. `PrincipalControls.tsx` and the export formatter both resolve to the
+    username.
+  - **Deleting a user or group scrubs the references.** No FK backs them (D4), so
+    `UserService.delete` / `UserGroupService.delete` call
+    `ListItemService.scrub_principal_references`, which nulls the cell (or drops the entry
+    from a multi-valued one) — the same treatment `lookup` gets when a target row goes away.
+  - **A cell accepts a uuid *or* a name, and always stores the uuid.** The UI sends uuids;
+    accepting a name is what lets an exported CSV (which writes names, because a file of
+    uuids is useless to a human) be imported straight back.
 - The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
-  (The `ColumnType` **enum itself** does need a migration; see the warning under
-  "Planned types" below.)
+  **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind
+  to enum labels; see `migrations/versions/b1f7c4a90e12_add_link_column_type.py` for the
+  pattern, and the startup drift guard (`src/infrastructure/schema_check.py`) for the
+  backstop when you forget.
 
-### Planned types: `user`, `group` (not built yet)
-
-| `type`   | Stored value in `data`                | Type-specific `config` |
-|----------|---------------------------------------|------------------------|
-| `user`   | `users.uuid` (or `[uuid, …]` if multi)| `multiple?` |
-| `group`  | `user_groups.uuid` (or `[uuid, …]`)   | `multiple?` |
-
-Both are **`lookup` with a fixed target**: same soft-reference shape (store a uuid, resolve
-the label on read), but pointing at the `users` / `user_groups` tables instead of a list, so
-there is no `target_list_uuid`. An assignee field is the motivating case.
-
-What they need, and the parts that are easy to get wrong:
-
-- **The `ColumnType` enum is a Postgres enum, and Alembic's autogenerate cannot see new
-  enum values.** Adding `user`/`group` produces a migration whose `upgrade()` is `pass`, and
-  the app then 500s with `invalid input value for enum column_type: "user"` — this has
-  already happened once, with `time`. Hand-write the revision, as
-  `migrations/versions/b1f7c4a90e12_add_link_column_type.py` does for `link`. The startup
-  drift guard (`src/infrastructure/schema_check.py`) catches a forgotten one.
-
-- **Dangling references on delete.** These are soft references (a uuid in JSONB, no FK), the
-  same trade as `lookup` (D4). Deleting a user or group would leave unresolvable ids behind.
-  `lookup` already solves this — `ListService._scrub_references_to_lists` drops the key from
-  referencing records when a target list is deleted — and `user`/`group` need the equivalent
-  hooked into `UserService.delete` / `UserGroupService.delete`. Until then, render an
-  unresolvable id as "unknown user" rather than a raw uuid.
-
-- **Display the username, never the person's name.** `/auth/users` is readable by any
-  authenticated user precisely so the Share dialog can list principals — but **person
-  records are private** (owner or superuser only, see §11 and `src/people`). A `user` column
-  resolving to "Grace Hopper" would leak personal data to every viewer of the list. Resolve
-  to `username`.
-
-- **Frontend touchpoints** (each type must be added to all of them, or it half-works):
-  `lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `renderCell` in `ListDetailPage.tsx`,
-  `RecordField` in `RecordFormDialog.tsx`, `FilterConditionsEditor.tsx`, and the export
-  formatter (`src/lists/transfer/services.py`) — `user`/`group` should export the resolved
-  username/name, not the uuid. `LookupControls.tsx` is the closest existing model to copy.
-
-- **Uniqueness and filtering** fall out of the existing machinery for single values; the
-  `multiple?` (list-valued) case is skipped by the `unique` check today, as it is for
-  `choice` and `lookup`.
+A new type must be added to **every** frontend touchpoint or it half-works: `lib/columnTypes.ts`
+(`COLUMN_TYPE_OPTIONS`), `renderCell` in `ListDetailPage.tsx`, `RecordField` in
+`RecordFormDialog.tsx`, `FilterConditionsEditor.tsx`, and the export/import cell handling in
+`src/lists/transfer/services.py`.
 
 **Example — a "Status" choice column**
 
@@ -426,13 +411,8 @@ each is enabled. Field layout is JSONB (D5).
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
 - **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
-- **New column types — `user`, `group`:** designed in §5 ("Planned types"); both are `lookup`
-  with a fixed target (users / user_groups) rather than a list. Note the traps recorded
-  there: the `ColumnType` enum needs a **hand-written** migration (autogenerate is blind to
-  enum values), deleted users/groups leave dangling references that need scrubbing, and a
-  `user` column must display the **username** — resolving to the person's real name would
-  leak private data. (`link`, planned alongside them, is built.)
-- **Further column types:** `email`, `attachment`, `rating`.
+- **Further column types:** `email`, `attachment`, `rating`. (`link`, `user` and `group` are
+  built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /

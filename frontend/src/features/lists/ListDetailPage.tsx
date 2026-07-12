@@ -29,6 +29,7 @@ import { RecordFormDialog } from "../records/RecordFormDialog";
 import { FormsPanel } from "../forms/FormsPanel";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { LookupCell } from "../lookups/LookupControls";
+import { PrincipalCell } from "../principals/PrincipalControls";
 import { ViewBar } from "../views/ViewBar";
 import { FilterDialog } from "../views/FilterDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
@@ -43,6 +44,9 @@ function renderCell(column: Column, row: ListItem) {
   const value = row.data?.[column.uuid];
   if (column.type === "lookup") {
     return <LookupCell column={column} value={value} />;
+  }
+  if (column.type === "user" || column.type === "group") {
+    return <PrincipalCell column={column} value={value} />;
   }
   if (value === null || value === undefined || value === "") {
     return <span className="text-gray-300">—</span>;

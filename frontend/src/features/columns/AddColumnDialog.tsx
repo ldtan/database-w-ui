@@ -85,6 +85,7 @@ export function AddColumnDialog({
       }
       if (type === "choice") config.choices = choices;
       if (type === "link" && linkText.trim()) config.label = linkText.trim();
+      if ((type === "user" || type === "group") && multiple) config.multiple = true;
       if (type === "lookup") {
         config.target_list_uuid = targetListUuid;
         if (displayColumnUuid) config.display_column_uuid = displayColumnUuid;
@@ -202,6 +203,19 @@ export function AddColumnDialog({
               onChange={(e) => setLinkText(e.target.value)}
               placeholder="Shown instead of the URL"
             />
+          </div>
+        )}
+
+        {(type === "user" || type === "group") && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              inputId="col-multi-principal"
+              checked={multiple}
+              onChange={(e) => setMultiple(!!e.checked)}
+            />
+            <label htmlFor="col-multi-principal">
+              Allow selecting multiple {type === "user" ? "users" : "groups"}
+            </label>
           </div>
         )}
 

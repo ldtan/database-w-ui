@@ -7,6 +7,7 @@ import { Button } from "primereact/button";
 
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import type { Column, FilterCondition } from "../../lib/types";
+import { PrincipalFilterValue } from "../principals/PrincipalControls";
 
 export const OPERATORS = [
   { label: "is", value: "is" },
@@ -108,6 +109,14 @@ export function FilterConditionsEditor({
                   onChange={(e) => update(i, { value: e.value })}
                   placeholder="Value"
                   style={{ width: 120 }}
+                />
+              ) : col?.type === "user" || col?.type === "group" ? (
+                // Cells store a uuid, so a text box here could only ever be
+                // filled by pasting one — pick the principal instead.
+                <PrincipalFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
                 />
               ) : col && isTemporal(col.type) ? (
                 // Otherwise this is a bare text box: you would have to hand-type the

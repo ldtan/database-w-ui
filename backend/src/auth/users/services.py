@@ -13,11 +13,26 @@ from src.core.exceptions import (
     PermissionDeniedError,
     UnknownReferenceError,
 )
+from src.lists.columns.enums import ColumnType
 from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash, verify_password
 from .models import User, UserGroup
 from .schemas import UserCreate, UserGroupCreate, UserGroupUpdate, UserUpdate
+
+
+async def _scrub_column_references(
+    db: AsyncSession, column_type: ColumnType, principal_uuid: UUID
+) -> None:
+    """Drop this user/group from every `user`/`group` cell that references it.
+
+    Imported inside the function on purpose: the item service imports the user
+    *models*, so a module-level import of its *service* here would close a cycle
+    (the same reason PermissionService is imported lazily elsewhere).
+    """
+    from src.lists.items.services import ListItemService
+
+    await ListItemService.scrub_principal_references(db, column_type, principal_uuid)
 
 
 def _coerce_uuid(value: Union[str, UUID]) -> Optional[UUID]:
@@ -194,6 +209,9 @@ class UserService:
         user.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the user stops appearing in UserGroupRead.users.
         user.groups.clear()
+        # `user` columns hold this uuid as a soft reference (no FK), so nothing
+        # else would clean it up; records would keep pointing at a ghost.
+        await _scrub_column_references(db, ColumnType.user, user.uuid)
         await db.commit()
         return True
 
@@ -359,5 +377,6 @@ class UserGroupService:
         group.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the group stops appearing in UserRead.groups.
         group.users.clear()
+        await _scrub_column_references(db, ColumnType.group, group.uuid)
         await db.commit()
         return True

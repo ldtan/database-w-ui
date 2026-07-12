@@ -15,6 +15,7 @@ import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal
 import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
+import { PrincipalField } from "../principals/PrincipalControls";
 
 interface Props {
   listUuid: string;
@@ -173,6 +174,16 @@ function RecordField({
     case "lookup":
       return (
         <LookupField
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+    case "user":
+    case "group":
+      return (
+        <PrincipalField
           column={column}
           value={value}
           disabled={disabled}

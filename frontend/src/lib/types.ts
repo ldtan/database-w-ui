@@ -32,6 +32,8 @@ export type ColumnType =
   | "choice"
   | "lookup"
   | "link"
+  | "user"
+  | "group"
   | "date"
   | "time"
   | "datetime";

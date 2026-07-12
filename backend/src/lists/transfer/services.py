@@ -14,10 +14,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from src.auth.users.models import User, UserGroup
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.infrastructure import database as db_module
 
-from ..columns.enums import ColumnType
+from ..columns.enums import PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
@@ -55,6 +56,39 @@ def _csv_cell(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+async def _principal_names(
+    db: AsyncSession, columns: list[Column]
+) -> dict[str, str]:
+    """uuid -> username / group name, for the principal columns being exported.
+
+    A file full of uuids is useless to a human, so `user`/`group` cells export the
+    name. Import resolves a name back to a uuid, so the file round-trips. Loaded
+    once for the whole export rather than per row; only the tables actually
+    referenced are read.
+
+    Names, not the connected person's real name: person records are private, and
+    an export is readable by anyone who can read the list.
+    """
+    types = {c.type for c in columns} & PRINCIPAL_TYPES
+    names: dict[str, str] = {}
+    for column_type in types:
+        model = User if column_type == ColumnType.user else UserGroup
+        label = User.username if column_type == ColumnType.user else UserGroup.name
+        rows = await db.execute(
+            select(model.uuid, label).where(model.deleted_at.is_(None))
+        )
+        names.update({str(uuid): name for uuid, name in rows})
+    return names
+
+
+def _export_cell(column: Column, value: object, names: dict[str, str]) -> object:
+    if column.type not in PRINCIPAL_TYPES or value is None:
+        return value
+    if isinstance(value, list):
+        return [names.get(str(v), str(v)) for v in value]
+    return names.get(str(value), value)
 
 
 async def export_rows(
@@ -100,6 +134,10 @@ async def export_rows(
         if limit is not None:
             stmt = stmt.limit(limit)
 
+        # Resolved before the cursor opens: issuing another query on this session
+        # mid-stream would disturb the in-flight result.
+        names = await _principal_names(db, columns)
+
         # Select only the JSONB payload, not whole ORM entities: Core rows do not
         # enter the session identity map, so memory stays flat over a large
         # export. yield_per bounds the client-side row buffer too.
@@ -111,7 +149,10 @@ async def export_rows(
             first = True
             yield "["
             async for data in result:
-                obj = {c.name: (data or {}).get(str(c.uuid)) for c in columns}
+                obj = {
+                    c.name: _export_cell(c, (data or {}).get(str(c.uuid)), names)
+                    for c in columns
+                }
                 yield ("" if first else ",") + json.dumps(obj, default=str)
                 first = False
             yield "]"
@@ -129,7 +170,12 @@ async def export_rows(
             yield flush()
             async for data in result:
                 row = data or {}
-                writer.writerow([_csv_cell(row.get(str(c.uuid))) for c in columns])
+                writer.writerow(
+                    [
+                        _csv_cell(_export_cell(c, row.get(str(c.uuid)), names))
+                        for c in columns
+                    ]
+                )
                 yield flush()
 
 
@@ -168,7 +214,10 @@ def _parse_cell(column: Column, raw: object):
         if s in ("false", "0", "no", "n"):
             return False
         raise ValidationError(f"column '{column.name}': '{raw}' is not true/false")
-    if column.type in (ColumnType.choice, ColumnType.lookup) and multiple:
+    if (
+        column.type in (ColumnType.choice, ColumnType.lookup) or
+        column.type in PRINCIPAL_TYPES
+    ) and multiple:
         if isinstance(raw, list):
             return raw
         return [p.strip() for p in str(raw).split(";") if p.strip()]

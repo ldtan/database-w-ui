@@ -29,7 +29,8 @@ adding, renaming, or removing a column never requires a database migration.
   column. Creating a list auto-provisions a default grid view and create/update forms.
 - **Columns** — typed fields: `text`, `long_text`, `number`, `checkbox`, `choice`,
   `lookup` (link to another list's rows), `link` (a URL, restricted to safe schemes),
-  `date`, `time`, `datetime`. Type-specific settings live in a per-column JSONB `config`.
+  `user` / `group` (reference an account or a group), `date`, `time`, `datetime`.
+  Type-specific settings live in a per-column JSONB `config`.
 - **Records** (`list_items`) — stored as JSONB keyed by column UUID; every value is
   validated against its column's type and config on write (required, choice options,
   lookup existence, etc.).
