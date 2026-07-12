@@ -24,6 +24,7 @@ async def lifespan(app: FastAPI):
     import src.lists.views.models
     import src.lists.forms.models
     import src.permissions.models
+    import src.people.models
 
     await init_db()
 
@@ -65,10 +66,12 @@ def create_app() -> FastAPI:
     from src.workspaces.routers import router as workspaces_router
     from src.lists.routers import router as lists_router
     from src.permissions.routers import router as permissions_router
+    from src.people.routers import router as people_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
     app.include_router(lists_router, prefix=settings.API_PREFIX)
     app.include_router(permissions_router, prefix=settings.API_PREFIX)
+    app.include_router(people_router, prefix=settings.API_PREFIX)
 
     return app
 
