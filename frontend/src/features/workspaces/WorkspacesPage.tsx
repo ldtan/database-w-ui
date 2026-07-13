@@ -5,7 +5,7 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
@@ -186,7 +186,7 @@ export function WorkspacesPage() {
         />
       )}
 
-      <Dialog
+      <AppDialog
         header="Rename workspace"
         visible={!!renaming}
         onHide={() => setRenaming(null)}
@@ -214,7 +214,7 @@ export function WorkspacesPage() {
             />
           </div>
         </div>
-      </Dialog>
+      </AppDialog>
     </div>
   );
 }

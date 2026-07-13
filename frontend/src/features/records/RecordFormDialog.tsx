@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { InputNumber } from "primereact/inputnumber";
@@ -264,7 +264,7 @@ export function RecordFormDialog({
   });
 
   return (
-    <Dialog
+    <AppDialog
       header={item ? "Edit record" : "Add record"}
       visible={visible}
       onHide={onHide}
@@ -302,6 +302,6 @@ export function RecordFormDialog({
           />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

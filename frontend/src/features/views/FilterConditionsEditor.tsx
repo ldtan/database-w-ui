@@ -79,7 +79,9 @@ export function FilterConditionsEditor({
           value: o.id,
         }));
         return (
-          <div key={i} className="flex items-center gap-2">
+          // Wraps rather than overflows: column + operator + value + remove is more
+          // than a phone's width, so on one it becomes two lines.
+          <div key={i} className="flex flex-wrap items-center gap-2">
             <Dropdown
               value={cond.column_uuid}
               options={columns.map((c) => ({
@@ -88,7 +90,7 @@ export function FilterConditionsEditor({
               }))}
               onChange={(e) => update(i, { column_uuid: e.value })}
               placeholder="Column"
-              className="flex-1"
+              className="flex-1 min-w-40"
             />
             <Dropdown
               value={cond.operator}

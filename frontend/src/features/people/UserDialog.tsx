@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
@@ -135,7 +135,7 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
     !personIncomplete;
 
   return (
-    <Dialog
+    <AppDialog
       header={editing ? `Edit ${user!.username}` : "Add user"}
       visible={visible}
       onHide={onHide}
@@ -326,6 +326,6 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
           />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

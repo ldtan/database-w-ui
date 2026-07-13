@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { Button } from "primereact/button";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
@@ -119,13 +119,13 @@ export function ViewBar({
   });
 
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Dropdown
         value={activeUuid}
         options={views.map((v) => ({ label: v.display_name, value: v.uuid }))}
         onChange={(e) => onSelect(e.value as string)}
         placeholder="View"
-        className="w-56"
+        className="w-40 sm:w-56"
       />
       {canSave && (
         <Button
@@ -169,7 +169,7 @@ export function ViewBar({
         />
       )}
 
-      <Dialog
+      <AppDialog
         header="New view"
         visible={creating}
         onHide={() => setCreating(false)}
@@ -195,7 +195,7 @@ export function ViewBar({
             />
           </div>
         </div>
-      </Dialog>
+      </AppDialog>
     </div>
   );
 }

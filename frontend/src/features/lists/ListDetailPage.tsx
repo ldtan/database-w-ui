@@ -400,9 +400,9 @@ export function ListDetailPage() {
     <div className="flex flex-col gap-4">
       <ConfirmDialog />
 
-      <div className="flex items-center justify-between">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <Breadcrumbs items={crumbs} />
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {/* Columns, permissions and forms all configure the *list*, so they live
               together behind one button; the toolbar is then about the data. */}
           <Button
@@ -431,7 +431,7 @@ export function ListDetailPage() {
       </div>
 
       {views.data && views.data.length > 0 && (
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <ViewBar
             listUuid={listUuid}
             views={views.data}
@@ -441,15 +441,17 @@ export function ListDetailPage() {
           />
           <ViewControls {...viewControls} />
           {/* pl-8 by hand: the icon is positioned over the input, and the theme's
-              reset does not give p-input-icon-left the padding to clear it. */}
-          <span className="p-input-icon-left ml-auto">
+              reset does not give p-input-icon-left the padding to clear it.
+              Once the row wraps, search takes the whole of its own line rather
+              than sitting at 16rem next to nothing. */}
+          <span className="p-input-icon-left w-full sm:w-auto sm:ml-auto">
             <i className="pi pi-search pl-3" />
             <InputText
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search records…"
               disabled={cols.length === 0}
-              className="w-64 pl-9"
+              className="w-full sm:w-64 pl-9"
             />
           </span>
         </div>
@@ -499,6 +501,12 @@ export function ListDetailPage() {
         value={items.data ?? []}
         loading={columns.isLoading || items.isLoading}
         dataKey="uuid"
+        // The table's wrapper already scrolls; left alone the table would instead
+        // squash itself to the width available, which on a phone means a dozen
+        // columns of two visible characters each. A floor of ~10rem a column makes
+        // it overflow — and therefore scroll — rather than crush. On a desktop the
+        // floor is below the viewport, so nothing changes.
+        tableStyle={{ minWidth: `${visibleCols.length * 10 + 12}rem` }}
         selectionMode="multiple"
         selection={selection}
         onSelectionChange={(e) => setSelection(e.value)}

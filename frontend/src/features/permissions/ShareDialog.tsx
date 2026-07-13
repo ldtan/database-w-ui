@@ -1,4 +1,4 @@
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
 
 import { SharePanel, type SharePanelProps } from "./SharePanel";
@@ -18,7 +18,7 @@ export function ShareDialog({
   ...panel
 }: Props) {
   return (
-    <Dialog
+    <AppDialog
       header={`Share “${resourceLabel}”`}
       visible={visible}
       onHide={onHide}
@@ -30,6 +30,6 @@ export function ShareDialog({
           <Button label="Done" text onClick={onHide} />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

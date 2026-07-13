@@ -7,8 +7,24 @@
 body {
   margin: 0;
   font-family: var(--font-family, system-ui, sans-serif);
+  /* A phone screen is narrower than several things on this page (a grid of twenty
+     columns, most obviously). Each of those scrolls inside its own box; the page
+     itself must never slide sideways under the header. */
+  overflow-x: hidden;
 }
 
 a {
   color: inherit;
+}
+
+/* On a phone the header's four labelled buttons do not fit beside the title, so
+   they shed their labels and stand as icons. Every one of them already carries an
+   icon and an aria-label, which is what a screen reader reads either way. */
+@media (max-width: 640px) {
+  .app-header .p-button-label {
+    display: none;
+  }
+  .app-header .p-button-icon {
+    margin: 0;
+  }
 }

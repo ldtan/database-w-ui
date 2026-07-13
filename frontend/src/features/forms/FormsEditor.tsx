@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
@@ -170,7 +170,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
         {save.error instanceof ApiError && (
           <Message severity="error" text={save.error.message} />
         )}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <Dropdown
             value={activeForm?.uuid ?? null}
             options={forms.map((f) => ({
@@ -178,7 +178,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
               value: f.uuid,
             }))}
             onChange={(e) => setSelectedUuid(e.value)}
-            className="w-64"
+            className="w-full sm:w-64"
           />
           {canEdit && activeForm && (
             <Button
@@ -204,7 +204,12 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
           )}
         </div>
 
-        <div className="flex flex-col gap-1">
+        {/* Order + field + two checkboxes + a label box is about 460px of columns
+            that have to stay in step with the header above them. Rather than reflow
+            them on a phone and lose that alignment, the block keeps its width and
+            scrolls sideways within the dialog. */}
+        <div className="overflow-x-auto">
+        <div className="flex flex-col gap-1" style={{ minWidth: 460 }}>
           <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
             <span style={{ width: 64 }}>Order</span>
             <span className="flex-1">Field</span>
@@ -258,6 +263,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
           ))}
           {rows.length === 0 && <p>Add a column to configure this form.</p>}
         </div>
+        </div>
 
         <div className="flex justify-end gap-2">
           {canEdit && (
@@ -271,7 +277,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
         </div>
       </div>
 
-      <Dialog
+      <AppDialog
         header={activeForm ? `Rename “${activeForm.display_name}”` : ""}
         visible={renaming}
         onHide={() => setRenaming(false)}
@@ -299,7 +305,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
             />
           </div>
         </div>
-      </Dialog>
+      </AppDialog>
 
       {sharing && activeForm && (
         <ShareDialog

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
 import { Checkbox } from "primereact/checkbox";
 import { SelectButton } from "primereact/selectbutton";
@@ -168,7 +168,7 @@ export function ImportExportDialog({
   }
 
   return (
-    <Dialog
+    <AppDialog
       header="Import / Export"
       visible={visible}
       onHide={onHide}
@@ -319,6 +319,6 @@ export function ImportExportDialog({
           </>
         )}
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

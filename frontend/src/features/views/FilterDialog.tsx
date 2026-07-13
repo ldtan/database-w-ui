@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
@@ -52,7 +52,7 @@ export function FilterDialog({
   });
 
   return (
-    <Dialog header="Filter" visible={visible} onHide={onHide} style={{ width: 560 }}>
+    <AppDialog header="Filter" visible={visible} onHide={onHide} style={{ width: 560 }}>
       <div className="flex flex-col gap-3">
         {apply.error instanceof ApiError && (
           <Message severity="error" text={apply.error.message} />
@@ -76,6 +76,6 @@ export function FilterDialog({
           />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

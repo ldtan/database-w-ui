@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
@@ -166,7 +166,7 @@ export function ViewsPanel({
         ))}
       </div>
 
-      <Dialog
+      <AppDialog
         header={renaming ? `Rename “${renaming.display_name}”` : ""}
         visible={!!renaming}
         onHide={() => setRenaming(null)}
@@ -194,7 +194,7 @@ export function ViewsPanel({
             />
           </div>
         </div>
-      </Dialog>
+      </AppDialog>
     </div>
   );
 }

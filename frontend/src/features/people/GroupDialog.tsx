@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { MultiSelect } from "primereact/multiselect";
@@ -70,7 +70,7 @@ export function GroupDialog({ visible, onHide, group }: Props) {
   }));
 
   return (
-    <Dialog
+    <AppDialog
       header={editing ? `Edit ${group!.name}` : "New group"}
       visible={visible}
       onHide={onHide}
@@ -128,6 +128,6 @@ export function GroupDialog({ visible, onHide, group }: Props) {
           />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

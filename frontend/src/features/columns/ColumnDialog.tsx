@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
 import { InputNumber } from "primereact/inputnumber";
 import { Dropdown } from "primereact/dropdown";
@@ -174,7 +174,7 @@ export function ColumnDialog({
   }
 
   return (
-    <Dialog
+    <AppDialog
       header={editing ? `Edit “${column.display_name}”` : "Add column"}
       visible={visible}
       onHide={onHide}
@@ -373,6 +373,6 @@ export function ColumnDialog({
           />
         </div>
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Dialog } from "primereact/dialog";
+import { AppDialog } from "../../components/AppDialog";
 import { TabPanel, TabView } from "primereact/tabview";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
@@ -116,7 +116,7 @@ export function ListSettingsDialog({
   ];
 
   return (
-    <Dialog
+    <AppDialog
       header={`${listName} settings`}
       visible={visible}
       onHide={onHide}
@@ -140,6 +140,6 @@ export function ListSettingsDialog({
       <div className="flex justify-end pt-2">
         <Button label="Done" text onClick={onHide} />
       </div>
-    </Dialog>
+    </AppDialog>
   );
 }
