@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import null as sa_null, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -92,6 +93,8 @@ class ColumnService:
 
         data = payload.model_dump(exclude_unset=True)
 
+        was_multiple = bool((column.config or {}).get("multiple"))
+
         if "config" in data:
             # A column's type is immutable after creation; re-validate the new
             # config against the existing type, preserving choice option ids.
@@ -99,6 +102,10 @@ class ColumnService:
                 db, lst, column.type, payload.config, existing=column.config
             )
             data.pop("config")
+
+        now_multiple = bool((column.config or {}).get("multiple"))
+        if was_multiple != now_multiple:
+            await cls._reshape_values(db, column, to_multiple=now_multiple)
         if data.get("name") is None:
             data.pop("name", None)
         if data.get("display_name") is None:
@@ -120,6 +127,54 @@ class ColumnService:
             ) from exc
 
         return await cls.get_by_uuid(db, lst.id, target_uuid)
+
+    @staticmethod
+    async def _reshape_values(
+        db: AsyncSession, column: Column, to_multiple: bool
+    ) -> None:
+        """Rewrite existing records when a column's `multiple` is toggled.
+
+        The config describes what a value *is*, so records cannot be left holding
+        the other shape: a `user` cell holding `["uuid"]` on a now-single column is
+        a value the API itself would reject, the picker mangles (`String(["a","b"])`
+        -> `"a,b"`), and — the sharp one — the delete-scrub misses, because it picks
+        its SQL from the column's *current* flag and never matches an array. So the
+        data is migrated with the config, in the same transaction.
+
+        Turning `multiple` **off keeps only the first element**: there is no
+        defensible way to fold several values into one, so the extras are dropped
+        (the UI warns before this happens). Turning it **on** wraps the scalar in a
+        one-element array, which loses nothing.
+
+        Does not commit; the caller's commit covers config and data together.
+        """
+        await db.flush()
+        params = {"list_id": column.list_id, "key": str(column.uuid)}
+
+        if to_multiple:
+            stmt = sa.text(
+                """
+                UPDATE list_items
+                   SET data = jsonb_set(data, ARRAY[:key], jsonb_build_array(data -> :key))
+                 WHERE list_id = :list_id
+                   AND deleted_at IS NULL
+                   AND jsonb_typeof(data -> :key) NOT IN ('array', 'null')
+                """
+            )
+        else:
+            stmt = sa.text(
+                """
+                UPDATE list_items
+                   SET data = jsonb_set(
+                           data, ARRAY[:key],
+                           COALESCE(data -> :key -> 0, 'null'::jsonb)
+                       )
+                 WHERE list_id = :list_id
+                   AND deleted_at IS NULL
+                   AND jsonb_typeof(data -> :key) = 'array'
+                """
+            )
+        await db.execute(stmt, params)
 
     @classmethod
     async def delete(

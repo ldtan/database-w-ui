@@ -7,6 +7,7 @@ import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { slugify } from "../../lib/slug";
@@ -140,10 +141,35 @@ export function ColumnDialog({
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      // Turning `multiple` off rewrites records, and the labels a lookup/user cell
+      // renders are keyed on the values it holds.
+      queryClient.invalidateQueries({ queryKey: ["lookup-labels"] });
+      queryClient.invalidateQueries({ queryKey: ["principal-labels"] });
       toast.success(editing ? "Column updated" : "Column added", saved.display_name);
       onHide();
     },
   });
+
+  // Going from several values to one is the only edit here that *destroys* data:
+  // every record keeping only its first value, the rest dropped. Say so, and let
+  // them back out — the alternative (leaving records holding arrays a single-valued
+  // column rejects) is worse, so this is a decision, not a formality.
+  function onSave() {
+    const losingValues = editing && !!column.config.multiple && !multiple;
+    if (!losingValues) {
+      save.mutate();
+      return;
+    }
+    confirmDialog({
+      header: "Keep only the first value?",
+      icon: "pi pi-exclamation-triangle",
+      message: `“${column.display_name}” currently allows several values. Records that hold more than one will keep only the first — the rest are removed from those records and cannot be recovered.`,
+      acceptLabel: "Keep first value",
+      acceptClassName: "p-button-danger",
+      rejectLabel: "Cancel",
+      accept: () => save.mutate(),
+    });
+  }
 
   return (
     <Dialog
@@ -333,7 +359,7 @@ export function ColumnDialog({
           <Button label="Cancel" text onClick={onHide} />
           <Button
             label={editing ? "Save" : "Add"}
-            onClick={() => save.mutate()}
+            onClick={onSave}
             loading={save.isPending}
             disabled={
               !displayName.trim() || (type === "lookup" && !targetListUuid)

@@ -277,6 +277,19 @@ It also avoids `forceSelection`, which *clears the model* on blur when the text 
 an option — so typing a few letters and clicking away would silently drop a value that was
 already set. Blur restores the selected label instead; only an emptied box clears the value.
 
+**Toggling a column's `multiple` migrates the records with it.** The config says what a value
+*is*, so records must not be left holding the other shape. Turning it **off** keeps each cell's
+**first** value and drops the rest (the UI confirms first — it is the one column edit that
+destroys data); turning it **on** wraps the scalar in a one-element array, which loses nothing.
+`ColumnService._reshape_values` does it in the same transaction as the config change.
+
+Leaving the data alone was not an option: a `user` cell holding `["uuid"]` on a now-single
+column is a value the API itself rejects on the next write, the picker mangles
+(`String(["a","b"])` -> `"a,b"`), the record editor *crashes* on the reverse case
+(`uuids.map` of a string), and — worst — the delete-scrub silently misses it, because it picks
+its SQL branch from the column's *current* `multiple` and never matches the other shape, so
+deleting the user left a dangling reference behind.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows
