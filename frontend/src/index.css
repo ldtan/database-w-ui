@@ -16,15 +16,3 @@ body {
 a {
   color: inherit;
 }
-
-/* On a phone the header's four labelled buttons do not fit beside the title, so
-   they shed their labels and stand as icons. Every one of them already carries an
-   icon and an aria-label, which is what a screen reader reads either way. */
-@media (max-width: 640px) {
-  .app-header .p-button-label {
-    display: none;
-  }
-  .app-header .p-button-icon {
-    margin: 0;
-  }
-}
