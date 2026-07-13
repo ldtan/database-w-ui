@@ -424,7 +424,19 @@ class PermissionService:
                 .order_by(PermissionGrant.id)
             )
         ).scalars().all()
-        return [cls._to_read(grant, resource_uuid) for grant in grants]
+        # A grant whose principal has been deleted is inert — the account cannot log
+        # in, and a deleted group has no members — but it lingers until the purge
+        # finalizes them. Listing it would answer "who has access to this?" with the
+        # names of people who don't, which is worse than useless to someone auditing.
+        live = [
+            grant
+            for grant in grants
+            if not (
+                (grant.user is not None and grant.user.deleted_at is not None)
+                or (grant.group is not None and grant.group.deleted_at is not None)
+            )
+        ]
+        return [cls._to_read(grant, resource_uuid) for grant in live]
 
     @classmethod
     async def revoke_grant(

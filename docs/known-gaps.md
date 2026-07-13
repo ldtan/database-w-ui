@@ -45,17 +45,25 @@ Both also need two fallbacks that are easy to miss: `RecordFormDialog` renders f
 by fetching a **different** list — so lookups must degrade to an unresolved value when the
 target list isn't visible.
 
-## 3. Grants are only scrubbed for the one thing that hard-deletes
+## 3. Grants have no foreign key to their resource
 
-`permission_grants` points at resources polymorphically via `(resource_type, resource_id)`
-with **no foreign key**, so nothing cleans up a grant when its resource goes away. That is
-harmless while a resource is only soft-deleted: the resolver walks the live hierarchy, so a
-deleted resource resolves to no context and its grants are inert.
+`permission_grants` points at its resource via `(resource_type, resource_id)` with **no foreign
+key** — `resource_id` means a different table depending on the type, so the database cannot
+enforce it. Nothing cascades. A deleted list, view or account leaves its grants behind.
 
-`purge_deleted_items` is the first thing in the codebase that *hard*-deletes anything, and it
-deletes each record's grants before destroying it. **Any future hard delete must do the same** —
-purging a list, a view, a form, or a user would each strip their own grants, and nothing in the
-schema will remind you.
+They are inert (the resolver walks the live hierarchy, so a grant on a deleted resource resolves
+to nothing) but they accumulate, and they used to make the Share dialog answer "who has access?"
+with the names of deleted people. Three things now handle them, and **any new hard delete must
+join them** — the schema will not remind you:
+
+- `list_grants` filters out grants whose principal is deleted, so the sharing panel tells the
+  truth immediately rather than after a cron run.
+- `purge_deleted_items` / `purge_deleted_principals` delete a resource's grants as they finalize
+  it — the purge is the only thing that hard-deletes, so it is the only thing that can leave a
+  grant pointing at an id that no longer exists.
+- `sweep_orphan_grants` catches the rest: resource or principal gone, or past the retention
+  window. Anything still *inside* the window is left alone, because it can still be restored and
+  its sharing should come back with it.
 
 ---
 

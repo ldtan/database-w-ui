@@ -196,6 +196,7 @@ systemd timer. Both take `--dry-run`, which reports without changing anything.
 uv run python -m src.maintenance.reconcile_shapes          # value shapes -> column config
 uv run python -m src.maintenance.purge_deleted_items       # empty the bin past the window
 uv run python -m src.maintenance.purge_deleted_principals  # finalize deleted accounts
+uv run python -m src.maintenance.sweep_orphan_grants       # grants for things that are gone
 ```
 
 **`reconcile_shapes`** — toggling a column's `multiple` deliberately leaves its records alone
@@ -217,6 +218,12 @@ user owns workspaces (a real foreign key), so destroying the row means answering
 data now?" — a question with no safe default and no UI to ask it. The soft-deleted row is inert
 and keeps every foreign key honest; proper account purging needs an ownership-transfer story
 first.
+
+**`sweep_orphan_grants`** — grants point at their resource with no foreign key (`resource_id`
+means a different table per `resource_type`), so nothing cascades and they outlive the lists,
+views and accounts they were about. This deletes the ones that can never apply again: resource
+or principal gone, or in the bin past the window. A grant on something still *inside* the window
+is left alone — that resource can still be restored, and its sharing should come back with it.
 
 ## Development
 
