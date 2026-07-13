@@ -17,6 +17,10 @@ class Settings(BaseSettings):
     FIRST_SUPERUSER_PASSWORD: str = "changeme"
     FIRST_SUPERUSER_USERNAME: str = "admin"
     DISABLE_AUTH: bool = False
+    # How long a soft-deleted record is kept before the purge job may destroy it.
+    # This is the window in which a delete can still be undone, so it is a policy
+    # decision, not a tuning knob. 0 means "purge as soon as the job runs".
+    PURGE_DELETED_AFTER_DAYS: int = 30
 
     @property
     def allowed_origins(self) -> list[str]:

@@ -45,13 +45,17 @@ Both also need two fallbacks that are easy to miss: `RecordFormDialog` renders f
 by fetching a **different** list — so lookups must degrade to an unresolved value when the
 target list isn't visible.
 
-## 3. Grants are not scrubbed on hard delete
+## 3. Grants are only scrubbed for the one thing that hard-deletes
 
 `permission_grants` points at resources polymorphically via `(resource_type, resource_id)`
-with **no foreign key**, so nothing cleans up a grant when its resource goes away. This is
-harmless today because resources only ever soft-delete and the resolver walks the live
-hierarchy (a deleted resource resolves to no context, so its grants are inert). It becomes
-a real problem the moment anything hard-deletes, or if ids are ever reused.
+with **no foreign key**, so nothing cleans up a grant when its resource goes away. That is
+harmless while a resource is only soft-deleted: the resolver walks the live hierarchy, so a
+deleted resource resolves to no context and its grants are inert.
+
+`purge_deleted_items` is the first thing in the codebase that *hard*-deletes anything, and it
+deletes each record's grants before destroying it. **Any future hard delete must do the same** —
+purging a list, a view, a form, or a user would each strip their own grants, and nothing in the
+schema will remind you.
 
 ---
 
@@ -304,6 +308,17 @@ per batch, idempotent, killable — run it from cron). **Nothing depends on it h
 exists so the tolerance stays a migration aid rather than permanent scaffolding. It includes
 soft-deleted records, which a restore would otherwise bring back in a shape their column no
 longer accepts.
+
+**Deleting the thing a reference points at already cleans the reference up.** Verified, all four
+paths: deleting a lookup's target *row*, a *user*, or a *group* sets the referencing cell to
+`null` (`ListItemService._drop_reference` / `scrub_principal_references`); deleting a lookup's
+target *list* drops the column's key from the referencing records entirely
+(`ListService._scrub_references_to_lists`). So by the time `purge_deleted_items` destroys a
+record for good, nothing points at it — the purge does not need to scrub, and does not.
+
+The corollary is the trap: **anything that soft-deletes outside the service layer bypasses that
+scrub** (a hand-written `UPDATE ... SET deleted_at`, a future bulk tool), and the reference is
+then left dangling with nothing to catch it.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

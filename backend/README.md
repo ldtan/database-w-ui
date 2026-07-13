@@ -148,6 +148,7 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `FIRST_SUPERUSER_USERNAME` | `admin` | Bootstrap user username. |
 | `FIRST_SUPERUSER_EMAIL` | `admin@example.com` | Bootstrap user email. |
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
+| `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. |
 
 ## API overview
 
@@ -188,16 +189,26 @@ POST /api/lists/{list_uuid}/columns
 
 ## Maintenance jobs
 
+Both are chunked, commit per batch, and are safe to kill and re-run. Run them from cron or a
+systemd timer. Both take `--dry-run`, which reports without changing anything.
+
 ```bash
-uv run python -m src.maintenance.reconcile_shapes --dry-run   # report
-uv run python -m src.maintenance.reconcile_shapes             # rewrite
+uv run python -m src.maintenance.reconcile_shapes      # value shapes -> column config
+uv run python -m src.maintenance.purge_deleted_items   # empty the bin past the window
 ```
 
-Toggling a column's `multiple` deliberately leaves its records alone — on a large list that
-rewrite is a multi-minute lock inside a web request — so the service tolerates both shapes and
-this job converges the stored data afterwards. Nothing depends on it having run; records in the
-old shape read, write, export and scrub correctly either way. Run it from cron or a systemd
-timer; it is chunked, idempotent, and safe to kill.
+**`reconcile_shapes`** — toggling a column's `multiple` deliberately leaves its records alone
+(on a large list that rewrite is a multi-minute lock inside a web request), so the service
+tolerates both shapes and this job converges the stored data afterwards. Nothing depends on it
+having run: records in the old shape read, write, export and scrub correctly either way.
+
+**`purge_deleted_items`** — deleting a record only sets `deleted_at`, so it can be recovered
+and nothing that pointed at it breaks. This destroys records deleted longer ago than
+`PURGE_DELETED_AFTER_DAYS` (default 30; `--days N` overrides, `--days 0` empties the bin now).
+It also deletes those records' permission grants, which **nothing else does** — grants point at
+their resource with no foreign key, so a hard delete would otherwise leave them orphaned. It
+does not need to scrub `lookup`/`user`/`group` references: those were already cleared when the
+record was soft-deleted.
 
 ## Development
 
