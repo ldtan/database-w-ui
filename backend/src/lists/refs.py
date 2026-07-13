@@ -15,11 +15,10 @@ use, which is why `coerce_uuid` returning None is the whole of the disambiguatio
   identifier is an unguessable uuid, an information leak the moment it is a word
   someone can guess. Children sit behind that same gate: reaching one of these routes
   at all means you already hold `view` on the list, so naming its columns tells you
-  nothing you could not read anyway. (A *view* or *form* can be restricted further than
-  its list, and there a guessed name still answers 403 rather than 404 — so it confirms
-  that name exists. It discloses no data, and the listing endpoints already hide the
-  resource itself; if that is ever too much, the fix is for those two routes to 404 on
-  a failed check, not to drop names.)
+  nothing you could not read anyway. A *view* or *form* can be restricted further than
+  its list, and those two routes therefore answer **404, not 403**, to a caller who
+  cannot view them — otherwise a guessed name would confirm that the name exists. See
+  `_visible_or_404` in each of their routers.
 
 The uuid stays canonical — it is what every response returns, and what the frontend
 uses. A name is an *input* convenience for people writing API calls by hand. Names are

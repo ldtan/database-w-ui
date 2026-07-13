@@ -10,11 +10,33 @@ from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
+from .models import Form
 from .schemas import FormCreate, FormRead, FormUpdate
 from .services import FormService
 
 
 router = APIRouter(prefix="/{list_uuid}/forms", tags=["forms"])
+
+
+async def _visible_or_404(
+    db: AsyncSession, current_user: User, lst: List, ref: str
+) -> Form:
+    """The form this ref names, or 404 — including when it exists but is not the
+    caller's to see.
+
+    A 403 would answer "a form by that name exists" to anyone who can reach the
+    list, and a form can be restricted further than its list is. That was harmless
+    while the only way to ask was an unguessable uuid; now that `ref` may be a name
+    (see src.lists.refs), it would be an enumeration oracle. `list_forms` already
+    omits the forms the caller cannot see, so "not found" is the answer that matches
+    everything else they can observe.
+    """
+    form = await FormService.get_by_ref(db, lst.id, ref)
+    if form is None or not await PermissionService.has(
+        db, current_user, ResourceType.form, form.id, Action.view
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    return form
 
 
 @router.post("/", response_model=FormRead, status_code=status.HTTP_201_CREATED)
@@ -51,13 +73,7 @@ async def get_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_ref(db, lst.id, ref)
-    if form is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
-    await PermissionService.require(
-        db, current_user, ResourceType.form, form.id, Action.view
-    )
-    return form
+    return await _visible_or_404(db, current_user, lst, ref)
 
 
 @router.patch("/{ref}", response_model=FormRead)
@@ -68,9 +84,7 @@ async def update_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_ref(db, lst.id, ref)
-    if form is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    form = await _visible_or_404(db, current_user, lst, ref)
     await PermissionService.require(
         db, current_user, ResourceType.form, form.id, Action.configure
     )
@@ -97,9 +111,7 @@ async def delete_form(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_ref(db, lst.id, ref)
-    if form is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
+    form = await _visible_or_404(db, current_user, lst, ref)
     await PermissionService.require(
         db, current_user, ResourceType.form, form.id, Action.configure
     )

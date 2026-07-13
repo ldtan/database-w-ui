@@ -10,11 +10,33 @@ from src.permissions.services import PermissionService
 
 from ..dependencies import get_list_or_404
 from ..models import List
+from .models import View
 from .schemas import ViewCreate, ViewRead, ViewUpdate
 from .services import ViewService
 
 
 router = APIRouter(prefix="/{list_uuid}/views", tags=["views"])
+
+
+async def _visible_or_404(
+    db: AsyncSession, current_user: User, lst: List, ref: str
+) -> View:
+    """The view this ref names, or 404 — including when it exists but is not the
+    caller's to see.
+
+    A 403 would answer "a view by that name exists" to anyone who can reach the
+    list, and a view can be restricted further than its list is. That was harmless
+    while the only way to ask was an unguessable uuid; now that `ref` may be a name
+    (see src.lists.refs), it would be an enumeration oracle. `list_views` already
+    omits the views the caller cannot see, so "not found" is the answer that matches
+    everything else they can observe.
+    """
+    view = await ViewService.get_by_ref(db, lst.id, ref)
+    if view is None or not await PermissionService.has(
+        db, current_user, ResourceType.view, view.id, Action.view
+    ):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    return view
 
 
 @router.post("/", response_model=ViewRead, status_code=status.HTTP_201_CREATED)
@@ -51,13 +73,7 @@ async def get_view(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_ref(db, lst.id, ref)
-    if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
-    await PermissionService.require(
-        db, current_user, ResourceType.view, view.id, Action.view
-    )
-    return view
+    return await _visible_or_404(db, current_user, lst, ref)
 
 
 @router.patch("/{ref}", response_model=ViewRead)
@@ -68,9 +84,7 @@ async def update_view(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_ref(db, lst.id, ref)
-    if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    view = await _visible_or_404(db, current_user, lst, ref)
     await PermissionService.require(
         db, current_user, ResourceType.view, view.id, Action.configure
     )
@@ -97,9 +111,7 @@ async def delete_view(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_ref(db, lst.id, ref)
-    if view is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
+    view = await _visible_or_404(db, current_user, lst, ref)
     await PermissionService.require(
         db, current_user, ResourceType.view, view.id, Action.configure
     )

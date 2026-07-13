@@ -8,7 +8,38 @@ The uuid stays canonical: it is what every response carries and what the fronten
 uses. The name is an input convenience, and it moves when you rename the column,
 which these tests pin down rather than treat as an accident.
 """
+from contextlib import asynccontextmanager
+
 import pytest
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
+
+from main import create_app
+from src.auth.dependencies import get_current_user
+from src.auth.users.schemas import UserCreate
+from src.auth.users.services import UserService
+from src.infrastructure import database as db_module
+
+
+@pytest_asyncio.fixture
+def make_client(engine, session_factory):
+    @asynccontextmanager
+    async def _make(user):
+        orig_engine, orig_factory = db_module.engine, db_module.SessionLocal
+        db_module.engine, db_module.SessionLocal = engine, session_factory
+        app = create_app()
+        app.dependency_overrides[get_current_user] = lambda: user
+        try:
+            async with AsyncClient(
+                transport=ASGITransport(app=app),
+                base_url="http://test",
+                headers={"Authorization": "Bearer test"},
+            ) as client:
+                yield client
+        finally:
+            db_module.engine, db_module.SessionLocal = orig_engine, orig_factory
+
+    return _make
 
 
 @pytest.fixture
@@ -167,6 +198,77 @@ async def test_renaming_a_column_moves_its_name_url(
     assert (await client.get(by_ref("columns", "phone"))).status_code == 404
     assert (await client.get(by_ref("columns", "mobile"))).json()["uuid"] == uuid
     assert (await client.get(by_ref("columns", uuid))).status_code == 200  # unmoved
+
+
+async def test_a_restricted_view_or_form_is_not_found_rather_than_forbidden(
+    client, make_client, session_factory, list_uuid, add_column
+):
+    """A view or form can be restricted further than its list is, and its name is
+    guessable in a way a uuid is not. A 403 would confirm the name exists to anyone
+    holding view on the list — so these two routes answer 404, matching the listing
+    endpoints, which omit them entirely."""
+    col = await add_column(list_uuid, name="pay", display_name="Pay", type="text")
+    view = (
+        await client.post(
+            f"/api/lists/{list_uuid}/views/",
+            json={"name": "payroll", "display_name": "Payroll"},
+        )
+    ).json()["uuid"]
+    form = (
+        await client.post(
+            f"/api/lists/{list_uuid}/forms/",
+            json={
+                "name": "payroll_intake",
+                "display_name": "Payroll intake",
+                "config": {"fields": [{"column_uuid": col}]},
+            },
+        )
+    ).json()["uuid"]
+    # Out from under the list's umbrella: the list's viewers no longer reach these.
+    for kind, uuid in (("views", view), ("forms", form)):
+        lifted = await client.patch(
+            f"/api/lists/{list_uuid}/{kind}/{uuid}", json={"permissions_inherit": False}
+        )
+        assert lifted.status_code == 200, lifted.text
+
+    async with session_factory() as db:
+        other = await UserService.create(
+            db, UserCreate(username="prober", email="prober@example.com", password="pw")
+        )
+        other_uuid = str(other.uuid)
+
+    granted = await client.post(
+        "/api/permissions/grants",
+        json={
+            "resource_type": "list",
+            "resource_uuid": list_uuid,
+            "user_uuid": other_uuid,
+            "actions": ["view", "configure"],
+        },
+    )
+    assert granted.status_code == 201, granted.text
+
+    async with make_client(other) as prober:
+        listed_views = (await prober.get(f"/api/lists/{list_uuid}/views/")).json()
+        listed_forms = (await prober.get(f"/api/lists/{list_uuid}/forms/")).json()
+        assert "payroll" not in [v["name"] for v in listed_views]  # the list's
+        assert "payroll_intake" not in [f["name"] for f in listed_forms]  # defaults stay
+
+        for kind, uuid, name in (
+            ("views", view, "payroll"),
+            ("forms", form, "payroll_intake"),
+        ):
+            for ref in (uuid, name):  # the uuid answers the same way as the name
+                base = f"/api/lists/{list_uuid}/{kind}/{ref}"
+                assert (await prober.get(base)).status_code == 404
+                patched = await prober.patch(base, json={"display_name": "Peek"})
+                assert patched.status_code == 404, patched.text
+                assert (await prober.delete(base)).status_code == 404
+
+    # And a name that was never used is indistinguishable from one that was.
+    async with make_client(other) as prober:
+        missing = await prober.get(f"/api/lists/{list_uuid}/views/no_such_view")
+        assert missing.status_code == 404
 
 
 async def test_a_ref_that_is_neither_a_uuid_nor_a_name_is_a_404(client, by_ref):
