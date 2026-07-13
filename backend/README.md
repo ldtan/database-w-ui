@@ -187,10 +187,32 @@ POST /api/lists/{list_uuid}/columns
 }
 ```
 
+**A name works in the URL wherever a child's uuid does.** These address the same column:
+
+```
+GET /api/lists/{list_uuid}/columns/019f52df-…
+GET /api/lists/{list_uuid}/columns/due_date
+```
+
+…and likewise for views, forms, and the view an item query applies
+(`/items/?view_uuid=open_only`). A slug can never parse as a uuid, so the two are
+unambiguous; one resolver — `src/lists/refs.py::get_by_ref` — tries the uuid and falls back
+to the name, matching **live rows only** (the unique index on `name` is partial, so a
+deleted `notes` column may sit beside a live one).
+
+Two caveats:
+
+- **The uuid stays canonical.** Responses carry it, the frontend holds it, and renaming
+  moves the name-URL out from under anyone using it. Store uuids; type names.
+- **Lists themselves are uuid-only.** A list's name is unique per *workspace*, which
+  `/lists/{x}` does not carry, and a guessable identifier there would turn the 403-vs-404
+  answer into an enumeration oracle. (A view or form can be restricted more tightly than
+  its list, so those two routes answer **404, not 403**, to a caller who cannot see them.)
+
 ## Maintenance jobs
 
-Both are chunked, commit per batch, and are safe to kill and re-run. Run them from cron or a
-systemd timer. Both take `--dry-run`, which reports without changing anything.
+All are chunked, commit per batch, and are safe to kill and re-run. Run them from cron or a
+systemd timer. All take `--dry-run`, which reports without changing anything.
 
 ```bash
 uv run python -m src.maintenance.reconcile_shapes          # value shapes -> column config

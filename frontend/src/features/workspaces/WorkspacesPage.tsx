@@ -17,6 +17,18 @@ import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 
+/**
+ * The home page: your workspaces, plus the lists shared with you directly.
+ *
+ * That second section is not a convenience. A list can be granted without its
+ * workspace, in which case the workspace is invisible to you and the list hangs off
+ * nothing — without "Shared with me" it would exist and be unreachable. It shows
+ * the list's own slug rather than "in «Workspace»", because naming a workspace you
+ * were deliberately not given would leak it.
+ *
+ * A shared workspace may be view-only, so each row's controls are gated by that
+ * workspace's own effective actions rather than by ownership.
+ */
 export function WorkspacesPage() {
   const queryClient = useQueryClient();
   const toast = useToast();

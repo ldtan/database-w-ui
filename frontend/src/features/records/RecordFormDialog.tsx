@@ -205,6 +205,19 @@ function RecordField({
   }
 }
 
+/**
+ * Add or edit one record, laid out by the list's form.
+ *
+ * The inputs are not chosen here so much as *derived*: `resolveFields` applies the
+ * form's config (which columns, in what order, with what labels, and which are
+ * read-only), and each field's editor comes from its column's `type` and `config`.
+ * A new column therefore appears in this dialog without touching it — that is the
+ * point of the config-driven design, and the reason there is no per-list form code.
+ *
+ * Which form? The list's `create` form when adding and its `update` form when
+ * editing, picked by the page. Values are sent under column **uuids**, never names,
+ * because that is how records are stored.
+ */
 export function RecordFormDialog({
   listUuid,
   columns,

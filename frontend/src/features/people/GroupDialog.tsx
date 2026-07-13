@@ -17,6 +17,14 @@ interface Props {
   group: ApiUserGroup | null;
 }
 
+/**
+ * Create or edit a group and its membership.
+ *
+ * A group is a *principal*: it can hold grants, and everyone in it inherits them.
+ * So adding someone to a group here hands them, silently, every permission that
+ * group has anywhere in the app — which is why this dialog is superuser-only, and
+ * why membership is worth more care than the plain list of checkboxes suggests.
+ */
 export function GroupDialog({ visible, onHide, group }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();

@@ -17,6 +17,18 @@ interface Props {
   onHide: () => void;
 }
 
+/**
+ * Edit the active view's filter.
+ *
+ * Unlike the rest of the toolbar, this saves immediately: a filter lives on the
+ * view, so changing it *is* a change to the view (hence the `configure` permission
+ * the page checks before offering the button). It PATCHes the whole config —
+ * `baseConfig` is the page's current state, so applying a filter does not silently
+ * discard the sort or column order you had set but not saved.
+ *
+ * The conditions themselves are edited by `FilterConditionsEditor`, which the
+ * import dialog also uses to pick which records to export.
+ */
 export function FilterDialog({
   listUuid,
   viewUuid,

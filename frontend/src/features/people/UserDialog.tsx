@@ -24,6 +24,19 @@ interface Props {
   isSelf: boolean;
 }
 
+/**
+ * Create or edit an account, and the person behind it, in one dialog.
+ *
+ * They are two records — a `User` (credentials, superuser flag, groups) and an
+ * optional `Person` (names, birth date) — and an account can exist without a
+ * profile. The dialog hides that seam, creating the person record on demand rather
+ * than making anyone visit a second screen.
+ *
+ * Changing *your own* password requires the current one; a superuser resetting
+ * someone else's does not (`isSelf`). The first stops a stolen token becoming a
+ * permanent takeover; the second is inherent to the role. The backend enforces
+ * both — this only asks for what the backend will demand.
+ */
 export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();

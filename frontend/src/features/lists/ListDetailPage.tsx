@@ -42,6 +42,25 @@ import {
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
+/**
+ * A list's records, and everything you do to them.
+ *
+ * The page owns the *view state* — sort, grouping, hidden columns, column order,
+ * page size, the search term — and hands it to whatever renders the records. It is
+ * seeded from the active view's saved config and diverges from it as you work; the
+ * "Save view" button in the toolbar writes it back, which is why nothing here
+ * persists on its own.
+ *
+ * Two renderers, one state: `DataTable` on a desktop, `RecordCards` below 640px
+ * (see `useMediaQuery`). They share the same selection, the same page size, the
+ * same per-record permissions and the same `renderCell` and `sortRows` — a value
+ * or an order that differed between them would be a bug, not a design.
+ *
+ * Filtering and searching are *server-side* (`?view_uuid=`, `?q=`), so the records
+ * arriving here are already the ones to show; sorting and paging are client-side
+ * over that page of records. Grouping pins the sort to the group column, because
+ * the server has already ordered by it.
+ */
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
   const queryClient = useQueryClient();

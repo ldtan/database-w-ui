@@ -75,6 +75,18 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
 
+/**
+ * Palette + light/dark, remembered in localStorage.
+ *
+ * The provider holds no colors. It writes `data-theme` and `data-mode` onto
+ * `<html>`, and `themes.css` keys every CSS variable off those two attributes — so
+ * a new palette is a block of CSS and an entry in `THEMES`, with no component to
+ * touch. Components must therefore reach for `var(--brand)`, `var(--text-muted)`
+ * and friends rather than a Tailwind color, which would not follow the theme.
+ *
+ * `index.html` applies the saved values before first paint; without that the page
+ * flashes the default theme on every load.
+ */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(readTheme);
   const [mode, setModeState] = useState<ThemeMode>(readMode);

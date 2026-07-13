@@ -28,6 +28,17 @@ interface Props {
   showShare?: boolean;
 }
 
+/**
+ * Choose a view, save the current one, share it, add another.
+ *
+ * "Save view" writes the *page's* live state (`currentConfig` — sort, grouping,
+ * hidden columns, page size) into the view. Nothing the toolbar does persists until
+ * that button is pressed: a view is a saved arrangement, and changing what you are
+ * looking at is not the same as changing what everyone else will look at.
+ *
+ * A view can carry its own grants, so who may save or share *this* view is asked
+ * per view, while adding one is a permission on the list.
+ */
 export function ViewBar({
   listUuid,
   views,

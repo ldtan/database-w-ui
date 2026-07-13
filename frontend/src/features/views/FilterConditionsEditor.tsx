@@ -44,6 +44,18 @@ interface Props {
   onConditionsChange: (conditions: FilterCondition[]) => void;
 }
 
+/**
+ * The rows of a filter: column, operator, value — joined by one and/or.
+ *
+ * Shared by the view's Filter dialog and the export dialog, which filters what it
+ * exports with exactly the same shape (the backend takes the same `filters` object
+ * either way), so this is the one place that knows what a condition looks like.
+ *
+ * The value input follows the column's type, and for reference columns that is not
+ * a nicety: a lookup, user or group cell stores a *uuid*, so a text box could only
+ * ever be filled by pasting one. Those get a picker, and a near-miss in a text box
+ * silently matching nothing is why temporal columns get a calendar.
+ */
 export function FilterConditionsEditor({
   listUuid,
   columns,

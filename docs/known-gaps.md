@@ -289,6 +289,30 @@ It also avoids `forceSelection`, which *clears the model* on blur when the text 
 an option — so typing a few letters and clicking away would silently drop a value that was
 already set. Blur restores the selected label instead; only an emptied box clears the value.
 
+**Records have two renderers, and they must never disagree.** Below 640px
+(`SMALL_SCREEN` in `lib/useMediaQuery.ts`) the grid is replaced by `RecordCards`, because
+twelve columns across a phone is twelve slivers. It is a second *layout*, not a second
+implementation, and the seam is where the bugs live:
+
+- Values go through the shared `renderCell`; ordering through the shared `sortRows`. Both
+  were duplicated once and the copies drifted — the grid sorted with PrimeReact's comparator
+  (blanks float to the top on a descending sort, `"item10"` before `"item9"`) and the cards
+  with ours, so the same list came out in a different order depending on the width of the
+  screen. The grid now sorts through each column's `sortFunction`, which is the only way to
+  make `DataTable` use someone else's comparator without going `lazy` (which would take its
+  paging away too).
+- Reference cells sort by the **uuid** they hold, not the label they show — both layouts
+  alike. Sorting those meaningfully means sorting server-side by the resolved label.
+- Anything new the grid grows (a column header affordance, a row action) has no home in a
+  card unless you give it one. Sorting is the example: it lived in the column headers, so on
+  a phone it did not exist at all until a "Sort by" dropdown was added to the toolbar.
+
+**Every dialog must be `components/AppDialog`, not `primereact/dialog`.** The px width each
+one is designed at (`style={{ width: 560 }}`) is wider than a phone; `AppDialog` applies the
+breakpoints that override it and caps the content height so the buttons at the bottom of a
+long form stay reachable. A raw `Dialog` looks fine on the machine you wrote it on and
+overflows the screen it ships to.
+
 **Toggling a column's `multiple` does not rewrite its records — on purpose.** Measured: that
 UPDATE takes ~1.4s over 100k rows and **~25s over 1M**, holding row locks on every record, in
 one transaction, inside a web request. So the toggle stays O(1) and the data is allowed to lag

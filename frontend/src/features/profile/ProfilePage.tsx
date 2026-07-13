@@ -15,6 +15,17 @@ import { useToast } from "../../lib/toast";
 import type { Person } from "../../lib/types";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 
+/**
+ * Your own account and profile.
+ *
+ * The profile (`Person`) is optional and may not exist yet — `useMyPerson` returns
+ * null rather than throwing on the 404, because "no profile" is a normal state for
+ * an account, not an error. The form therefore doubles as a create form.
+ *
+ * Fields are sent with `exclude_unset` semantics on the backend: an omitted field
+ * is left alone, an explicit null clears a nullable one. That is why blanking a
+ * middle name sends null rather than "".
+ */
 export function ProfilePage() {
   const queryClient = useQueryClient();
   const toast = useToast();

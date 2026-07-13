@@ -8,6 +8,14 @@ import { Message } from "primereact/message";
 
 import { useAuth } from "../../lib/auth";
 
+/**
+ * The only unauthenticated page.
+ *
+ * There is no sign-up: accounts are minted by a superuser (or seeded into an empty
+ * database), so this offers nowhere to go but in. `login` stores the token pair and
+ * flips the auth context, which is what actually lets the router render anything
+ * else — see `lib/auth.tsx`.
+ */
 export function LoginPage() {
   const { login } = useAuth();
   const navigate = useNavigate();

@@ -4,6 +4,13 @@ import { OverlayPanel } from "primereact/overlaypanel";
 
 import { THEMES, useTheme } from "../lib/theme";
 
+/**
+ * Two header buttons: light/dark, and the palette picker.
+ *
+ * The toggle is a button rather than an item in a menu because a control you have
+ * to open a panel to reach is one people stop using — it stays visible even on a
+ * phone, where the rest of the navigation collapses into the burger.
+ */
 export function ThemeSwitcher() {
   const { theme, mode, setTheme, toggleMode } = useTheme();
   const panel = useRef<OverlayPanel>(null);

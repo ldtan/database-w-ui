@@ -40,6 +40,20 @@ interface ImportResult {
   errors: { row: number; message: string }[];
 }
 
+/**
+ * Get records out of a list, and back into one.
+ *
+ * Both halves are keyed by column **name**, not uuid: a file whose headers read
+ * `first_name` is one a person can write and a spreadsheet can produce, and it
+ * survives a column being renamed in the UI. Reference columns (lookup, user,
+ * group) export the *label* of what they point at, not the uuid, for the same
+ * reason, and import resolves those labels back, so a file round-trips.
+ *
+ * Export can be narrowed by a filter (the same `FilterConditionsEditor` the view's
+ * Filter dialog uses). Import is offered only with `create` **and** `edit` on the
+ * list, since a file can do both; it reports per-row errors rather than failing the
+ * whole file.
+ */
 export function ImportExportDialog({
   listUuid,
   listName,

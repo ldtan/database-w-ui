@@ -24,6 +24,20 @@ import { UserDialog } from "./UserDialog";
 // report "no match" for anything past the limit, which is worse than no search.
 const ROWS = 10;
 
+/**
+ * Accounts and groups — identity administration, not access.
+ *
+ * Nothing here grants anyone access to a workspace, list or record; that is the
+ * grant system's business (see the Share dialog). What it administers sits
+ * *underneath* permissions, which is why writing is superuser-only: groups are
+ * principals in the grant table, so whoever edits membership can hand themselves
+ * any grant a group holds, and whoever resets a password can simply become the
+ * workspace owner. Reading stays open, so everyone can see who is in what.
+ *
+ * Both lists are searched and paged **server-side** — a client-side filter over one
+ * fetched page silently fails to find anyone past the page limit, which in the
+ * Share dialog would mean being unable to grant to them at all.
+ */
 export function PeoplePage() {
   const queryClient = useQueryClient();
   const toast = useToast();

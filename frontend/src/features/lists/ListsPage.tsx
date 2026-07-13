@@ -20,6 +20,17 @@ import {
   useEffectiveActionsMap,
 } from "../permissions/useEffectiveActions";
 
+/**
+ * The lists of one workspace: create, rename, share, delete.
+ *
+ * Creating is a permission on the *workspace*; everything else is asked per list,
+ * because a list can be shared on its own terms and a viewer of the workspace is
+ * not necessarily allowed to rename its lists.
+ *
+ * The quick-create box takes only a label and derives the `name` slug from it. The
+ * rename dialog then shows both, since a name is what code and API paths use and a
+ * bad one has to be fixable — see `NameFields`.
+ */
 export function ListsPage() {
   const { workspaceUuid = "" } = useParams();
   const queryClient = useQueryClient();
