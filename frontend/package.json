@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "gen:api": "openapi-typescript http://localhost:5000/openapi.json -o src/lib/api-schema.ts"
+    "gen:api": "npm run gen:api:spec && openapi-typescript openapi.json -o src/lib/api-schema.ts",
+    "gen:api:spec": "cd ../backend && uv run python -m src.infrastructure.export_openapi > ../frontend/openapi.json"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

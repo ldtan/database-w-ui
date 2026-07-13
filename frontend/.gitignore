@@ -4,3 +4,7 @@ dist-ssr
 *.local
 .vite
 *.tsbuildinfo
+
+# Intermediate of `npm run gen:api`; the generated types (src/lib/api-schema.ts)
+# are committed, this dump of the backend's OpenAPI document is not.
+openapi.json

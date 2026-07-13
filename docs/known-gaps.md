@@ -172,8 +172,19 @@ because `themes.css` is a custom, **unlayered** override sheet imported **last**
 `main.tsx` — unlayered rules beat `@layer`ed Tailwind utilities, and last-import wins on
 source order. Reordering those imports silently breaks every theme.
 
-**`frontend/src/lib/types.ts` is maintained by hand.** Generated API types were considered
-and deferred, so backend schema changes do not propagate — update `types.ts` yourself.
+**API types are generated; `config` blobs are not.** `frontend/src/lib/types.ts` re-exports
+`api-schema.ts`, which `npm run gen:api` builds from the backend's OpenAPI document — so a
+renamed or removed field breaks the frontend build rather than drifting silently. **Run it
+after any backend schema change.**
+
+What it *cannot* generate is the shape of a `config`: a column's, view's and form's config is
+a `dict` to Pydantic — its contents depend on the column type and are validated per type — so
+OpenAPI says only "object". `ColumnConfig` / `ViewConfig` / `FormConfig` in `types.ts` are the
+frontend's own claim about those blobs, and are the one thing left that can quietly go stale.
+Change a config's shape in the backend and nothing will tell you; change it here too.
+
+The endpoints are still untyped, too: `api.get<T>(path)` takes the caller's word for both.
+A typed client (`openapi-fetch`) would close that, at the cost of touching every call site.
 
 **Permission-gated controls are hidden while their query is in flight.** `useEffectiveActions`
 returns an empty set until the request resolves, so buttons appear a beat after page load

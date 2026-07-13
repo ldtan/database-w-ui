@@ -32,8 +32,29 @@ Other scripts:
 ```bash
 npm run build    # typecheck (tsc --noEmit) + production build
 npm run preview  # serve the production build
-npm run gen:api  # regenerate typed API bindings from http://localhost:5000/openapi.json
+npm run gen:api  # regenerate src/lib/api-schema.ts from the backend's OpenAPI document
 ```
+
+## API types are generated
+
+`src/lib/types.ts` re-exports from `src/lib/api-schema.ts`, which `npm run gen:api`
+generates from the backend's own OpenAPI document — so the frontend's idea of a
+`ColumnRead` *is* the Pydantic model. **Run it after any backend schema change**; whatever
+the frontend now gets wrong stops compiling instead of failing at runtime.
+
+It needs neither a running server nor a database: the script asks the app for its schema
+directly (`src.infrastructure.export_openapi`), which is why refreshing types is one
+command and not a ceremony.
+
+Two things stay hand-written, on purpose:
+
+- **The `config` blobs.** A column's/view's/form's `config` is a `dict` to the backend —
+  its shape depends on the column type — so OpenAPI can only say "object". `ColumnConfig`,
+  `ViewConfig` and `FormConfig` in `types.ts` say what the UI actually reads, and are the
+  one thing here that can still drift.
+- **`Response<T>`.** OpenAPI marks a field optional when its model gives it a default, but
+  FastAPI serializes response models in full, so those fields are always present. The
+  helper makes them required rather than littering the app with `?? false`.
 
 ## Structure
 
@@ -107,13 +128,9 @@ instead of the hand-written `src/lib/types.ts`.
 - A `link` cell's URL must go through `safeHref` (`lib/links.ts`) before it reaches an
   `href`. The backend already restricts schemes, but rows predating that check, or
   arriving by import, mean a raw `href={value}` is stored XSS.
-- **Recommended (not yet adopted): generate API types instead of hand-writing them.**
-  `src/lib/types.ts` is currently a hand-maintained mirror of the backend Pydantic
-  schemas, so every backend field change must be copied over by hand — a silent
-  drift risk. `npm run gen:api` already exists and generates exact types from the
-  backend's OpenAPI schema into `src/lib/api-schema.ts`. When the API surface grows
-  or more people touch it, switch `types.ts` to re-export the generated types (level 1),
-  and optionally adopt a typed client (e.g. `openapi-fetch`) so endpoints and their
-  request/response shapes are checked at compile time (level 2). Trade-off: the
-  generated file is more verbose, and `gen:api` must be re-run against a running
-  backend after schema changes.
+- **Next step for type safety: a typed client.** The *schemas* are now generated (above),
+  but the *endpoints* are not: `api.get<ListItem[]>(\`/lists/${uuid}/items/\`)` is a string
+  and a type argument the caller supplies, so a wrong path or a stale response type still
+  compiles. Adopting `openapi-fetch` over `api-schema.ts` would check the path, its
+  parameters and its response against the OpenAPI document at compile time. It touches
+  every call site, which is why it has not been done yet.

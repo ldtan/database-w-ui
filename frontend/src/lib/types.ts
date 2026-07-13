@@ -1,42 +1,59 @@
-// Hand-written mirrors of the backend Read schemas. Run `npm run gen:api`
-// (with the backend running) to generate exact types into api-schema.ts.
+/**
+ * The API's types, re-exported from the generated schema.
+ *
+ * `api-schema.ts` is produced by `npm run gen:api` from the backend's own OpenAPI
+ * document, so these names are the Pydantic schemas themselves rather than a
+ * hand-written mirror of them that quietly falls behind. Add a field to a Read
+ * schema in Python, regenerate, and every place the frontend is now wrong stops
+ * compiling. (It was accurate when this switch was made — the point is that staying
+ * accurate is no longer anybody's job.)
+ *
+ * The aliases exist because the app's names for things predate the API's and read
+ * better in components: `Column`, not `ColumnRead`.
+ *
+ * **The `config` blobs are refined here, deliberately.** The backend types a
+ * column's, a view's and a form's `config` as a plain `dict` — their shape depends
+ * on the column type and is validated per type, which OpenAPI cannot express. So
+ * the generated types say `Record<string, unknown>`, and the interfaces below say
+ * what the UI actually relies on. That is a promise this file is making, not one
+ * the backend is: keep them in step with the backend's column/view/form schemas by
+ * hand.
+ */
+import type { components } from "./api-schema";
 
-export interface ResourceLink {
-  uuid: string;
-}
+type Schemas = components["schemas"];
 
-export interface Workspace {
-  uuid: string;
-  name: string;
-  display_name: string;
-  description?: string | null;
-  settings: Record<string, unknown>;
-}
+/**
+ * Every field of a response, present.
+ *
+ * OpenAPI marks a field "not required" when its Pydantic model gives it a default
+ * (`permissions_inherit`, `settings`, `is_deleted`…), and `openapi-typescript`
+ * faithfully turns that into `field?: T`. But FastAPI serializes a response model
+ * in full — defaults and nulls included — so those fields are always *there*; only
+ * their value may be null. Without this, half the app would be `?? false`-ing
+ * fields that cannot actually be absent.
+ *
+ * Note it is about *responses*. Request bodies genuinely may omit those fields, and
+ * are typed from the API schema's own `…Create` / `…Update` models where it matters.
+ */
+type Response<T> = { [K in keyof T]-?: T[K] };
 
-export interface ListRead {
-  uuid: string;
-  name: string;
-  display_name: string;
-  description?: string | null;
-  settings: Record<string, unknown>;
-  workspace: ResourceLink;
-  primary_column?: ResourceLink | null;
-  permissions_inherit: boolean;
-}
+export type ResourceLink = Response<Schemas["ResourceLink"]>;
+export type Workspace = Response<Schemas["WorkspaceRead"]>;
+export type ListRead = Response<Schemas["ListRead"]>;
+export type ListItem = Response<Schemas["ListItemRead"]>;
+export type Person = Response<Schemas["PersonRead"]>;
+export type ApiUser = Response<Schemas["UserRead"]>;
+export type ApiUserGroup = Response<Schemas["UserGroupRead"]>;
+export type Grant = Response<Schemas["GrantRead"]>;
 
-export type ColumnType =
-  | "text"
-  | "long_text"
-  | "number"
-  | "checkbox"
-  | "choice"
-  | "lookup"
-  | "link"
-  | "user"
-  | "group"
-  | "date"
-  | "time"
-  | "datetime";
+export type ColumnType = Schemas["ColumnType"];
+export type FormType = Schemas["FormType"];
+export type ResourceType = Schemas["ResourceType"];
+/** The backend calls it `Action`; in the UI it is always an action *on* something. */
+export type PermissionAction = Schemas["Action"];
+
+// ---- The config blobs: shapes the backend validates but does not publish ----
 
 export interface ChoiceOption {
   id: string;
@@ -53,21 +70,6 @@ export interface ColumnConfig {
   allowed_schemes?: string[];
   label?: string;
   [key: string]: unknown;
-}
-
-export interface Column {
-  uuid: string;
-  name: string;
-  display_name: string;
-  type: ColumnType;
-  position: number;
-  config: ColumnConfig;
-}
-
-export interface ListItem {
-  uuid: string;
-  data: Record<string, unknown>;
-  permissions_inherit: boolean;
 }
 
 export interface ViewSort {
@@ -95,17 +97,6 @@ export interface ViewConfig {
   page_size?: number;
 }
 
-export interface View {
-  uuid: string;
-  name: string;
-  display_name: string;
-  position: number;
-  config: ViewConfig;
-  permissions_inherit: boolean;
-}
-
-export type FormType = "create" | "update" | "custom";
-
 export interface FormField {
   column_uuid: string;
   included: boolean;
@@ -118,69 +109,13 @@ export interface FormConfig {
   fields: FormField[];
 }
 
-export interface Form {
-  uuid: string;
-  name: string;
-  display_name: string;
-  type: FormType;
-  is_default: boolean;
+/** The generated shape, with its untyped `config` replaced by the one the UI reads. */
+export type Column = Omit<Response<Schemas["ColumnRead"]>, "config"> & {
+  config: ColumnConfig;
+};
+export type View = Omit<Response<Schemas["ViewRead"]>, "config"> & {
+  config: ViewConfig;
+};
+export type Form = Omit<Response<Schemas["FormRead"]>, "config"> & {
   config: FormConfig;
-  permissions_inherit: boolean;
-}
-
-// ---- Permissions ----
-
-export type ResourceType = "workspace" | "list" | "view" | "form" | "item";
-
-export type PermissionAction =
-  | "view"
-  | "create"
-  | "edit"
-  | "delete"
-  | "configure"
-  | "share"
-  | "manage";
-
-export interface Grant {
-  uuid: string;
-  resource_type: ResourceType;
-  resource_uuid: string;
-  user_uuid?: string | null;
-  user_username?: string | null;
-  group_uuid?: string | null;
-  group_name?: string | null;
-  actions: PermissionAction[];
-}
-
-export interface ApiUser {
-  uuid: string;
-  username: string;
-  // Deleted accounts come back only when resolving a uuid a record already holds, so
-  // the cell can render them as gone rather than as an unidentifiable id.
-  is_deleted?: boolean;
-  email: string;
-  is_active: boolean;
-  // Administers accounts and groups — not a grant of access to other people's data.
-  is_superuser: boolean;
-  groups: ResourceLink[];
-}
-
-// A user's personal details. Optional — an account can exist without one.
-export interface Person {
-  uuid: string;
-  name_prefix?: string | null; // "Dr", "Ms"
-  first_name: string;
-  middle_name?: string | null;
-  last_name: string;
-  name_suffix?: string | null; // "Jr", "III"
-  birth_date?: string | null; // ISO date, no time component
-  user: ResourceLink;
-}
-
-export interface ApiUserGroup {
-  uuid: string;
-  name: string;
-  is_deleted?: boolean;
-  description?: string | null;
-  users: ResourceLink[];
-}
+};
