@@ -617,6 +617,10 @@ export function ListDetailPage() {
           workspaceUuid={list.data.workspace.uuid ?? null}
           columns={cols}
           forms={formList}
+          views={views.data ?? []}
+          activeViewUuid={activeViewUuid}
+          onSelectView={setActiveViewUuid}
+          currentConfig={currentConfig}
           canConfigure={listActions.has("configure")}
           canShare={listActions.has("share")}
           inherit={{

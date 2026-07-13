@@ -4,10 +4,11 @@ import { TabPanel, TabView } from "primereact/tabview";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
-import type { Column, Form } from "../../lib/types";
+import type { Column, Form, View, ViewConfig } from "../../lib/types";
 import { ColumnsPanel } from "../columns/ColumnsPanel";
 import { FormsEditor } from "../forms/FormsEditor";
 import { SharePanel } from "../permissions/SharePanel";
+import { ViewsPanel } from "../views/ViewsPanel";
 
 interface Props {
   listUuid: string;
@@ -15,6 +16,11 @@ interface Props {
   workspaceUuid: string | null;
   columns: Column[];
   forms: Form[];
+  views: View[];
+  activeViewUuid: string | null;
+  onSelectView: (uuid: string | null) => void;
+  // The sort/filter/columns showing right now — what a new view is created from.
+  currentConfig: ViewConfig;
   canConfigure: boolean;
   canShare: boolean;
   // The list's own "unique permissions" break from its workspace.
@@ -36,6 +42,10 @@ export function ListSettingsDialog({
   workspaceUuid,
   columns,
   forms,
+  views,
+  activeViewUuid,
+  onSelectView,
+  currentConfig,
   canConfigure,
   canShare,
   inherit,
@@ -75,6 +85,20 @@ export function ListSettingsDialog({
           },
         ]
       : []),
+    {
+      key: "views",
+      header: "Views",
+      body: (
+        <ViewsPanel
+          listUuid={listUuid}
+          views={views}
+          activeUuid={activeViewUuid}
+          onSelect={onSelectView}
+          currentConfig={currentConfig}
+          canConfigure={canConfigure}
+        />
+      ),
+    },
     {
       key: "forms",
       header: "Forms",
