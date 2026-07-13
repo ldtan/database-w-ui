@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
+import { Dialog } from "primereact/dialog";
 import { InputText } from "primereact/inputtext";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { NameFields } from "../../components/NameFields";
+import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
 import { ShareDialog } from "../permissions/ShareDialog";
@@ -70,6 +73,8 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   const [sharing, setSharing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [names, setNames] = useState({ displayName: "", name: "" });
 
   const activeForm =
     forms.find((f) => f.uuid === selectedUuid) ?? forms[0] ?? null;
@@ -129,6 +134,19 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
     },
   });
 
+  const rename = useMutation({
+    mutationFn: () =>
+      api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+        name: names.name,
+        display_name: names.displayName,
+      }),
+    onSuccess: (form) => {
+      setRenaming(false);
+      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      toast.success("Form renamed", form.display_name);
+    },
+  });
+
   function move(index: number, delta: number) {
     setRows((prev) => {
       const next = [...prev];
@@ -162,6 +180,20 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
             onChange={(e) => setSelectedUuid(e.value)}
             className="w-64"
           />
+          {canEdit && activeForm && (
+            <Button
+              label="Rename"
+              icon="pi pi-pencil"
+              text
+              onClick={() => {
+                setNames({
+                  displayName: activeForm.display_name,
+                  name: activeForm.name,
+                });
+                setRenaming(true);
+              }}
+            />
+          )}
           {canShare && (
             <Button
               label="Share"
@@ -238,6 +270,36 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
           )}
         </div>
       </div>
+
+      <Dialog
+        header={activeForm ? `Rename “${activeForm.display_name}”` : ""}
+        visible={renaming}
+        onHide={() => setRenaming(false)}
+        style={{ width: 380 }}
+      >
+        <div className="flex flex-col gap-4">
+          {rename.error instanceof ApiError && (
+            <Message severity="error" text={rename.error.message} />
+          )}
+          <NameFields
+            key={activeForm?.uuid ?? "none"}
+            idPrefix="form"
+            value={names}
+            onChange={setNames}
+            linked={false}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button label="Cancel" text onClick={() => setRenaming(false)} />
+            <Button
+              label="Save"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
+            />
+          </div>
+        </div>
+      </Dialog>
 
       {sharing && activeForm && (
         <ShareDialog

@@ -10,8 +10,9 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { NameFields } from "../../components/NameFields";
 import type { ListRead, Workspace } from "../../lib/types";
-import { slugify } from "../../lib/slug";
+import { isValidName, slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
@@ -60,11 +61,12 @@ export function ListsPage() {
   });
 
   const [renaming, setRenaming] = useState<ListRead | null>(null);
-  const [renameValue, setRenameValue] = useState("");
+  const [names, setNames] = useState({ displayName: "", name: "" });
   const rename = useMutation({
     mutationFn: () =>
       api.patch<ListRead>(`/lists/${renaming!.uuid}`, {
-        display_name: renameValue,
+        name: names.name,
+        display_name: names.displayName,
       }),
     onSuccess: () => {
       setRenaming(null);
@@ -163,7 +165,10 @@ export function ListsPage() {
                     aria-label="Rename list"
                     onClick={() => {
                       setRenaming(list);
-                      setRenameValue(list.display_name);
+                      setNames({
+                        displayName: list.display_name,
+                        name: list.name,
+                      });
                     }}
                   />
                 )}
@@ -208,9 +213,12 @@ export function ListsPage() {
           {rename.error instanceof ApiError && (
             <Message severity="error" text={rename.error.message} />
           )}
-          <InputText
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
+          <NameFields
+            key={renaming?.uuid ?? "none"}
+            idPrefix="list"
+            value={names}
+            onChange={setNames}
+            linked={false}
             autoFocus
           />
           <div className="flex justify-end gap-2">
@@ -219,7 +227,7 @@ export function ListsPage() {
               label="Save"
               onClick={() => rename.mutate()}
               loading={rename.isPending}
-              disabled={!renameValue.trim()}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
             />
           </div>
         </div>

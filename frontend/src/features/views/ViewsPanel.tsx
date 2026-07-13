@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
 import { Dialog } from "primereact/dialog";
-import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { NameFields } from "../../components/NameFields";
+import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, View, ViewConfig } from "../../lib/types";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
@@ -53,7 +54,7 @@ export function ViewsPanel({
   const queryClient = useQueryClient();
   const toast = useToast();
   const [renaming, setRenaming] = useState<View | null>(null);
-  const [name, setName] = useState("");
+  const [names, setNames] = useState({ displayName: "", name: "" });
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
@@ -70,10 +71,9 @@ export function ViewsPanel({
 
   const rename = useMutation({
     mutationFn: () =>
-      // `name` (the slug) is left alone, as with columns: it identifies the view to
-      // code, and only the label is being changed.
       api.patch<View>(`/lists/${listUuid}/views/${renaming!.uuid}`, {
-        display_name: name,
+        name: names.name,
+        display_name: names.displayName,
       }),
     onSuccess: (view) => {
       setRenaming(null);
@@ -147,7 +147,7 @@ export function ViewsPanel({
                 size="small"
                 aria-label={`Rename view ${view.display_name}`}
                 onClick={() => {
-                  setName(view.display_name);
+                  setNames({ displayName: view.display_name, name: view.name });
                   setRenaming(view);
                 }}
               />
@@ -176,10 +176,12 @@ export function ViewsPanel({
           {rename.error instanceof ApiError && (
             <Message severity="error" text={rename.error.message} />
           )}
-          <InputText
-            placeholder="View name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+          <NameFields
+            key={renaming?.uuid ?? "none"}
+            idPrefix="view"
+            value={names}
+            onChange={setNames}
+            linked={false}
             autoFocus
           />
           <div className="flex justify-end gap-2">
@@ -188,7 +190,7 @@ export function ViewsPanel({
               label="Save"
               onClick={() => rename.mutate()}
               loading={rename.isPending}
-              disabled={!name.trim()}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
             />
           </div>
         </div>

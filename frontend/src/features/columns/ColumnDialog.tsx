@@ -10,7 +10,8 @@ import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { slugify } from "../../lib/slug";
+import { NameFields } from "../../components/NameFields";
+import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
 import type { ChoiceOption, Column, ColumnType, ListRead } from "../../lib/types";
@@ -39,6 +40,7 @@ export function ColumnDialog({
   const editing = column !== null;
 
   const [displayName, setDisplayName] = useState("");
+  const [name, setName] = useState("");
   const [type, setType] = useState<ColumnType>("text");
   const [required, setRequired] = useState(false);
   const [maxLength, setMaxLength] = useState<number | null>(null);
@@ -57,6 +59,7 @@ export function ColumnDialog({
     if (!visible) return;
     if (!column) {
       setDisplayName("");
+      setName("");
       setType("text");
       setRequired(false);
       setMaxLength(null);
@@ -72,6 +75,7 @@ export function ColumnDialog({
     }
     const config = column.config ?? {};
     setDisplayName(column.display_name);
+    setName(column.name);
     setType(column.type);
     setRequired(!!config.required);
     setMaxLength((config.max_length as number) ?? null);
@@ -123,16 +127,14 @@ export function ColumnDialog({
       }
 
       if (editing) {
-        // `name` is deliberately left alone: it is the code-facing slug, and an
-        // export's column headers are keyed by it — renaming the label should not
-        // break a file someone already has.
-        return api.patch<Column>(
-          `/lists/${listUuid}/columns/${column.uuid}`,
-          { display_name: displayName, config },
-        );
+        return api.patch<Column>(`/lists/${listUuid}/columns/${column.uuid}`, {
+          name,
+          display_name: displayName,
+          config,
+        });
       }
       return api.post<Column>(`/lists/${listUuid}/columns/`, {
-        name: slugify(displayName),
+        name,
         display_name: displayName,
         type,
         config,
@@ -182,15 +184,17 @@ export function ColumnDialog({
         {save.error instanceof ApiError && (
           <Message severity="error" text={save.error.message} />
         )}
-        <div className="flex flex-col gap-2">
-          <label htmlFor="col-name">Name</label>
-          <InputText
-            id="col-name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            autoFocus
-          />
-        </div>
+        <NameFields
+          key={`${column?.uuid ?? "new"}:${visible}`}
+          idPrefix="col"
+          value={{ displayName, name }}
+          onChange={(next) => {
+            setDisplayName(next.displayName);
+            setName(next.name);
+          }}
+          linked={!editing}
+          autoFocus
+        />
         <div className="flex flex-col gap-2">
           <label htmlFor="col-type">Type</label>
           <Dropdown
@@ -362,7 +366,9 @@ export function ColumnDialog({
             onClick={onSave}
             loading={save.isPending}
             disabled={
-              !displayName.trim() || (type === "lookup" && !targetListUuid)
+              !displayName.trim() ||
+              !isValidName(name) ||
+              (type === "lookup" && !targetListUuid)
             }
           />
         </div>
