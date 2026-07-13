@@ -4,7 +4,9 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import func, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
@@ -12,7 +14,7 @@ from src.workspaces.models import Workspace
 
 from src.auth.users.models import User, UserGroup
 
-from ..columns.enums import PRINCIPAL_TYPES, ColumnType
+from ..columns.enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
@@ -23,6 +25,9 @@ from .schemas import ListItemCreate, ListItemUpdate
 
 # Namespace for the per-list advisory lock that serializes unique-value writes.
 _UNIQUE_LOCK_NS = 0x4C495354  # "LIST"
+# How many principals/rows a search resolves a label to before it stops widening.
+# A search matching thousands of target rows is not a search anyone meant to run.
+_SEARCH_REF_MAX = 200
 
 
 async def display_column_key(
@@ -86,29 +91,117 @@ class ListItemService:
         result = await db.execute(cls._select(list_id).where(ListItem.uuid == parsed))
         return result.scalars().first()
 
-    @staticmethod
-    def _apply_search(stmt, q: Optional[str], columns: dict[str, Column]):
-        """Match ``q`` against the text of any of the list's columns.
+    @classmethod
+    async def _reference_matches(
+        cls, db: AsyncSession, user, column: Column, pattern: str
+    ) -> list[str]:
+        """The uuids a reference column points at whose *label* matches the search.
+
+        A `lookup`, `user` or `group` cell stores a uuid; the thing a person types is
+        the label, and it lives in another table. So resolve the label to uuids here,
+        then match cells against them.
+
+        A lookup obeys the target list's permissions — `view` on it, then the
+        per-record filter — exactly as the picker and the export do: searching must
+        not become a way to learn what is in a list you cannot read.
+        """
+        if column.type in PRINCIPAL_TYPES:
+            model = User if column.type == ColumnType.user else UserGroup
+            label = (
+                User.username if column.type == ColumnType.user else UserGroup.name
+            )
+            rows = await db.execute(
+                select(model.uuid)
+                .where(
+                    model.deleted_at.is_(None),
+                    label.ilike(pattern, escape=LIKE_ESCAPE),
+                )
+                .limit(_SEARCH_REF_MAX)
+            )
+            return [str(u) for u in rows.scalars().all()]
+
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
+        config = column.config or {}
+        target = (
+            await db.execute(
+                select(List)
+                .options(selectinload(List.workspace))
+                .where(
+                    List.uuid == coerce_uuid(config.get("target_list_uuid")),
+                    List.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if target is None or not await PermissionService.has(
+            db, user, ResourceType.list, target.id, Action.view
+        ):
+            return []
+
+        key = await display_column_key(db, target.id, config)
+        if key is None:
+            return []
+
+        rows = await db.execute(
+            select(ListItem.uuid)
+            .where(
+                ListItem.list_id == target.id,
+                ListItem.deleted_at.is_(None),
+                await PermissionService.item_view_filter(db, user, target),
+                ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE),
+            )
+            .limit(_SEARCH_REF_MAX)
+        )
+        return [str(u) for u in rows.scalars().all()]
+
+    @classmethod
+    async def _apply_search(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        user,
+        stmt,
+        q: Optional[str],
+        columns: dict[str, Column],
+    ):
+        """Match ``q`` against any of the list's columns.
 
         Server-side, like every other search here: filtering a fetched page in the
         browser would silently fail to find records past it. Matched per column
         rather than over the whole JSONB blob, so a query cannot match a column
         *uuid* (the keys) instead of a value someone can actually see.
 
-        Reference columns hold uuids, so searching a lookup's label or a user's name
-        does not find them — the label lives in another table. Noted in known-gaps.
+        Reference columns are matched by the label a person can actually read — the
+        linked row's, the user's, the group's — not by the uuid the cell stores. The
+        label resolves to uuids first (`_reference_matches`), and the cell is then
+        matched with `?|`, which is true for a single value *and* for one element of
+        a multi-valued cell.
         """
         if not (q and q.strip()) or not columns:
             return stmt
         pattern = like_pattern(q.strip())
-        return stmt.where(
-            sa.or_(
-                *[
-                    ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE)
-                    for key in columns
-                ]
+
+        conditions = []
+        for key, column in columns.items():
+            if column.type in REFERENCE_TYPES:
+                uuids = await cls._reference_matches(db, user, column, pattern)
+                if uuids:
+                    # Typed as text[]: `?|` takes an array of strings, and an
+                    # untyped literal list is inferred as jsonb.
+                    conditions.append(
+                        ListItem.data[key].has_any(
+                            sa.literal(uuids, postgresql.ARRAY(sa.Text))
+                        )
+                    )
+                continue
+            conditions.append(
+                ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE)
             )
-        )
+
+        if not conditions:
+            return stmt.where(sa.false())  # a search that can match nothing, matches nothing
+        return stmt.where(sa.or_(*conditions))
 
     @classmethod
     async def list(
@@ -128,7 +221,7 @@ class ListItemService:
             await PermissionService.item_view_filter(db, user, lst)
         )
         # A search narrows whatever the view already shows, rather than replacing it.
-        stmt = cls._apply_search(stmt, q, columns)
+        stmt = await cls._apply_search(db, lst, user, stmt, q, columns)
         sorts = None
         group_by = None
 

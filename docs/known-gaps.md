@@ -252,12 +252,16 @@ the labels drop out and every cell falls back to a stub.
 key off `isFetching`, **not** `isPending` — with `placeholderData` the status is already
 `success` while the new uuid set is still in flight.
 
-**Record search does not match reference columns.** `GET /lists/{uuid}/items/?q=…` matches
-`q` against each column's stored text, so it finds text, numbers, dates and choice values —
-but a `lookup`, `user` or `group` cell stores a *uuid*, and the label lives in another table.
-Searching a school's name will not find the students pointing at it. Fixing it means joining
-each reference column to its target on the label (`display_column_key` again) inside the
-search predicate, which is a real query, not a tweak.
+**Record search matches reference columns by label, and that means it obeys the *target's*
+permissions.** A `lookup`/`user`/`group` cell stores a uuid while a person types the label, so
+`?q=` resolves the label to uuids first and then matches cells with `?|` (true for a single
+value and for one element of a multi-valued cell alike). Resolving a lookup's label is a read
+of the target list, so it takes `view` on that list plus the per-record filter — otherwise
+search becomes a way to probe the contents of a list you were never given. A caller without
+that access simply gets no match on those columns, and
+`test_search_by_lookup_label_obeys_the_target_lists_permissions` pins it. A label resolving to
+more than `_SEARCH_REF_MAX` (200) rows stops widening there — a search matching thousands of
+target rows is not a search anyone meant to run.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

@@ -120,6 +120,7 @@ export function ViewsPanel({
         activeUuid={activeUuid}
         onSelect={onSelect}
         currentConfig={currentConfig}
+        showShare
       />
 
       {/* What the current view shows: filter, grouping, columns. */}

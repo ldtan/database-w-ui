@@ -344,3 +344,89 @@ async def test_records_can_be_searched(client, list_uuid, add_column):
 
     # Blank searches are no-ops rather than matching nothing.
     assert len((await client.get(f"/api/lists/{list_uuid}/items/?q=  ")).json()) == 3
+
+
+async def test_search_matches_lookup_and_user_labels(
+    client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """A reference cell stores a uuid, but what a person types is the label. Search
+    resolves the label — the linked row's, the account's — and matches on that."""
+    from src.auth.users.schemas import UserCreate
+    from src.auth.users.services import UserService
+
+    async with session_factory() as db:
+        alice = await UserService.create(
+            db, UserCreate(username="alice", email="alice@example.com", password="pw")
+        )
+        alice_uuid = str(alice.uuid)
+
+    target = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "schools",
+                "display_name": "Schools",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    school_name = await add_column(
+        target, name="name", display_name="Name", type="text"
+    )
+    springfield = (
+        await client.post(
+            f"/api/lists/{target}/items/",
+            json={"data": {school_name: "Springfield High"}},
+        )
+    ).json()["uuid"]
+    shelbyville = (
+        await client.post(
+            f"/api/lists/{target}/items/",
+            json={"data": {school_name: "Shelbyville High"}},
+        )
+    ).json()["uuid"]
+
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    school = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    owner = await add_column(list_uuid, name="owner", display_name="Owner", type="user")
+    reviewers = await add_column(
+        list_uuid,
+        name="reviewers",
+        display_name="Reviewers",
+        type="user",
+        config={"multiple": True},
+    )
+
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={
+            "data": {
+                name: "Ann",
+                school: springfield,
+                owner: alice_uuid,
+                reviewers: [alice_uuid],
+            }
+        },
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {name: "Bo", school: shelbyville}},
+    )
+
+    async def search(q):
+        found = (await client.get(f"/api/lists/{list_uuid}/items/?q={q}")).json()
+        return sorted(i["data"][name] for i in found)
+
+    # The lookup's label, not its uuid.
+    assert await search("springfield") == ["Ann"]
+    assert await search("high") == ["Ann", "Bo"]  # both schools match
+    # A username, on a single-valued and a multi-valued cell alike.
+    assert await search("alice") == ["Ann"]
+    # And plain text still works.
+    assert await search("Bo") == ["Bo"]

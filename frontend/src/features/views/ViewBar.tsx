@@ -23,6 +23,9 @@ interface Props {
   activeUuid: string | null;
   onSelect: (uuid: string) => void;
   currentConfig: ViewConfig;
+  // Sharing a view is configuring it, not using it, so the toolbar leaves it out
+  // and List settings → Views offers it. Same bar, one button apart.
+  showShare?: boolean;
 }
 
 export function ViewBar({
@@ -31,6 +34,7 @@ export function ViewBar({
   activeUuid,
   onSelect,
   currentConfig,
+  showShare = false,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -133,7 +137,7 @@ export function ViewBar({
           tooltip="Save the current sort and page size to this view"
         />
       )}
-      {canShare && (
+      {showShare && canShare && (
         <Button
           label="Share"
           icon="pi pi-share-alt"

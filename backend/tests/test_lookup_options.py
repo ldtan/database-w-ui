@@ -320,3 +320,54 @@ async def test_resolving_more_rows_than_a_search_page_is_not_truncated(
     # A search, by contrast, still returns one page of suggestions.
     page = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options")
     assert len(page.json()) == 25
+
+
+async def test_search_by_lookup_label_obeys_the_target_lists_permissions(
+    client, make_client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """Searching a linked row's label means reading the target list. A caller who
+    cannot read it gets no match — otherwise search becomes a way to probe the
+    contents of a list you were never given."""
+    target, rows = await _target_with_rows(
+        client, workspace_uuid, add_column, ["Springfield High"]
+    )
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {name: "Ann", lookup: rows["Springfield High"]}},
+    )
+
+    async with session_factory() as db:
+        other = await UserService.create(
+            db, UserCreate(username="prober", email="prober@example.com", password="pw")
+        )
+        other_uuid = str(other.uuid)
+
+    # Granted the list, but deliberately not the list its lookup points at.
+    granted = await client.post(
+        "/api/permissions/grants",
+        json={
+            "resource_type": "list",
+            "resource_uuid": list_uuid,
+            "user_uuid": other_uuid,
+            "actions": ["view"],
+        },
+    )
+    assert granted.status_code == 201, granted.text
+
+    async with make_client(other) as prober:
+        # The record is visible...
+        assert len((await prober.get(f"/api/lists/{list_uuid}/items/")).json()) == 1
+        # ...but its school's name is not theirs to search by.
+        hidden = await prober.get(f"/api/lists/{list_uuid}/items/?q=springfield")
+        assert hidden.json() == []
+        # The owner, who can read the target, finds it.
+        mine = await client.get(f"/api/lists/{list_uuid}/items/?q=springfield")
+        assert len(mine.json()) == 1
