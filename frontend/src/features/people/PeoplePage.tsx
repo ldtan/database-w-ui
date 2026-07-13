@@ -11,6 +11,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
+import { fullName } from "../../lib/people";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup, Person } from "../../lib/types";
@@ -118,12 +119,6 @@ export function PeoplePage() {
   const usernameByUuid = new Map(
     shownUsers.map((user) => [user.uuid, user.username]),
   );
-
-  function fullName(person: Person): string {
-    return [person.first_name, person.middle_name, person.last_name]
-      .filter(Boolean)
-      .join(" ");
-  }
 
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 820 }}>

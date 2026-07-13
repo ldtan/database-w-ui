@@ -4,27 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Button } from "primereact/button";
 import { Sidebar } from "primereact/sidebar";
 
-import { api, ApiError } from "../lib/api";
+import { api } from "../lib/api";
 import { useAuth, useCurrentUser } from "../lib/auth";
+import { fullName, useMyPerson } from "../lib/people";
 import type { ListRead, Person, Workspace } from "../lib/types";
 
 interface Props {
   visible: boolean;
   onHide: () => void;
-}
-
-/** The name a person goes by, if they have filled one in. */
-function fullName(person: Person | null): string | null {
-  if (!person) return null;
-  return [
-    person.name_prefix,
-    person.first_name,
-    person.middle_name,
-    person.last_name,
-    person.name_suffix,
-  ]
-    .filter(Boolean)
-    .join(" ");
 }
 
 /** Nothing in the model holds a picture — `Person` is names and a birth date — so
@@ -50,24 +37,10 @@ function ProfileHeader({
   onNavigate: () => void;
 }) {
   const me = useCurrentUser();
-  // 404 means "no profile yet", which is a normal state for an account, not an
-  // error — the same query (and key) the profile page uses.
-  const person = useQuery<Person | null>({
-    queryKey: ["person", "me"],
-    retry: false,
-    enabled: !!me,
-    queryFn: async () => {
-      try {
-        return await api.get<Person>("/people/me");
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
-    },
-  });
+  const person = useMyPerson();
 
   if (!me) return null;
-  const name = fullName(person.data ?? null);
+  const name = fullName(person.data);
 
   return (
     <Link

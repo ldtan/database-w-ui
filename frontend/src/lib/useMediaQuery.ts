@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useSyncExternalStore } from "react";
 
 /** The width below which a table stops being readable and the UI switches to
  *  cards. Matches the 640px the CSS and Tailwind's `sm:` already use — one number,
@@ -13,17 +13,20 @@ export const SMALL_SCREEN = "(max-width: 640px)";
  * painting the desktop layout and then correcting itself.
  */
 export function useMediaQuery(query: string): boolean {
+  // One MediaQueryList per query, not one per call: React asks for the snapshot on
+  // every render and after every change, and `window.matchMedia(query)` would
+  // build a fresh object each time for the sake of reading one boolean off it.
+  const mql = useMemo(() => window.matchMedia(query), [query]);
   const subscribe = useCallback(
     (onChange: () => void) => {
-      const mql = window.matchMedia(query);
       mql.addEventListener("change", onChange);
       return () => mql.removeEventListener("change", onChange);
     },
-    [query],
+    [mql],
   );
   return useSyncExternalStore(
     subscribe,
-    () => window.matchMedia(query).matches,
+    () => mql.matches,
     () => false, // server/prerender: assume the desktop layout
   );
 }

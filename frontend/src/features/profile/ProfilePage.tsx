@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Calendar } from "primereact/calendar";
@@ -9,6 +9,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
+import { useMyPerson } from "../../lib/people";
 import { fmtDate, parseTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { Person } from "../../lib/types";
@@ -19,19 +20,9 @@ export function ProfilePage() {
   const toast = useToast();
   const me = useCurrentUser();
 
-  // 404 means "no profile yet", which is a normal state, not an error.
-  const person = useQuery<Person | null>({
-    queryKey: ["person", "me"],
-    retry: false,
-    queryFn: async () => {
-      try {
-        return await api.get<Person>("/people/me");
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 404) return null;
-        throw err;
-      }
-    },
-  });
+  // 404 means "no profile yet", which is a normal state, not an error — the rule
+  // lives in the hook, so the drawer's copy of this cannot drift from it.
+  const person = useMyPerson();
 
   const [namePrefix, setNamePrefix] = useState("");
   const [firstName, setFirstName] = useState("");
