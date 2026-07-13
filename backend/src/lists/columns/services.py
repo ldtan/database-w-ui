@@ -197,18 +197,34 @@ class ColumnService:
         key = await display_column_key(db, target.id, config)
         label = ListItem.data[key].astext if key else sa_null()
 
-        stmt = select(ListItem.uuid, label.label("label")).where(
+        stmt = select(
+            ListItem.uuid, label.label("label"), ListItem.deleted_at
+        ).where(
             ListItem.list_id == target.id,
-            ListItem.deleted_at.is_(None),
             await PermissionService.item_view_filter(db, user, target),
         )
+
+        # Resolving and offering are different questions, and a deleted row answers
+        # them differently. A grid asking for *specific* uuids is labelling what its
+        # records already hold, and one of those rows may be in the bin — it must
+        # still get a name, or a live relationship renders as an unidentifiable stub.
+        # A *search* is offering choices, and nothing new may be linked to a row that
+        # is on its way out.
         if uuids is not None:
             stmt = stmt.where(ListItem.uuid.in_(uuids))
+        else:
+            stmt = stmt.where(ListItem.deleted_at.is_(None))
         if q and q.strip() and key:
-            stmt = stmt.where(label.ilike(like_pattern(q.strip()), escape=LIKE_ESCAPE))
+            stmt = stmt.where(
+                ListItem.deleted_at.is_(None),
+                label.ilike(like_pattern(q.strip()), escape=LIKE_ESCAPE),
+            )
 
         rows = await db.execute(stmt.order_by(label, ListItem.id).limit(limit))
-        return [{"uuid": uuid, "label": text} for uuid, text in rows]
+        return [
+            {"uuid": uuid, "label": text, "deleted": deleted_at is not None}
+            for uuid, text, deleted_at in rows
+        ]
 
     @staticmethod
     async def _validate_config(

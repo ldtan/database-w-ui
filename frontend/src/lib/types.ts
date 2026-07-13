@@ -155,6 +155,9 @@ export interface Grant {
 export interface ApiUser {
   uuid: string;
   username: string;
+  // Deleted accounts come back only when resolving a uuid a record already holds, so
+  // the cell can render them as gone rather than as an unidentifiable id.
+  is_deleted?: boolean;
   email: string;
   is_active: boolean;
   // Administers accounts and groups — not a grant of access to other people's data.
@@ -175,6 +178,7 @@ export interface Person {
 export interface ApiUserGroup {
   uuid: string;
   name: string;
+  is_deleted?: boolean;
   description?: string | null;
   users: ResourceLink[];
 }

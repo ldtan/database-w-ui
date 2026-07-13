@@ -75,6 +75,15 @@ async def display_column_key(
     return str(first) if first is not None else None
 
 
+def _as_set(value) -> set:
+    """A cell's current value as a set of uuid strings — what it already points at."""
+    if value is None:
+        return set()
+    if isinstance(value, list):
+        return {str(v) for v in value if v is not None}
+    return {str(value)}
+
+
 def coerce_shape(column: Column, value):
     """A cell's value in the shape its column *currently* declares.
 
@@ -379,9 +388,12 @@ class ListItemService:
         if item is None:
             return False
 
+        # Only this. References to the row are deliberately left intact: scrubbing
+        # them here is what used to make a soft delete irreversible — the pointers
+        # were destroyed and nothing remembered what they were, so restoring the row
+        # brought it back stripped of every inbound relationship. They are cleared
+        # when the record is *purged*, at which point it is unrecoverable anyway.
         item.deleted_at = datetime.now(timezone.utc)
-        # Remove references to this row from any lookup column targeting this list.
-        await cls._scrub_lookup_references(db, lst.uuid, item.uuid)
         await db.commit()
         return True
 
@@ -389,9 +401,9 @@ class ListItemService:
     async def bulk_delete(
         cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
     ) -> int:
-        """Soft-delete several records in one transaction, scrubbing lookup
-        references for each. Unknown/already-deleted uuids are skipped. Returns
-        the number actually deleted."""
+        """Soft-delete several records in one transaction. Unknown/already-deleted
+        uuids are skipped. Returns the number actually deleted. References to these
+        rows survive, as for a single delete."""
         now = datetime.now(timezone.utc)
         deleted = 0
         for uuid in uuids:
@@ -399,7 +411,6 @@ class ListItemService:
             if item is None:
                 continue
             item.deleted_at = now
-            await cls._scrub_lookup_references(db, lst.uuid, item.uuid)
             deleted += 1
         if deleted:
             await db.commit()
@@ -519,7 +530,14 @@ class ListItemService:
                 continue
             # Validation may normalize (a user column accepts a username and
             # stores the uuid), so the checked value is what gets written.
-            result[key] = await cls._validate_value(db, lst, column, value)
+            #
+            # `kept` is what this cell already holds. A reference to something that
+            # has since been deleted stays legal *if it is already there* — otherwise
+            # binning one row would make every record pointing at it unsaveable,
+            # which is a fine way to lock a list. A *new* reference to a deleted
+            # target is still refused.
+            kept = _as_set((existing or {}).get(key))
+            result[key] = await cls._validate_value(db, lst, column, value, kept)
 
         # Apply defaults and enforce required, over the final merged record.
         for key, column in columns.items():
@@ -616,15 +634,19 @@ class ListItemService:
 
     @classmethod
     async def _validate_value(
-        cls, db: AsyncSession, lst: List, column: Column, value
+        cls, db: AsyncSession, lst: List, column: Column, value, kept: set = frozenset()
     ):
         """Validate a value and return what should be stored (usually the value
-        itself; reference types normalize to a uuid string)."""
+        itself; reference types normalize to a uuid string).
+
+        ``kept`` is the set of uuids this cell already holds; those may point at a
+        deleted target, because they were valid when they were written.
+        """
         # References need the database; every other type is a pure scalar check.
         if column.type == ColumnType.lookup:
-            return await cls._validate_lookup(db, lst, column, value)
+            return await cls._validate_lookup(db, lst, column, value, kept)
         if column.type in PRINCIPAL_TYPES:
-            return await cls._validate_principal(db, column, value)
+            return await cls._validate_principal(db, column, value, kept)
         if column.type == ColumnType.link and isinstance(value, str):
             # Store what was validated: the check parses the trimmed URL, so
             # trimming here keeps the stored string and the checked string the
@@ -634,7 +656,9 @@ class ListItemService:
         return value
 
     @classmethod
-    async def _validate_principal(cls, db: AsyncSession, column: Column, value):
+    async def _validate_principal(
+        cls, db: AsyncSession, column: Column, value, kept: set = frozenset()
+    ):
         """Resolve a `user`/`group` cell to the referenced uuid(s).
 
         Accepts a uuid (what the UI sends) or a username / group name (what a CSV
@@ -644,6 +668,9 @@ class ListItemService:
         Resolved in one query for the whole cell, not one per value: import runs
         this per row, so a query per value turns a bulk import into thousands of
         sequential round-trips.
+
+        A uuid in ``kept`` — already stored in this cell — is allowed even if the
+        account has since been deleted. Anything else must point at a live one.
         """
         model = User if column.type == ColumnType.user else UserGroup
         name_field = User.username if column.type == ColumnType.user else UserGroup.name
@@ -660,8 +687,7 @@ class ListItemService:
 
         rows = (
             await db.execute(
-                select(model.uuid, name_field).where(
-                    model.deleted_at.is_(None),
+                select(model.uuid, name_field, model.deleted_at).where(
                     sa.or_(
                         model.uuid.in_(uuids) if uuids else sa.false(),
                         name_field.in_(names) if names else sa.false(),
@@ -669,12 +695,23 @@ class ListItemService:
                 )
             )
         ).all()
-        found_uuids = {str(uuid) for uuid, _ in rows}
-        by_name = {name: str(uuid) for uuid, name in rows}
+        live_uuids = {str(u) for u, _, gone in rows if gone is None}
+        deleted_uuids = {str(u) for u, _, gone in rows if gone is not None}
+        by_name = {name: str(u) for u, name, gone in rows if gone is None}
 
         resolved: list[str] = []
         for raw, uuid in parsed:
-            hit = str(uuid) if uuid and str(uuid) in found_uuids else by_name.get(raw)
+            as_str = str(uuid) if uuid else None
+            if as_str and as_str in live_uuids:
+                resolved.append(as_str)
+                continue
+            # Already in the record, and the account has since gone: keep it. The
+            # alternative is that binning an account makes every record naming them
+            # unsaveable until someone edits the cell.
+            if as_str and as_str in kept and as_str in deleted_uuids:
+                resolved.append(as_str)
+                continue
+            hit = by_name.get(raw)
             if hit is None:
                 raise UnknownReferenceError(
                     f"Column '{column.name}' references an unknown {noun}: {raw}"
@@ -704,7 +741,7 @@ class ListItemService:
 
     @classmethod
     async def _validate_lookup(
-        cls, db: AsyncSession, lst: List, column: Column, value
+        cls, db: AsyncSession, lst: List, column: Column, value, kept: set = frozenset()
     ):
         """Resolve a lookup cell to target-row uuid(s).
 
@@ -712,6 +749,10 @@ class ListItemService:
         of the lookup's display column — which is what our own export writes, so a
         file round-trips. A label matching more than one row is an error rather
         than a guess: unlike a username, a row label is not unique.
+
+        A uuid in ``kept`` — already stored in this cell — is allowed even if the
+        target row has since been deleted. Anything else must point at a live row:
+        nothing new may be linked to a record on its way out.
         """
         config = column.config or {}
         multiple, raws = cls._reference_inputs(column, value, "row")
@@ -730,13 +771,15 @@ class ListItemService:
         found_uuids: set[str] = set()
         if uuids:
             rows = await db.execute(
-                select(ListItem.uuid).where(
+                select(ListItem.uuid, ListItem.deleted_at).where(
                     ListItem.list_id == target_list_id,
                     ListItem.uuid.in_(uuids),
-                    ListItem.deleted_at.is_(None),
                 )
             )
-            found_uuids = {str(u) for u in rows.scalars().all()}
+            for row_uuid, gone in rows.all():
+                # Live, or already in this cell and since deleted.
+                if gone is None or str(row_uuid) in kept:
+                    found_uuids.add(str(row_uuid))
 
         by_label: dict[str, tuple[str, int]] = {}
         if labels:
@@ -754,6 +797,9 @@ class ListItemService:
                 )
                 .where(
                     ListItem.list_id == target_list_id,
+                    # Live rows only: a *label* is how something new gets picked, and
+                    # nothing new may point at a row in the bin. A uuid already in the
+                    # cell is handled above.
                     ListItem.deleted_at.is_(None),
                     label_col.in_(labels),
                 )

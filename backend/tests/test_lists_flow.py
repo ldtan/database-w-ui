@@ -265,7 +265,7 @@ async def test_lookup_default_rejected(client, list_uuid, workspace_uuid):
     assert "default" in resp.json()["detail"].lower()
 
 
-async def test_deleting_row_scrubs_lookup_reference(client, list_uuid, workspace_uuid, add_column):
+async def test_deleting_a_row_keeps_the_lookup_reference(client, list_uuid, workspace_uuid, add_column):
     # Target list with one row.
     target = (
         await client.post(
@@ -286,10 +286,12 @@ async def test_deleting_row_scrubs_lookup_reference(client, list_uuid, workspace
     ).json()
     assert row["data"][link] == target_row
 
-    # Delete the target row; the referencing record should be scrubbed.
+    # Delete the target row: the reference *survives*, because a soft delete has to be
+    # undoable and destroying the pointer is not. It is cleared when the row is purged
+    # (see tests/test_soft_delete_is_reversible.py).
     assert (await client.delete(f"/api/lists/{target}/items/{target_row}")).status_code == 204
     refreshed = (await client.get(f"/api/lists/{list_uuid}/items/{row['uuid']}")).json()
-    assert refreshed["data"][link] is None
+    assert refreshed["data"][link] == target_row
 
 
 async def test_blank_means_empty_for_every_column_type(client, list_uuid, add_column):

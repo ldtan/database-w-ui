@@ -78,6 +78,10 @@ class LookupOption(BaseModel):
 
     uuid: UUID
     label: Optional[str] = None
+    # The row is in the bin. Returned only when resolving specific uuids — a search
+    # never offers one — so the caller can render an existing link as unavailable
+    # rather than pretending the relationship is gone.
+    deleted: bool = False
 
 
 class ColumnRead(BaseModel):

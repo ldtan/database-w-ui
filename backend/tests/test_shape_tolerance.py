@@ -123,12 +123,19 @@ async def test_writing_back_a_legacy_value_collapses_it(
     assert await _stored(session_factory, col) == alice  # written in the new shape
 
 
-async def test_the_scrub_no_longer_cares_about_shape(
+async def test_clearing_a_reference_no_longer_cares_about_shape(
     client, session_factory, list_uuid, two_users
 ):
-    """The bug this design could have reintroduced: with records a shape behind, a
-    scrub that picks its SQL from the column's current `multiple` matches nothing and
-    leaves the deleted user's uuid behind. It no longer asks."""
+    """The bug this design could have reintroduced: with records a shape behind, SQL
+    that picks its branch from the column's current `multiple` matches nothing and
+    leaves the dead uuid behind. The purge-time clear no longer asks."""
+    from datetime import datetime, timedelta, timezone
+
+    from sqlalchemy import update
+
+    from src.auth.users.models import User
+    from src.maintenance.purge_deleted_principals import purge_principals
+
     alice, bob = two_users
     col = await _multi_column(client, list_uuid)
     await client.post(
@@ -140,8 +147,17 @@ async def test_the_scrub_no_longer_cares_about_shape(
 
     async with session_factory() as db:
         assert await UserService.delete(db, alice) is True
+        # Past the retention window, so the purge finalizes the account.
+        await db.execute(
+            update(User)
+            .where(User.uuid == alice)
+            .values(deleted_at=datetime.now(timezone.utc) - timedelta(days=45))
+        )
+        await db.commit()
 
-    # Scrubbed out of the array on disk, even though the column says single.
+    await purge_principals(days=30)
+
+    # Cleared out of the array on disk, even though the column now says single.
     assert await _stored(session_factory, col) == [bob]
 
 

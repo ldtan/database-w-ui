@@ -309,16 +309,31 @@ exists so the tolerance stays a migration aid rather than permanent scaffolding.
 soft-deleted records, which a restore would otherwise bring back in a shape their column no
 longer accepts.
 
-**Deleting the thing a reference points at already cleans the reference up.** Verified, all four
-paths: deleting a lookup's target *row*, a *user*, or a *group* sets the referencing cell to
-`null` (`ListItemService._drop_reference` / `scrub_principal_references`); deleting a lookup's
-target *list* drops the column's key from the referencing records entirely
-(`ListService._scrub_references_to_lists`). So by the time `purge_deleted_items` destroys a
-record for good, nothing points at it — the purge does not need to scrub, and does not.
+**Soft delete destroys nothing — that is the whole contract.** Deleting a record, a user or
+a group leaves every cell pointing at it *intact*. The cell still holds the uuid, still resolves
+(the target comes back flagged `deleted`), and renders as `Springfield High (deleted)`. Only the
+**purge** clears it, once the target is past the retention window and going for good.
 
-The corollary is the trap: **anything that soft-deletes outside the service layer bypasses that
-scrub** (a hand-written `UPDATE ... SET deleted_at`, a future bulk tool), and the reference is
-then left dangling with nothing to catch it.
+The old behaviour scrubbed those references at delete time, which quietly made soft delete
+irreversible: the pointers were destroyed and nothing remembered them, so a restore would bring
+a record back stripped of every inbound relationship. Restore does not exist yet; this is what
+makes it *possible*.
+
+Three rules hold it together, and all three are easy to get backwards:
+
+- **Resolving is not offering.** `lookup_options` (and `/auth/users?uuid=`) return deleted
+  targets when asked for *specific uuids* — a grid labelling what its records already hold —
+  and never when *searching*. Nothing new may be linked to something on its way out.
+- **A stored reference stays saveable.** `_validate_data` passes the cell's current uuids down
+  as `kept`; a reference in that set is accepted even if its target is deleted. Without it,
+  binning one row makes every record naming it unsaveable — a fine way to lock a list.
+- **The clear happens once, in `_references.clear_expired`**, driven by the same retention
+  window. Shape-agnostic (`?|` plus a `CASE`), set-based (one UPDATE per column, not per row).
+
+**Deleting a *list* is the deliberate exception** and still scrubs. Every value in a lookup
+pointing at it goes stale at once; the permission resolver returns *no access* for a deleted
+resource, so those labels could not even be authorised; and restoring a list would mean
+un-cascading its columns, records, views and forms — a feature that does not exist.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

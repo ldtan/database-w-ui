@@ -193,8 +193,9 @@ Both are chunked, commit per batch, and are safe to kill and re-run. Run them fr
 systemd timer. Both take `--dry-run`, which reports without changing anything.
 
 ```bash
-uv run python -m src.maintenance.reconcile_shapes      # value shapes -> column config
-uv run python -m src.maintenance.purge_deleted_items   # empty the bin past the window
+uv run python -m src.maintenance.reconcile_shapes          # value shapes -> column config
+uv run python -m src.maintenance.purge_deleted_items       # empty the bin past the window
+uv run python -m src.maintenance.purge_deleted_principals  # finalize deleted accounts
 ```
 
 **`reconcile_shapes`** — toggling a column's `multiple` deliberately leaves its records alone
@@ -206,9 +207,16 @@ having run: records in the old shape read, write, export and scrub correctly eit
 and nothing that pointed at it breaks. This destroys records deleted longer ago than
 `PURGE_DELETED_AFTER_DAYS` (default 30; `--days N` overrides, `--days 0` empties the bin now).
 It also deletes those records' permission grants, which **nothing else does** — grants point at
-their resource with no foreign key, so a hard delete would otherwise leave them orphaned. It
-does not need to scrub `lookup`/`user`/`group` references: those were already cleared when the
-record was soft-deleted.
+their resource with no foreign key, so a hard delete would otherwise leave them orphaned — and
+clears the `lookup` cells pointing at them. That clearing is *not* done at delete time: a soft
+delete destroys nothing, so it can be undone, and the cells render as "(deleted)" meanwhile.
+
+**`purge_deleted_principals`** — the same, for users and groups past the window: clears the
+`user`/`group` cells naming them and deletes their grants. It does **not** delete the rows. A
+user owns workspaces (a real foreign key), so destroying the row means answering "who owns their
+data now?" — a question with no safe default and no UI to ask it. The soft-deleted row is inert
+and keeps every foreign key honest; proper account purging needs an ownership-transfer story
+first.
 
 ## Development
 

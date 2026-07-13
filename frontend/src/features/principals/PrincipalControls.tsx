@@ -37,9 +37,11 @@ const PATHS: Record<PrincipalType, string> = {
 // any authenticated user so the Share dialog can list principals. Rendering
 // "Grace Hopper" in a cell would leak personal data to every viewer of the list.
 function labelOf(kind: PrincipalType, row: ApiUser | ApiUserGroup): string {
-  return kind === "user"
-    ? (row as ApiUser).username
-    : (row as ApiUserGroup).name;
+  const name =
+    kind === "user" ? (row as ApiUser).username : (row as ApiUserGroup).name;
+  // A deleted account still names the person who owned the record. Saying so beats
+  // showing a uuid, and beats pretending the cell was always empty.
+  return row.is_deleted ? `${name} (deleted)` : name;
 }
 
 function toOptions(

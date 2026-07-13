@@ -34,6 +34,9 @@ class UserRead(UserBase):
     uuid: UUID
     is_superuser: bool = False
     groups: List[ResourceLink] = Field(default_factory=list)
+    # Deleted accounts come back only when a caller resolves a uuid one of its
+    # records already holds, so the cell can render "(deleted)" rather than a raw id.
+    is_deleted: bool = False
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -55,4 +58,5 @@ class UserGroupUpdate(BaseModel):
 class UserGroupRead(UserGroupBase):
     uuid: UUID
     users: List[ResourceLink] = Field(default_factory=list)
+    is_deleted: bool = False
     model_config = ConfigDict(from_attributes=True)

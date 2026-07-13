@@ -190,10 +190,12 @@ class _LabelResolver:
                 continue
 
             plan = self._plan[scope]
+            # Deleted targets are resolved too. The cell holds a real relationship
+            # that has not been cleaned up yet, and the person exporting could see
+            # its label yesterday — writing the uuid instead helps nobody.
             if "model" in plan:
                 rows = await self._db.execute(
                     select(plan["model"].uuid, plan["label"]).where(
-                        plan["model"].deleted_at.is_(None),
                         plan["model"].uuid.in_(parsed),
                     )
                 )
@@ -203,7 +205,6 @@ class _LabelResolver:
                         ListItem.uuid, ListItem.data[plan["display_key"]].astext
                     ).where(
                         ListItem.list_id == plan["list_id"],
-                        ListItem.deleted_at.is_(None),
                         ListItem.uuid.in_(parsed),
                         plan["visible"],
                     )

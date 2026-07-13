@@ -53,6 +53,11 @@ class UserService:
             .options(selectinload(User.groups))
         )
 
+    @staticmethod
+    def _select_any():
+        """Deleted accounts included — for resolving a uuid a record already holds."""
+        return select(User).options(selectinload(User.groups))
+
     @classmethod
     async def get_by_uuid(cls, db: AsyncSession, uuid: Union[str, UUID]) -> Optional[User]:
         parsed = _coerce_uuid(uuid)
@@ -117,7 +122,12 @@ class UserService:
         `user` cells needs to turn the uuids it holds into names, without pulling
         the whole users table down to do it.
         """
-        stmt = cls._apply_search(cls._select(), q, search_person_names)
+        # Resolving specific accounts includes deleted ones: a `user` cell may hold
+        # someone who has since been removed, and it still has to render their name
+        # (as "(deleted)") rather than an unidentifiable uuid. A *search* only ever
+        # offers live accounts — nothing new may be assigned to a deleted user.
+        base = cls._select_any() if uuids is not None else cls._select()
+        stmt = cls._apply_search(base, q, search_person_names)
         if uuids is not None:
             stmt = stmt.where(User.uuid.in_(uuids))
         result = await db.execute(stmt.order_by(User.id).offset(skip).limit(limit))
@@ -224,9 +234,9 @@ class UserService:
         user.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the user stops appearing in UserGroupRead.users.
         user.groups.clear()
-        # `user` columns hold this uuid as a soft reference (no FK), so nothing
-        # else would clean it up; records would keep pointing at a ghost.
-        await _scrub_column_references(db, ColumnType.user, user.uuid)
+        # `user` cells still holding this uuid are left alone: they are what makes a
+        # restore meaningful, and they render as "(deleted)" until the account is
+        # purged. See src/maintenance/purge_deleted_principals.py.
         await db.commit()
         return True
 
@@ -263,6 +273,11 @@ class UserGroupService:
             .where(UserGroup.deleted_at.is_(None))
             .options(selectinload(UserGroup.users))
         )
+
+    @staticmethod
+    def _select_any():
+        """Deleted groups included — for resolving a uuid a record already holds."""
+        return select(UserGroup).options(selectinload(UserGroup.users))
 
     @staticmethod
     def _apply_search(stmt, q: Optional[str]):
@@ -326,7 +341,8 @@ class UserGroupService:
         q: Optional[str] = None,
         uuids: Optional[Sequence[UUID]] = None,
     ) -> Sequence[UserGroup]:
-        stmt = cls._apply_search(cls._select(), q)
+        base = cls._select_any() if uuids is not None else cls._select()
+        stmt = cls._apply_search(base, q)
         if uuids is not None:
             stmt = stmt.where(UserGroup.uuid.in_(uuids))
         result = await db.execute(
@@ -402,6 +418,5 @@ class UserGroupService:
         group.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the group stops appearing in UserRead.groups.
         group.users.clear()
-        await _scrub_column_references(db, ColumnType.group, group.uuid)
         await db.commit()
         return True

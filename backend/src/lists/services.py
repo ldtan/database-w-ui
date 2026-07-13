@@ -196,6 +196,14 @@ class ListService:
         now = datetime.now(timezone.utc)
         await cls._cascade_descendants(db, [lst.id], now)
         lst.deleted_at = now
+        # Deleting a *list* is the exception to "soft delete destroys nothing", and
+        # deliberately so. Deleting a row or an account leaves the cells naming it
+        # intact, because they can still be resolved and restored. A deleted list
+        # cannot: every value in a lookup column pointing at it is stale at once, and
+        # the permission resolver returns *no access* for a deleted resource, so those
+        # labels could not even be authorised. Restoring a list would mean
+        # un-cascading its columns, records, views and forms — a feature that does not
+        # exist. Until it does, this stays a scrub.
         await cls._scrub_references_to_lists(db, [lst.uuid])
         await db.commit()
         return True

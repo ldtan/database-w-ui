@@ -21,9 +21,11 @@ id that no longer exists. This is the "grants are not scrubbed on hard delete" g
 docs/known-gaps.md, and this job is the first thing in the codebase that hard-deletes
 anything — so it is the first thing that has to close it.
 
-What it does *not* need to do is scrub references. A `lookup`/`user`/`group` cell
-pointing at this record was already cleared when the record was soft-deleted (see
-`ListItemService._drop_reference`), so by the time it gets here nothing points at it.
+It also clears the references to the records it destroys. That is *not* done at
+soft-delete time any more: scrubbing there is what used to make a delete
+irreversible — the pointers were destroyed and nothing remembered them, so restoring
+a record brought it back stripped of every inbound relationship. They live on,
+rendering as "(deleted)", until the record is past the window and going for good.
 """
 import argparse
 import asyncio
@@ -36,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.infrastructure.model_registry  # noqa: F401
 from src.core.config import settings
 from src.infrastructure import database as db_module
+from src.maintenance._references import clear_expired
 
 # Rows destroyed per transaction — bounded so locks are held for milliseconds.
 CHUNK = 5_000
@@ -58,6 +61,10 @@ async def purge(days: int, dry_run: bool = False) -> int:
     async with db_module.SessionLocal() as db:
         if dry_run:
             return await _count(db, cutoff)
+
+        # References to these records go first. Once the rows are gone the cells
+        # pointing at them would be unresolvable, and nothing else would clean them.
+        await clear_expired(db, cutoff)
 
         total = 0
         while True:

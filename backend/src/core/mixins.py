@@ -31,3 +31,9 @@ class DatetimeTrackerMixin:
     @declared_attr
     def deleted_at(cls) -> Mapped[Optional[sa.DateTime]]:
         return mapped_column(sa.DateTime(timezone=True), nullable=True)
+
+    @property
+    def is_deleted(self) -> bool:
+        """In the bin. A read schema can expose this without leaking *when* it went,
+        which is nobody's business but the purge job's."""
+        return self.deleted_at is not None

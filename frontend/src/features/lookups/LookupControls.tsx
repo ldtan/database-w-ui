@@ -11,6 +11,9 @@ import type { Column, ListItem } from "../../lib/types";
 interface LookupOption {
   uuid: string;
   label: string | null;
+  // The row is in the bin. It still resolves — the relationship is real and the
+  // record still points at it — but it is shown as gone, and no picker offers it.
+  deleted?: boolean;
 }
 
 export interface LookupLabels {
@@ -41,7 +44,10 @@ function optionsUrl(
 
 function toNames(rows: LookupOption[] | undefined): Map<string, string> {
   const names = new Map<string, string>();
-  for (const row of rows ?? []) names.set(row.uuid, row.label || fallback(row.uuid));
+  for (const row of rows ?? []) {
+    const label = row.label || fallback(row.uuid);
+    names.set(row.uuid, row.deleted ? `${label} (deleted)` : label);
+  }
   return names;
 }
 

@@ -104,11 +104,13 @@ async def test_a_principal_column_cannot_have_a_default(client, list_uuid, alice
     assert resp.status_code == 400, resp.text
 
 
-async def test_deleting_a_user_scrubs_references(
+async def test_deleting_a_user_keeps_the_reference(
     client, session_factory, list_uuid, alice
 ):
-    """Soft references have no FK, so nothing else would clean them up: without
-    this the cell keeps pointing at a ghost account."""
+    """A soft delete must be undoable, so it destroys nothing — including the cells
+    pointing at the account. They keep the uuid and render as deleted; the reference
+    is only cleared when the account is purged, by which time it is unrecoverable
+    anyway. Scrubbing here is what used to make restore impossible."""
     single = await _add(client, list_uuid, "user")
     resp = await client.post(
         f"/api/lists/{list_uuid}/columns/",
@@ -127,18 +129,46 @@ async def test_deleting_a_user_scrubs_references(
         json={"data": {single: alice["uuid"], multi: [alice["uuid"]]}},
     )
     assert created.status_code == 201, created.text
+    item = created.json()["uuid"]
 
-    # Through the service: the HTTP route is superuser-only, and the seeded test
-    # caller is an ordinary user. The scrub hangs off the service either way.
     async with session_factory() as db:
         assert await UserService.delete(db, alice["uuid"]) is True
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert items[0]["data"][single] is None
-    assert items[0]["data"][multi] == []
+    assert items[0]["data"][single] == alice["uuid"]  # still there
+    assert items[0]["data"][multi] == [alice["uuid"]]
+
+    # The account resolves by uuid, flagged deleted, so the cell can say so.
+    found = (
+        await client.get(f"/api/auth/users/?uuid={alice['uuid']}")
+    ).json()
+    assert [(u["username"], u["is_deleted"]) for u in found] == [("alice", True)]
+    # But it is not offered to anyone picking a new value.
+    assert (await client.get("/api/auth/users/?q=alice")).json() == []
+
+    # And the record is still saveable while holding the dead reference.
+    saved = await client.patch(
+        f"/api/lists/{list_uuid}/items/{item}",
+        json={"data": {single: alice["uuid"]}},
+    )
+    assert saved.status_code == 200, saved.text
 
 
-async def test_deleting_a_group_scrubs_references(
+async def test_a_new_reference_to_a_deleted_user_is_still_refused(
+    client, session_factory, list_uuid, alice
+):
+    """Keeping what is already there is not the same as allowing more of it."""
+    col = await _add(client, list_uuid, "user")
+    async with session_factory() as db:
+        await UserService.delete(db, alice["uuid"])
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: alice["uuid"]}}
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_deleting_a_group_keeps_the_reference(
     client, session_factory, list_uuid, editors
 ):
     col = await _add(client, list_uuid, "group")
@@ -150,7 +180,7 @@ async def test_deleting_a_group_scrubs_references(
         assert await UserGroupService.delete(db, editors["uuid"]) is True
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert items[0]["data"][col] is None
+    assert items[0]["data"][col] == editors["uuid"]
 
 
 async def test_export_writes_names_and_import_reads_them_back(
