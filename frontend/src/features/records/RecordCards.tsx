@@ -19,6 +19,9 @@ interface Props {
   onSelectionChange: (next: ListItem[]) => void;
   /** Null unless the view groups; cards then carry the same subheaders the grid does. */
   groupColumn: Column | null;
+  /** Changes when the *question* changes (the view, the search) — not when the
+   *  answer is merely refetched. Paging returns to the top on a change. */
+  resetKey: string;
   pageSize: number;
   onPageSize: (rows: number) => void;
   can: (uuid: string, action: PermissionAction) => boolean;
@@ -39,10 +42,9 @@ interface Props {
  * `renderCell` the grid uses, and it drives the same selection, the same page size
  * and the same row actions.
  *
- * What it deliberately does not have is interactive sorting — that lives in the
- * grid's column headers, and has nowhere to go here. Records still arrive in the
- * active view's order, because the server applies the view's sort; what you cannot
- * do on a phone is re-sort by tapping a header that isn't there.
+ * Sorting comes in already applied: there is no column header to tap, so the page
+ * sorts the records first — through the same `sortRows` the grid's columns use, so
+ * neither layout can disagree with the other about what "sorted by Name" means.
  */
 export function RecordCards({
   listUuid,
@@ -54,6 +56,7 @@ export function RecordCards({
   selection,
   onSelectionChange,
   groupColumn,
+  resetKey,
   pageSize,
   onPageSize,
   can,
@@ -63,12 +66,23 @@ export function RecordCards({
 }: Props) {
   const [first, setFirst] = useState(0);
 
-  // A search or a view change replaces the record set; page 4 of the old one is
-  // not a meaningful place to be in the new one, and may not even exist.
-  useEffect(() => setFirst(0), [items]);
+  // A search or a view change asks a different question, so it starts at the top.
+  // Keyed on *that*, not on the `items` array: react-query hands back a new array
+  // after every mutation and every background refetch, so keying on its identity
+  // threw you back to page 1 whenever you edited a record — the grid, which keeps
+  // its own paging state, does not.
+  useEffect(() => setFirst(0), [resetKey]);
 
   const selected = new Set(selection.map((item) => item.uuid));
-  const page = items.slice(first, first + pageSize);
+  // Deleting the last records of the last page leaves `first` past the end, which
+  // would render an empty page with no way back to the records. Land on the new
+  // last page instead.
+  const lastPageFirst = Math.max(
+    0,
+    Math.floor((items.length - 1) / pageSize) * pageSize,
+  );
+  const start = Math.min(first, lastPageFirst);
+  const page = items.slice(start, start + pageSize);
 
   function toggle(item: ListItem, checked: boolean) {
     onSelectionChange(
@@ -97,7 +111,13 @@ export function RecordCards({
             {startsGroup && groupColumn && (
               <div className="font-semibold pt-1">
                 {groupColumn.display_name}:{" "}
-                {renderCell(groupColumn, item, listUuid, principalUuids, lookupUuids)}
+                {renderCell(
+                  groupColumn,
+                  item,
+                  listUuid,
+                  principalUuids,
+                  lookupUuids,
+                )}
               </div>
             )}
             <div
@@ -118,7 +138,13 @@ export function RecordCards({
                     {col.display_name}
                   </span>
                   <span className="min-w-0 flex-1 break-words">
-                    {renderCell(col, item, listUuid, principalUuids, lookupUuids)}
+                    {renderCell(
+                      col,
+                      item,
+                      listUuid,
+                      principalUuids,
+                      lookupUuids,
+                    )}
                   </span>
                 </div>
               ))}
@@ -170,7 +196,7 @@ export function RecordCards({
       })}
 
       <Paginator
-        first={first}
+        first={start}
         rows={pageSize}
         totalRecords={items.length}
         rowsPerPageOptions={[10, 25, 50, 100]}

@@ -27,6 +27,7 @@ import { ListSettingsDialog } from "./ListSettingsDialog";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { renderCell } from "../records/renderCell";
+import { sortRows } from "../records/sortRows";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { collectLookupUuids } from "../lookups/LookupControls";
 import { collectPrincipalUuids } from "../principals/PrincipalControls";
@@ -40,23 +41,6 @@ import {
 } from "../permissions/useEffectiveActions";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
-
-/** Order two cell values the way the grid does: blanks last whichever way you
- *  sort, numbers numerically, everything else as text. Reference cells hold uuids,
- *  so they sort by uuid rather than by the label shown — the grid has always done
- *  that, and a card list that disagreed with it would be the odd one out. */
-function compareValues(a: unknown, b: unknown, order: 1 | -1): number {
-  const aBlank = a === null || a === undefined || a === "";
-  const bBlank = b === null || b === undefined || b === "";
-  // Blanks sink to the bottom either way — the direction is applied *after* this,
-  // so reversing the sort must not float the empty records to the top.
-  if (aBlank || bBlank) return aBlank && bBlank ? 0 : aBlank ? 1 : -1;
-  const base =
-    typeof a === "number" && typeof b === "number"
-      ? a - b
-      : String(a).localeCompare(String(b), undefined, { numeric: true });
-  return base * order;
-}
 
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
@@ -253,7 +237,9 @@ export function ListDetailPage() {
     for (const c of cols) if (!seen.has(c.uuid)) result.push(c);
     return result;
   })();
-  const visibleCols = orderedCols.filter((c) => !hiddenColumns.includes(c.uuid));
+  const visibleCols = orderedCols.filter(
+    (c) => !hiddenColumns.includes(c.uuid),
+  );
 
   // The reference uuids this page of records holds. The cells resolve them (one
   // shared request per column — see renderCell); the page only has to gather them,
@@ -272,11 +258,14 @@ export function ListDetailPage() {
     (items.data ?? []).find((i) => i.uuid === sharingItemUuid) ?? null;
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
-    formList.find((f) => f.type === (recordDialog.item ? "update" : "create")) ??
-    null;
+    formList.find(
+      (f) => f.type === (recordDialog.item ? "update" : "create"),
+    ) ?? null;
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
-  const groupColumn = groupBy ? cols.find((c) => c.uuid === groupBy) ?? null : null;
+  const groupColumn = groupBy
+    ? (cols.find((c) => c.uuid === groupBy) ?? null)
+    : null;
   const currentConfig: ViewConfig = {
     sorts: sortField
       ? [
@@ -287,7 +276,10 @@ export function ListDetailPage() {
         ]
       : [],
     page_size: pageSize,
-    filters: activeView?.config.filters ?? { conjunction: "and", conditions: [] },
+    filters: activeView?.config.filters ?? {
+      conjunction: "and",
+      conditions: [],
+    },
     group_by: groupBy ? { column_uuid: groupBy } : null,
     hidden_columns: hiddenColumns,
     column_order: columnOrder,
@@ -323,24 +315,25 @@ export function ListDetailPage() {
     canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
   };
 
-  // The grid sorts itself from sortField/sortOrder; the cards have no header to
-  // click, so the page sorts for them. Grouping pins the order to the group column
-  // (the server already returned the records in it), so it is left alone.
-  const sortedItems = useMemo(() => {
-    const rows = items.data ?? [];
-    if (groupColumn || !sortField || !sortOrder) return rows;
-    const key = sortField.replace(/^data\./, "");
-    const order = sortOrder === -1 ? -1 : 1;
-    return [...rows].sort((a, b) =>
-      compareValues(a.data?.[key], b.data?.[key], order),
-    );
-  }, [items.data, sortField, sortOrder, groupColumn]);
+  // The cards have no column header to sort by, so the page sorts for them —
+  // through the same sortRows the grid's columns use, so the two layouts cannot
+  // disagree about what "sorted by Name" means. Grouping pins the order to the
+  // group column (the server already returned the records in it), so it is left
+  // alone. Only computed for the layout that needs it.
+  const sortedItems = useMemo(
+    () =>
+      small && !groupColumn
+        ? sortRows(items.data ?? [], sortField, sortOrder)
+        : (items.data ?? []),
+    [small, items.data, sortField, sortOrder, groupColumn],
+  );
 
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
     return (
       <span className="font-semibold">
-        {groupColumn.display_name}: {renderCell(groupColumn, row, listUuid, principalUuids, lookupUuids)}
+        {groupColumn.display_name}:{" "}
+        {renderCell(groupColumn, row, listUuid, principalUuids, lookupUuids)}
       </span>
     );
   }
@@ -396,66 +389,70 @@ export function ListDetailPage() {
         </div>
       </div>
 
-      {views.data && views.data.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2">
-          <ViewBar
-            listUuid={listUuid}
-            views={views.data}
-            activeUuid={activeViewUuid}
-            onSelect={setActiveViewUuid}
-            currentConfig={currentConfig}
-          />
-          <ViewControls {...viewControls} />
+      {/* Sort and search are about the *records*, so the toolbar stands whether or
+          not the list has views: a list whose views were all deleted still has its
+          records, and used to lose the search box — and, briefly, the sort control —
+          along with them. Only the view-shaped controls come and go. */}
+      <div className="flex flex-wrap items-center gap-2">
+        {views.data && views.data.length > 0 && (
+          <>
+            <ViewBar
+              listUuid={listUuid}
+              views={views.data}
+              activeUuid={activeViewUuid}
+              onSelect={setActiveViewUuid}
+              currentConfig={currentConfig}
+            />
+            <ViewControls {...viewControls} />
+          </>
+        )}
 
-          {/* Sorting otherwise lives in the grid's column headers, which a card
+        {/* Sorting otherwise lives in the grid's column headers, which a card
               list does not have — so on a phone there was no way to sort at all.
               Here it drives the same sortField/sortOrder the headers do, so the
               two agree and a header click moves this dropdown. Grouping pins the
               order to the group column, which is why it disables. */}
-          <Dropdown
-            value={sortField ?? null}
-            options={orderedCols.map((c) => ({
-              label: c.display_name,
-              value: `data.${c.uuid}`,
-            }))}
-            onChange={(e) => {
-              setSortField(e.value ?? undefined);
-              if (e.value && !sortOrder) setSortOrder(1);
-            }}
-            placeholder="Sort by…"
-            showClear
-            disabled={cols.length === 0 || !!groupColumn}
-            className="w-40"
-          />
-          <Button
-            icon={
-              sortOrder === -1 ? "pi pi-sort-amount-down" : "pi pi-sort-amount-up"
-            }
-            text
-            aria-label={
-              sortOrder === -1 ? "Sort ascending" : "Sort descending"
-            }
-            tooltip={sortOrder === -1 ? "Descending" : "Ascending"}
-            disabled={!sortField || !!groupColumn}
-            onClick={() => setSortOrder(sortOrder === -1 ? 1 : -1)}
-          />
+        <Dropdown
+          value={sortField ?? null}
+          options={orderedCols.map((c) => ({
+            label: c.display_name,
+            value: `data.${c.uuid}`,
+          }))}
+          onChange={(e) => {
+            setSortField(e.value ?? undefined);
+            if (e.value && !sortOrder) setSortOrder(1);
+          }}
+          placeholder="Sort by…"
+          showClear
+          disabled={cols.length === 0 || !!groupColumn}
+          className="w-40"
+        />
+        <Button
+          icon={
+            sortOrder === -1 ? "pi pi-sort-amount-down" : "pi pi-sort-amount-up"
+          }
+          text
+          aria-label={sortOrder === -1 ? "Sort ascending" : "Sort descending"}
+          tooltip={sortOrder === -1 ? "Descending" : "Ascending"}
+          disabled={!sortField || !!groupColumn}
+          onClick={() => setSortOrder(sortOrder === -1 ? 1 : -1)}
+        />
 
-          {/* pl-8 by hand: the icon is positioned over the input, and the theme's
+        {/* pl-8 by hand: the icon is positioned over the input, and the theme's
               reset does not give p-input-icon-left the padding to clear it.
               Once the row wraps, search takes the whole of its own line rather
               than sitting at 16rem next to nothing. */}
-          <span className="p-input-icon-left w-full sm:w-auto sm:ml-auto">
-            <i className="pi pi-search pl-3" />
-            <InputText
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search records…"
-              disabled={cols.length === 0}
-              className="w-full sm:w-64 pl-9"
-            />
-          </span>
-        </div>
-      )}
+        <span className="p-input-icon-left w-full sm:w-auto sm:ml-auto">
+          <i className="pi pi-search pl-3" />
+          <InputText
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search records…"
+            disabled={cols.length === 0}
+            className="w-full sm:w-64 pl-9"
+          />
+        </span>
+      </div>
 
       {cols.length === 0 && !columns.isLoading && (
         <Message
@@ -508,6 +505,9 @@ export function ListDetailPage() {
           selection={selection}
           onSelectionChange={setSelection}
           groupColumn={groupColumn}
+          // The view and the search are the question being asked; a refetch of the
+          // same question must not move you off the page you were reading.
+          resetKey={`${activeViewUuid ?? ""}|${q}`}
           pageSize={pageSize}
           onPageSize={setPageSize}
           can={canItem}
@@ -516,101 +516,110 @@ export function ListDetailPage() {
           onDelete={confirmDeleteItem}
         />
       ) : (
-      <DataTable
-        value={items.data ?? []}
-        loading={columns.isLoading || items.isLoading}
-        dataKey="uuid"
-        // The table's wrapper already scrolls; left alone the table would instead
-        // squash itself to whatever width it is given, so a dozen columns become a
-        // dozen slivers. A floor of ~10rem a column makes it overflow — and
-        // therefore scroll — rather than crush. Below 640px it is not a table at
-        // all (see RecordCards); this is what carries a tablet, where a table still
-        // makes sense but the columns may not fit. On a desktop the floor is under
-        // the viewport, so nothing changes.
-        tableStyle={{ minWidth: `${visibleCols.length * 10 + 12}rem` }}
-        selectionMode="multiple"
-        selection={selection}
-        onSelectionChange={(e) => setSelection(e.value)}
-        stripedRows
-        paginator
-        rows={pageSize}
-        rowsPerPageOptions={[10, 25, 50, 100]}
-        onPage={(e) => setPageSize(e.rows)}
-        sortMode="single"
-        sortField={groupColumn ? `data.${groupBy}` : sortField}
-        sortOrder={groupColumn ? 1 : sortOrder}
-        onSort={(e: DataTableSortEvent) => {
-          if (groupColumn) return; // sort is pinned to the group column
-          setSortField(e.sortField);
-          setSortOrder(e.sortOrder);
-        }}
-        rowGroupMode={groupColumn ? "subheader" : undefined}
-        groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
-        rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
-        emptyMessage="No records yet."
-      >
-        <DataColumn
+        <DataTable
+          value={items.data ?? []}
+          loading={columns.isLoading || items.isLoading}
+          dataKey="uuid"
+          // The table's wrapper already scrolls; left alone the table would instead
+          // squash itself to whatever width it is given, so a dozen columns become a
+          // dozen slivers. A floor of ~10rem a column makes it overflow — and
+          // therefore scroll — rather than crush. Below 640px it is not a table at
+          // all (see RecordCards); this is what carries a tablet, where a table still
+          // makes sense but the columns may not fit. On a desktop the floor is under
+          // the viewport, so nothing changes.
+          tableStyle={{ minWidth: `${visibleCols.length * 10 + 12}rem` }}
           selectionMode="multiple"
-          headerStyle={{ width: "3rem" }}
-          exportable={false}
-        />
-        {visibleCols.map((col) => (
+          selection={selection}
+          onSelectionChange={(e) => setSelection(e.value)}
+          stripedRows
+          paginator
+          rows={pageSize}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPage={(e) => setPageSize(e.rows)}
+          sortMode="single"
+          sortField={groupColumn ? `data.${groupBy}` : sortField}
+          sortOrder={groupColumn ? 1 : sortOrder}
+          onSort={(e: DataTableSortEvent) => {
+            if (groupColumn) return; // sort is pinned to the group column
+            setSortField(e.sortField);
+            setSortOrder(e.sortOrder);
+          }}
+          rowGroupMode={groupColumn ? "subheader" : undefined}
+          groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
+          rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
+          emptyMessage="No records yet."
+        >
           <DataColumn
-            key={col.uuid}
-            field={`data.${col.uuid}`}
-            sortable={!groupColumn}
-            // Deleting a column moved into List settings: a trash button on every
-            // header crowded out the thing the grid is for.
-            header={col.display_name}
-            body={(row: ListItem) => renderCell(col, row, listUuid, principalUuids, lookupUuids)}
+            selectionMode="multiple"
+            headerStyle={{ width: "3rem" }}
+            exportable={false}
           />
-        ))}
-        <DataColumn
-          header=""
-          style={{ width: "9rem" }}
-          body={(row: ListItem) => (
-            <div className="flex gap-1">
-              {canItem(row.uuid, "edit") && (
-                <Button
-                  icon="pi pi-pencil"
-                  text
-                  size="small"
-                  aria-label="Edit record"
-                  onClick={(e) => {
-                    e.stopPropagation(); // don't also toggle row selection
-                    setRecordDialog({ open: true, item: row });
-                  }}
-                />
-              )}
-              {canItem(row.uuid, "share") && (
-                <Button
-                  icon="pi pi-share-alt"
-                  text
-                  size="small"
-                  aria-label="Share record"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSharingItemUuid(row.uuid);
-                  }}
-                />
-              )}
-              {canItem(row.uuid, "delete") && (
-                <Button
-                  icon="pi pi-trash"
-                  text
-                  severity="danger"
-                  size="small"
-                  aria-label="Delete record"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    confirmDeleteItem(row);
-                  }}
-                />
-              )}
-            </div>
-          )}
-        />
-      </DataTable>
+          {visibleCols.map((col) => (
+            <DataColumn
+              key={col.uuid}
+              field={`data.${col.uuid}`}
+              sortable={!groupColumn}
+              // Without this the grid sorts with PrimeReact's comparator and the
+              // cards with ours, and the same records come out in different orders
+              // depending on the screen: it floats blanks to the top on a descending
+              // sort, and puts "item10" before "item9".
+              sortFunction={(e) =>
+                sortRows(e.data as ListItem[], e.field, e.order)
+              }
+              // Deleting a column moved into List settings: a trash button on every
+              // header crowded out the thing the grid is for.
+              header={col.display_name}
+              body={(row: ListItem) =>
+                renderCell(col, row, listUuid, principalUuids, lookupUuids)
+              }
+            />
+          ))}
+          <DataColumn
+            header=""
+            style={{ width: "9rem" }}
+            body={(row: ListItem) => (
+              <div className="flex gap-1">
+                {canItem(row.uuid, "edit") && (
+                  <Button
+                    icon="pi pi-pencil"
+                    text
+                    size="small"
+                    aria-label="Edit record"
+                    onClick={(e) => {
+                      e.stopPropagation(); // don't also toggle row selection
+                      setRecordDialog({ open: true, item: row });
+                    }}
+                  />
+                )}
+                {canItem(row.uuid, "share") && (
+                  <Button
+                    icon="pi pi-share-alt"
+                    text
+                    size="small"
+                    aria-label="Share record"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSharingItemUuid(row.uuid);
+                    }}
+                  />
+                )}
+                {canItem(row.uuid, "delete") && (
+                  <Button
+                    icon="pi pi-trash"
+                    text
+                    severity="danger"
+                    size="small"
+                    aria-label="Delete record"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      confirmDeleteItem(row);
+                    }}
+                  />
+                )}
+              </div>
+            )}
+          />
+        </DataTable>
       )}
 
       {list.data && (

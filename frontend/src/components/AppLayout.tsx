@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import { Button } from "primereact/button";
 
@@ -13,6 +13,13 @@ export function AppLayout() {
   // does not develop two ideas of what a small screen is.
   const small = useMediaQuery(SMALL_SCREEN);
   const [navOpen, setNavOpen] = useState(false);
+
+  // Widening past the breakpoint unmounts the drawer but would leave it *open* —
+  // so narrowing back (a rotation, a resized window) flung it across the page
+  // again with nobody touching the burger.
+  useEffect(() => {
+    if (!small) setNavOpen(false);
+  }, [small]);
 
   return (
     <div className="min-h-screen">
