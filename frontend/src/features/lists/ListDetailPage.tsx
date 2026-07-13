@@ -9,10 +9,9 @@ import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { linkLabel, safeHref } from "../../lib/links";
-import { displayTemporal, isTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
+import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import type {
   Column,
@@ -24,14 +23,12 @@ import type {
   Workspace,
 } from "../../lib/types";
 import { ListSettingsDialog } from "./ListSettingsDialog";
+import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
-import { LookupCell, collectLookupUuids } from "../lookups/LookupControls";
-import {
-  PrincipalCell,
-  collectPrincipalUuids,
-  type PrincipalType,
-} from "../principals/PrincipalControls";
+import { collectLookupUuids } from "../lookups/LookupControls";
+import { collectPrincipalUuids } from "../principals/PrincipalControls";
 import { ViewBar } from "../views/ViewBar";
 import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
@@ -43,76 +40,14 @@ import {
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
 
-function renderCell(
-  column: Column,
-  row: ListItem,
-  listUuid: string,
-  principalUuids: Record<PrincipalType, string[]>,
-  lookupUuids: Map<string, string[]>,
-) {
-  const value = row.data?.[column.uuid];
-  // Reference cells are handed the uuids the *whole page* holds, and resolve them
-  // themselves. They share one query key per column, so it is still one request —
-  // but each cell subscribes to it, which a map passed down as a prop cannot do:
-  // DataTable re-renders only when its `value` changes, so the labels would land
-  // after an edit and never reach the DOM.
-  if (column.type === "lookup") {
-    return (
-      <LookupCell
-        listUuid={listUuid}
-        column={column}
-        value={value}
-        pageUuids={lookupUuids.get(column.uuid) ?? []}
-      />
-    );
-  }
-  if (column.type === "user" || column.type === "group") {
-    return (
-      <PrincipalCell
-        column={column}
-        value={value}
-        pageUuids={principalUuids[column.type]}
-      />
-    );
-  }
-  if (value === null || value === undefined || value === "") {
-    return <span className="text-gray-300">—</span>;
-  }
-  if (column.type === "checkbox") {
-    return value ? "✓" : "✗";
-  }
-  if (column.type === "choice") {
-    const option = column.config.options?.find((o) => o.id === value);
-    return option?.label ?? String(value);
-  }
-  if (column.type === "link") {
-    const href = safeHref(column, value);
-    // A value the scheme check rejects is shown as plain text, never an anchor.
-    if (!href) return String(value);
-    return (
-      <a
-        href={href}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="hover:underline"
-        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
-        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
-      >
-        {linkLabel(column, href)}
-      </a>
-    );
-  }
-  // Otherwise a datetime renders as its raw stored string, seconds and all.
-  if (isTemporal(column.type)) {
-    return displayTemporal(column.type, value);
-  }
-  return String(value);
-}
-
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
+  // A table of a dozen columns is unreadable on a phone; below 640px the records
+  // render as cards instead. Same data, same actions, same selection — see
+  // RecordCards.
+  const small = useMediaQuery(SMALL_SCREEN);
   const [showSettings, setShowSettings] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
@@ -497,15 +432,36 @@ export function ListDetailPage() {
         </div>
       )}
 
+      {small ? (
+        <RecordCards
+          listUuid={listUuid}
+          items={items.data ?? []}
+          columns={visibleCols}
+          loading={columns.isLoading || items.isLoading}
+          principalUuids={principalUuids}
+          lookupUuids={lookupUuids}
+          selection={selection}
+          onSelectionChange={setSelection}
+          groupColumn={groupColumn}
+          pageSize={pageSize}
+          onPageSize={setPageSize}
+          can={canItem}
+          onEdit={(item) => setRecordDialog({ open: true, item })}
+          onShare={(item) => setSharingItemUuid(item.uuid)}
+          onDelete={confirmDeleteItem}
+        />
+      ) : (
       <DataTable
         value={items.data ?? []}
         loading={columns.isLoading || items.isLoading}
         dataKey="uuid"
         // The table's wrapper already scrolls; left alone the table would instead
-        // squash itself to the width available, which on a phone means a dozen
-        // columns of two visible characters each. A floor of ~10rem a column makes
-        // it overflow — and therefore scroll — rather than crush. On a desktop the
-        // floor is below the viewport, so nothing changes.
+        // squash itself to whatever width it is given, so a dozen columns become a
+        // dozen slivers. A floor of ~10rem a column makes it overflow — and
+        // therefore scroll — rather than crush. Below 640px it is not a table at
+        // all (see RecordCards); this is what carries a tablet, where a table still
+        // makes sense but the columns may not fit. On a desktop the floor is under
+        // the viewport, so nothing changes.
         tableStyle={{ minWidth: `${visibleCols.length * 10 + 12}rem` }}
         selectionMode="multiple"
         selection={selection}
@@ -590,6 +546,7 @@ export function ListDetailPage() {
           )}
         />
       </DataTable>
+      )}
 
       {list.data && (
         <ListSettingsDialog
