@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,14 +44,14 @@ async def list_views(
     return await ViewService.list(db, lst.id, current_user)
 
 
-@router.get("/{uuid}", response_model=ViewRead)
+@router.get("/{ref}", response_model=ViewRead)
 async def get_view(
-    uuid: UUID,
+    ref: str,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_uuid(db, lst.id, uuid)
+    view = await ViewService.get_by_ref(db, lst.id, ref)
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
     await PermissionService.require(
@@ -62,15 +60,15 @@ async def get_view(
     return view
 
 
-@router.patch("/{uuid}", response_model=ViewRead)
+@router.patch("/{ref}", response_model=ViewRead)
 async def update_view(
-    uuid: UUID,
+    ref: str,
     payload: ViewUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_uuid(db, lst.id, uuid)
+    view = await ViewService.get_by_ref(db, lst.id, ref)
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
     await PermissionService.require(
@@ -81,7 +79,7 @@ async def update_view(
             db, current_user, ResourceType.view, view.id, Action.share
         )
     try:
-        view = await ViewService.update(db, lst, uuid, payload)
+        view = await ViewService.update(db, lst, view.uuid, payload)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
@@ -92,17 +90,17 @@ async def update_view(
     return view
 
 
-@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_view(
-    uuid: UUID,
+    ref: str,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await ViewService.get_by_uuid(db, lst.id, uuid)
+    view = await ViewService.get_by_ref(db, lst.id, ref)
     if view is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="View not found")
     await PermissionService.require(
         db, current_user, ResourceType.view, view.id, Action.configure
     )
-    await ViewService.delete(db, lst.id, uuid)
+    await ViewService.delete(db, lst.id, view.uuid)

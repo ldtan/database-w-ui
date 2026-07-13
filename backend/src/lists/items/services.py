@@ -19,6 +19,7 @@ from ..columns.enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
+from ..refs import get_by_ref
 from ..views.models import View
 from .filtering import apply_filters, apply_sorts
 from .models import ListItem
@@ -293,18 +294,7 @@ class ListItemService:
         group_by = None
 
         if view_uuid is not None:
-            parsed = coerce_uuid(view_uuid)
-            view = None
-            if parsed is not None:
-                view = (
-                    await db.execute(
-                        select(View).where(
-                            View.list_id == lst.id,
-                            View.uuid == parsed,
-                            View.deleted_at.is_(None),
-                        )
-                    )
-                ).scalars().first()
+            view = await get_by_ref(db, View, lst.id, view_uuid)
             if view is not None:
                 config = view.config or {}
                 stmt = apply_filters(stmt, config.get("filters"), columns)

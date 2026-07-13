@@ -1,5 +1,3 @@
-from uuid import UUID
-
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -46,14 +44,14 @@ async def list_forms(
     return await FormService.list(db, lst.id, current_user)
 
 
-@router.get("/{uuid}", response_model=FormRead)
+@router.get("/{ref}", response_model=FormRead)
 async def get_form(
-    uuid: UUID,
+    ref: str,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_uuid(db, lst.id, uuid)
+    form = await FormService.get_by_ref(db, lst.id, ref)
     if form is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
     await PermissionService.require(
@@ -62,15 +60,15 @@ async def get_form(
     return form
 
 
-@router.patch("/{uuid}", response_model=FormRead)
+@router.patch("/{ref}", response_model=FormRead)
 async def update_form(
-    uuid: UUID,
+    ref: str,
     payload: FormUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_uuid(db, lst.id, uuid)
+    form = await FormService.get_by_ref(db, lst.id, ref)
     if form is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
     await PermissionService.require(
@@ -81,7 +79,7 @@ async def update_form(
             db, current_user, ResourceType.form, form.id, Action.share
         )
     try:
-        form = await FormService.update(db, lst, uuid, payload)
+        form = await FormService.update(db, lst, form.uuid, payload)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
@@ -92,17 +90,17 @@ async def update_form(
     return form
 
 
-@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_form(
-    uuid: UUID,
+    ref: str,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await FormService.get_by_uuid(db, lst.id, uuid)
+    form = await FormService.get_by_ref(db, lst.id, ref)
     if form is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Form not found")
     await PermissionService.require(
         db, current_user, ResourceType.form, form.id, Action.configure
     )
-    await FormService.delete(db, lst.id, uuid)
+    await FormService.delete(db, lst.id, form.uuid)

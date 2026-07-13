@@ -52,7 +52,9 @@ async def list_items(
     lst: List = Depends(resolve_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    view_uuid: Optional[UUID] = Query(None),
+    view_uuid: Optional[str] = Query(
+        None, description="The view to apply, by uuid or by name"
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match any column's text"),

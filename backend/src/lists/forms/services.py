@@ -11,6 +11,7 @@ from src.core.utils import coerce_uuid
 
 from ..columns.models import Column
 from ..models import List
+from ..refs import get_by_ref
 from .models import Form
 from .schemas import FormConfig, FormCreate, FormUpdate
 
@@ -29,6 +30,13 @@ class FormService:
             return None
         result = await db.execute(cls._select(list_id).where(Form.uuid == parsed))
         return result.scalars().first()
+
+    @classmethod
+    async def get_by_ref(
+        cls, db: AsyncSession, list_id: int, ref: Union[str, UUID]
+    ) -> Optional[Form]:
+        """A form addressed by uuid or by name — see src.lists.refs."""
+        return await get_by_ref(db, Form, list_id, ref)
 
     @classmethod
     async def list(cls, db: AsyncSession, list_id: int, user) -> Sequence[Form]:

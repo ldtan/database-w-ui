@@ -11,6 +11,7 @@ from src.core.utils import coerce_uuid
 
 from ..columns.models import Column
 from ..models import List
+from ..refs import get_by_ref
 from .models import View
 from .schemas import ViewConfig, ViewCreate, ViewUpdate
 
@@ -29,6 +30,13 @@ class ViewService:
             return None
         result = await db.execute(cls._select(list_id).where(View.uuid == parsed))
         return result.scalars().first()
+
+    @classmethod
+    async def get_by_ref(
+        cls, db: AsyncSession, list_id: int, ref: Union[str, UUID]
+    ) -> Optional[View]:
+        """A view addressed by uuid or by name — see src.lists.refs."""
+        return await get_by_ref(db, View, list_id, ref)
 
     @classmethod
     async def list(cls, db: AsyncSession, list_id: int, user) -> Sequence[View]:

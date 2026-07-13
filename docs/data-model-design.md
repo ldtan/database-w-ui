@@ -66,6 +66,20 @@ The shared slug type lives in `src/core/schemas.py` as `NameSlug`. `list_items`
 resources by `name` internally (uuids do that job, per D2/D4), so `name` is purely a
 handle for API/code consumers and is safe to rename.
 
+**A name is accepted wherever a child's uuid is** — `/lists/{list}/columns/first_name`
+is the same column as `/lists/{list}/columns/019f…`, and likewise for views, forms, and
+the `?view_uuid=` an item listing takes. A slug can never parse as a uuid, so the two
+are unambiguous; `src/lists/refs.py::get_by_ref` is the one resolver. It matches **live
+rows only**, because the unique index on `name` is partial and a deleted `notes` may sit
+beside a live one.
+
+The uuid stays canonical: responses carry it, the frontend holds it, and a rename moves
+the name-URL out from under anyone who bookmarked it. **Lists themselves are addressed
+by uuid alone** — a list's name is unique only per *workspace*, which `/lists/{x}` does
+not carry, and a guessable identifier would turn the 403-vs-404 distinction on that
+route into an enumeration oracle. A column is already behind `view` on its list, so
+naming one tells a caller nothing they could not already see.
+
 ---
 
 ## 2. Entity overview
