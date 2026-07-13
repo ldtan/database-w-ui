@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(
-        title="Database with UI",
+        title="Database w/ UI",
         description="This app lets you create lists and add records.",
         version="1.0.0",
         docs_url="/docs",

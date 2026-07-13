@@ -25,7 +25,7 @@ export function AppLayout() {
     <div className="min-h-screen">
       <header className="app-header flex items-center justify-between px-4 py-3">
         <Link to="/" className="text-lg font-semibold no-underline">
-          Database UI
+          Database w/ UI
         </Link>
         <div className="flex items-center gap-1 sm:gap-2">
           {/* The theme controls stay out of the drawer on every screen: they are two
