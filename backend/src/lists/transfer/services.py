@@ -23,7 +23,7 @@ from ..columns.enums import PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
-from ..items.services import ListItemService, display_column_key
+from ..items.services import ListItemService, coerce_shape, display_column_key
 from ..models import List
 
 # Commit every N successfully-prepared rows to bound the transaction size.
@@ -320,7 +320,7 @@ async def export_rows(
             async for batch in batches():
                 for row in batch:
                     obj = {
-                        c.name: labels.cell(c, row.get(str(c.uuid)))
+                        c.name: labels.cell(c, coerce_shape(c, row.get(str(c.uuid))))
                         for c in columns
                     }
                     yield ("" if first else ",") + json.dumps(obj, default=str)
@@ -342,7 +342,9 @@ async def export_rows(
                 for row in batch:
                     writer.writerow(
                         [
-                            _csv_cell(labels.cell(c, row.get(str(c.uuid))))
+                            _csv_cell(
+                                labels.cell(c, coerce_shape(c, row.get(str(c.uuid))))
+                            )
                             for c in columns
                         ]
                     )

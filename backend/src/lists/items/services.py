@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.orm.attributes import set_committed_value
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
@@ -74,6 +75,33 @@ async def display_column_key(
     return str(first) if first is not None else None
 
 
+def coerce_shape(column: Column, value):
+    """A cell's value in the shape its column *currently* declares.
+
+    Toggling a column's `multiple` does not rewrite its records — on a large list
+    that would be a multi-minute UPDATE inside a web request — so records outlive
+    the setting that shaped them, and a cell can hold `["a", "b"]` on a column that
+    now allows one value. Rather than teach every reader about both shapes, the
+    service coerces at its edges: here on the way out, and in `_validate_data` on
+    the way in. Everything past those two points sees only the declared shape.
+
+    Single column, list value  -> its first element (extras are dropped, which is
+    what the user confirmed when they turned `multiple` off).
+    Multiple column, bare value -> a one-element list.
+
+    A scheduled reconcile converges the stored data on the same rule, after which
+    this is a no-op — it is a migration aid, not a permanent translation layer.
+    """
+    multiple = bool((column.config or {}).get("multiple"))
+    if value is None:
+        return None
+    if multiple and not isinstance(value, list):
+        return [value]
+    if not multiple and isinstance(value, list):
+        return value[0] if value else None
+    return value
+
+
 class ListItemService:
     @staticmethod
     def _select(list_id: int):
@@ -90,6 +118,36 @@ class ListItemService:
             return None
         result = await db.execute(cls._select(list_id).where(ListItem.uuid == parsed))
         return result.scalars().first()
+
+    @classmethod
+    async def get_for_read(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """`get_by_uuid` for a caller that will *render* the record, so its values
+        come back in the shape their columns declare (see `coerce_shape`)."""
+        item = await cls.get_by_uuid(db, list_id, uuid)
+        if item is None:
+            return None
+        cls._shape_for_read(await cls._columns_by_key(db, list_id), [item])
+        return item
+
+    @staticmethod
+    def _shape_for_read(columns: dict[str, Column], items: Sequence[ListItem]) -> None:
+        """Present each record in its columns' declared shape.
+
+        `set_committed_value`, not a plain assignment: this is a *presentation* fix,
+        and marking the instance dirty would have the next flush write the coercion
+        back to the database — turning every read into a silent migration, inside
+        whatever transaction happened to be open.
+        """
+        for item in items:
+            data = item.data or {}
+            shaped = {
+                key: coerce_shape(columns[key], value) if key in columns else value
+                for key, value in data.items()
+            }
+            if shaped != data:
+                set_committed_value(item, "data", shaped)
 
     @classmethod
     async def _reference_matches(
@@ -245,8 +303,9 @@ class ListItemService:
                 group_by = config.get("group_by")
 
         stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
-        result = await db.execute(stmt)
-        return result.scalars().all()
+        items = (await db.execute(stmt)).scalars().all()
+        cls._shape_for_read(columns, items)
+        return items
 
     @classmethod
     async def query(
@@ -269,8 +328,9 @@ class ListItemService:
         )
         stmt = apply_filters(base, filters, columns)
         stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
-        result = await db.execute(stmt)
-        return result.scalars().all()
+        items = (await db.execute(stmt)).scalars().all()
+        cls._shape_for_read(columns, items)
+        return items
 
     @classmethod
     async def create(
@@ -360,16 +420,45 @@ class ListItemService:
         ).scalars().all()
         await cls._drop_reference(db, lookup_columns, str(deleted_item_uuid))
 
-    @staticmethod
+    # One statement, and it never asks the column what shape its values are.
+    #
+    # That question is exactly what used to make this wrong: the scrub picked its
+    # SQL from the column's *current* `multiple`, so after that flag was toggled it
+    # ran the statement for the wrong shape, matched nothing, and quietly left the
+    # deleted user's uuid sitting in the record. Now the predicate finds the rows
+    # whatever shape they are in — `?|` is true for a scalar string *and* for an
+    # element of an array — and the CASE rewrites each row according to the shape it
+    # actually has. Nothing to keep in step, so nothing to get out of step.
+    _SCRUB_SQL = sa.text(
+        """
+        UPDATE list_items
+           SET data = jsonb_set(
+                   data,
+                   ARRAY[:key],
+                   CASE WHEN jsonb_typeof(data -> :key) = 'array'
+                        THEN COALESCE(
+                                 (SELECT jsonb_agg(elem)
+                                    FROM jsonb_array_elements(data -> :key) AS elem
+                                   WHERE elem <> to_jsonb(CAST(:target AS text))),
+                                 '[]'::jsonb)
+                        ELSE 'null'::jsonb
+                   END)
+         WHERE list_id = :list_id
+           AND deleted_at IS NULL
+           AND data -> :key ?| ARRAY[CAST(:target AS text)]
+        """
+    )
+
+    @classmethod
     async def _drop_reference(
-        db: AsyncSession, columns: Sequence[Column], target: str
+        cls, db: AsyncSession, columns: Sequence[Column], target: str
     ) -> None:
         """Remove a now-dangling uuid from every record held by these columns.
 
-        One UPDATE per column, matched by a JSONB containment predicate, rather
-        than hydrating every referencing record into Python to rewrite it: a
-        column on a large list would otherwise pull the whole list into memory
-        inside the delete's transaction. Does not commit.
+        One UPDATE per column, matched by a JSONB predicate, rather than hydrating
+        every referencing record into Python to rewrite it: a column on a large list
+        would otherwise pull the whole list into memory inside the delete's
+        transaction. Does not commit.
         """
         # The caller has typically just set deleted_at on an ORM object. Flush it
         # first: these are Core UPDATEs, and a later flush would otherwise reorder
@@ -377,42 +466,14 @@ class ListItemService:
         await db.flush()
 
         for column in columns:
-            key = str(column.uuid)
-            multiple = bool((column.config or {}).get("multiple"))
-            params = {"list_id": column.list_id, "key": key, "target": target}
-
-            if multiple:
-                # Rebuild the array without the dangling uuid. `- to_jsonb(text)`
-                # is not an array-element delete, so filter and re-aggregate.
-                stmt = sa.text(
-                    """
-                    UPDATE list_items SET data = jsonb_set(
-                        data,
-                        ARRAY[:key],
-                        COALESCE(
-                            (SELECT jsonb_agg(elem)
-                               FROM jsonb_array_elements(data -> :key) AS elem
-                              WHERE elem <> to_jsonb(CAST(:target AS text))),
-                            '[]'::jsonb
-                        )
-                    )
-                    WHERE list_id = :list_id
-                      AND deleted_at IS NULL
-                      AND jsonb_typeof(data -> :key) = 'array'
-                      AND data -> :key @> to_jsonb(ARRAY[CAST(:target AS text)])
-                    """
-                )
-            else:
-                stmt = sa.text(
-                    """
-                    UPDATE list_items
-                       SET data = jsonb_set(data, ARRAY[:key], 'null'::jsonb)
-                     WHERE list_id = :list_id
-                       AND deleted_at IS NULL
-                       AND data ->> :key = :target
-                    """
-                )
-            await db.execute(stmt, params)
+            await db.execute(
+                cls._SCRUB_SQL,
+                {
+                    "list_id": column.list_id,
+                    "key": str(column.uuid),
+                    "target": target,
+                },
+            )
 
     # -- validation ---------------------------------------------------------
 
@@ -447,6 +508,13 @@ class ListItemService:
             # ("not a full URL"), and the same payload means different things
             # depending on which column it lands in.
             if value is None or (isinstance(value, str) and not value.strip()):
+                result[key] = None
+                continue
+            # The other edge of the shape tolerance (see `coerce_shape`): a client
+            # echoing back a legacy array to a now-single column writes the first
+            # value, rather than being told its own record is invalid.
+            value = coerce_shape(column, value)
+            if value is None:
                 result[key] = None
                 continue
             # Validation may normalize (a user column accepts a username and

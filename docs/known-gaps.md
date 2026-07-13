@@ -277,18 +277,33 @@ It also avoids `forceSelection`, which *clears the model* on blur when the text 
 an option — so typing a few letters and clicking away would silently drop a value that was
 already set. Blur restores the selected label instead; only an emptied box clears the value.
 
-**Toggling a column's `multiple` migrates the records with it.** The config says what a value
-*is*, so records must not be left holding the other shape. Turning it **off** keeps each cell's
-**first** value and drops the rest (the UI confirms first — it is the one column edit that
-destroys data); turning it **on** wraps the scalar in a one-element array, which loses nothing.
-`ColumnService._reshape_values` does it in the same transaction as the config change.
+**Toggling a column's `multiple` does not rewrite its records — on purpose.** Measured: that
+UPDATE takes ~1.4s over 100k rows and **~25s over 1M**, holding row locks on every record, in
+one transaction, inside a web request. So the toggle stays O(1) and the data is allowed to lag
+the setting that shaped it.
 
-Leaving the data alone was not an option: a `user` cell holding `["uuid"]` on a now-single
-column is a value the API itself rejects on the next write, the picker mangles
-(`String(["a","b"])` -> `"a,b"`), the record editor *crashes* on the reverse case
-(`uuids.map` of a string), and — worst — the delete-scrub silently misses it, because it picks
-its SQL branch from the column's *current* `multiple` and never matches the other shape, so
-deleting the user left a dangling reference behind.
+What makes that safe is that the mismatch is absorbed in exactly **three** places, and nowhere
+else has to know:
+
+- **Reads** — `coerce_shape` is applied as records leave `ListItemService` (and in the export,
+  which streams raw JSONB and bypasses that path). A single column returns the array's first
+  element; a multiple column returns a bare value as a one-element list. Put this in the UI
+  instead and every surface — grid, editor, filters, forms, the next page someone writes — has
+  to remember it, and one of them won't.
+- **Writes** — `_validate_data` coerces the incoming value the same way, so a client echoing
+  back the record it was given is never told its own data is invalid.
+- **The scrub** — `_SCRUB_SQL` **never asks the column what shape it is**. One statement, whose
+  predicate (`?|`) matches a scalar *and* an array element, and whose `CASE` rewrites each row
+  per the shape it actually has. This is the one that matters: the scrub used to pick its SQL
+  from the column's *current* `multiple`, so after a toggle it matched nothing and left the
+  deleted user's uuid sitting in the record. Nothing to keep in step, so nothing to get out of
+  step.
+
+`src/maintenance/reconcile_shapes.py` converges the stored data afterwards (chunked, committed
+per batch, idempotent, killable — run it from cron). **Nothing depends on it having run**: it
+exists so the tolerance stays a migration aid rather than permanent scaffolding. It includes
+soft-deleted records, which a restore would otherwise bring back in a shape their column no
+longer accepts.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

@@ -186,6 +186,19 @@ POST /api/lists/{list_uuid}/columns
 }
 ```
 
+## Maintenance jobs
+
+```bash
+uv run python -m src.maintenance.reconcile_shapes --dry-run   # report
+uv run python -m src.maintenance.reconcile_shapes             # rewrite
+```
+
+Toggling a column's `multiple` deliberately leaves its records alone — on a large list that
+rewrite is a multi-minute lock inside a web request — so the service tolerates both shapes and
+this job converges the stored data afterwards. Nothing depends on it having run; records in the
+old shape read, write, export and scrub correctly either way. Run it from cron or a systemd
+timer; it is chunked, idempotent, and safe to kill.
+
 ## Development
 
 ```bash

@@ -109,7 +109,9 @@ async def get_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = await ListItemService.get_by_uuid(db, lst.id, uuid)
+    # get_for_read, not get_by_uuid: this record is about to be rendered, so its
+    # values come back in the shape their columns declare (see `coerce_shape`).
+    item = await ListItemService.get_for_read(db, lst.id, uuid)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     await PermissionService.require(

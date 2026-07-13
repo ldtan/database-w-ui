@@ -150,10 +150,10 @@ export function ColumnDialog({
     },
   });
 
-  // Going from several values to one is the only edit here that *destroys* data:
-  // every record keeping only its first value, the rest dropped. Say so, and let
-  // them back out — the alternative (leaving records holding arrays a single-valued
-  // column rejects) is worse, so this is a decision, not a formality.
+  // Going from several values to one is the only edit here that loses data, so it
+  // asks first. The records are not rewritten on the spot (on a large list that
+  // would be a multi-minute lock inside this request) — the extra values are hidden
+  // immediately and cleared out later, which is exactly what the message promises.
   function onSave() {
     const losingValues = editing && !!column.config.multiple && !multiple;
     if (!losingValues) {
@@ -163,7 +163,7 @@ export function ColumnDialog({
     confirmDialog({
       header: "Keep only the first value?",
       icon: "pi pi-exclamation-triangle",
-      message: `“${column.display_name}” currently allows several values. Records that hold more than one will keep only the first — the rest are removed from those records and cannot be recovered.`,
+      message: `“${column.display_name}” currently allows several values. Records holding more than one will show only the first from now on, and the extra values are removed for good the next time the records are edited or cleaned up. Switching back to multiple before then restores them.`,
       acceptLabel: "Keep first value",
       acceptClassName: "p-button-danger",
       rejectLabel: "Cancel",
