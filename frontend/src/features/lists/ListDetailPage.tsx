@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
+import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
@@ -39,6 +40,23 @@ import {
 } from "../permissions/useEffectiveActions";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
+
+/** Order two cell values the way the grid does: blanks last whichever way you
+ *  sort, numbers numerically, everything else as text. Reference cells hold uuids,
+ *  so they sort by uuid rather than by the label shown — the grid has always done
+ *  that, and a card list that disagreed with it would be the odd one out. */
+function compareValues(a: unknown, b: unknown, order: 1 | -1): number {
+  const aBlank = a === null || a === undefined || a === "";
+  const bBlank = b === null || b === undefined || b === "";
+  // Blanks sink to the bottom either way — the direction is applied *after* this,
+  // so reversing the sort must not float the empty records to the top.
+  if (aBlank || bBlank) return aBlank && bBlank ? 0 : aBlank ? 1 : -1;
+  const base =
+    typeof a === "number" && typeof b === "number"
+      ? a - b
+      : String(a).localeCompare(String(b), undefined, { numeric: true });
+  return base * order;
+}
 
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
@@ -305,6 +323,19 @@ export function ListDetailPage() {
     canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
   };
 
+  // The grid sorts itself from sortField/sortOrder; the cards have no header to
+  // click, so the page sorts for them. Grouping pins the order to the group column
+  // (the server already returned the records in it), so it is left alone.
+  const sortedItems = useMemo(() => {
+    const rows = items.data ?? [];
+    if (groupColumn || !sortField || !sortOrder) return rows;
+    const key = sortField.replace(/^data\./, "");
+    const order = sortOrder === -1 ? -1 : 1;
+    return [...rows].sort((a, b) =>
+      compareValues(a.data?.[key], b.data?.[key], order),
+    );
+  }, [items.data, sortField, sortOrder, groupColumn]);
+
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
     return (
@@ -375,6 +406,40 @@ export function ListDetailPage() {
             currentConfig={currentConfig}
           />
           <ViewControls {...viewControls} />
+
+          {/* Sorting otherwise lives in the grid's column headers, which a card
+              list does not have — so on a phone there was no way to sort at all.
+              Here it drives the same sortField/sortOrder the headers do, so the
+              two agree and a header click moves this dropdown. Grouping pins the
+              order to the group column, which is why it disables. */}
+          <Dropdown
+            value={sortField ?? null}
+            options={orderedCols.map((c) => ({
+              label: c.display_name,
+              value: `data.${c.uuid}`,
+            }))}
+            onChange={(e) => {
+              setSortField(e.value ?? undefined);
+              if (e.value && !sortOrder) setSortOrder(1);
+            }}
+            placeholder="Sort by…"
+            showClear
+            disabled={cols.length === 0 || !!groupColumn}
+            className="w-40"
+          />
+          <Button
+            icon={
+              sortOrder === -1 ? "pi pi-sort-amount-down" : "pi pi-sort-amount-up"
+            }
+            text
+            aria-label={
+              sortOrder === -1 ? "Sort ascending" : "Sort descending"
+            }
+            tooltip={sortOrder === -1 ? "Descending" : "Ascending"}
+            disabled={!sortField || !!groupColumn}
+            onClick={() => setSortOrder(sortOrder === -1 ? 1 : -1)}
+          />
+
           {/* pl-8 by hand: the icon is positioned over the input, and the theme's
               reset does not give p-input-icon-left the padding to clear it.
               Once the row wraps, search takes the whole of its own line rather
@@ -435,7 +500,7 @@ export function ListDetailPage() {
       {small ? (
         <RecordCards
           listUuid={listUuid}
-          items={items.data ?? []}
+          items={sortedItems}
           columns={visibleCols}
           loading={columns.isLoading || items.isLoading}
           principalUuids={principalUuids}
