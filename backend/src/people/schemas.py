@@ -15,9 +15,14 @@ def _not_in_the_future(value: Optional[date]) -> Optional[date]:
 
 
 class PersonBase(BaseModel):
+    # Honorific ("Dr", "Ms") and suffix ("Jr", "III"). Free text rather than a choice
+    # list: naming conventions are not a closed set, and guessing at one excludes
+    # people for no benefit.
+    name_prefix: Optional[str] = Field(default=None, max_length=100)
     first_name: str = Field(min_length=1, max_length=100)
     middle_name: Optional[str] = Field(default=None, max_length=100)
     last_name: str = Field(min_length=1, max_length=100)
+    name_suffix: Optional[str] = Field(default=None, max_length=100)
     birth_date: Optional[date] = None
 
     _check_birth_date = field_validator("birth_date")(_not_in_the_future)
@@ -29,9 +34,11 @@ class PersonCreate(PersonBase):
 
 
 class PersonUpdate(BaseModel):
+    name_prefix: Optional[str] = Field(default=None, max_length=100)
     first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     middle_name: Optional[str] = Field(default=None, max_length=100)
     last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    name_suffix: Optional[str] = Field(default=None, max_length=100)
     birth_date: Optional[date] = None
 
     _check_birth_date = field_validator("birth_date")(_not_in_the_future)

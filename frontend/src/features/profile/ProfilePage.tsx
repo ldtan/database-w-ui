@@ -33,17 +33,21 @@ export function ProfilePage() {
     },
   });
 
+  const [namePrefix, setNamePrefix] = useState("");
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
   const [lastName, setLastName] = useState("");
+  const [nameSuffix, setNameSuffix] = useState("");
   const [birthDate, setBirthDate] = useState<Date | null>(null);
 
   // Seed the form once the record loads (or clear it after a delete).
   useEffect(() => {
     const data = person.data;
+    setNamePrefix(data?.name_prefix ?? "");
     setFirstName(data?.first_name ?? "");
     setMiddleName(data?.middle_name ?? "");
     setLastName(data?.last_name ?? "");
+    setNameSuffix(data?.name_suffix ?? "");
     setBirthDate(parseTemporal("date", data?.birth_date));
   }, [person.data]);
 
@@ -53,10 +57,12 @@ export function ProfilePage() {
   const save = useMutation({
     mutationFn: () => {
       const body = {
+        // Sending null (not "") clears a field server-side.
+        name_prefix: namePrefix.trim() || null,
         first_name: firstName.trim(),
-        // Sending null (not "") clears the field server-side.
         middle_name: middleName.trim() || null,
         last_name: lastName.trim(),
+        name_suffix: nameSuffix.trim() || null,
         birth_date: birthDate ? fmtDate(birthDate) : null,
       };
       return person.data
@@ -135,6 +141,18 @@ export function ProfilePage() {
 
       <form onSubmit={onSubmit} className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
+          <label htmlFor="name-prefix" className="text-sm font-medium">
+            Prefix{" "}
+            <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+          </label>
+          <InputText
+            id="name-prefix"
+            value={namePrefix}
+            onChange={(e) => setNamePrefix(e.target.value)}
+            placeholder="Dr, Ms, …"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
           <label htmlFor="first-name" className="text-sm font-medium">
             First name
           </label>
@@ -163,6 +181,18 @@ export function ProfilePage() {
             id="last-name"
             value={lastName}
             onChange={(e) => setLastName(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label htmlFor="name-suffix" className="text-sm font-medium">
+            Suffix{" "}
+            <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+          </label>
+          <InputText
+            id="name-suffix"
+            value={nameSuffix}
+            onChange={(e) => setNameSuffix(e.target.value)}
+            placeholder="Jr, III, …"
           />
         </div>
         <div className="flex flex-col gap-1">

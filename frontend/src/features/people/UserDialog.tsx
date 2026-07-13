@@ -39,6 +39,8 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
   const [hasPerson, setHasPerson] = useState(false);
   const [firstName, setFirstName] = useState("");
   const [middleName, setMiddleName] = useState("");
+  const [namePrefix, setNamePrefix] = useState("");
+  const [nameSuffix, setNameSuffix] = useState("");
   const [lastName, setLastName] = useState("");
   const [birthDate, setBirthDate] = useState<Date | null>(null);
 
@@ -53,9 +55,11 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
     setIsSuperuser(user?.is_superuser ?? false);
 
     setHasPerson(!!person);
+    setNamePrefix(person?.name_prefix ?? "");
     setFirstName(person?.first_name ?? "");
     setMiddleName(person?.middle_name ?? "");
     setLastName(person?.last_name ?? "");
+    setNameSuffix(person?.name_suffix ?? "");
     setBirthDate(parseTemporal("date", person?.birth_date));
   }, [visible, user, person]);
 
@@ -93,9 +97,11 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
       }
 
       const personBody = {
+        name_prefix: namePrefix.trim() || null,
         first_name: firstName.trim(),
         last_name: lastName.trim(),
         middle_name: middleName.trim() || null,
+        name_suffix: nameSuffix.trim() || null,
         birth_date: birthDate ? fmtDate(birthDate) : null,
       };
       if (hasPerson) {
@@ -238,6 +244,18 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
         {hasPerson && (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
+              <label htmlFor="p-prefix" className="text-sm font-medium">
+                Prefix{" "}
+                <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <InputText
+                id="p-prefix"
+                value={namePrefix}
+                onChange={(e) => setNamePrefix(e.target.value)}
+                placeholder="Dr, Ms, …"
+              />
+            </div>
+            <div className="flex flex-col gap-1">
               <label htmlFor="p-first" className="text-sm font-medium">
                 First name
               </label>
@@ -266,6 +284,18 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
                 id="p-last"
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-1">
+              <label htmlFor="p-suffix" className="text-sm font-medium">
+                Suffix{" "}
+                <span style={{ color: "var(--text-muted)" }}>(optional)</span>
+              </label>
+              <InputText
+                id="p-suffix"
+                value={nameSuffix}
+                onChange={(e) => setNameSuffix(e.target.value)}
+                placeholder="Jr, III, …"
               />
             </div>
             <div className="flex flex-col gap-1">

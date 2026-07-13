@@ -164,3 +164,31 @@ async def test_birth_date_cannot_be_in_the_future(make_client, session_factory):
     async with make_client(user) as client:
         resp = await client.post("/api/people/", json={**BODY, "birth_date": "3000-01-01"})
         assert resp.status_code == 422
+
+
+async def test_prefix_and_suffix_round_trip(client):
+    """A field added to PersonBase must actually reach the row — `create` used to
+    list its columns by hand, so a new one was accepted by the API and dropped."""
+    created = await client.post(
+        "/api/people/",
+        json={
+            "name_prefix": "Dr",
+            "first_name": "Grace",
+            "last_name": "Hopper",
+            "name_suffix": "Jr",
+        },
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert (body["name_prefix"], body["name_suffix"]) == ("Dr", "Jr")
+
+    me = (await client.get("/api/people/me")).json()
+    assert (me["name_prefix"], me["name_suffix"]) == ("Dr", "Jr")
+
+    # And an explicit null clears them, as with every other nullable person field.
+    patched = await client.patch(
+        f"/api/people/{body['uuid']}", json={"name_prefix": None, "name_suffix": None}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["name_prefix"] is None
+    assert patched.json()["name_suffix"] is None

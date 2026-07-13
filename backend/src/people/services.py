@@ -71,13 +71,12 @@ class PersonService:
     ) -> Person:
         """The router resolves user_uuid to user_id and enforces who may create
         a profile for whom."""
-        person = Person(
-            user_id=user_id,
-            first_name=payload.first_name,
-            middle_name=payload.middle_name,
-            last_name=payload.last_name,
-            birth_date=payload.birth_date,
-        )
+        # From the payload rather than field by field: a new column on PersonBase then
+        # reaches the row without a second edit here, which is how `name_prefix` and
+        # `name_suffix` would otherwise have been accepted by the API and silently
+        # dropped. `user_uuid` is the router's business, not a column.
+        fields = payload.model_dump(exclude={"user_uuid"})
+        person = Person(user_id=user_id, **fields)
         db.add(person)
         try:
             await db.flush()

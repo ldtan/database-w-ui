@@ -25,6 +25,8 @@ class Person(BaseModel):
     first_name: Mapped[str] = mapped_column(sa.String(100))
     middle_name: Mapped[Optional[str]] = mapped_column(sa.String(100), nullable=True)
     last_name: Mapped[str] = mapped_column(sa.String(100))
+    name_prefix: Mapped[Optional[str]] = mapped_column(sa.String(100), nullable=True)
+    name_suffix: Mapped[Optional[str]] = mapped_column(sa.String(100), nullable=True)
     birth_date: Mapped[Optional[date]] = mapped_column(sa.Date, nullable=True)
 
     user: Mapped["User"] = relationship("User")
