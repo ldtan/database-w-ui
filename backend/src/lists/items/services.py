@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
-from src.core.utils import coerce_uuid
+from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from src.workspaces.models import Workspace
 
 from src.auth.users.models import User, UserGroup
@@ -86,6 +86,30 @@ class ListItemService:
         result = await db.execute(cls._select(list_id).where(ListItem.uuid == parsed))
         return result.scalars().first()
 
+    @staticmethod
+    def _apply_search(stmt, q: Optional[str], columns: dict[str, Column]):
+        """Match ``q`` against the text of any of the list's columns.
+
+        Server-side, like every other search here: filtering a fetched page in the
+        browser would silently fail to find records past it. Matched per column
+        rather than over the whole JSONB blob, so a query cannot match a column
+        *uuid* (the keys) instead of a value someone can actually see.
+
+        Reference columns hold uuids, so searching a lookup's label or a user's name
+        does not find them — the label lives in another table. Noted in known-gaps.
+        """
+        if not (q and q.strip()) or not columns:
+            return stmt
+        pattern = like_pattern(q.strip())
+        return stmt.where(
+            sa.or_(
+                *[
+                    ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE)
+                    for key in columns
+                ]
+            )
+        )
+
     @classmethod
     async def list(
         cls,
@@ -95,6 +119,7 @@ class ListItemService:
         view_uuid: Optional[Union[str, UUID]] = None,
         skip: int = 0,
         limit: int = 100,
+        q: Optional[str] = None,
     ) -> Sequence[ListItem]:
         from src.permissions.services import PermissionService
 
@@ -102,6 +127,8 @@ class ListItemService:
         stmt = cls._select(lst.id).where(
             await PermissionService.item_view_filter(db, user, lst)
         )
+        # A search narrows whatever the view already shows, rather than replacing it.
+        stmt = cls._apply_search(stmt, q, columns)
         sorts = None
         group_by = None
 

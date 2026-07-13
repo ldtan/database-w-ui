@@ -252,6 +252,13 @@ the labels drop out and every cell falls back to a stub.
 key off `isFetching`, **not** `isPending` — with `placeholderData` the status is already
 `success` while the new uuid set is still in flight.
 
+**Record search does not match reference columns.** `GET /lists/{uuid}/items/?q=…` matches
+`q` against each column's stored text, so it finds text, numbers, dates and choice values —
+but a `lookup`, `user` or `group` cell stores a *uuid*, and the label lives in another table.
+Searching a school's name will not find the students pointing at it. Fixing it means joining
+each reference column to its target on the label (`display_column_key` again) inside the
+search predicate, which is a real query, not a tweak.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows

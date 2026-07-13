@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
-import { Dropdown } from "primereact/dropdown";
-import { Checkbox } from "primereact/checkbox";
-import { OverlayPanel } from "primereact/overlaypanel";
+import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
@@ -14,6 +12,7 @@ import { api, ApiError } from "../../lib/api";
 import { linkLabel, safeHref } from "../../lib/links";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
+import { useDebounced } from "../../lib/useDebounced";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import type {
   Column,
@@ -34,6 +33,7 @@ import {
   type PrincipalType,
 } from "../principals/PrincipalControls";
 import { ViewBar } from "../views/ViewBar";
+import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
@@ -127,6 +127,9 @@ export function ListDetailPage() {
   const [sortOrder, setSortOrder] = useState<SortOrder>(undefined);
   const [pageSize, setPageSize] = useState(25);
   const [showFilter, setShowFilter] = useState(false);
+  const [search, setSearch] = useState("");
+  // Debounced so a query goes out per pause, not per keystroke.
+  const q = useDebounced(search);
   const [groupBy, setGroupBy] = useState<string | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
@@ -140,13 +143,18 @@ export function ListDetailPage() {
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
   });
   const items = useQuery({
-    queryKey: ["items", listUuid, activeViewUuid],
-    queryFn: () =>
-      api.get<ListItem[]>(
-        `/lists/${listUuid}/items/${
-          activeViewUuid ? `?view_uuid=${activeViewUuid}` : ""
-        }`,
-      ),
+    // The search is part of the key: it is applied server-side, so the result is a
+    // different set of records, not a filtered view of the same one.
+    queryKey: ["items", listUuid, activeViewUuid, q],
+    queryFn: () => {
+      const params = new URLSearchParams();
+      if (activeViewUuid) params.set("view_uuid", activeViewUuid);
+      if (q.trim()) params.set("q", q.trim());
+      const query = params.toString();
+      return api.get<ListItem[]>(
+        `/lists/${listUuid}/items/${query ? `?${query}` : ""}`,
+      );
+    },
   });
   const views = useQuery({
     queryKey: ["views", listUuid],
@@ -332,7 +340,6 @@ export function ListDetailPage() {
     column_order: columnOrder,
   };
 
-  const columnsPanel = useRef<OverlayPanel>(null);
   function toggleColumn(uuid: string, visible: boolean) {
     setHiddenColumns((prev) =>
       visible ? prev.filter((u) => u !== uuid) : [...new Set([...prev, uuid])],
@@ -347,6 +354,21 @@ export function ListDetailPage() {
     [next[index], next[target]] = [next[target], next[index]];
     setColumnOrder(next);
   }
+
+  // One object, handed to both the toolbar and List settings → Views, so the two
+  // drive the same state rather than each keeping their own.
+  const viewControls = {
+    columns: orderedCols,
+    hiddenColumns,
+    onToggleColumn: toggleColumn,
+    onMoveColumn: moveColumn,
+    groupBy,
+    onGroupBy: setGroupBy,
+    filterCount,
+    onOpenFilter: () => setShowFilter(true),
+    // Filters live on the view, so editing them is a change to that view.
+    canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
+  };
 
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
@@ -417,68 +439,19 @@ export function ListDetailPage() {
             onSelect={setActiveViewUuid}
             currentConfig={currentConfig}
           />
-          {/* Filters are stored on the view, so editing them is a view change. */}
-          {!!activeViewUuid && canView(activeViewUuid, "configure") && (
-            <Button
-              label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
-              icon="pi pi-filter"
-              text
-              onClick={() => setShowFilter(true)}
+          <ViewControls {...viewControls} />
+          {/* pl-8 by hand: the icon is positioned over the input, and the theme's
+              reset does not give p-input-icon-left the padding to clear it. */}
+          <span className="p-input-icon-left ml-auto">
+            <i className="pi pi-search" />
+            <InputText
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search records…"
               disabled={cols.length === 0}
+              className="w-64 pl-8"
             />
-          )}
-          <Dropdown
-            value={groupBy}
-            options={cols.map((c) => ({ label: c.display_name, value: c.uuid }))}
-            onChange={(e) => setGroupBy(e.value)}
-            placeholder="Group by…"
-            showClear
-            disabled={cols.length === 0}
-            className="w-48"
-          />
-          <Button
-            label={
-              hiddenColumns.length > 0
-                ? `Columns (${visibleCols.length}/${cols.length})`
-                : "Columns"
-            }
-            icon="pi pi-eye"
-            text
-            onClick={(e) => columnsPanel.current?.toggle(e)}
-            disabled={cols.length === 0}
-          />
-          <OverlayPanel ref={columnsPanel}>
-            <div className="flex flex-col gap-1">
-              {orderedCols.map((col, i) => (
-                <div key={col.uuid} className="flex items-center gap-2">
-                  <Button
-                    icon="pi pi-chevron-up"
-                    text
-                    size="small"
-                    aria-label="Move up"
-                    disabled={i === 0}
-                    onClick={() => moveColumn(i, -1)}
-                  />
-                  <Button
-                    icon="pi pi-chevron-down"
-                    text
-                    size="small"
-                    aria-label="Move down"
-                    disabled={i === orderedCols.length - 1}
-                    onClick={() => moveColumn(i, 1)}
-                  />
-                  <Checkbox
-                    inputId={`vis-${col.uuid}`}
-                    checked={!hiddenColumns.includes(col.uuid)}
-                    onChange={(e) => toggleColumn(col.uuid, !!e.checked)}
-                  />
-                  <label htmlFor={`vis-${col.uuid}`} className="flex-1">
-                    {col.display_name}
-                  </label>
-                </div>
-              ))}
-            </div>
-          </OverlayPanel>
+          </span>
         </div>
       )}
 
@@ -621,6 +594,7 @@ export function ListDetailPage() {
           activeViewUuid={activeViewUuid}
           onSelectView={setActiveViewUuid}
           currentConfig={currentConfig}
+          viewControls={viewControls}
           canConfigure={listActions.has("configure")}
           canShare={listActions.has("share")}
           inherit={{

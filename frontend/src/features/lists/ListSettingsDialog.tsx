@@ -8,7 +8,7 @@ import type { Column, Form, View, ViewConfig } from "../../lib/types";
 import { ColumnsPanel } from "../columns/ColumnsPanel";
 import { FormsEditor } from "../forms/FormsEditor";
 import { SharePanel } from "../permissions/SharePanel";
-import { ViewsPanel } from "../views/ViewsPanel";
+import { ViewsPanel, type ViewControlsState } from "../views/ViewsPanel";
 
 interface Props {
   listUuid: string;
@@ -21,6 +21,7 @@ interface Props {
   onSelectView: (uuid: string | null) => void;
   // The sort/filter/columns showing right now — what a new view is created from.
   currentConfig: ViewConfig;
+  viewControls: ViewControlsState;
   canConfigure: boolean;
   canShare: boolean;
   // The list's own "unique permissions" break from its workspace.
@@ -46,6 +47,7 @@ export function ListSettingsDialog({
   activeViewUuid,
   onSelectView,
   currentConfig,
+  viewControls,
   canConfigure,
   canShare,
   inherit,
@@ -95,7 +97,7 @@ export function ListSettingsDialog({
           activeUuid={activeViewUuid}
           onSelect={onSelectView}
           currentConfig={currentConfig}
-          canConfigure={canConfigure}
+          controls={viewControls}
         />
       ),
     },

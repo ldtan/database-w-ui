@@ -320,3 +320,27 @@ async def test_blank_means_empty_for_every_column_type(client, list_uuid, add_co
     )
     assert cleared.status_code == 200, cleared.text
     assert all(cleared.json()["data"][uuid] is None for uuid in cols.values())
+
+
+async def test_records_can_be_searched(client, list_uuid, add_column):
+    """Server-side, like every other search here: filtering a fetched page in the
+    browser would silently fail to find records past it."""
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    note = await add_column(list_uuid, name="note", display_name="Note", type="text")
+    for n, t in [("Ann", "likes cats"), ("Bo", "likes dogs"), ("Cy", "no pets")]:
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {name: n, note: t}}
+        )
+
+    # Any column matches, case-insensitively.
+    found = (await client.get(f"/api/lists/{list_uuid}/items/?q=ann")).json()
+    assert [i["data"][name] for i in found] == ["Ann"]
+    found = (await client.get(f"/api/lists/{list_uuid}/items/?q=likes")).json()
+    assert sorted(i["data"][name] for i in found) == ["Ann", "Bo"]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/?q=zebra")).json() == []
+
+    # A LIKE wildcard is matched literally, not as a wildcard.
+    assert (await client.get(f"/api/lists/{list_uuid}/items/?q=%25")).json() == []
+
+    # Blank searches are no-ops rather than matching nothing.
+    assert len((await client.get(f"/api/lists/{list_uuid}/items/?q=  ")).json()) == 3

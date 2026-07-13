@@ -55,9 +55,10 @@ async def list_items(
     view_uuid: Optional[UUID] = Query(None),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(None, description="Match any column's text"),
 ):
     return await ListItemService.list(
-        db, lst, current_user, view_uuid=view_uuid, skip=skip, limit=limit
+        db, lst, current_user, view_uuid=view_uuid, skip=skip, limit=limit, q=q
     )
 
 

@@ -7,28 +7,40 @@ import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
-import type { View, ViewConfig } from "../../lib/types";
-import { ShareDialog } from "../permissions/ShareDialog";
+import type { Column, View, ViewConfig } from "../../lib/types";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
+import { ViewBar } from "./ViewBar";
+import { ViewControls } from "./ViewControls";
+
+export interface ViewControlsState {
+  columns: Column[]; // in display order
+  hiddenColumns: string[];
+  onToggleColumn: (uuid: string, visible: boolean) => void;
+  onMoveColumn: (index: number, delta: number) => void;
+  groupBy: string | null;
+  onGroupBy: (uuid: string | null) => void;
+  filterCount: number;
+  onOpenFilter: () => void;
+  canFilter: boolean;
+}
 
 interface Props {
   listUuid: string;
   views: View[];
   activeUuid: string | null;
   onSelect: (uuid: string | null) => void;
-  // The sort/filter/columns showing right now — what a new view is created from.
   currentConfig: ViewConfig;
-  canConfigure: boolean;
+  controls: ViewControlsState;
 }
 
-/** Managing the views themselves: create, rename, share, delete.
+/** The whole of a view's settings, in one place.
  *
- *  What a view *contains* — sort, filter, grouping, which columns show — stays on
- *  the toolbar, because that is the thing you are looking at while you change it.
- *  This tab is for the views as objects, the same way the Columns tab is for the
- *  fields as objects.
+ *  Everything here is also on the toolbar — the same components, not a second copy
+ *  of them — because changing a filter while watching the grid react is the natural
+ *  way to do it. This tab exists so the list's configuration is all reachable from
+ *  one button, and adds the two things the toolbar has no room for: renaming a view
+ *  and deleting one.
  */
 export function ViewsPanel({
   listUuid,
@@ -36,14 +48,12 @@ export function ViewsPanel({
   activeUuid,
   onSelect,
   currentConfig,
-  canConfigure,
+  controls,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [renaming, setRenaming] = useState<View | null>(null);
   const [name, setName] = useState("");
-  const [creating, setCreating] = useState(false);
-  const [sharing, setSharing] = useState<View | null>(null);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
@@ -51,28 +61,12 @@ export function ViewsPanel({
     queryClient.invalidateQueries({ queryKey: ["effective"] });
   };
 
-  // A view can carry its own grants, so who may rename, delete or re-share one is
-  // decided per view — not by the list.
+  // A view can carry its own grants, so who may rename or delete one is decided per
+  // view, not by the list.
   const canView = useEffectiveActionsMap(
     "view",
     views.map((v) => v.uuid),
   );
-
-  const create = useMutation({
-    mutationFn: () =>
-      api.post<View>(`/lists/${listUuid}/views/`, {
-        name: slugify(name),
-        display_name: name,
-        config: currentConfig,
-      }),
-    onSuccess: (view) => {
-      setCreating(false);
-      setName("");
-      invalidate();
-      onSelect(view.uuid);
-      toast.success("View created", view.display_name);
-    },
-  });
 
   const rename = useMutation({
     mutationFn: () =>
@@ -104,19 +98,6 @@ export function ViewsPanel({
       ),
   });
 
-  const setInherit = useMutation({
-    mutationFn: (vars: { uuid: string; value: boolean }) =>
-      api.patch(`/lists/${listUuid}/views/${vars.uuid}`, {
-        permissions_inherit: vars.value,
-      }),
-    onSuccess: invalidate,
-    onError: (err) =>
-      toast.error(
-        "Could not update inheritance",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-
   function confirmDelete(view: View) {
     confirmDialog({
       message: `Delete the view “${view.display_name}”? The records stay; only this saved sort/filter goes.`,
@@ -127,93 +108,72 @@ export function ViewsPanel({
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-4">
       {views.length === 0 && (
         <Message severity="info" text="This list has no views." />
       )}
 
-      {views.map((view) => (
-        <div
-          key={view.uuid}
-          className="flex items-center gap-3 border-b pb-2"
-          style={{ borderColor: "var(--border)" }}
-        >
-          <div className="flex-1 min-w-0">
-            <div className="truncate">{view.display_name}</div>
-            <small style={{ color: "var(--text-muted)" }}>
-              {view.uuid === activeUuid ? "Showing now" : view.name}
-            </small>
-          </div>
-          {canView(view.uuid, "configure") && (
-            <Button
-              icon="pi pi-pencil"
-              text
-              size="small"
-              aria-label={`Rename view ${view.display_name}`}
-              onClick={() => {
-                setName(view.display_name);
-                setRenaming(view);
-              }}
-            />
-          )}
-          {canView(view.uuid, "share") && (
-            <Button
-              icon="pi pi-share-alt"
-              text
-              size="small"
-              aria-label={`Share view ${view.display_name}`}
-              onClick={() => setSharing(view)}
-            />
-          )}
-          {canView(view.uuid, "delete") && views.length > 1 && (
-            <Button
-              icon="pi pi-trash"
-              text
-              severity="danger"
-              size="small"
-              aria-label={`Delete view ${view.display_name}`}
-              onClick={() => confirmDelete(view)}
-            />
-          )}
-        </div>
-      ))}
+      {/* Pick a view, save it, share it, add one — the toolbar's own bar. */}
+      <ViewBar
+        listUuid={listUuid}
+        views={views}
+        activeUuid={activeUuid}
+        onSelect={onSelect}
+        currentConfig={currentConfig}
+      />
 
-      {canConfigure && (
-        <div>
-          <Button
-            label="New view"
-            icon="pi pi-plus"
-            outlined
-            size="small"
-            onClick={() => {
-              setName("");
-              setCreating(true);
-            }}
-          />
-          <small className="block pt-1" style={{ color: "var(--text-muted)" }}>
-            Saves the sort, filter and columns showing right now.
-          </small>
-        </div>
-      )}
+      {/* What the current view shows: filter, grouping, columns. */}
+      <ViewControls {...controls} stacked />
+
+      <div className="flex flex-col gap-2">
+        <span className="text-sm font-medium">All views</span>
+        {views.map((view) => (
+          <div
+            key={view.uuid}
+            className="flex items-center gap-3 border-b pb-2"
+            style={{ borderColor: "var(--border)" }}
+          >
+            <div className="flex-1 min-w-0">
+              <div className="truncate">{view.display_name}</div>
+              <small style={{ color: "var(--text-muted)" }}>
+                {view.uuid === activeUuid ? "Showing now" : view.name}
+              </small>
+            </div>
+            {canView(view.uuid, "configure") && (
+              <Button
+                icon="pi pi-pencil"
+                text
+                size="small"
+                aria-label={`Rename view ${view.display_name}`}
+                onClick={() => {
+                  setName(view.display_name);
+                  setRenaming(view);
+                }}
+              />
+            )}
+            {canView(view.uuid, "delete") && views.length > 1 && (
+              <Button
+                icon="pi pi-trash"
+                text
+                severity="danger"
+                size="small"
+                aria-label={`Delete view ${view.display_name}`}
+                onClick={() => confirmDelete(view)}
+              />
+            )}
+          </div>
+        ))}
+      </div>
 
       <Dialog
-        header={renaming ? `Rename “${renaming.display_name}”` : "New view"}
-        visible={creating || !!renaming}
-        onHide={() => {
-          setCreating(false);
-          setRenaming(null);
-        }}
+        header={renaming ? `Rename “${renaming.display_name}”` : ""}
+        visible={!!renaming}
+        onHide={() => setRenaming(null)}
         style={{ width: 360 }}
       >
         <div className="flex flex-col gap-4">
-          {(create.error instanceof ApiError ||
-            rename.error instanceof ApiError) && (
-            <Message
-              severity="error"
-              text={
-                ((create.error ?? rename.error) as ApiError).message
-              }
-            />
+          {rename.error instanceof ApiError && (
+            <Message severity="error" text={rename.error.message} />
           )}
           <InputText
             placeholder="View name"
@@ -222,39 +182,16 @@ export function ViewsPanel({
             autoFocus
           />
           <div className="flex justify-end gap-2">
+            <Button label="Cancel" text onClick={() => setRenaming(null)} />
             <Button
-              label="Cancel"
-              text
-              onClick={() => {
-                setCreating(false);
-                setRenaming(null);
-              }}
-            />
-            <Button
-              label={renaming ? "Save" : "Create"}
-              onClick={() => (renaming ? rename.mutate() : create.mutate())}
-              loading={create.isPending || rename.isPending}
+              label="Save"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
               disabled={!name.trim()}
             />
           </div>
         </div>
       </Dialog>
-
-      {sharing && (
-        <ShareDialog
-          visible={!!sharing}
-          onHide={() => setSharing(null)}
-          resourceType="view"
-          resourceUuid={sharing.uuid}
-          resourceLabel={sharing.display_name}
-          inherit={{
-            value: sharing.permissions_inherit,
-            onChange: (value) =>
-              setInherit.mutate({ uuid: sharing.uuid, value }),
-            busy: setInherit.isPending,
-          }}
-        />
-      )}
     </div>
   );
 }

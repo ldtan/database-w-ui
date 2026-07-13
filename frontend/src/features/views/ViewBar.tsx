@@ -1,12 +1,21 @@
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { Button } from "primereact/button";
+import { Dialog } from "primereact/dialog";
+import { InputText } from "primereact/inputtext";
+import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
-import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
+import { ShareDialog } from "../permissions/ShareDialog";
+import {
+  useEffectiveActions,
+  useEffectiveActionsMap,
+} from "../permissions/useEffectiveActions";
 
 interface Props {
   listUuid: string;
@@ -16,12 +25,6 @@ interface Props {
   currentConfig: ViewConfig;
 }
 
-/** Pick a view, and save what you are looking at into it.
- *
- *  Only that: creating, renaming, sharing and deleting a view are *managing* views
- *  rather than using one, and live in List settings → Views, alongside the other
- *  things that configure the list.
- */
 export function ViewBar({
   listUuid,
   views,
@@ -31,15 +34,23 @@ export function ViewBar({
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
+    // Sort/filter are applied server-side by view, so records must refetch too.
+    queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+    queryClient.invalidateQueries({ queryKey: ["effective"] });
+  };
 
   const activeView = views.find((v) => v.uuid === activeUuid) ?? null;
-  // A view can carry its own grants, so saving one is gated per view, not by the
-  // list as a whole.
+  // Adding a view is a list-level change; saving or sharing one is scoped to
+  // that view, which may carry its own grants.
+  const listActions = useEffectiveActions("list", listUuid);
   const canView = useEffectiveActionsMap(
     "view",
     views.map((view) => view.uuid),
   );
   const canSave = !!activeView && canView(activeView.uuid, "configure");
+  const canShare = !!activeView && canView(activeView.uuid, "share");
 
   const save = useMutation({
     mutationFn: () =>
@@ -47,9 +58,7 @@ export function ViewBar({
         config: currentConfig,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
-      // Sort/filter are applied server-side by view, so records must refetch too.
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      invalidate();
       toast.success("View saved");
     },
     onError: (err) =>
@@ -72,6 +81,39 @@ export function ViewBar({
     });
   }
 
+  const [sharing, setSharing] = useState(false);
+  const setInherit = useMutation({
+    mutationFn: (value: boolean) =>
+      api.patch(`/lists/${listUuid}/views/${activeUuid}`, {
+        permissions_inherit: value,
+      }),
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["views", listUuid] }),
+    onError: (err) =>
+      toast.error(
+        "Could not update inheritance",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+
+  const [creating, setCreating] = useState(false);
+  const [newName, setNewName] = useState("");
+  const create = useMutation({
+    mutationFn: () =>
+      api.post<View>(`/lists/${listUuid}/views/`, {
+        name: slugify(newName),
+        display_name: newName,
+        config: currentConfig,
+      }),
+    onSuccess: (view) => {
+      setCreating(false);
+      setNewName("");
+      invalidate();
+      onSelect(view.uuid);
+      toast.success("View created", view.display_name);
+    },
+  });
+
   return (
     <div className="flex items-center gap-2">
       <Dropdown
@@ -91,6 +133,65 @@ export function ViewBar({
           tooltip="Save the current sort and page size to this view"
         />
       )}
+      {canShare && (
+        <Button
+          label="Share"
+          icon="pi pi-share-alt"
+          text
+          onClick={() => setSharing(true)}
+        />
+      )}
+      {listActions.has("configure") && (
+        <Button
+          label="New view"
+          icon="pi pi-plus"
+          text
+          onClick={() => setCreating(true)}
+        />
+      )}
+
+      {sharing && activeView && (
+        <ShareDialog
+          visible={sharing}
+          onHide={() => setSharing(false)}
+          resourceType="view"
+          resourceUuid={activeView.uuid}
+          resourceLabel={activeView.display_name}
+          inherit={{
+            value: activeView.permissions_inherit,
+            onChange: (value) => setInherit.mutate(value),
+            busy: setInherit.isPending,
+          }}
+        />
+      )}
+
+      <Dialog
+        header="New view"
+        visible={creating}
+        onHide={() => setCreating(false)}
+        style={{ width: 360 }}
+      >
+        <div className="flex flex-col gap-4">
+          {create.error instanceof ApiError && (
+            <Message severity="error" text={create.error.message} />
+          )}
+          <InputText
+            placeholder="View name"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            autoFocus
+          />
+          <div className="flex justify-end gap-2">
+            <Button label="Cancel" text onClick={() => setCreating(false)} />
+            <Button
+              label="Create"
+              onClick={() => create.mutate()}
+              loading={create.isPending}
+              disabled={!newName.trim()}
+            />
+          </div>
+        </div>
+      </Dialog>
     </div>
   );
 }
