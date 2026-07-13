@@ -20,9 +20,12 @@ interface Props {
 }
 
 /**
- * The two identifiers every list, column, view and form carries: the label the UI
- * shows, and the `name` — a slug that code addresses the resource by, in export
- * headers and in API paths (`/lists/{list}/columns/first_name`).
+ * The two identifiers every workspace, list, column, view and form carries: the
+ * label the UI shows, and the `name` — a slug that code addresses the resource by.
+ * What that means depends on the resource: a column's name keys an export's headers,
+ * and a list's children can be addressed by name in API paths
+ * (`/lists/{list}/columns/first_name`). Hence the deliberately general help text —
+ * it must be true of a workspace as well as a column.
  *
  * While creating, the name follows the label, which is what the app did silently
  * before and is right almost always. The moment it is typed in, it stops following:
@@ -70,10 +73,13 @@ export function NameFields({
           invalid={invalid}
           aria-describedby={`${idPrefix}-name-help`}
         />
-        <small id={`${idPrefix}-name-help`} style={{ color: invalid ? "var(--red-500)" : "var(--text-muted)" }}>
+        <small
+          id={`${idPrefix}-name-help`}
+          style={{ color: invalid ? "var(--red-500)" : "var(--text-muted)" }}
+        >
           {invalid
             ? "Start with a lowercase letter; then lowercase letters, digits and underscores only."
-            : "How code refers to this: export headers and API paths. Changing it breaks anything using the old name."}
+            : "The code-facing name. Changing it breaks anything that refers to this one by name."}
         </small>
       </div>
     </>
