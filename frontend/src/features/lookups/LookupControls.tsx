@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { AutoComplete } from "primereact/autocomplete";
 
 import { api } from "../../lib/api";
+import { ReferencePicker } from "../references/ReferencePicker";
 import type { Column, ListItem } from "../../lib/types";
 
 // One row of a lookup's target list. The server derives `label` from the lookup's
@@ -157,10 +157,6 @@ function LookupPicker({
   inputId?: string;
   style?: React.CSSProperties;
 }) {
-  const [suggestions, setSuggestions] = useState<
-    { label: string; value: string }[]
-  >([]);
-
   const uuids = useMemo(
     () => (multiple ? ((value as string[]) ?? []) : value ? [String(value)] : []),
     [value, multiple],
@@ -170,45 +166,26 @@ function LookupPicker({
   const result = useQuery(labelQuery(listUuid, column.uuid, uuids));
   const resolved = toLabels(uuids, result);
 
-  const selected = useMemo(() => {
-    const options = uuids.map((u) => ({ label: nameFor(resolved, u), value: u }));
-    return multiple ? options : (options[0] ?? null);
-  }, [uuids, resolved, multiple]);
-
-  async function search(event: { query: string }) {
-    const term = event.query.trim();
-    const q = term ? `q=${encodeURIComponent(term)}&` : "";
-    const rows = await api.get<LookupOption[]>(
-      optionsUrl(listUuid, column.uuid, `${q}limit=${SUGGESTION_LIMIT}`),
-    );
-    setSuggestions(
-      rows.map((r) => ({ label: r.label || fallback(r.uuid), value: r.uuid })),
-    );
-  }
-
   return (
-    <AutoComplete
-      inputId={inputId}
-      value={selected}
-      suggestions={suggestions}
-      completeMethod={search}
-      field="label"
+    <ReferencePicker
+      uuids={uuids}
       multiple={multiple}
-      dropdown
-      forceSelection
-      disabled={disabled}
-      placeholder="Search rows…"
-      style={style}
-      onChange={(e) => {
-        // While typing, AutoComplete reports the raw string; only a picked option
-        // (an object) is a real change.
-        if (typeof e.value === "string") return;
-        if (multiple) {
-          onChange((e.value as { value: string }[]).map((o) => o.value));
-        } else {
-          onChange((e.value as { value: string } | null)?.value ?? null);
-        }
+      labelFor={(uuid) => nameFor(resolved, uuid)}
+      search={async (term) => {
+        const q = term.trim() ? `q=${encodeURIComponent(term.trim())}&` : "";
+        const rows = await api.get<LookupOption[]>(
+          optionsUrl(listUuid, column.uuid, `${q}limit=${SUGGESTION_LIMIT}`),
+        );
+        return rows.map((r) => ({
+          label: r.label || fallback(r.uuid),
+          value: r.uuid,
+        }));
       }}
+      onChange={onChange}
+      placeholder="Search rows…"
+      disabled={disabled}
+      inputId={inputId}
+      style={style}
     />
   );
 }

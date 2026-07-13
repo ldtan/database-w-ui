@@ -263,6 +263,20 @@ that access simply gets no match on those columns, and
 more than `_SEARCH_REF_MAX` (200) rows stops widening there — a search matching thousands of
 target rows is not a search anyone meant to run.
 
+**PrimeReact's AutoComplete overwrites the input's text on every render.**
+`updateInputField(props.value)` runs in a `useUpdateEffect` with **no dependency array**
+(`primereact/autocomplete/autocomplete.esm.js:977`), so after *any* re-render it replaces what
+you typed with the label of the currently *selected* value. Fetching suggestions re-renders,
+so the search text vanished the moment the results arrived — for single-valued pickers only
+(`!props.multiple` guards it). `ReferencePicker` works around it by holding the typed text in
+state and passing it as `value` while typing: `formatValue` returns a string unchanged, so the
+effect writes the same characters back. Every uuid-backed picker (lookup, user, group) goes
+through that one component; don't hand `AutoComplete` a `value` you don't control.
+
+It also avoids `forceSelection`, which *clears the model* on blur when the text doesn't match
+an option — so typing a few letters and clicking away would silently drop a value that was
+already set. Blur restores the selected label instead; only an emptied box clears the value.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows

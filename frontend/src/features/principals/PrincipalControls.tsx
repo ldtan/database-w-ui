@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { AutoComplete } from "primereact/autocomplete";
 
 import { api } from "../../lib/api";
+import { ReferencePicker } from "../references/ReferencePicker";
 import type { ApiUser, ApiUserGroup, Column, ColumnType } from "../../lib/types";
 
 export type PrincipalType = Extract<ColumnType, "user" | "group">;
@@ -164,8 +164,6 @@ function PrincipalPicker({
   inputId?: string;
   style?: React.CSSProperties;
 }) {
-  const [suggestions, setSuggestions] = useState<Option[]>([]);
-
   const uuids = useMemo(
     () =>
       multiple
@@ -178,46 +176,24 @@ function PrincipalPicker({
   // The current value is a uuid; its name has to be fetched to display it, since
   // it is not necessarily in whatever the last search returned.
   const labels = usePrincipalLabels(kind, uuids);
-  const selected = useMemo(() => {
-    const options = uuids.map((u) => ({
-      label: nameFor(kind, labels, u),
-      value: u,
-    }));
-    return multiple ? options : (options[0] ?? null);
-  }, [uuids, labels, kind, multiple]);
-
-  async function search(event: { query: string }) {
-    const term = event.query.trim();
-    const q = term ? `q=${encodeURIComponent(term)}&` : "";
-    const rows = await api.get<(ApiUser | ApiUserGroup)[]>(
-      `${PATHS[kind]}?${q}limit=${SUGGESTION_LIMIT}`,
-    );
-    setSuggestions(toOptions(kind, rows));
-  }
 
   return (
-    <AutoComplete
-      inputId={inputId}
-      value={selected}
-      suggestions={suggestions}
-      completeMethod={search}
-      field="label"
+    <ReferencePicker
+      uuids={uuids}
       multiple={multiple}
-      dropdown
-      forceSelection
-      disabled={disabled}
-      placeholder={`Search ${kind}s…`}
-      style={style}
-      onChange={(e) => {
-        // While typing, AutoComplete reports the raw string; only a picked
-        // option (an object) is a real change.
-        if (typeof e.value === "string") return;
-        if (multiple) {
-          onChange((e.value as Option[]).map((o) => o.value));
-        } else {
-          onChange((e.value as Option | null)?.value ?? null);
-        }
+      labelFor={(uuid) => nameFor(kind, labels, uuid)}
+      search={async (term) => {
+        const q = term.trim() ? `q=${encodeURIComponent(term.trim())}&` : "";
+        const rows = await api.get<(ApiUser | ApiUserGroup)[]>(
+          `${PATHS[kind]}?${q}limit=${SUGGESTION_LIMIT}`,
+        );
+        return toOptions(kind, rows);
       }}
+      onChange={onChange}
+      placeholder={`Search ${kind}s…`}
+      disabled={disabled}
+      inputId={inputId}
+      style={style}
     />
   );
 }

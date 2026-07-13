@@ -443,13 +443,13 @@ export function ListDetailPage() {
           {/* pl-8 by hand: the icon is positioned over the input, and the theme's
               reset does not give p-input-icon-left the padding to clear it. */}
           <span className="p-input-icon-left ml-auto">
-            <i className="pi pi-search" />
+            <i className="pi pi-search pl-3" />
             <InputText
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search records…"
               disabled={cols.length === 0}
-              className="w-64 pl-8"
+              className="w-64 pl-9"
             />
           </span>
         </div>
