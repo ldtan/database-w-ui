@@ -1,5 +1,9 @@
 # Render blueprint: this file *is* the deployment. New → Blueprint in the dashboard reads it
-# and creates every service below.
+# and creates every service below. It does not have to live at the repo root — give Render
+# `deploy/render/render.yaml` as the Blueprint path. `rootDir` below stays relative to the
+# **repo** root either way, not to this file.
+#
+# The runbook for a first deploy, and the traps, are in README.md next to this file.
 #
 # The shape:
 #   - the API as a plain Python web service (no container: Render's native runtime installs

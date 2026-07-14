@@ -71,61 +71,25 @@ emit a `DROP TABLE` for its table.
 `tests/test_migrations.py` builds a database *through the migrations* and asserts it matches
 the models, so a missing or wrong revision fails CI rather than production.
 
-## Deployment (Render)
+## Deployment
 
-[`render.yaml`](render.yaml) is the whole deployment: **New → Blueprint** in Render reads it
-and creates the API (a plain Python web service), the SPA (a free static site), a free
-Postgres, and the environment group they share. It is written for the **free tier**; every
-paid upgrade is marked `PAID:` in the file and is a one-line edit.
+Each target gets a directory under [`deploy/`](deploy/), holding its config *and* the runbook
+for it — so a second platform is a new folder, not an edit to this file.
 
-**No container.** The app needs Python 3.14 — every entity's public id comes from `uuid.uuid7`
-(`src/core/mixins.py`) — and Render's native runtime installs any released version, so
-`backend/.python-version` is enough. A Dockerfile would only add build time.
+| Target | Config | Notes |
+|--------|--------|-------|
+| [Render](deploy/render/) | [`deploy/render/render.yaml`](deploy/render/render.yaml) | Free tier: Python web service + static site + free Postgres. **The free database is deleted after ~30 days**, and the app goes down with it. |
 
-**The free database expires, and the app goes down with it.** Render *deletes* a free Postgres
-about 30 days after it is created. It is not emptied — it is gone, so `DATABASE_URI` names a
-host that no longer exists, `alembic upgrade head` fails in the start command, and the service
-never reaches uvicorn. **Down, not blank.** Recovery is manual and takes minutes: create a new
-database, paste its internal URL into `DATABASE_URI`, redeploy — the start command migrates it
-from empty and the superuser is seeded again. Accept this only for a deployment you are willing
-to rebuild; `plan: basic-256mb` (~$7/mo) removes the expiry and adds backups, and is the
-**first** thing to buy when the data starts mattering — before the web service.
+Two facts that hold whatever the target is, because they come from the app rather than the
+host:
 
-**`DATABASE_URI` is set by hand, not by `fromDatabase`.** Render emits a plain `postgresql://`
-URL, and SQLAlchemy picks its driver from that scheme — so the app would reach for psycopg2,
-which is neither installed nor async. Take the database's **internal** connection string and
-rewrite the scheme to `postgresql+asyncpg://`. The internal network needs no SSL parameter; if
-you use the external URL (the maintenance workflow must), the parameter is **`ssl=require`**,
-never `sslmode=require` — asyncpg is not libpq, and raises an unexpected-keyword `TypeError`
-from a URL that looks perfectly correct.
-
-**The SPA and the API share an origin, by rewrite.** `frontend/src/lib/api.ts` calls a relative
-`/api/...` and has no configurable base URL, so the static site rewrites `/api/*` to the API
-service (and `/*` to `/index.html`, because React Router owns the paths). CORS therefore never
-enters the picture. If the rewrite ever has to go, the fallback is a `VITE_API_BASE` env var in
-the client plus `ALLOWED_ORIGINS` set to the site's URL.
-
-**The RSA keys are uploaded as Render Secret Files**, not generated per deploy: RS256 signs
-every token with them, so a fresh pair silently logs out everyone holding one. `AUTH_SALT` is
-likewise permanent — it is mixed into every password hash. And `FIRST_SUPERUSER_PASSWORD` seeds
-a real account on first boot: on a public URL, `changeme` is a public login.
-
-**The migration runs in the start command**, which is the one compromise here. It belongs in a
-pre-deploy hook, because at boot every instance races every other instance to run it — but the
-free plan has no such hook and runs exactly one instance, so there is no race to lose. It is
-the first thing to move when the service is paid for or scaled; `render.yaml` says so at the
-point of change.
-
-**The four maintenance jobs run in GitHub Actions**
-([`.github/workflows/maintenance.yml`](.github/workflows/maintenance.yml)), because Render's
-Cron Job is a paid service type. They are idempotent housekeeping, so a missed night costs
-nothing — which is what makes a free scheduler an honest home for them. The workflow needs one
-secret, `DATABASE_URI`, and it must be the **external** connection string with `?ssl=require`:
-GitHub cannot route to Render's internal network. That is the one place the API's own URL will
-not work.
-
-Expect a cold start of up to a minute on the first request after a quiet spell: Render spins a
-free web service down after ~15 minutes idle.
+- **`alembic upgrade head` must run before the app starts**, as its own step where the platform
+  offers one. The app refuses to boot against a database that is behind (it verifies, never
+  migrates — that would race across workers), so a deploy that skips this fails loudly instead
+  of half-working.
+- **The database URL must say `postgresql+asyncpg://`**, and any SSL parameter is `ssl=…`, not
+  `sslmode=…`. SQLAlchemy picks its driver from the scheme, and asyncpg is not libpq — get
+  either wrong and the app dies at connect time with an error that looks unrelated to the URL.
 
 ## Documentation
 
