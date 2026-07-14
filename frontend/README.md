@@ -14,6 +14,7 @@ React + TypeScript SPA for the lists/tables app, talking to the FastAPI backend.
 | Routing | React Router |
 | Forms | React Hook Form + Zod |
 | Drag & drop | dnd-kit (for future column/field reordering) |
+| QR scanning | html5-qrcode (camera, with an image fallback) |
 | API types | `openapi-typescript` (generate from the backend's OpenAPI schema) |
 
 ## Getting started
@@ -70,7 +71,8 @@ src/
     workspaces/   # workspaces + the lists shared with you directly
     lists/        # lists of a workspace; a list's records; the List settings dialog
     columns/      # add/edit a column, and the columns panel in List settings
-    records/      # the record form, the mobile card layout, renderCell, sortRows
+    records/      # the record form, the mobile card layout, renderCell, sortRows,
+                  # and the QR scanner (QrScanDialog + qrFill)
     views/        # the view bar, filter/group/column controls, filter conditions
     forms/        # per-list form layouts
     permissions/  # Share dialog/panel and the effective-actions hooks
@@ -85,6 +87,61 @@ src/
 A column's `type` and `config` drive everything about it: `renderCell` picks how it
 displays, `RecordFormDialog` picks its input, `FilterConditionsEditor` picks its filter
 control. Adding a column type means teaching those three, not writing per-list code.
+
+## Adding a record from a QR code
+
+"Add record" is a `SplitButton`: the button adds a record by hand, and its menu offers
+**Fill using QR code** and **Submit using QR code**. Both read one QR code holding a JSON
+object, keyed by **column name** — the same key a CSV/JSON import uses, so one convention
+covers every way a record arrives from outside the app, and a code stays writable by a
+person (a column uuid works as a key too, for a code a machine generated):
+
+```json
+{ "full_name": "Ana Cruz", "age": 30, "status": "Active", "owner": "admin" }
+```
+
+- **Fill** opens the Add-record form with those values in it, for the user to check.
+- **Submit** posts the record immediately, *invalid values and all*. A rejection is not a
+  dead end: the values land in the form with the server's own message above them, so the
+  scan gets fixed rather than discarded.
+
+**`qrFill.ts` does not validate, deliberately.** The backend validates every value on write
+(`src/lists/columns/validation.py`) and is the only thing that does — restating "what a
+link's scheme may be" or "what this choice column's options are" in the browser would be
+two rulebooks to keep in step, and the frontend's is the one that would silently fall
+behind. A bad value is therefore submitted and comes back as the server's error, which is
+better worded than anything the client would have invented.
+
+What `qrFill` *does* do is translate JSON's types into the form's, which is a shape and not
+a rule: `"30"` into a number for the `InputNumber`, `"yes"` into a boolean for the
+`Checkbox`, an ISO string into the `Date` a `Calendar` holds (via the same `deserialize`
+the form uses for a stored value), and a person's name into the uuid a reference cell
+stores, so its picker can render it. The first two mirror the backend's *importer*
+(`_parse_cell`), which is where a QR's laxness comes from; the last is only for display,
+since the item service resolves reference names on write by itself. **Every translation
+falls back to the raw value** rather than dropping it — an unresolvable name is still
+submitted, because the server resolves names too and will say precisely why it cannot.
+
+The one thing a code is refused is a field this form does not have: it cannot reach a
+column the **create form** excludes, or write one it marks read-only. That is a fact about
+the form, not a judgement about a value.
+
+One consequence to know: a **choice** column is written by its option *id* (`in_progress`),
+not the label the UI shows ("In progress"), because that is all the backend accepts — the
+same wart CSV/JSON import has. It is written up as gap #4 in
+[`docs/known-gaps.md`](../docs/known-gaps.md); the fix belongs in `validate_scalar`, not
+here.
+
+Scanning uses `html5-qrcode`, with **an image fallback that is not a nicety**:
+`getUserMedia` needs a camera and a secure context (HTTPS, or localhost), so on a desktop
+— or on a LAN deployment served over plain HTTP — the camera path does not exist, and a
+scanner that only scanned would be a dead button. Both paths end in the same place: the
+code's text, handed to `qrFill`.
+
+`QrScanDialog` is **lazy-loaded** (`React.lazy` + `Suspense` in `ListDetailPage`): the
+decoder is ~110 kB gzipped, a quarter of the whole bundle, and most sessions never open
+the scanner. Import it that way, not directly. `qrFill` is small and pure, and stays in
+the main bundle.
 
 ## Layout on small screens
 

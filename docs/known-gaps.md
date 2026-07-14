@@ -65,6 +65,38 @@ join them** — the schema will not remind you:
   window. Anything still *inside* the window is left alone, because it can still be restored and
   its sharing should come back with it.
 
+## 4. A choice column is written by option **id**, and nobody can see an id
+
+`validate_scalar` accepts a `choice` value only if it is one of the column's option **ids**.
+An id is generated once, by slugifying the label the column was created with (`_slugify`:
+"In progress" → `in_progress`), and is then **never shown anywhere in the UI** — the grid,
+the form and the filters all display the *label*. Renaming an option keeps the old id, so the
+two drift apart on purpose: records keep pointing at the right option across an edit.
+
+So every way of writing a record from outside the app — CSV/JSON import, and now a QR code —
+requires a value nobody can look up:
+
+```json
+{ "status": "in_progress" }   // works
+{ "status": "In progress" }   // rejected: 'In progress' is not a valid option
+```
+
+`GET /lists/{uuid}/columns/` does return the ids, so it is *discoverable*; it is simply not
+discoverable by the person writing the file, who is reading the screen. (References do not
+have this problem: `lookup`, `user` and `group` all accept a **name** on write and resolve it
+themselves — see `_as_uuid`, which returns `None` for a label and falls through to a label
+match. Choice is the one reference-ish type that does not.)
+
+The fix is one place, not two: teach `validate_scalar` to fall back to a case-insensitive
+**label** match when the value is not an id, exactly as the reference types already do. That
+closes it for import and QR at once. It needs a decision first, though — two options with the
+same label, or a label that happens to equal another option's id, must be rejected rather than
+guessed, which is the same "one unambiguous match" rule `_reference_inputs` uses.
+
+Do **not** paper over this in the frontend. The QR scanner deliberately owns none of the
+backend's validation rules (see `qrFill.ts`), and a label→id map in the browser would be the
+first crack in that: a second rulebook, in the copy that falls behind.
+
 ---
 
 ## Behavior that surprises people

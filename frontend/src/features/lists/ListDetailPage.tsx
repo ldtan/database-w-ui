@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
+import { SplitButton } from "primereact/splitbutton";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
@@ -26,6 +27,8 @@ import type {
 import { ListSettingsDialog } from "./ListSettingsDialog";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { fillFromQr, parseQrPayload } from "../records/qrFill";
+import { buildRecordData, resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { sortRows } from "../records/sortRows";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -41,6 +44,13 @@ import {
 } from "../permissions/useEffectiveActions";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
+
+// Split out of the bundle: the decoder it pulls in is ~110 kB gzipped — a quarter
+// of the whole app — for a dialog most sessions never open. It arrives when the
+// scanner does. (`qrFill`, which is small and pure, stays in the main bundle.)
+const QrScanDialog = lazy(() =>
+  import("../records/QrScanDialog").then((m) => ({ default: m.QrScanDialog })),
+);
 
 /**
  * A list's records, and everything you do to them.
@@ -75,8 +85,15 @@ export function ListDetailPage() {
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
     item: ListItem | null;
+    // Both set only by the QR scanner: what it read, and what it could not.
+    prefill?: Record<string, unknown> | null;
+    notes?: string[];
   }>({ open: false, item: null });
   const [selection, setSelection] = useState<ListItem[]>([]);
+  // Which QR flow is running, if any: fill the form, or submit it outright.
+  const [qrMode, setQrMode] = useState<"fill" | "submit" | null>(null);
+  const [qrBusy, setQrBusy] = useState(false);
+  const [qrError, setQrError] = useState<string | null>(null);
 
   const [activeViewUuid, setActiveViewUuid] = useState<string | null>(null);
   const [sortField, setSortField] = useState<string | undefined>(undefined);
@@ -280,6 +297,89 @@ export function ListDetailPage() {
     formList.find(
       (f) => f.type === (recordDialog.item ? "update" : "create"),
     ) ?? null;
+
+  // A QR code always creates, so it is always the "create" form it fills — which
+  // is what decides the fields it may write, and their names. Resolving them here
+  // (rather than reading `cols`) is what stops a code from filling a column the
+  // form excludes or marks read-only.
+  const createForm = formList.find((f) => f.type === "create") ?? null;
+  const createFields = useMemo(
+    () => resolveFields(cols, createForm),
+    [cols, createForm],
+  );
+
+  const qrSubmit = useMutation({
+    mutationFn: (values: Record<string, unknown>) =>
+      api.post<ListItem>(`/lists/${listUuid}/items/`, {
+        data: buildRecordData(createFields, values, false),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success("Record added", "Submitted from a QR code");
+    },
+    // Deliberately no onError: the scan handler turns a rejection into a note on
+    // the form it then opens, rather than a toast over a lost scan.
+  });
+
+  function openQr(mode: "fill" | "submit") {
+    setQrError(null);
+    setQrMode(mode);
+  }
+
+  /**
+   * A scanned code, from text to a record.
+   *
+   * "Submit" posts whatever the code said, invalid values and all — **the server
+   * is the only thing that decides what is valid**, and it says so far better than
+   * a second copy of its rules in the browser could (see `qrFill.ts`). A rejection
+   * is not a dead end: the values land in the form with the server's message above
+   * them, so the scan is fixed rather than lost. "Fill" simply stops at that form
+   * every time.
+   */
+  async function handleQrScan(text: string) {
+    setQrBusy(true);
+    setQrError(null);
+    try {
+      const payload = parseQrPayload(text);
+      const fill = await fillFromQr(listUuid, createFields, payload);
+      if (fill.filled.length === 0 && fill.issues.length === 0) {
+        setQrError("This QR code has no fields for this list.");
+        return;
+      }
+      const notes = fill.issues.map(
+        (issue) => `${issue.key}: ${issue.message}`,
+      );
+
+      if (qrMode === "submit") {
+        try {
+          await qrSubmit.mutateAsync(fill.values);
+          setQrMode(null);
+          return;
+        } catch (err) {
+          notes.unshift(
+            err instanceof ApiError
+              ? err.message
+              : "The server rejected the record.",
+          );
+        }
+      }
+
+      setRecordDialog({
+        open: true,
+        item: null,
+        prefill: fill.values,
+        notes,
+      });
+      setQrMode(null);
+    } catch (err) {
+      setQrError(
+        err instanceof Error ? err.message : "Could not read that QR code.",
+      );
+    } finally {
+      setQrBusy(false);
+    }
+  }
+
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
   const groupColumn = groupBy
@@ -397,12 +497,26 @@ export function ListDetailPage() {
             onClick={() => setShowTransfer(true)}
             disabled={cols.length === 0}
           />
+          {/* The button still adds a record; the dropdown is the same act with a QR
+              code doing the typing. */}
           {listActions.has("create") && (
-            <Button
+            <SplitButton
               label="Add record"
               icon="pi pi-plus"
               onClick={() => setRecordDialog({ open: true, item: null })}
               disabled={cols.length === 0}
+              model={[
+                {
+                  label: "Fill using QR code",
+                  icon: "pi pi-qrcode",
+                  command: () => openQr("fill"),
+                },
+                {
+                  label: "Submit using QR code",
+                  icon: "pi pi-qrcode",
+                  command: () => openQr("submit"),
+                },
+              ]}
             />
           )}
         </div>
@@ -669,9 +783,29 @@ export function ListDetailPage() {
         columns={cols}
         form={recordForm}
         item={recordDialog.item}
+        prefill={recordDialog.prefill}
+        notes={recordDialog.notes}
         visible={recordDialog.open}
         onHide={() => setRecordDialog({ open: false, item: null })}
       />
+      <Suspense fallback={null}>
+        {qrMode && (
+          <QrScanDialog
+            header={
+              qrMode === "fill" ? "Fill using QR code" : "Submit using QR code"
+            }
+            hint={
+              qrMode === "fill"
+                ? "The code's values fill the Add record form, where you can check them before adding the record."
+                : "The record is added as soon as the code is read. If the server rejects any of it, the form opens with the values and the reason."
+            }
+            busy={qrBusy}
+            error={qrError}
+            onScan={handleQrScan}
+            onHide={() => setQrMode(null)}
+          />
+        )}
+      </Suspense>
       <ImportExportDialog
         listUuid={listUuid}
         listName={list.data?.name ?? "records"}

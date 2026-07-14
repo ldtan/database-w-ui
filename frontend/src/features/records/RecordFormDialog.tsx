@@ -11,62 +11,24 @@ import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
-import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
+import { buildRecordData, deserialize, resolveFields } from "./recordValues";
 
 interface Props {
   listUuid: string;
   columns: Column[];
   form: Form | null; // the create/update form whose config drives the layout
   item: ListItem | null; // null => create, otherwise edit
+  /** Values to open a *new* record with, keyed by column uuid (the QR scanner's). */
+  prefill?: Record<string, unknown> | null;
+  /** What the QR scanner has to say: a key the form has no field for, or, when a
+   *  scan was submitted and refused, the server's reason. Shown above the fields. */
+  notes?: string[];
   visible: boolean;
   onHide: () => void;
-}
-
-interface ResolvedField {
-  column: Column;
-  enabled: boolean;
-  label: string;
-}
-
-// Apply the form's config: only included fields, in order, with enabled and
-// label overrides. An empty/absent config means "all columns in schema order".
-function resolveFields(columns: Column[], form: Form | null): ResolvedField[] {
-  if (form && form.config.fields && form.config.fields.length > 0) {
-    const byUuid = new Map(columns.map((c) => [c.uuid, c]));
-    return form.config.fields
-      .filter((f) => f.included)
-      .slice()
-      .sort((a, b) => a.order - b.order)
-      .map((f) => {
-        const column = byUuid.get(f.column_uuid);
-        if (!column) return null;
-        return {
-          column,
-          enabled: f.enabled !== false,
-          label:
-            (f.label_override && f.label_override.trim()) || column.display_name,
-        };
-      })
-      .filter((x): x is ResolvedField => x !== null);
-  }
-  return columns.map((c) => ({ column: c, enabled: true, label: c.display_name }));
-}
-
-function serialize(column: Column, value: unknown): unknown {
-  if (value instanceof Date) {
-    return serializeTemporal(column.type, value);
-  }
-  return value;
-}
-
-function deserialize(column: Column, raw: unknown): unknown {
-  if (!isTemporal(column.type)) return raw;
-  // A value we cannot parse stays as-is rather than becoming an Invalid Date.
-  return parseTemporal(column.type, raw) ?? raw;
 }
 
 function RecordField({
@@ -217,12 +179,19 @@ function RecordField({
  * Which form? The list's `create` form when adding and its `update` form when
  * editing, picked by the page. Values are sent under column **uuids**, never names,
  * because that is how records are stored.
+ *
+ * A new record can arrive part-written: `prefill` is what a scanned QR code could
+ * make sense of, and `notes` is what it could not (see `qrFill.ts`). The dialog
+ * treats those values exactly as if they had been typed — a QR fills this form, it
+ * does not bypass it.
  */
 export function RecordFormDialog({
   listUuid,
   columns,
   form,
   item,
+  prefill,
+  notes,
   visible,
   onHide,
 }: Props) {
@@ -234,7 +203,8 @@ export function RecordFormDialog({
   useEffect(() => {
     if (!visible) return;
     if (!item) {
-      setValues({});
+      // Read, not depended on: the prefill is handed over as the dialog opens.
+      setValues(prefill ?? {});
       return;
     }
     const initial: Record<string, unknown> = {};
@@ -250,21 +220,7 @@ export function RecordFormDialog({
 
   const persist = useMutation({
     mutationFn: () => {
-      const data: Record<string, unknown> = {};
-      for (const { column, enabled } of fields) {
-        if (!enabled) continue; // read-only fields keep default/existing value
-        const value = values[column.uuid];
-        const empty =
-          value === undefined ||
-          value === null ||
-          value === "" ||
-          (Array.isArray(value) && value.length === 0);
-        if (item) {
-          data[column.uuid] = empty ? null : serialize(column, value);
-        } else if (!empty) {
-          data[column.uuid] = serialize(column, value);
-        }
-      }
+      const data = buildRecordData(fields, values, !!item);
       return item
         ? api.patch<ListItem>(`/lists/${listUuid}/items/${item.uuid}`, { data })
         : api.post<ListItem>(`/lists/${listUuid}/items/`, { data });
@@ -286,6 +242,21 @@ export function RecordFormDialog({
       <div className="flex flex-col gap-4">
         {persist.error instanceof ApiError && (
           <Message severity="error" text={persist.error.message} />
+        )}
+        {notes && notes.length > 0 && (
+          <Message
+            severity="warn"
+            content={
+              <div className="flex flex-col gap-1">
+                <span className="font-semibold">From the QR code:</span>
+                <ul className="m-0 pl-4">
+                  {notes.map((note, i) => (
+                    <li key={i}>{note}</li>
+                  ))}
+                </ul>
+              </div>
+            }
+          />
         )}
         {fields.length === 0 && <p>Add a column first.</p>}
         {fields.map(({ column, enabled, label }) => (
