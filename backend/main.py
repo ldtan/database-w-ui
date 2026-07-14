@@ -57,6 +57,15 @@ def create_app() -> FastAPI:
             status_code=status.HTTP_403_FORBIDDEN, content={"detail": str(exc)}
         )
 
+    # Liveness probe for a host's health check (Render, a container orchestrator).
+    # It answers from the process alone: a check that queried the database would
+    # turn a brief database outage into a restart loop, killing the instance that
+    # is about to recover. A database the app cannot work against is caught at
+    # startup instead, by the schema check in init_db.
+    @app.get("/health", tags=["health"], summary="Liveness probe")
+    async def _health() -> dict[str, str]:
+        return {"status": "ok"}
+
     # Import and include your routers here
     from src.auth.routers import router as auth_router
     from src.workspaces.routers import router as workspaces_router
