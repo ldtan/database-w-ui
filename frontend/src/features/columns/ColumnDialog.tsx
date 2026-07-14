@@ -43,6 +43,7 @@ export function ColumnDialog({
   const [name, setName] = useState("");
   const [type, setType] = useState<ColumnType>("text");
   const [required, setRequired] = useState(false);
+  const [unique, setUnique] = useState(false);
   const [maxLength, setMaxLength] = useState<number | null>(null);
   const [min, setMin] = useState<number | null>(null);
   const [max, setMax] = useState<number | null>(null);
@@ -62,6 +63,7 @@ export function ColumnDialog({
       setName("");
       setType("text");
       setRequired(false);
+      setUnique(false);
       setMaxLength(null);
       setMin(null);
       setMax(null);
@@ -78,6 +80,7 @@ export function ColumnDialog({
     setName(column.name);
     setType(column.type);
     setRequired(!!config.required);
+    setUnique(!!config.unique);
     setMaxLength((config.max_length as number) ?? null);
     setMin((config.min as number) ?? null);
     setMax((config.max as number) ?? null);
@@ -106,9 +109,21 @@ export function ColumnDialog({
     enabled: type === "lookup" && !!targetListUuid,
   });
 
+  // A multi-value column holds an array, and the uniqueness check compares whole
+  // stored values — so it would ask whether two records picked the *same set*,
+  // which is not what anyone means by a unique column. Hide it, and clear it.
+  const multiValued =
+    (type === "user" || type === "group" || type === "lookup") && multiple;
+
   const save = useMutation({
     mutationFn: () => {
-      const config: Record<string, unknown> = { required };
+      // `unique` is always sent, never omitted: a config PATCH merges onto the
+      // stored one, so leaving it out would preserve a `true` this dialog is
+      // currently hiding — a constraint still enforced but no longer visible.
+      const config: Record<string, unknown> = {
+        required,
+        unique: multiValued ? false : unique,
+      };
       if (type === "text" || type === "long_text") {
         config.max_length = maxLength;
       }
@@ -358,6 +373,25 @@ export function ColumnDialog({
           />
           <label htmlFor="col-required">Required</label>
         </div>
+
+        {!multiValued && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                inputId="col-unique"
+                checked={unique}
+                onChange={(e) => setUnique(!!e.checked)}
+              />
+              <label htmlFor="col-unique">Unique</label>
+            </div>
+            {editing && !column.config.unique && unique && (
+              <small style={{ color: "var(--text-muted)" }}>
+                Existing duplicates are left alone — this is checked when a record is
+                saved, so they surface the next time one of them is edited.
+              </small>
+            )}
+          </div>
+        )}
 
         <div className="flex justify-end gap-2">
           <Button label="Cancel" text onClick={onHide} />
