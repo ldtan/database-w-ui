@@ -1,0 +1,56 @@
+# Render's Cron Job is a paid service type, so the four maintenance jobs run here.
+#
+# They are idempotent housekeeping and nothing depends on them having run — a missed night just
+# means soft-deleted rows outlive their window and reconciliation waits a day. That is what
+# makes a free scheduler an honest home for them.
+#
+# The order is not arbitrary: converge the record shapes first, then purge what is past its
+# window, then sweep the grants those purges orphaned.
+name: Daily maintenance
+
+on:
+  schedule:
+    # 03:17 UTC. Off the hour on purpose — every scheduler on the planet fires at :00.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      # This runs outside Render, so it needs the database's **external** connection string —
+      # the internal one the API uses is not routable from here. Which means SSL, which means
+      # `?ssl=require`: asyncpg is not libpq and does not know the word `sslmode`.
+      #   postgresql+asyncpg://…render.com/dbui?ssl=require
+      DATABASE_URI: ${{ secrets.DATABASE_URI }}
+      # Settings requires these four, so they must be *set* — but none of these jobs imports
+      # src/auth/helpers.py, which is the only module that reads the key files, so the paths
+      # need not point at anything. (Verified by importing each job with bogus paths.) Nothing
+      # here signs a token; nothing here needs a real secret.
+      SECRET_KEY: unused-by-the-maintenance-jobs
+      AUTH_SALT: unused-by-the-maintenance-jobs
+      RSA_PRIVATE_KEY_PATH: /dev/null
+      RSA_PUBLIC_KEY_PATH: /dev/null
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+
+      - run: uv sync --frozen --no-dev
+
+      - name: Converge record shapes
+        run: uv run python -m src.maintenance.reconcile_shapes
+
+      - name: Purge deleted records
+        run: uv run python -m src.maintenance.purge_deleted_items
+
+      - name: Purge deleted users and groups
+        run: uv run python -m src.maintenance.purge_deleted_principals
+
+      - name: Sweep orphaned grants
+        run: uv run python -m src.maintenance.sweep_orphan_grants

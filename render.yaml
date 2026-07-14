@@ -1,0 +1,139 @@
+# Render blueprint: this file *is* the deployment. New → Blueprint in the dashboard reads it
+# and creates every service below.
+#
+# The shape:
+#   - the API as a plain Python web service (no container: Render's native runtime installs
+#     any released Python, and this app needs 3.14 — every entity's public id comes from
+#     uuid.uuid7 in src/core/mixins.py)
+#   - the SPA as a static site, free and on a CDN, rewriting /api/* to the API so the two
+#     share an origin
+#   - a free Postgres, which Render DELETES about 30 days after it is created. Read the
+#     comment on the `databases` block before relying on it.
+#
+# This is the free-tier configuration throughout. Every paid upgrade is marked "PAID:" and is
+# a one-line edit. See "Deployment" in the root README.
+
+databases:
+  # A free Render database is deleted — not emptied, deleted — roughly 30 days after it is
+  # created. When that happens the app does not carry on with a blank database: DATABASE_URI
+  # names a host that no longer exists, `alembic upgrade head` fails in the start command, and
+  # the service never reaches uvicorn. It is DOWN, not empty, until someone creates a new
+  # database and re-points DATABASE_URI by hand.
+  #
+  # Recovery is at least clean: the start command migrates a fresh database from empty and
+  # seed_initial_data recreates the superuser, so a new instance comes back blank and working.
+  # That is the deal being accepted here — a demo we are willing to rebuild.
+  #
+  # PAID: `plan: basic-256mb` (~$7/mo) removes the expiry and adds managed backups. It is the
+  # first thing to buy — before the web service — the moment the data starts mattering.
+  - name: dbui-db
+    databaseName: dbui
+    user: dbui
+    plan: free
+    region: oregon
+
+services:
+  - type: web
+    name: dbui-api
+    runtime: python
+    plan: free
+    region: oregon
+    rootDir: backend
+    # Liveness only: it answers from the process, never the database, so a database blip
+    # cannot get the instance restarted out from under itself.
+    healthCheckPath: /health
+    buildCommand: pip install uv && uv sync --frozen --no-dev
+    # Alembic owns the schema and the app refuses to boot against a database that is behind it
+    # (src/infrastructure/schema_check.py), so the upgrade has to land before uvicorn does.
+    #
+    # It belongs in a pre-deploy hook, not here: at boot, every instance races every other
+    # instance to run it. The free plan has no such hook and runs exactly one instance, so
+    # there is no race to lose — but this is the FIRST thing to move when the service is paid
+    # for or scaled.
+    #
+    # PAID: `plan: starter`, add `preDeployCommand: uv run alembic upgrade head`, and drop the
+    # alembic call from the line below.
+    startCommand: uv run alembic upgrade head && uv run uvicorn main:create_app --factory --host 0.0.0.0 --port $PORT
+    envVars:
+      - fromGroup: dbui
+
+  - type: web
+    name: dbui-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: ./dist
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+    routes:
+      # src/lib/api.ts builds every call as a relative `/api/...` — there is no configurable
+      # base URL — so the SPA and the API must share an origin. This rewrite is what makes
+      # that true, and it is why CORS never enters the picture.
+      #
+      # Check this hostname after the first deploy: Render appends a suffix when the name it
+      # wants is taken, and a wrong host here 404s every request in the app.
+      - type: rewrite
+        source: /api/*
+        destination: https://dbui-api.onrender.com/api/*
+      # React Router owns the paths. An unknown one is the SPA, not a 404.
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+envVarGroups:
+  - name: dbui
+    envVars:
+      # Set by hand, from dbui-db's **internal** connection string, with the scheme rewritten:
+      #   postgresql://  ->  postgresql+asyncpg://
+      #
+      # It cannot be wired with `fromDatabase`: Render emits a plain `postgresql://` URL and
+      # SQLAlchemy reads the driver out of that scheme, so the app would reach for psycopg2 —
+      # which is neither installed nor async (ModuleNotFoundError). One string edit is the fix.
+      #
+      # No ssl parameter on the internal network. If you ever use the *external* URL (the
+      # maintenance workflow does), note that asyncpg is not libpq: the parameter is
+      # `ssl=require`, and `sslmode=require` raises an unexpected-keyword TypeError from a URL
+      # that looks perfectly correct.
+      - key: DATABASE_URI
+        sync: false
+
+      # Generated once, then permanent. AUTH_SALT is mixed into every password hash: change it
+      # later and every account is locked out.
+      - key: SECRET_KEY
+        generateValue: true
+      - key: AUTH_SALT
+        generateValue: true
+
+      # Upload the existing pair from backend/keys/ as Secret Files on dbui-api; they land at
+      # these paths. Do NOT generate a fresh pair per deploy — RS256 signs every token with
+      # them, so a new key silently logs out everyone holding one.
+      - key: RSA_PRIVATE_KEY_PATH
+        value: /etc/secrets/private.pem
+      - key: RSA_PUBLIC_KEY_PATH
+        value: /etc/secrets/public.pem
+      - key: JWT_ALGORITHM
+        value: RS256
+
+      # backend/.python-version says 3.14 as well. This is belt and braces: the env var takes
+      # precedence and must be fully qualified, and it removes any doubt about which directory
+      # Render reads the file from.
+      - key: PYTHON_VERSION
+        value: 3.14.3
+
+      - key: DEBUG
+        value: "False"
+      # Empty on purpose: the rewrite above makes the SPA same-origin, so there is no
+      # cross-origin request to allow. It is only needed for the VITE_API_BASE fallback
+      # described in the README.
+      - key: ALLOWED_ORIGINS
+        value: ""
+
+      # The bootstrap account, seeded on first boot while the users table is empty. On a public
+      # URL, `changeme` is a public login: set a real password.
+      - key: FIRST_SUPERUSER_USERNAME
+        value: admin
+      - key: FIRST_SUPERUSER_EMAIL
+        sync: false
+      - key: FIRST_SUPERUSER_PASSWORD
+        sync: false
