@@ -181,20 +181,6 @@ export function PeoplePage() {
             text={userSearch ? "No users match that search." : "No users yet."}
           />
         )}
-        {userTotal > 0 && (
-          <Paginator
-            first={userFirst}
-            rows={userRows}
-            totalRecords={userTotal}
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            onPageChange={(e) => {
-              setUserFirst(e.first);
-              setUserRows(e.rows);
-            }}
-            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-            currentPageReportTemplate="{first}–{last} of {totalRecords}"
-          />
-        )}
 
         <div className="flex flex-col gap-2">
           {shownUsers.map((user) => {
@@ -243,6 +229,21 @@ export function PeoplePage() {
             );
           })}
         </div>
+
+        {userTotal > 0 && (
+          <Paginator
+            first={userFirst}
+            rows={userRows}
+            totalRecords={userTotal}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={(e) => {
+              setUserFirst(e.first);
+              setUserRows(e.rows);
+            }}
+            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+            currentPageReportTemplate="{first}–{last} of {totalRecords}"
+          />
+        )}
       </section>
 
       {/* --------------------------------------------------------- Groups */}
@@ -273,20 +274,6 @@ export function PeoplePage() {
           <Message
             severity="info"
             text={groupSearch ? "No groups match that search." : "No groups yet."}
-          />
-        )}
-        {groupTotal > 0 && (
-          <Paginator
-            first={groupFirst}
-            rows={groupRows}
-            totalRecords={groupTotal}
-            rowsPerPageOptions={[10, 25, 50, 100]}
-            onPageChange={(e) => {
-              setGroupFirst(e.first);
-              setGroupRows(e.rows);
-            }}
-            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-            currentPageReportTemplate="{first}–{last} of {totalRecords}"
           />
         )}
 
@@ -334,6 +321,21 @@ export function PeoplePage() {
             </Card>
           ))}
         </div>
+
+        {groupTotal > 0 && (
+          <Paginator
+            first={groupFirst}
+            rows={groupRows}
+            totalRecords={groupTotal}
+            rowsPerPageOptions={[10, 25, 50, 100]}
+            onPageChange={(e) => {
+              setGroupFirst(e.first);
+              setGroupRows(e.rows);
+            }}
+            template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+            currentPageReportTemplate="{first}–{last} of {totalRecords}"
+          />
+        )}
       </section>
 
       <UserDialog

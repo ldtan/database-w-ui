@@ -188,20 +188,6 @@ export function ListsPage() {
             : "No lists in this workspace yet."}
         </p>
       )}
-      {listTotal > 0 && (
-        <Paginator
-          first={first}
-          rows={rows}
-          totalRecords={listTotal}
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          onPageChange={(e) => {
-            setFirst(e.first);
-            setRows(e.rows);
-          }}
-          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-          currentPageReportTemplate="{first}–{last} of {totalRecords}"
-        />
-      )}
 
       <div className="flex flex-col gap-2">
         {shownLists.map((list) => (
@@ -248,6 +234,21 @@ export function ListsPage() {
           </Card>
         ))}
       </div>
+
+      {listTotal > 0 && (
+        <Paginator
+          first={first}
+          rows={rows}
+          totalRecords={listTotal}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(e) => {
+            setFirst(e.first);
+            setRows(e.rows);
+          }}
+          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+          currentPageReportTemplate="{first}–{last} of {totalRecords}"
+        />
+      )}
 
       {sharing && (
         <ShareDialog

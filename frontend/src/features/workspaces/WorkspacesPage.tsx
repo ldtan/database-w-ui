@@ -179,20 +179,6 @@ export function WorkspacesPage() {
       {!workspaces.isLoading && shownWorkspaces.length === 0 && (
         <p>{wsSearch ? "No workspaces match that search." : "No workspaces yet."}</p>
       )}
-      {wsTotal > 0 && (
-        <Paginator
-          first={wsFirst}
-          rows={wsRows}
-          totalRecords={wsTotal}
-          rowsPerPageOptions={[10, 25, 50, 100]}
-          onPageChange={(e) => {
-            setWsFirst(e.first);
-            setWsRows(e.rows);
-          }}
-          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-          currentPageReportTemplate="{first}–{last} of {totalRecords}"
-        />
-      )}
 
       <div className="flex flex-col gap-2">
         {shownWorkspaces.map((ws) => (
@@ -237,6 +223,21 @@ export function WorkspacesPage() {
         ))}
       </div>
 
+      {wsTotal > 0 && (
+        <Paginator
+          first={wsFirst}
+          rows={wsRows}
+          totalRecords={wsTotal}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(e) => {
+            setWsFirst(e.first);
+            setWsRows(e.rows);
+          }}
+          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+          currentPageReportTemplate="{first}–{last} of {totalRecords}"
+        />
+      )}
+
       {(sharedTotal > 0 || sharedSearch) && (
         <section className="flex flex-col gap-2 mt-2">
           <h2 className="text-lg font-medium">Shared with me</h2>
@@ -251,20 +252,6 @@ export function WorkspacesPage() {
           </IconField>
           {!shared.isLoading && shownShared.length === 0 && (
             <Message severity="info" text="No shared lists match that search." />
-          )}
-          {sharedTotal > 0 && (
-            <Paginator
-              first={sharedFirst}
-              rows={sharedRows}
-              totalRecords={sharedTotal}
-              rowsPerPageOptions={[10, 25, 50, 100]}
-              onPageChange={(e) => {
-                setSharedFirst(e.first);
-                setSharedRows(e.rows);
-              }}
-              template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
-              currentPageReportTemplate="{first}–{last} of {totalRecords}"
-            />
           )}
           {shownShared.map((list) => (
             <Card key={list.uuid}>
@@ -285,6 +272,20 @@ export function WorkspacesPage() {
               </Link>
             </Card>
           ))}
+          {sharedTotal > 0 && (
+            <Paginator
+              first={sharedFirst}
+              rows={sharedRows}
+              totalRecords={sharedTotal}
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              onPageChange={(e) => {
+                setSharedFirst(e.first);
+                setSharedRows(e.rows);
+              }}
+              template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+              currentPageReportTemplate="{first}–{last} of {totalRecords}"
+            />
+          )}
         </section>
       )}
 
