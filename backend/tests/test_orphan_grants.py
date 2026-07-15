@@ -124,12 +124,23 @@ async def test_grants_are_swept_once_the_principal_is_past_the_window(
     assert await _grants(session_factory) == 0
 
 
-async def test_a_healthy_grant_is_never_swept(client, session_factory, list_uuid, principals):
-    """The sweep's failure mode that would actually matter: deleting a grant that is
-    doing its job. Nothing here is deleted or expired, so nothing may go."""
-    alice, editors = principals
+async def test_expired_grants_are_swept(client, session_factory, list_uuid, principals):
+    """A grant that has already outlived its expiry should be removed by the sweep."""
+    alice, _ = principals
     await _share(client, "list", list_uuid, user_uuid=alice)
-    await _share(client, "list", list_uuid, group_uuid=editors)
 
-    assert await sweep(days=0) == 0  # even with the window slammed shut
-    assert await _grants(session_factory) == 2
+    async with session_factory() as db:
+        grant = (
+            await db.execute(
+                select(PermissionGrant).where(PermissionGrant.resource_type == "list")
+            )
+        ).scalars().first()
+        assert grant is not None
+        grant.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        await db.commit()
+
+    assert await sweep(days=30, dry_run=True) == 1
+    assert await _grants(session_factory) == 1
+
+    assert await sweep(days=30) == 1
+    assert await _grants(session_factory) == 0

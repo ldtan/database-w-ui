@@ -49,7 +49,8 @@ _RESOURCE_TABLES = {
 }
 
 # A grant is dead when its resource, or its principal, is gone or expired. "Gone"
-# means the row is absent entirely; "expired" means soft-deleted before the cutoff.
+# means the row is absent entirely; "expired" means soft-deleted before the cutoff
+# (for resources/principals) or a grant timestamp already in the past.
 _DEAD_RESOURCE = """
     resource_type = '{rt}'
 AND NOT EXISTS (
@@ -68,6 +69,10 @@ OR (group_id IS NOT NULL AND NOT EXISTS (
          WHERE g.id = permission_grants.group_id
            AND (g.deleted_at IS NULL OR g.deleted_at >= :cutoff)))
 """
+_DEAD_EXPIRY = """
+    expires_at IS NOT NULL
+AND expires_at <= :now
+"""
 
 
 def _predicate() -> str:
@@ -75,22 +80,24 @@ def _predicate() -> str:
         f"({_DEAD_RESOURCE.format(rt=rt, table=table)})"
         for rt, table in _RESOURCE_TABLES.items()
     )
-    return f"(({dead_resources}) OR ({_DEAD_PRINCIPAL}))"
+    return f"(({dead_resources}) OR ({_DEAD_PRINCIPAL}) OR ({_DEAD_EXPIRY}))"
 
 
 async def sweep(days: int, dry_run: bool = False) -> int:
-    """Delete grants whose resource or principal is gone. Returns how many."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    """Delete grants whose resource/principal is gone or whose expiry has passed."""
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=days)
     where = _predicate()
+    params = {"cutoff": cutoff, "now": now}
 
     async with db_module.SessionLocal() as db:
         if dry_run:
             return await db.scalar(
                 sa.text(f"SELECT count(*) FROM permission_grants WHERE {where}"),
-                {"cutoff": cutoff},
+                params,
             )
         result = await db.execute(
-            sa.text(f"DELETE FROM permission_grants WHERE {where}"), {"cutoff": cutoff}
+            sa.text(f"DELETE FROM permission_grants WHERE {where}"), params
         )
         await db.commit()
         return result.rowcount
