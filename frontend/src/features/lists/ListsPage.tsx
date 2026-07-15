@@ -1,10 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
+import { IconField } from "primereact/iconfield";
+import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { Paginator } from "primereact/paginator";
 import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
@@ -13,12 +16,17 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { NameFields } from "../../components/NameFields";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
+import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
   useEffectiveActions,
   useEffectiveActionsMap,
 } from "../permissions/useEffectiveActions";
+
+// Search and paging both happen server-side, so a term finds a match no matter how
+// far down the list it sits.
+const ROWS = 10;
 
 /**
  * The lists of one workspace: create, rename, share, delete.
@@ -40,10 +48,21 @@ export function ListsPage() {
     queryClient.invalidateQueries({ queryKey: ["effective"] });
   };
 
+  const [search, setSearch] = useState("");
+  const q = useDebounced(search);
+  const [first, setFirst] = useState(0);
+  const [rows, setRows] = useState(ROWS);
+  // A new search re-ranks everything, so the old page number is meaningless.
+  useEffect(() => setFirst(0), [q]);
+
   const lists = useQuery({
-    queryKey: ["lists", workspaceUuid],
+    queryKey: ["lists", workspaceUuid, "search", q, first, rows],
     queryFn: () =>
-      api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
+      api.getPage<ListRead>(
+        `/lists/?workspace_uuid=${workspaceUuid}&skip=${first}&limit=${rows}` +
+          `&q=${encodeURIComponent(q.trim())}`,
+      ),
+    placeholderData: (prev) => prev, // don't blank the list while paging
   });
   const workspace = useQuery({
     queryKey: ["workspace", workspaceUuid],
@@ -51,9 +70,11 @@ export function ListsPage() {
   });
   // Adding a list is a workspace-level change; the rest is gated per list.
   const workspaceActions = useEffectiveActions("workspace", workspaceUuid);
+  const shownLists = lists.data?.items ?? [];
+  const listTotal = lists.data?.total ?? 0;
   const can = useEffectiveActionsMap(
     "list",
-    (lists.data ?? []).map((list) => list.uuid),
+    shownLists.map((list) => list.uuid),
   );
 
   const [displayName, setDisplayName] = useState("");
@@ -101,7 +122,7 @@ export function ListsPage() {
 
   // Share dialog: track by uuid so the inherit toggle reflects fresh data.
   const [sharingUuid, setSharingUuid] = useState<string | null>(null);
-  const sharing = lists.data?.find((l) => l.uuid === sharingUuid) ?? null;
+  const sharing = shownLists.find((l) => l.uuid === sharingUuid) ?? null;
   const setInherit = useMutation({
     mutationFn: (vars: { uuid: string; value: boolean }) =>
       api.patch(`/lists/${vars.uuid}`, { permissions_inherit: vars.value }),
@@ -149,11 +170,41 @@ export function ListsPage() {
         <Message severity="error" text={create.error.message} />
       )}
 
+      <IconField iconPosition="left">
+        <InputIcon className="pi pi-search" />
+        <InputText
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          placeholder="Search lists…"
+          className="w-full"
+        />
+      </IconField>
+
       {lists.isLoading && <p>Loading…</p>}
-      {lists.data?.length === 0 && <p>No lists in this workspace yet.</p>}
+      {!lists.isLoading && shownLists.length === 0 && (
+        <p>
+          {search
+            ? "No lists match that search."
+            : "No lists in this workspace yet."}
+        </p>
+      )}
+      {listTotal > 0 && (
+        <Paginator
+          first={first}
+          rows={rows}
+          totalRecords={listTotal}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(e) => {
+            setFirst(e.first);
+            setRows(e.rows);
+          }}
+          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+          currentPageReportTemplate="{first}–{last} of {totalRecords}"
+        />
+      )}
 
       <div className="flex flex-col gap-2">
-        {lists.data?.map((list) => (
+        {shownLists.map((list) => (
           <Card key={list.uuid}>
             <div className="flex items-center justify-between">
               <Link to={`/lists/${list.uuid}`} className="no-underline">

@@ -1,10 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
+import { IconField } from "primereact/iconfield";
+import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { Paginator } from "primereact/paginator";
 import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
@@ -13,9 +16,15 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { NameFields } from "../../components/NameFields";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
+import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
+
+// Search and paging both happen server-side, so a term finds a match no matter how
+// far down the list it sits — a client-side filter over one fetched page would
+// report "no match" for anything past the limit.
+const ROWS = 10;
 
 /**
  * The home page: your workspaces, plus the lists shared with you directly.
@@ -35,23 +44,51 @@ export function WorkspacesPage() {
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["workspaces"] });
 
+  const [wsSearch, setWsSearch] = useState("");
+  const [sharedSearch, setSharedSearch] = useState("");
+  const wsQ = useDebounced(wsSearch);
+  const sharedQ = useDebounced(sharedSearch);
+  const [wsFirst, setWsFirst] = useState(0);
+  const [sharedFirst, setSharedFirst] = useState(0);
+  const [wsRows, setWsRows] = useState(ROWS);
+  const [sharedRows, setSharedRows] = useState(ROWS);
+  // A new search re-ranks everything, so the old page number is meaningless;
+  // without this you can land on an empty page and think there are no matches.
+  useEffect(() => setWsFirst(0), [wsQ]);
+  useEffect(() => setSharedFirst(0), [sharedQ]);
+
   const workspaces = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: () => api.get<Workspace[]>("/workspaces/"),
+    queryKey: ["workspaces", "search", wsQ, wsFirst, wsRows],
+    queryFn: () =>
+      api.getPage<Workspace>(
+        `/workspaces/?skip=${wsFirst}&limit=${wsRows}` +
+          `&q=${encodeURIComponent(wsQ.trim())}`,
+      ),
+    placeholderData: (prev) => prev, // don't blank the list while paging
   });
   // A shared workspace may be view-only, so gate its controls per row.
   const can = useEffectiveActionsMap(
     "workspace",
-    (workspaces.data ?? []).map((ws) => ws.uuid),
+    (workspaces.data?.items ?? []).map((ws) => ws.uuid),
   );
 
   // A list can be shared without its workspace, which then stays invisible — so
   // these lists have no workspace to browse into and would otherwise be
   // unreachable.
   const shared = useQuery({
-    queryKey: ["lists", "shared"],
-    queryFn: () => api.get<ListRead[]>("/lists/?shared=true"),
+    queryKey: ["lists", "shared", sharedQ, sharedFirst, sharedRows],
+    queryFn: () =>
+      api.getPage<ListRead>(
+        `/lists/?shared=true&skip=${sharedFirst}&limit=${sharedRows}` +
+          `&q=${encodeURIComponent(sharedQ.trim())}`,
+      ),
+    placeholderData: (prev) => prev,
   });
+
+  const shownWorkspaces = workspaces.data?.items ?? [];
+  const wsTotal = workspaces.data?.total ?? 0;
+  const shownShared = shared.data?.items ?? [];
+  const sharedTotal = shared.data?.total ?? 0;
 
   const [displayName, setDisplayName] = useState("");
   const create = useMutation({
@@ -128,11 +165,37 @@ export function WorkspacesPage() {
         <Message severity="error" text={create.error.message} />
       )}
 
+      <IconField iconPosition="left">
+        <InputIcon className="pi pi-search" />
+        <InputText
+          value={wsSearch}
+          onChange={(e) => setWsSearch(e.target.value)}
+          placeholder="Search workspaces…"
+          className="w-full"
+        />
+      </IconField>
+
       {workspaces.isLoading && <p>Loading…</p>}
-      {workspaces.data?.length === 0 && <p>No workspaces yet.</p>}
+      {!workspaces.isLoading && shownWorkspaces.length === 0 && (
+        <p>{wsSearch ? "No workspaces match that search." : "No workspaces yet."}</p>
+      )}
+      {wsTotal > 0 && (
+        <Paginator
+          first={wsFirst}
+          rows={wsRows}
+          totalRecords={wsTotal}
+          rowsPerPageOptions={[10, 25, 50, 100]}
+          onPageChange={(e) => {
+            setWsFirst(e.first);
+            setWsRows(e.rows);
+          }}
+          template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+          currentPageReportTemplate="{first}–{last} of {totalRecords}"
+        />
+      )}
 
       <div className="flex flex-col gap-2">
-        {workspaces.data?.map((ws) => (
+        {shownWorkspaces.map((ws) => (
           <Card key={ws.uuid}>
             <div className="flex items-center justify-between">
               <Link to={`/workspaces/${ws.uuid}`} className="no-underline">
@@ -174,14 +237,51 @@ export function WorkspacesPage() {
         ))}
       </div>
 
-      {shared.data && shared.data.length > 0 && (
+      {(sharedTotal > 0 || sharedSearch) && (
         <section className="flex flex-col gap-2 mt-2">
           <h2 className="text-lg font-medium">Shared with me</h2>
-          {shared.data.map((list) => (
+          <IconField iconPosition="left">
+            <InputIcon className="pi pi-search" />
+            <InputText
+              value={sharedSearch}
+              onChange={(e) => setSharedSearch(e.target.value)}
+              placeholder="Search shared lists…"
+              className="w-full"
+            />
+          </IconField>
+          {!shared.isLoading && shownShared.length === 0 && (
+            <Message severity="info" text="No shared lists match that search." />
+          )}
+          {sharedTotal > 0 && (
+            <Paginator
+              first={sharedFirst}
+              rows={sharedRows}
+              totalRecords={sharedTotal}
+              rowsPerPageOptions={[10, 25, 50, 100]}
+              onPageChange={(e) => {
+                setSharedFirst(e.first);
+                setSharedRows(e.rows);
+              }}
+              template="CurrentPageReport FirstPageLink PrevPageLink PageLinks NextPageLink LastPageLink RowsPerPageDropdown"
+              currentPageReportTemplate="{first}–{last} of {totalRecords}"
+            />
+          )}
+          {shownShared.map((list) => (
             <Card key={list.uuid}>
               <Link to={`/lists/${list.uuid}`} className="no-underline">
                 <div className="font-medium">{list.display_name}</div>
-                <div className="text-sm text-gray-500">{list.name}</div>
+                {/* Same-named lists are common here, so disambiguate by owner and —
+                    only when the caller can see it — the workspace. The backend
+                    sends workspace_display_name only for a viewable workspace, so
+                    this never names one the caller was denied; otherwise it falls
+                    back to the list's own slug. */}
+                <div className="text-sm text-gray-500">
+                  {list.owner_username
+                    ? `owned by ${list.owner_username}`
+                    : list.name}
+                  {list.workspace_display_name &&
+                    ` · in ${list.workspace_display_name}`}
+                </div>
               </Link>
             </Card>
           ))}

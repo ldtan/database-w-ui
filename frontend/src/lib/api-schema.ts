@@ -192,7 +192,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Workspaces */
+        /**
+         * List Workspaces
+         * @description Searching and paging server-side; the total match count (ignoring skip/limit)
+         *     comes back in X-Total-Count for the paginator, leaving the body a plain array.
+         */
         get: operations["list_workspaces_api_workspaces__get"];
         put?: never;
         /** Create Workspace */
@@ -229,7 +233,14 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Lists */
+        /**
+         * List Lists
+         * @description Searching and paging server-side, so a search finds lists past the first page.
+         *
+         *     The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
+         *     which is what a paginator needs; the body stays a plain array, so callers that
+         *     just want the list (the nav drawer, the column picker) are unaffected.
+         */
         get: operations["list_lists_api_lists__get"];
         put?: never;
         /** Create List */
@@ -1099,6 +1110,10 @@ export interface components {
              * @default true
              */
             permissions_inherit: boolean;
+            /** Owner Username */
+            owner_username?: string | null;
+            /** Workspace Display Name */
+            workspace_display_name?: string | null;
         };
         /** ListUpdate */
         ListUpdate: {
@@ -1951,6 +1966,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Match name or display name */
+                q?: string | null;
             };
             header?: never;
             path?: never;
@@ -2114,6 +2131,8 @@ export interface operations {
                 shared?: boolean;
                 skip?: number;
                 limit?: number;
+                /** @description Match list name or display name */
+                q?: string | null;
             };
             header?: never;
             path?: never;

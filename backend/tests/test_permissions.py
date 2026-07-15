@@ -514,3 +514,81 @@ async def test_http_effective_batch(make_client, session_factory):
         assert resp.status_code == 200
         for row in resp.json():
             assert set(row["actions"]) == {a.value for a in ALL_ACTIONS}
+
+
+# --------------------------------------------------------------------------
+# "Shared with me" enrichment: owner username always, workspace name only when
+# the caller can view that workspace (else it would leak a workspace they were
+# specifically not given).
+# --------------------------------------------------------------------------
+
+
+async def test_shared_list_exposes_owner_but_not_a_hidden_workspace(session_factory):
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        # A list-level grant, and crucially *no* workspace grant — so `other` can
+        # reach the list but cannot view its workspace.
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+
+        shared = await ListService.list(db, other, shared_only=True)
+        assert [r.uuid for r in shared] == [lst.uuid]
+        row = shared[0]
+        # Owner username is always exposed — it is the disambiguator.
+        assert row.owner_username == "owner"
+        # The workspace name is withheld: `other` cannot view "WS".
+        assert row.workspace_display_name is None
+
+
+async def test_owner_listing_includes_its_workspace_name(session_factory):
+    async with session_factory() as db:
+        owner, _, ws, lst = await _fixture_world(db)
+        rows = await ListService.list(db, owner, workspace_uuid=ws.uuid)
+        assert len(rows) == 1
+        # The owner can view the workspace, so its name comes through.
+        assert rows[0].workspace_display_name == "WS"
+        assert rows[0].owner_username == "owner"
+
+
+async def test_list_search_and_count_agree(session_factory):
+    async with session_factory() as db:
+        owner, _, ws, _ = await _fixture_world(db)
+        await ListService.create(
+            db, ListCreate(name="apples", display_name="Apples", workspace_uuid=ws.uuid)
+        )
+        await ListService.create(
+            db, ListCreate(name="oranges", display_name="Oranges", workspace_uuid=ws.uuid)
+        )
+
+        # Baseline: the fixture's "Lst" plus the two just created.
+        assert await ListService.count(db, owner, workspace_uuid=ws.uuid) == 3
+
+        matched = await ListService.list(db, owner, workspace_uuid=ws.uuid, q="apple")
+        assert [r.name for r in matched] == ["apples"]
+        assert await ListService.count(db, owner, workspace_uuid=ws.uuid, q="apple") == 1
+        # A miss matches nothing, and the count agrees with the page.
+        assert await ListService.list(db, owner, workspace_uuid=ws.uuid, q="zzz") == []
+        assert await ListService.count(db, owner, workspace_uuid=ws.uuid, q="zzz") == 0
+
+
+async def test_http_lists_sends_total_count_header(make_client, session_factory):
+    async with session_factory() as db:
+        owner, _, ws, _ = await _fixture_world(db)
+        await ListService.create(
+            db, ListCreate(name="apples", display_name="Apples", workspace_uuid=ws.uuid)
+        )
+
+    async with make_client(owner) as client:
+        resp = await client.get(f"/api/lists/?workspace_uuid={ws.uuid}&limit=1")
+        assert resp.status_code == 200, resp.text
+        # The body is capped by limit, but the header reports the full match count.
+        assert len(resp.json()) == 1
+        assert resp.headers["X-Total-Count"] == "2"

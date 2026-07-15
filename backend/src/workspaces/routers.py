@@ -1,6 +1,8 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -35,12 +37,21 @@ async def create_workspace(
 
 @router.get("/", response_model=list[WorkspaceRead])
 async def list_workspaces(
+    response: Response,
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(None, description="Match name or display name"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await WorkspaceService.list_visible(db, current_user, skip=skip, limit=limit)
+    """Searching and paging server-side; the total match count (ignoring skip/limit)
+    comes back in X-Total-Count for the paginator, leaving the body a plain array."""
+    response.headers["X-Total-Count"] = str(
+        await WorkspaceService.count_visible(db, current_user, q=q)
+    )
+    return await WorkspaceService.list_visible(
+        db, current_user, skip=skip, limit=limit, q=q
+    )
 
 
 @router.get("/{workspace_uuid}", response_model=WorkspaceRead)

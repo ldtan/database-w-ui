@@ -2,13 +2,14 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from sqlalchemy.sql.elements import ColumnElement
 
 from src.core.exceptions import ConflictError, UnknownReferenceError
-from src.core.utils import coerce_uuid
+from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from src.workspaces.models import Workspace
 from src.workspaces.services import WorkspaceService
 
@@ -18,7 +19,7 @@ from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
 from .models import List
-from .schemas import ListCreate, ListUpdate
+from .schemas import ListCreate, ListRead, ListUpdate
 from .views.models import View
 from .views.schemas import ViewConfig
 
@@ -68,6 +69,39 @@ class ListService:
         return result.scalars().first()
 
     @classmethod
+    async def _visible_conditions(
+        cls,
+        db: AsyncSession,
+        user,
+        workspace_uuid: Optional[Union[str, UUID]],
+        shared_only: bool,
+        q: Optional[str],
+    ) -> list[ColumnElement[bool]]:
+        """The WHERE conditions for a visible-lists query, shared by ``list`` and
+        ``count`` so the page and its total can never describe different queries.
+        Assumes the statement already joins ``Workspace``."""
+        from src.permissions.services import PermissionService
+
+        conds: list[ColumnElement[bool]] = [
+            List.deleted_at.is_(None),
+            Workspace.deleted_at.is_(None),
+            await PermissionService.list_query_filter(db, user),
+        ]
+        if workspace_uuid is not None:
+            conds.append(Workspace.uuid == coerce_uuid(workspace_uuid))
+        if shared_only:
+            conds.append(Workspace.owner_id != user.id)
+        if q and q.strip():
+            pattern = like_pattern(q.strip())
+            conds.append(
+                or_(
+                    List.display_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    List.name.ilike(pattern, escape=LIKE_ESCAPE),
+                )
+            )
+        return conds
+
+    @classmethod
     async def list(
         cls,
         db: AsyncSession,
@@ -76,35 +110,76 @@ class ListService:
         shared_only: bool = False,
         skip: int = 0,
         limit: int = 100,
-    ) -> Sequence[List]:
+        q: Optional[str] = None,
+    ) -> Sequence[ListRead]:
         """Lists the user can view (owned, directly granted, or inherited from a
-        workspace grant), optionally scoped to one workspace.
+        workspace grant), optionally scoped to one workspace or filtered by ``q``.
 
         ``shared_only`` keeps just the lists the user does not own. A list can be
         granted without its workspace being visible, so those lists sit inside a
         workspace the user cannot open — this is what backs the "Shared with me"
         section, the only way to reach them.
+
+        Each row is enriched with its workspace owner's username, and with the
+        workspace's display name *only when the caller can view that workspace* —
+        naming a workspace the caller was denied would leak it.
         """
         from src.permissions.services import PermissionService
 
-        condition = await PermissionService.list_query_filter(db, user)
+        conds = await cls._visible_conditions(db, user, workspace_uuid, shared_only, q)
         stmt = (
             select(List)
             .join(Workspace, List.workspace_id == Workspace.id)
-            .where(
-                List.deleted_at.is_(None),
-                Workspace.deleted_at.is_(None),
-                condition,
+            .where(*conds)
+            .options(
+                selectinload(List.workspace).selectinload(Workspace.owner),
+                selectinload(List.primary_column),
             )
-            .options(selectinload(List.workspace), selectinload(List.primary_column))
+            .order_by(List.id)
+            .offset(skip)
+            .limit(limit)
         )
-        if workspace_uuid is not None:
-            parsed = coerce_uuid(workspace_uuid)
-            stmt = stmt.where(Workspace.uuid == parsed)
-        if shared_only:
-            stmt = stmt.where(Workspace.owner_id != user.id)
-        result = await db.execute(stmt.order_by(List.id).offset(skip).limit(limit))
-        return result.scalars().all()
+        lists = (await db.execute(stmt)).scalars().all()
+
+        # Which of these workspaces the caller may actually view — the gate on
+        # exposing a workspace's name (see the docstring and known-gaps).
+        ws_ids = {lst.workspace_id for lst in lists}
+        viewable: set[int] = set()
+        if ws_ids:
+            ws_filter = await PermissionService.workspace_view_filter(db, user)
+            rows = await db.execute(
+                select(Workspace.id).where(Workspace.id.in_(ws_ids), ws_filter)
+            )
+            viewable = set(rows.scalars().all())
+
+        reads: list[ListRead] = []
+        for lst in lists:
+            read = ListRead.model_validate(lst)
+            read.owner_username = lst.workspace.owner.username
+            read.workspace_display_name = (
+                lst.workspace.display_name if lst.workspace_id in viewable else None
+            )
+            reads.append(read)
+        return reads
+
+    @classmethod
+    async def count(
+        cls,
+        db: AsyncSession,
+        user,
+        workspace_uuid: Optional[Union[str, UUID]] = None,
+        shared_only: bool = False,
+        q: Optional[str] = None,
+    ) -> int:
+        """Total matching lists, ignoring skip/limit — what the paginator needs."""
+        conds = await cls._visible_conditions(db, user, workspace_uuid, shared_only, q)
+        stmt = (
+            select(func.count(func.distinct(List.id)))
+            .select_from(List)
+            .join(Workspace, List.workspace_id == Workspace.id)
+            .where(*conds)
+        )
+        return await db.scalar(stmt) or 0
 
     @classmethod
     async def create(cls, db: AsyncSession, payload: ListCreate) -> List:

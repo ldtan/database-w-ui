@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -55,13 +55,26 @@ async def create_list(
 
 @router.get("/", response_model=list[ListRead])
 async def list_lists(
+    response: Response,
     workspace_uuid: Optional[UUID] = Query(None),
     shared: bool = Query(False, description="Only lists the caller does not own"),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    q: Optional[str] = Query(None, description="Match list name or display name"),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Searching and paging server-side, so a search finds lists past the first page.
+
+    The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
+    which is what a paginator needs; the body stays a plain array, so callers that
+    just want the list (the nav drawer, the column picker) are unaffected.
+    """
+    response.headers["X-Total-Count"] = str(
+        await ListService.count(
+            db, current_user, workspace_uuid=workspace_uuid, shared_only=shared, q=q
+        )
+    )
     return await ListService.list(
         db,
         current_user,
@@ -69,6 +82,7 @@ async def list_lists(
         shared_only=shared,
         skip=skip,
         limit=limit,
+        q=q,
     )
 
 

@@ -2,12 +2,12 @@ from datetime import datetime, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.exceptions import ConflictError
-from src.core.utils import coerce_uuid
+from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from .models import Workspace
 from .schemas import WorkspaceCreate, WorkspaceUpdate
@@ -55,22 +55,57 @@ class WorkspaceService:
         )
         return result.scalars().all()
 
+    @staticmethod
+    def _apply_search(stmt, q: Optional[str]):
+        """Shared by list_visible() and count_visible() so the page and its total
+        cannot drift."""
+        if not (q and q.strip()):
+            return stmt
+        pattern = like_pattern(q.strip())
+        return stmt.where(
+            or_(
+                Workspace.display_name.ilike(pattern, escape=LIKE_ESCAPE),
+                Workspace.name.ilike(pattern, escape=LIKE_ESCAPE),
+            )
+        )
+
     @classmethod
     async def list_visible(
-        cls, db: AsyncSession, user, skip: int = 0, limit: int = 100
+        cls,
+        db: AsyncSession,
+        user,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
     ) -> Sequence[Workspace]:
-        """Workspaces the user owns or has a workspace-level grant on."""
+        """Workspaces the user owns or has a workspace-level grant on, matched
+        server-side by ``q`` so a search finds one past the first page."""
         from src.permissions.services import PermissionService
 
         condition = await PermissionService.workspace_view_filter(db, user)
+        stmt = cls._apply_search(
+            select(Workspace).where(Workspace.deleted_at.is_(None), condition), q
+        )
         result = await db.execute(
-            select(Workspace)
-            .where(Workspace.deleted_at.is_(None), condition)
-            .order_by(Workspace.id)
-            .offset(skip)
-            .limit(limit)
+            stmt.order_by(Workspace.id).offset(skip).limit(limit)
         )
         return result.scalars().all()
+
+    @classmethod
+    async def count_visible(
+        cls, db: AsyncSession, user, q: Optional[str] = None
+    ) -> int:
+        """Total visible workspaces, ignoring skip/limit — what the paginator needs."""
+        from src.permissions.services import PermissionService
+
+        condition = await PermissionService.workspace_view_filter(db, user)
+        stmt = cls._apply_search(
+            select(func.count(Workspace.id))
+            .select_from(Workspace)
+            .where(Workspace.deleted_at.is_(None), condition),
+            q,
+        )
+        return await db.scalar(stmt) or 0
 
     @classmethod
     async def create(

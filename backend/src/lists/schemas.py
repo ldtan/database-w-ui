@@ -37,5 +37,14 @@ class ListRead(ListBase):
     workspace: ResourceLink
     primary_column: Optional[ResourceLink] = None
     permissions_inherit: bool = True
+    # The workspace owner's username. A disambiguator for the "Shared with me"
+    # section, where several lists can share a display name; populated by the list
+    # endpoint (None elsewhere).
+    owner_username: Optional[str] = None
+    # The workspace's display name, but *only* when the caller can view that
+    # workspace. A list can be shared without its workspace (see "Shared with me"),
+    # and naming a workspace the caller was denied would leak it — so it stays None
+    # in exactly that case, and the UI falls back to the list's own slug.
+    workspace_display_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
