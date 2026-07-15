@@ -19,7 +19,7 @@ from src.core.exceptions import ConflictError, UnknownReferenceError, Validation
 from src.core.utils import coerce_uuid
 from src.infrastructure import database as db_module
 
-from ..columns.enums import PRINCIPAL_TYPES, ColumnType
+from ..columns.enums import COMPUTED_TYPES, PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
@@ -258,6 +258,10 @@ async def export_rows(
 
     async with db_module.SessionLocal() as db:
         columns = await _ordered_columns(db, list_id, column_names)
+        # Calculated columns store no value; exporting them would write blanks, and
+        # a re-import would then reject the header as a read-only column. Leave them
+        # out so a file this app writes imports cleanly back into it.
+        columns = [c for c in columns if c.type not in COMPUTED_TYPES]
         all_columns = await ListItemService._columns_by_key(db, list_id)
 
         # An export is a read of the records, so it must honor exactly the same
@@ -362,6 +366,10 @@ def _parse_cell(column: Column, raw: object):
     if raw is None:
         return _SKIP
     if isinstance(raw, str) and raw.strip() == "":
+        return _SKIP
+    if column.type in COMPUTED_TYPES:
+        # Derived on read and read-only on write: a value in the file for one is
+        # ignored rather than an error, so a hand-made file is forgiving.
         return _SKIP
 
     multiple = bool((column.config or {}).get("multiple"))

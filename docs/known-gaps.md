@@ -99,6 +99,42 @@ first crack in that: a second rulebook, in the copy that falls behind.
 
 ---
 
+## 5. Calculated columns are computed on read, and that has edges
+
+A `calculated` column stores no value. It carries a `formula` in its config — arithmetic over
+the list's **number** columns, referenced by name, plus `min`/`max`/`round`/`abs`/`IF` — and
+the value is produced in `_shape_for_read` (`items/services.py`) every time a record is read,
+injected under the column's uuid and never persisted. The formula is parsed and evaluated by
+`columns/formula.py`, which is a deliberately tiny AST walker with an allow-list: **it never
+calls `eval`**, and the only names it resolves are the column values handed to it, so a formula
+cannot reach a builtin, an attribute or a subscript. Keep it that way — the moment it grows an
+`eval` or a real namespace, a list editor (an ordinary user, not an admin) can run code.
+
+The compute-on-read choice buys correctness for free — editing a dependency or the formula is
+reflected on the next read, no backfill — at these costs, all currently accepted:
+
+- **You cannot filter, sort or search on a calculated column.** Its value is not in the stored
+  JSONB, so `apply_filters`/`apply_sorts`/`_apply_search` see nothing there. They don't error;
+  they just never match. Making them work means evaluating in Python (on-read can't push the
+  expression into SQL) — a real feature, not a patch.
+- **Exports leave calculated columns out** (`transfer/services.py`), and imports skip a value
+  for one. That keeps a file this app writes importing cleanly back into it, since the column
+  is read-only on write. Exporting the *computed value* would be a nice enhancement, but then a
+  re-import has to know to ignore it.
+- **No calc-on-calc.** A formula may only reference `number` columns, so it cannot reference
+  another calculated column (that would need cycle detection and recursive evaluation). Caught
+  at config time: the referenced column is not a `number`.
+- **References are by column *name*, and names are editable.** Rename a column a formula reads
+  and the formula silently stops finding it — a missing operand reads as blank (see below), so
+  the calculated cells quietly go empty rather than erroring. There is no reverse index from
+  formula to column yet; renaming is not re-checked.
+- **A missing operand makes the whole cell blank, not zero.** If any referenced cell is empty,
+  the result is `None` and the cell renders `—`. This is on purpose: an incomplete row should
+  read as incomplete, not as `0 * price`. Division by zero and non-finite results are blank the
+  same way — one bad row must not fail a whole list read.
+
+---
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

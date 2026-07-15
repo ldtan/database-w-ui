@@ -25,8 +25,11 @@ export function resolveFields(
   columns: Column[],
   form: Form | null,
 ): ResolvedField[] {
+  // A calculated column is computed on read and rejected on write, so it is never
+  // an input on a record form.
+  const editable = columns.filter((c) => c.type !== "calculated");
   if (form && form.config.fields && form.config.fields.length > 0) {
-    const byUuid = new Map(columns.map((c) => [c.uuid, c]));
+    const byUuid = new Map(editable.map((c) => [c.uuid, c]));
     return form.config.fields
       .filter((f) => f.included)
       .slice()
@@ -43,7 +46,7 @@ export function resolveFields(
       })
       .filter((x): x is ResolvedField => x !== null);
   }
-  return columns.map((c) => ({ column: c, enabled: true, label: c.display_name }));
+  return editable.map((c) => ({ column: c, enabled: true, label: c.display_name }));
 }
 
 export function serialize(column: Column, value: unknown): unknown {

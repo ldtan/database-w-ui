@@ -14,4 +14,5 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "User", value: "user" },
   { label: "Group", value: "group" },
   { label: "Lookup (link to another list)", value: "lookup" },
+  { label: "Calculated (formula)", value: "calculated" },
 ];

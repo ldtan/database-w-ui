@@ -310,6 +310,36 @@ class ColumnService:
                         "target list"
                     )
 
+        if type_ == ColumnType.calculated:
+            from .formula import column_refs, parse
+
+            formula = parse(data.get("formula"))
+            # Every referenced name must be an existing number column of this list.
+            # A calculated column referencing itself, or another calculated column,
+            # is caught here too: on update it is among these siblings and is not a
+            # `number`; on create its name is not present at all.
+            siblings = (
+                await db.execute(
+                    select(Column).where(
+                        Column.list_id == lst.id, Column.deleted_at.is_(None)
+                    )
+                )
+            ).scalars().all()
+            by_name = {c.name: c for c in siblings}
+            for name in sorted(column_refs(formula)):
+                target = by_name.get(name)
+                if target is None:
+                    raise ValidationError(
+                        f"Formula references unknown column '{name}'"
+                    )
+                if target.type != ColumnType.number:
+                    raise ValidationError(
+                        f"Formula can only reference number columns; "
+                        f"'{name}' is {target.type.value}"
+                    )
+            if data.get("default") is not None:
+                raise ValidationError("A calculated column cannot have a default")
+
         if type_ in PRINCIPAL_TYPES and data.get("default") is not None:
             # A default would have to name a specific account or group, which then
             # rots when that account is deleted. Same call as lookup makes.

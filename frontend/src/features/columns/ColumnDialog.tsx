@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
+import { InputTextarea } from "primereact/inputtextarea";
 import { InputNumber } from "primereact/inputnumber";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
@@ -53,6 +54,7 @@ export function ColumnDialog({
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   const [multiple, setMultiple] = useState(false);
+  const [formula, setFormula] = useState("");
 
   // Seed the form from the column being edited (or clear it for a new one) each
   // time the dialog opens.
@@ -73,6 +75,7 @@ export function ColumnDialog({
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
       setMultiple(false);
+      setFormula("");
       return;
     }
     const config = column.config ?? {};
@@ -93,6 +96,7 @@ export function ColumnDialog({
     setTargetListUuid((config.target_list_uuid as string) ?? null);
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
     setMultiple(!!config.multiple);
+    setFormula((config.formula as string) ?? "");
   }, [visible, column]);
 
   // Lists in this workspace are the candidate lookup targets (self included).
@@ -108,22 +112,36 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
     enabled: type === "lookup" && !!targetListUuid,
   });
+  // This list's own columns, so a formula can name the number columns it may use.
+  const ownColumns = useQuery({
+    queryKey: ["columns", listUuid],
+    queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
+    enabled: type === "calculated",
+  });
+  const numberNames = (ownColumns.data ?? [])
+    .filter((c) => c.type === "number" && c.uuid !== column?.uuid)
+    .map((c) => c.name);
 
   // A multi-value column holds an array, and the uniqueness check compares whole
   // stored values — so it would ask whether two records picked the *same set*,
   // which is not what anyone means by a unique column. Hide it, and clear it.
   const multiValued =
     (type === "user" || type === "group" || type === "lookup") && multiple;
+  // A calculated column is derived on read and stores no value, so required and
+  // unique have nothing to act on.
+  const isCalculated = type === "calculated";
 
   const save = useMutation({
     mutationFn: () => {
       // `unique` is always sent, never omitted: a config PATCH merges onto the
       // stored one, so leaving it out would preserve a `true` this dialog is
       // currently hiding — a constraint still enforced but no longer visible.
-      const config: Record<string, unknown> = {
-        required,
-        unique: multiValued ? false : unique,
-      };
+      const config: Record<string, unknown> = isCalculated
+        ? { formula: formula.trim() }
+        : {
+            required,
+            unique: multiValued ? false : unique,
+          };
       if (type === "text" || type === "long_text") {
         config.max_length = maxLength;
       }
@@ -365,16 +383,46 @@ export function ColumnDialog({
           </>
         )}
 
-        <div className="flex items-center gap-2">
-          <Checkbox
-            inputId="col-required"
-            checked={required}
-            onChange={(e) => setRequired(!!e.checked)}
-          />
-          <label htmlFor="col-required">Required</label>
-        </div>
+        {isCalculated && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor="col-formula">Formula</label>
+            <InputTextarea
+              id="col-formula"
+              value={formula}
+              onChange={(e) => setFormula(e.target.value)}
+              rows={2}
+              placeholder="qty * price"
+              style={{ fontFamily: "monospace" }}
+            />
+            <small style={{ color: "var(--text-muted)" }}>
+              Computed from other columns each time a record is read; it has no
+              stored value of its own. Use <code>+ - * /</code>, parentheses, and{" "}
+              <code>min</code>, <code>max</code>, <code>round</code>,{" "}
+              <code>abs</code>, <code>IF(cond, a, b)</code>.
+              {numberNames.length > 0 ? (
+                <>
+                  {" "}
+                  Number columns you can reference: {numberNames.join(", ")}.
+                </>
+              ) : (
+                <> Add a number column first — a formula can only reference those.</>
+              )}
+            </small>
+          </div>
+        )}
 
-        {!multiValued && (
+        {!isCalculated && (
+          <div className="flex items-center gap-2">
+            <Checkbox
+              inputId="col-required"
+              checked={required}
+              onChange={(e) => setRequired(!!e.checked)}
+            />
+            <label htmlFor="col-required">Required</label>
+          </div>
+        )}
+
+        {!isCalculated && !multiValued && (
           <div className="flex flex-col gap-2">
             <div className="flex items-center gap-2">
               <Checkbox
@@ -402,7 +450,8 @@ export function ColumnDialog({
             disabled={
               !displayName.trim() ||
               !isValidName(name) ||
-              (type === "lookup" && !targetListUuid)
+              (type === "lookup" && !targetListUuid) ||
+              (isCalculated && !formula.trim())
             }
           />
         </div>

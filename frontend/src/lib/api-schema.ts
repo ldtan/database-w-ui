@@ -738,6 +738,8 @@ export interface components {
             target_list_uuid?: string | null;
             /** Display Column Uuid */
             display_column_uuid?: string | null;
+            /** Formula */
+            formula?: string | null;
         };
         /** ColumnCreate */
         ColumnCreate: {
@@ -776,7 +778,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "long_text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "user" | "group" | "date" | "time" | "datetime";
+        ColumnType: "text" | "long_text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */

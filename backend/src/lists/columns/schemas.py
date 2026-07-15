@@ -49,6 +49,9 @@ class ColumnConfig(BaseModel):
     # which column of the target list to show as each row's label; defaults to
     # the target list's primary column when unset
     display_column_uuid: Optional[UUID] = None
+    # calculated — an expression over other columns of this list, by name. The
+    # column stores nothing; the value is computed on read. See columns/formula.py.
+    formula: Optional[str] = None
 
     model_config = ConfigDict(extra="forbid")
 

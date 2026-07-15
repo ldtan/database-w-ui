@@ -15,7 +15,13 @@ from src.workspaces.models import Workspace
 
 from src.auth.users.models import User, UserGroup
 
-from ..columns.enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
+from ..columns.enums import (
+    COMPUTED_TYPES,
+    PRINCIPAL_TYPES,
+    REFERENCE_TYPES,
+    ColumnType,
+)
+from ..columns.formula import evaluate, parse
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
@@ -145,17 +151,38 @@ class ListItemService:
     def _shape_for_read(columns: dict[str, Column], items: Sequence[ListItem]) -> None:
         """Present each record in its columns' declared shape.
 
+        Two things happen here: stored values are coerced to the shape their column
+        currently declares (see `coerce_shape`), and calculated columns — which
+        store nothing — have their value computed and injected under their own key.
+
         `set_committed_value`, not a plain assignment: this is a *presentation* fix,
         and marking the instance dirty would have the next flush write the coercion
-        back to the database — turning every read into a silent migration, inside
-        whatever transaction happened to be open.
+        (and the computed values, which must never be persisted) back to the
+        database — turning every read into a silent migration, inside whatever
+        transaction happened to be open.
         """
+        # Parse each formula once for the whole batch, and map column name -> key so
+        # a formula written in names can read the values stored under uuids.
+        computed = [
+            (key, column, parse(column.config["formula"]))
+            for key, column in columns.items()
+            if column.type in COMPUTED_TYPES and (column.config or {}).get("formula")
+        ]
+        key_of_name = {column.name: key for key, column in columns.items()}
+
         for item in items:
             data = item.data or {}
             shaped = {
                 key: coerce_shape(columns[key], value) if key in columns else value
                 for key, value in data.items()
             }
+            for key, _column, formula in computed:
+                inputs = {
+                    name: shaped.get(key_of_name[name])
+                    for name in formula.refs
+                    if name in key_of_name
+                }
+                shaped[key] = evaluate(formula, inputs)
             if shaped != data:
                 set_committed_value(item, "data", shaped)
 
@@ -344,7 +371,9 @@ class ListItemService:
         await db.flush()
         new_uuid = item.uuid
         await db.commit()
-        return await cls.get_by_uuid(db, lst.id, new_uuid)
+        # get_for_read, not get_by_uuid: the response renders the record, so it
+        # carries coerced values and any calculated column's computed value.
+        return await cls.get_for_read(db, lst.id, new_uuid)
 
     @classmethod
     async def update(
@@ -368,7 +397,8 @@ class ListItemService:
         if payload.permissions_inherit is not None:
             item.permissions_inherit = payload.permissions_inherit
         await db.commit()
-        return await cls.get_by_uuid(db, lst.id, uuid)
+        # get_for_read: see the note in create() — the response is a rendered record.
+        return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
     async def delete(
@@ -504,6 +534,14 @@ class ListItemService:
             column = columns.get(key)
             if column is None:
                 raise ValidationError(f"Unknown column '{key}' for this list")
+            if column.type in COMPUTED_TYPES:
+                # A calculated cell is derived on read and stores nothing, so there
+                # is nothing to set. Reject rather than silently drop it, so a client
+                # sending one learns it is not editable instead of wondering why its
+                # value vanished.
+                raise ValidationError(
+                    f"Column '{column.name}' is calculated and cannot be set"
+                )
             # Blank means empty, whatever the column type. Decided once, here, rather
             # than per type: otherwise "" clears a user cell but 400s a link cell
             # ("not a full URL"), and the same payload means different things
@@ -531,6 +569,9 @@ class ListItemService:
 
         # Apply defaults and enforce required, over the final merged record.
         for key, column in columns.items():
+            if column.type in COMPUTED_TYPES:
+                # No stored value, so no default to apply and nothing to require.
+                continue
             config = column.config or {}
             if result.get(key) is None:
                 default = config.get("default")

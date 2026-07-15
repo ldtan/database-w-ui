@@ -69,6 +69,7 @@ export interface ColumnConfig {
   multiple?: boolean;
   allowed_schemes?: string[];
   label?: string;
+  formula?: string;
   [key: string]: unknown;
 }
 
