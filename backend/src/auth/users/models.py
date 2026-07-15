@@ -45,11 +45,23 @@ class User(BaseModel):
     )
 
 
+# The virtual group every authenticated account implicitly belongs to. Seeded once
+# (see auth/seed.py), never given membership rows: the resolver injects it for every
+# user (see PermissionService._group_ids), so a grant to it means "everyone".
+AUTHENTICATED_USERS_NAME = "Authenticated Users"
+
+
 class UserGroup(BaseModel):
     __tablename__ = "user_groups"
 
     name: Mapped[str] = mapped_column(sa.String(50), unique=True)
     description: Mapped[Optional[str]] = mapped_column(sa.Text)
+    # System groups are seeded, not user-created: immutable, undeletable, and their
+    # membership is implicit (no rows in user_group_association). Currently just
+    # "Authenticated Users".
+    is_system: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, server_default=sa.false(), nullable=False
+    )
     users: Mapped[list[User]] = relationship(
         "User",
         secondary=user_group_association,

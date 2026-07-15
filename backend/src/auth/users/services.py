@@ -17,7 +17,7 @@ from src.lists.columns.enums import ColumnType
 from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash, verify_password
-from .models import User, UserGroup
+from .models import AUTHENTICATED_USERS_NAME, User, UserGroup
 from .schemas import UserCreate, UserGroupCreate, UserGroupUpdate, UserUpdate
 
 
@@ -275,6 +275,13 @@ class UserGroupService:
         )
 
     @staticmethod
+    def _guard_system_group(group: UserGroup) -> None:
+        if group.is_system:
+            raise PermissionDeniedError(
+                f"System group {AUTHENTICATED_USERS_NAME!r} is immutable"
+            )
+
+    @staticmethod
     def _select_any():
         """Deleted groups included — for resolving a uuid a record already holds."""
         return select(UserGroup).options(selectinload(UserGroup.users))
@@ -366,6 +373,11 @@ class UserGroupService:
 
     @classmethod
     async def create(cls, db: AsyncSession, payload: UserGroupCreate) -> UserGroup:
+        if payload.name == AUTHENTICATED_USERS_NAME:
+            raise PermissionDeniedError(
+                f"Group name {AUTHENTICATED_USERS_NAME!r} is reserved"
+            )
+
         users = await cls._resolve_users(db, payload.user_uuids)
         group = UserGroup(
             name=payload.name,
@@ -391,6 +403,8 @@ class UserGroupService:
         if group is None:
             return None
 
+        cls._guard_system_group(group)
+
         data = payload.model_dump(exclude_unset=True)
         if "user_uuids" in data:
             group.users = await cls._resolve_users(db, data.pop("user_uuids"))
@@ -414,6 +428,8 @@ class UserGroupService:
         group = await cls.get_by_uuid(db, uuid)
         if group is None:
             return False
+
+        cls._guard_system_group(group)
 
         group.deleted_at = datetime.now(timezone.utc)
         # Drop memberships so the group stops appearing in UserRead.groups.

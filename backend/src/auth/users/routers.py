@@ -15,7 +15,11 @@ from .schemas import (
     UserUpdate,
 )
 from .services import UserGroupService, UserService
-from src.core.exceptions import ConflictError, UnknownReferenceError
+from src.core.exceptions import (
+    ConflictError,
+    PermissionDeniedError,
+    UnknownReferenceError,
+)
 from src.infrastructure.database import get_db
 
 
@@ -169,6 +173,8 @@ async def create_group(
         return await UserGroupService.create(db, payload)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -216,6 +222,8 @@ async def update_group(
         group = await UserGroupService.update(db, uuid, payload)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -230,5 +238,8 @@ async def delete_group(
     db: AsyncSession = Depends(get_db),
     _: User = Depends(require_superuser),
 ):
-    if not await UserGroupService.delete(db, uuid):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    try:
+        if not await UserGroupService.delete(db, uuid):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
+    except PermissionDeniedError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc

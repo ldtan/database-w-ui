@@ -20,10 +20,12 @@ async def lifespan(app: FastAPI):
 
     await init_db()
 
-    # Seed the first user so there is an account to authenticate with
-    from src.auth.seed import seed_initial_data
+    # Seed the first user so there is an account to authenticate with, and the
+    # virtual system groups the permission resolver relies on.
+    from src.auth.seed import ensure_system_groups, seed_initial_data
     async with SessionLocal() as db:
         await seed_initial_data(db)
+        await ensure_system_groups(db)
 
     yield
     # Shutdown logic (if any) would go here

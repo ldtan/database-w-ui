@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
-from src.auth.users.models import User, user_group_association
+from src.auth.users.models import User, UserGroup, user_group_association
 from src.auth.users.services import UserGroupService, UserService
 from src.core.exceptions import PermissionDeniedError, UnknownReferenceError
 from src.core.utils import coerce_uuid
@@ -86,7 +86,24 @@ class PermissionService:
         return (chain, ws.owner_id)
 
     @staticmethod
-    async def _group_ids(db: AsyncSession, user_id: int) -> list[int]:
+    async def _system_group_ids(db: AsyncSession) -> list[int]:
+        """The virtual groups every authenticated caller belongs to — currently just
+        "Authenticated Users", whose membership is implicit (no rows in
+        user_group_association). Cached per session: it is stable for the life of a
+        request and read on every authorization check."""
+        cached = db.info.get("system_group_ids")
+        if cached is None:
+            rows = await db.execute(
+                select(UserGroup.id).where(
+                    UserGroup.is_system.is_(True), UserGroup.deleted_at.is_(None)
+                )
+            )
+            cached = [row[0] for row in rows.all()]
+            db.info["system_group_ids"] = cached
+        return cached
+
+    @classmethod
+    async def _group_ids(cls, db: AsyncSession, user_id: int) -> list[int]:
         # Query membership directly rather than touching user.groups: under asyncpg
         # a lazy relationship load outside the greenlet raises MissingGreenlet, and
         # the DISABLE_AUTH user isn't loaded with groups eager-loaded.
@@ -95,7 +112,13 @@ class PermissionService:
                 user_group_association.c.user_id == user_id
             )
         )
-        return [row[0] for row in rows.all()]
+        ids = [row[0] for row in rows.all()]
+        # Every authenticated user is implicitly in the system group(s); _group_ids is
+        # only ever called for a resolved user, so this is exactly "Authenticated
+        # Users". A grant to that group therefore reaches everyone, here and through
+        # every collection filter that shares this helper.
+        ids += await cls._system_group_ids(db)
+        return ids
 
     @staticmethod
     def _not_expired() -> ColumnElement[bool]:

@@ -58,5 +58,9 @@ class UserGroupUpdate(BaseModel):
 class UserGroupRead(UserGroupBase):
     uuid: UUID
     users: List[ResourceLink] = Field(default_factory=list)
+    # A system group (e.g. "Authenticated Users") is immutable and its membership is
+    # implicit — an empty `users` means *everyone*, not nobody, so the UI reads this
+    # flag to render it correctly and to hide edit/delete.
+    is_system: bool = False
     is_deleted: bool = False
     model_config = ConfigDict(from_attributes=True)

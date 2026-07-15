@@ -12,9 +12,11 @@ from httpx import ASGITransport, AsyncClient
 
 from main import create_app
 from src.auth.dependencies import get_current_user
+from src.auth.users.models import AUTHENTICATED_USERS_NAME
 from src.auth.users.schemas import UserCreate, UserGroupCreate
 from src.auth.users.services import UserGroupService, UserService
 from src.infrastructure import database as db_module
+from src.auth.seed import ensure_system_groups
 
 
 async def _make_user(db, name: str, superuser: bool = False):
@@ -130,6 +132,26 @@ async def test_cannot_self_add_to_a_group(make_client, session_factory):
 
         assert (await client.post("/api/auth/groups/", json={"name": "mine"})).status_code == 403
         assert (await client.delete(f"/api/auth/groups/{group_uuid}")).status_code == 403
+
+
+async def test_system_group_is_immutable(make_client, session_factory):
+    """The virtual 'Authenticated Users' group exists only for the resolver."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "root2", superuser=True)
+        await ensure_system_groups(db)
+        group = await UserGroupService.get_by_name(db, AUTHENTICATED_USERS_NAME)
+        assert group is not None
+        group_uuid = str(group.uuid)
+
+    async with make_client(admin) as client:
+        resp = await client.patch(
+            f"/api/auth/groups/{group_uuid}",
+            json={"name": "tampered"},
+        )
+        assert resp.status_code == 403
+
+        resp = await client.delete(f"/api/auth/groups/{group_uuid}")
+        assert resp.status_code == 403
 
 
 async def test_cannot_promote_self_to_superuser(make_client, session_factory):
