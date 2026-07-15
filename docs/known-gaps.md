@@ -141,6 +141,81 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
+## 6. There is no trash: soft-deleted things can be neither restored nor purged from the UI
+
+Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
+record, user or group only sets `deleted_at`, and the two purge jobs (`purge_deleted_items`,
+`purge_deleted_principals`) hard-delete once a target is past its retention window. What is
+missing is any **surface** for it — a trash listing everything currently soft-deleted, with
+**restore** and **delete-for-good** actions.
+
+Restore does not exist as an operation yet; the soft-delete contract was built precisely to
+make it *possible* (references to a deleted target are kept intact, so a restored record comes
+back with its inbound relationships), but nothing clears `deleted_at`. So this is a new service
+method and endpoint per resource type, not just a page:
+
+- **Restore** = clear `deleted_at`, with two edges. A `unique` column may have gained a
+  duplicate while the record sat in the bin, so restore has to run through `_enforce_unique`
+  and can legitimately fail. And a record can come back in a shape its column no longer accepts
+  (its `multiple` was toggled meanwhile) — the same tolerance `reconcile_shapes` exists for,
+  which is exactly why that job **includes soft-deleted rows**.
+- **Delete for good** = the purge path, run on demand for one target instead of by the cron
+  sweep. It must still clear the target's grants (see gap 3) and, for a record, its
+  now-dangling references — the purge is the only thing that hard-deletes.
+
+Two scoping calls to make first:
+
+- **Records are cheap; lists are not.** Deleting a *list* is the deliberate exception that
+  *does* scrub, and restoring one "would mean un-cascading its columns, records, views and
+  forms — a feature that does not exist" (see "Deleting a list is the deliberate exception").
+  So a first trash is records, and maybe principals — not lists.
+- **Who may do it.** The intended scope is superusers only, but `is_superuser` is deliberately
+  **orthogonal to data access** (see "`is_superuser` and the permission model are orthogonal") —
+  a superuser administers identities, not other people's records, and gating record restore on
+  it would be the first place that stops being true. The consistent authority over data is the
+  **workspace owner** (the implicit superuser of their own data). Decide whether the bin is
+  per-workspace and owner-driven, global and superuser-driven, or both, before writing the list
+  endpoint — it changes what that query filters on, and the answer for records (owner) may
+  differ from the answer for accounts and groups (genuinely superuser, since those *are*
+  identity administration).
+
+Only targets still *within* the retention window belong in the bin; once purged they are
+unrecoverable and simply gone from it.
+
+## 7. New lists start with no audit columns (created_at / updated_at / created_by / updated_by)
+
+A freshly created list has exactly the columns someone adds by hand. The common four — when a
+record was created and last changed, and by whom — are now **buildable from the machinery in
+place**: the column `default` and `onupdate` values give `created_at` a `today`/`now` default,
+`updated_at` an `onupdate: now`, `created_by` a `current_user` default, and `updated_by` an
+`onupdate: current_user`. On-update values are already auto-managed — re-stamped on every edit
+and not settable by hand — which is exactly the audit-column contract, so no new backend concept
+is required; the work is seeding them.
+
+`ListService.create` would add the four columns once the list row exists. The design calls to
+make:
+
+- **Ordinary columns, or protected ones?** The config-driven design means anything seeded here
+  shows up in the grid, the record forms and exports for free — but an audit column a user can
+  freely edit, reorder into the middle, or delete is only half an audit column. `updated_*` are
+  already un-settable via `onupdate`; `created_*` are plain defaults and *can* be overwritten on
+  create unless marked `read_only` — which today is a UI hint, **not enforced** (see
+  `ColumnConfig`). Decide whether these are deletable/renamable at all, and whether their
+  read-only-ness needs to become enforced rather than advisory.
+- **Name collisions.** Column names are unique per list (`uq_columns_list_name`). Seeding runs
+  at creation on an empty list, so there is no existing data to collide with, but the four names
+  become reserved from that point — a user who wanted a plain `created_at` of their own can't
+  have it.
+- **New lists only.** Existing lists are unaffected; there is no backfill, and adding these to a
+  list after the fact is just the normal "add column" flow. A per-list opt-out at creation is
+  worth considering — not every scratch list wants four audit columns.
+
+Note `created_by`/`updated_by` are `user` columns, so they label by **username** and store a
+uuid, like every principal cell — which is the right privacy posture (see "A user cell must
+never resolve to a person's real name").
+
+---
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers
