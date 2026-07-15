@@ -220,6 +220,71 @@ async def test_dynamic_default_today(client, list_uuid, add_column):
     assert resp.json()["data"][col] == date.today().isoformat()
 
 
+async def test_static_default_applied_when_empty(client, list_uuid, add_column):
+    col = await add_column(
+        list_uuid, name="qty", display_name="Qty", type="number",
+        config={"default": 7},
+    )
+    # Absent -> the default is filled in.
+    empty = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert empty.status_code == 201, empty.text
+    assert empty.json()["data"][col] == 7
+    # A provided value wins over the default.
+    given = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: 3}})
+    assert given.json()["data"][col] == 3
+
+
+async def test_static_default_must_be_valid(client, list_uuid):
+    # A default that is not itself a valid value for the column is rejected up front.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "qty", "display_name": "Qty", "type": "number",
+            "config": {"default": 5, "max": 3},
+        },
+    )
+    assert resp.status_code == 400, resp.text
+
+
+async def test_onupdate_stamps_on_create_and_edit(client, list_uuid, add_column):
+    stamped = await add_column(
+        list_uuid, name="touched", display_name="Touched", type="datetime",
+        config={"onupdate": "now"},
+    )
+    other = await add_column(
+        list_uuid, name="note", display_name="Note", type="text",
+    )
+    # Stamped at create even though nothing was sent for it.
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {other: "a"}}
+    )
+    assert created.status_code == 201, created.text
+    first = created.json()["data"][stamped]
+    assert first  # a concrete datetime string
+
+    item_uuid = created.json()["uuid"]
+    # Editing any field re-stamps it, and a value the client tries to set is ignored.
+    edited = await client.patch(
+        f"/api/lists/{list_uuid}/items/{item_uuid}",
+        json={"data": {other: "b", stamped: "1999-01-01T00:00:00"}},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["data"][stamped] != "1999-01-01T00:00:00"
+    assert edited.json()["data"][stamped] >= first
+
+
+async def test_onupdate_rejected_on_unsupported_type(client, list_uuid):
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "note", "display_name": "Note", "type": "text",
+            "config": {"onupdate": "now"},
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    assert "on-update" in resp.json()["detail"].lower()
+
+
 async def test_unique_sequential_conflict(client, list_uuid, add_column):
     col = await add_column(
         list_uuid, name="email", display_name="Email", type="text",

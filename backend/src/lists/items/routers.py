@@ -40,7 +40,7 @@ async def create_item(
         db, current_user, ResourceType.list, lst.id, Action.create
     )
     try:
-        return await ListItemService.create(db, lst, payload)
+        return await ListItemService.create(db, lst, payload, user=current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
@@ -141,7 +141,7 @@ async def update_item(
             db, current_user, ResourceType.item, item.id, Action.share
         )
     try:
-        item = await ListItemService.update(db, lst, uuid, payload)
+        item = await ListItemService.update(db, lst, uuid, payload, user=current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:

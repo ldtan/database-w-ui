@@ -63,6 +63,8 @@ export interface ChoiceOption {
 
 export interface ColumnConfig {
   required?: boolean;
+  default?: unknown;
+  onupdate?: unknown;
   options?: ChoiceOption[];
   target_list_uuid?: string;
   display_column_uuid?: string;

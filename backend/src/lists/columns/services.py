@@ -19,6 +19,8 @@ from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
+    ONUPDATE_TYPES,
+    dynamic_tokens,
     is_dynamic_default,
     resolve_choice_options,
     validate_config_constraints,
@@ -346,9 +348,36 @@ class ColumnService:
                 raise ValidationError("A calculated column cannot have a default")
 
         if type_ in PRINCIPAL_TYPES and data.get("default") is not None:
-            # A default would have to name a specific account or group, which then
-            # rots when that account is deleted. Same call as lookup makes.
-            raise ValidationError(f"A {type_.value} column cannot have a default value")
+            # A user column may default to the acting user — a dynamic token resolved
+            # per record, not a stored account id, so nothing rots when accounts are
+            # deleted. Any other default (a named account, a group) would, so it is
+            # refused, the same call lookup makes.
+            if not (
+                type_ == ColumnType.user
+                and is_dynamic_default(type_, data.get("default"))
+            ):
+                raise ValidationError(
+                    "A user column's default can only be the current user"
+                    if type_ == ColumnType.user
+                    else f"A {type_.value} column cannot have a default value"
+                )
+
+        # An on-update value is only meaningful for the types with a dynamic token
+        # to re-stamp (a "last modified" date, a "last edited by" user), and must be
+        # one of those tokens — there is no static onupdate.
+        onupdate = data.get("onupdate")
+        if onupdate is not None:
+            if type_ not in ONUPDATE_TYPES:
+                raise ValidationError(
+                    "An on-update value is only available for date, time, datetime, "
+                    "and user columns"
+                )
+            if not is_dynamic_default(type_, onupdate):
+                allowed = ", ".join(sorted(dynamic_tokens(type_)))
+                raise ValidationError(
+                    f"An on-update value for a {type_.value} column must be one of: "
+                    f"{allowed}"
+                )
 
         if type_ == ColumnType.link and isinstance(data.get("default"), str):
             # Stored stripped, like a link value, so the default that is written into

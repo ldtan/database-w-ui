@@ -37,23 +37,40 @@ def link_schemes(config: dict) -> list[str]:
     schemes = config.get("allowed_schemes")
     return list(schemes) if schemes else list(_DEFAULT_LINK_SCHEMES)
 
-# Special `default` tokens for temporal columns, resolved at record-insert time.
+# Dynamic tokens for a column's `default`/`onupdate`: values not fixed at config
+# time but resolved per record when it is written. Temporal columns stamp the
+# current date/time; a user column stamps whoever is making the write.
+CURRENT_USER = "current_user"
 _DYNAMIC_DEFAULTS = {
     ColumnType.date: {"today"},
     ColumnType.time: {"now"},
     ColumnType.datetime: {"now"},
+    ColumnType.user: {CURRENT_USER},
 }
+# Types allowed an `onupdate`: a value re-stamped on create and on every edit. Its
+# tokens are the same as the type's default — there is no static onupdate value.
+ONUPDATE_TYPES = frozenset(_DYNAMIC_DEFAULTS)
+
+
+def dynamic_tokens(column_type: ColumnType) -> set:
+    """The dynamic default/onupdate tokens this column type accepts."""
+    return _DYNAMIC_DEFAULTS.get(column_type, set())
 
 
 def is_dynamic_default(column_type: ColumnType, default) -> bool:
-    """True if ``default`` is a dynamic token (e.g. "today"/"now") for this type."""
-    return isinstance(default, str) and default in _DYNAMIC_DEFAULTS.get(column_type, set())
+    """True if ``default`` is a dynamic token ("today"/"now"/"current_user")."""
+    return isinstance(default, str) and default in dynamic_tokens(column_type)
 
 
-def resolve_dynamic_default(column_type: ColumnType, default):
-    """Resolve a dynamic default token to a concrete ISO string; else pass through."""
+def resolve_dynamic_default(column_type: ColumnType, default, user=None):
+    """Resolve a dynamic token to a concrete value; else pass the value through.
+
+    Temporal tokens become an ISO string for *now*; ``current_user`` becomes the
+    acting user's uuid (or None when there is no acting user to attribute it to)."""
     if not is_dynamic_default(column_type, default):
         return default
+    if column_type == ColumnType.user:
+        return str(user.uuid) if user is not None else None
     now = datetime.now()
     if column_type == ColumnType.date:
         return now.date().isoformat()

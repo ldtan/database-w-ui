@@ -227,3 +227,43 @@ async def test_a_blank_value_clears_the_cell(client, list_uuid, alice):
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["data"][col] is None
 
+
+
+async def _current_user_uuid(session_factory) -> str:
+    """The account requests act as under DISABLE_AUTH: the first (seeded) user."""
+    async with session_factory() as db:
+        user = await UserService.get_by_username(db, "tester")
+        return str(user.uuid)
+
+
+async def test_user_default_is_the_current_user(client, session_factory, list_uuid):
+    """A user column may default to whoever is writing the record — a dynamic token,
+    resolved to their uuid per record, not a stored account id that could rot."""
+    me = await _current_user_uuid(session_factory)
+    col = await _add(client, list_uuid, "user", default="current_user")
+    resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][col] == me
+
+
+async def test_user_onupdate_stamps_the_current_user(
+    client, session_factory, list_uuid
+):
+    me = await _current_user_uuid(session_factory)
+    col = await _add(client, list_uuid, "user", onupdate="current_user")
+    created = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert created.status_code == 201, created.text
+    assert created.json()["data"][col] == me
+
+
+async def test_group_cannot_have_a_default(client, list_uuid):
+    # No dynamic token stands in for "the current group", so a group default (even
+    # the user token) is refused, as before.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "team", "display_name": "Team", "type": "group",
+            "config": {"default": "current_user"},
+        },
+    )
+    assert resp.status_code == 400, resp.text

@@ -6,6 +6,7 @@ import { InputTextarea } from "primereact/inputtextarea";
 import { InputNumber } from "primereact/inputnumber";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
+import { Calendar } from "primereact/calendar";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
@@ -14,8 +15,23 @@ import { api, ApiError } from "../../lib/api";
 import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
+import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { ChoiceOption, Column, ColumnType, ListRead } from "../../lib/types";
+
+// The dynamic default/on-update token a type auto-fills with, and its human label.
+// Temporal columns stamp the current date/time; a user column stamps the actor.
+function dynamicToken(type: ColumnType): string | null {
+  if (type === "date") return "today";
+  if (type === "time" || type === "datetime") return "now";
+  if (type === "user") return "current_user";
+  return null;
+}
+function dynamicLabel(type: ColumnType): string {
+  return type === "date" ? "Today" : type === "user" ? "Current user" : "Now";
+}
+// Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
+const SPECIFIC = "__specific__";
 
 interface Props {
   listUuid: string;
@@ -55,6 +71,29 @@ export function ColumnDialog({
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   const [multiple, setMultiple] = useState(false);
   const [formula, setFormula] = useState("");
+  // Default value — one piece of state per family of column type; only the one
+  // matching `type` is read when the config is built.
+  const [defaultText, setDefaultText] = useState(""); // text / long_text / link
+  const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
+  const [defaultChecked, setDefaultChecked] = useState(false);
+  const [defaultChoice, setDefaultChoice] = useState<string | null>(null); // by label
+  const [defaultTemporal, setDefaultTemporal] = useState(""); // "" | token | SPECIFIC
+  const [defaultDate, setDefaultDate] = useState<Date | null>(null); // when SPECIFIC
+  const [defaultUser, setDefaultUser] = useState(""); // "" | "current_user"
+  const [onUpdate, setOnUpdate] = useState(""); // "" | token (temporal / user only)
+
+  // Clear every default/on-update control. Called when starting a new column and
+  // when the type changes, so a value entered for one type can't leak into another.
+  function resetDefaults() {
+    setDefaultText("");
+    setDefaultNumber(null);
+    setDefaultChecked(false);
+    setDefaultChoice(null);
+    setDefaultTemporal("");
+    setDefaultDate(null);
+    setDefaultUser("");
+    setOnUpdate("");
+  }
 
   // Seed the form from the column being edited (or clear it for a new one) each
   // time the dialog opens.
@@ -76,6 +115,7 @@ export function ColumnDialog({
       setDisplayColumnUuid(null);
       setMultiple(false);
       setFormula("");
+      resetDefaults();
       return;
     }
     const config = column.config ?? {};
@@ -97,6 +137,31 @@ export function ColumnDialog({
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
+
+    // Seed the default/on-update controls from the stored config.
+    resetDefaults();
+    const def = config.default;
+    if (typeof def === "string") setDefaultText(def);
+    if (typeof def === "number") setDefaultNumber(def);
+    setDefaultChecked(def === true);
+    // A choice default is stored as an option id; show it by its label.
+    const opt = ((config.options as ChoiceOption[]) ?? []).find(
+      (o) => o.id === def,
+    );
+    if (opt) setDefaultChoice(opt.label);
+    else if (typeof def === "string") setDefaultChoice(def);
+    if (isTemporal(column.type)) {
+      const token = dynamicToken(column.type);
+      if (def == null) setDefaultTemporal("");
+      else if (def === token) setDefaultTemporal(token);
+      else {
+        setDefaultTemporal(SPECIFIC);
+        setDefaultDate(parseTemporal(column.type, def));
+      }
+    }
+    if (column.type === "user" && def === "current_user")
+      setDefaultUser("current_user");
+    if (typeof config.onupdate === "string") setOnUpdate(config.onupdate);
   }, [visible, column]);
 
   // Lists in this workspace are the candidate lookup targets (self included).
@@ -136,6 +201,21 @@ export function ColumnDialog({
   // unique have nothing to act on.
   const isCalculated = type === "calculated";
 
+  // Types that offer an auto-stamp on write (a "last modified" date, "edited by" user).
+  const supportsOnUpdate = isTemporal(type) || type === "user";
+  // The default is hidden once an on-update stamp is set: the stamp always
+  // overwrites, so a default could never take effect, and showing both misleads.
+  const showDefault =
+    !isCalculated &&
+    type !== "lookup" &&
+    type !== "group" &&
+    !(supportsOnUpdate && onUpdate !== "");
+  // Option labels for the choice "default option" dropdown (ids are assigned server-side).
+  const choiceLabels = choices
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+
   const save = useMutation({
     mutationFn: () => {
       // `unique` is always sent, never omitted: a config PATCH merges onto the
@@ -162,6 +242,31 @@ export function ColumnDialog({
         config.target_list_uuid = targetListUuid;
         config.display_column_uuid = displayColumnUuid;
         config.multiple = multiple;
+      }
+
+      // Default value — sent for every type that supports one (not lookup, group,
+      // or calculated). Always sent, even when empty, so clearing it on edit takes
+      // effect: a config PATCH merges, so an omitted key would keep the old default.
+      if (!isCalculated && type !== "lookup" && type !== "group") {
+        let defaultValue: unknown = null;
+        if (type === "text" || type === "long_text" || type === "link")
+          defaultValue = defaultText.trim() || null;
+        else if (type === "number") defaultValue = defaultNumber;
+        else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
+        else if (type === "choice") defaultValue = defaultChoice || null;
+        else if (isTemporal(type))
+          defaultValue =
+            defaultTemporal === SPECIFIC
+              ? defaultDate
+                ? serializeTemporal(type, defaultDate)
+                : null
+              : defaultTemporal || null;
+        else if (type === "user") defaultValue = defaultUser || null;
+        config.default = defaultValue;
+      }
+      // On-update auto-stamp — temporal and user columns only.
+      if (isTemporal(type) || type === "user") {
+        config.onupdate = onUpdate || null;
       }
 
       if (editing) {
@@ -239,7 +344,11 @@ export function ColumnDialog({
             inputId="col-type"
             value={type}
             options={COLUMN_TYPE_OPTIONS}
-            onChange={(e) => setType(e.value as ColumnType)}
+            onChange={(e) => {
+              setType(e.value as ColumnType);
+              // The default/on-update controls are type-specific.
+              resetDefaults();
+            }}
             disabled={editing}
           />
           {editing && (
@@ -418,6 +527,109 @@ export function ColumnDialog({
                   Add a number or text column first — a formula references those.
                 </>
               )}
+            </small>
+          </div>
+        )}
+
+        {showDefault && (
+          <div className="flex flex-col gap-2">
+            {type !== "checkbox" && (
+              <label htmlFor="col-default">Default value</label>
+            )}
+            {(type === "text" || type === "long_text" || type === "link") && (
+              <InputText
+                id="col-default"
+                value={defaultText}
+                onChange={(e) => setDefaultText(e.target.value)}
+                placeholder={
+                  type === "link" ? "https://example.com" : "Used when left blank"
+                }
+              />
+            )}
+            {type === "number" && (
+              <InputNumber
+                inputId="col-default"
+                value={defaultNumber}
+                onValueChange={(e) => setDefaultNumber(e.value ?? null)}
+                useGrouping={false}
+              />
+            )}
+            {type === "checkbox" && (
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  inputId="col-default"
+                  checked={defaultChecked}
+                  onChange={(e) => setDefaultChecked(!!e.checked)}
+                />
+                <label htmlFor="col-default">New records start checked</label>
+              </div>
+            )}
+            {type === "choice" && (
+              <Dropdown
+                inputId="col-default"
+                value={defaultChoice}
+                options={choiceLabels.map((l) => ({ label: l, value: l }))}
+                onChange={(e) => setDefaultChoice(e.value ?? null)}
+                placeholder="No default"
+                showClear
+              />
+            )}
+            {isTemporal(type) && (
+              <>
+                <Dropdown
+                  inputId="col-default"
+                  value={defaultTemporal}
+                  options={[
+                    { label: "No default", value: "" },
+                    {
+                      label: dynamicLabel(type),
+                      value: dynamicToken(type) as string,
+                    },
+                    { label: "Specific value…", value: SPECIFIC },
+                  ]}
+                  onChange={(e) => setDefaultTemporal(e.value)}
+                />
+                {defaultTemporal === SPECIFIC && (
+                  <Calendar
+                    value={defaultDate}
+                    onChange={(e) => setDefaultDate((e.value as Date) ?? null)}
+                    dateFormat="yy-mm-dd"
+                    timeOnly={type === "time"}
+                    showTime={type === "datetime"}
+                    showButtonBar={type === "date"}
+                  />
+                )}
+              </>
+            )}
+            {type === "user" && (
+              <Dropdown
+                inputId="col-default"
+                value={defaultUser}
+                options={[
+                  { label: "No default", value: "" },
+                  { label: "Current user", value: "current_user" },
+                ]}
+                onChange={(e) => setDefaultUser(e.value)}
+              />
+            )}
+          </div>
+        )}
+
+        {supportsOnUpdate && (
+          <div className="flex flex-col gap-2">
+            <label htmlFor="col-onupdate">On update</label>
+            <Dropdown
+              inputId="col-onupdate"
+              value={onUpdate}
+              options={[
+                { label: "Off", value: "" },
+                { label: dynamicLabel(type), value: dynamicToken(type) as string },
+              ]}
+              onChange={(e) => setOnUpdate(e.value)}
+            />
+            <small style={{ color: "var(--text-muted)" }}>
+              Filled in automatically when a record is created and re-stamped on
+              every edit; it isn't set by hand.
             </small>
           </div>
         )}

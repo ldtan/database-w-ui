@@ -360,10 +360,12 @@ class ListItemService:
 
     @classmethod
     async def create(
-        cls, db: AsyncSession, lst: List, payload: ListItemCreate
+        cls, db: AsyncSession, lst: List, payload: ListItemCreate, user=None
     ) -> ListItem:
         columns = await cls._columns_by_key(db, lst.id)
-        data = await cls._validate_data(db, lst, columns, payload.data, existing=None)
+        data = await cls._validate_data(
+            db, lst, columns, payload.data, existing=None, user=user
+        )
         await cls._enforce_unique(db, lst.id, columns, data, exclude_id=None)
 
         item = ListItem(list_id=lst.id, data=data)
@@ -382,6 +384,7 @@ class ListItemService:
         lst: List,
         uuid: Union[str, UUID],
         payload: ListItemUpdate,
+        user=None,
     ) -> Optional[ListItem]:
         item = await cls.get_by_uuid(db, lst.id, uuid)
         if item is None:
@@ -389,7 +392,7 @@ class ListItemService:
 
         columns = await cls._columns_by_key(db, lst.id)
         merged = await cls._validate_data(
-            db, lst, columns, payload.data, existing=item.data or {}
+            db, lst, columns, payload.data, existing=item.data or {}, user=user
         )
         await cls._enforce_unique(db, lst.id, columns, merged, exclude_id=item.id)
         # Reassign a new dict so SQLAlchemy detects the JSONB change.
@@ -525,9 +528,13 @@ class ListItemService:
         columns: dict[str, Column],
         incoming: dict,
         existing: Optional[dict],
+        user=None,
     ) -> dict:
         """Validate incoming values against the schema and return the record to
-        store. When ``existing`` is given the update is a partial merge."""
+        store. When ``existing`` is given the update is a partial merge.
+
+        ``user`` is the account making the write, needed to resolve a `current_user`
+        default/onupdate; the temporal tokens do not need it."""
         result = dict(existing) if existing is not None else {}
 
         for key, value in incoming.items():
@@ -567,16 +574,27 @@ class ListItemService:
             kept = _as_set((existing or {}).get(key))
             result[key] = await cls._validate_value(db, lst, column, value, kept)
 
-        # Apply defaults and enforce required, over the final merged record.
+        # Apply defaults / on-update stamps and enforce required, over the merged
+        # record. `coerce_shape` so a resolved token lands in the column's declared
+        # shape (a `multiple` user column stores ["<uuid>"], not "<uuid>").
         for key, column in columns.items():
             if column.type in COMPUTED_TYPES:
                 # No stored value, so no default to apply and nothing to require.
                 continue
             config = column.config or {}
-            if result.get(key) is None:
+            onupdate = config.get("onupdate")
+            if onupdate is not None:
+                # Auto-managed: re-stamped on create and every edit, overwriting
+                # whatever is there — an editor cannot set it by hand.
+                result[key] = coerce_shape(
+                    column, resolve_dynamic_default(column.type, onupdate, user=user)
+                )
+            elif result.get(key) is None:
                 default = config.get("default")
                 if default is not None:
-                    result[key] = resolve_dynamic_default(column.type, default)
+                    result[key] = coerce_shape(
+                        column, resolve_dynamic_default(column.type, default, user=user)
+                    )
             if config.get("required") and cls._is_empty(result.get(key)):
                 raise ValidationError(f"Column '{column.name}' is required")
 

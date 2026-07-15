@@ -21,6 +21,9 @@ class ColumnConfig(BaseModel):
     # Common (all types)
     required: bool = False
     default: Any = None
+    # date/time/datetime/user only: a dynamic token ("today"/"now"/"current_user")
+    # re-stamped onto the cell on create and on every edit (see columns/validation).
+    onupdate: Any = None
     help_text: Optional[str] = None
     unique: bool = False  # enforced: no two records may share the value
     placeholder: Optional[str] = None  # UI hint, not enforced

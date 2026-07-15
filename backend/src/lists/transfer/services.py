@@ -411,12 +411,14 @@ async def import_records(
     db: AsyncSession,
     lst: List,
     rows: Iterable[Tuple[int, dict]],
+    user=None,
 ) -> dict:
     """Validate and insert rows through the item service. ``rows`` yields
     ``(row_number, values)`` pairs so the caller controls how a row maps to a
     file line. Each row runs in a savepoint so a failure is isolated; commits
     happen in batches and the committed rows are expunged so memory stays flat
-    over a large import. Returns a summary dict {created, errors}."""
+    over a large import. ``user`` is the importer, attributed to any
+    `current_user` default/onupdate. Returns a summary dict {created, errors}."""
     columns = await ListItemService._columns_by_key(db, lst.id)
     by_name = {c.name: c for c in columns.values()}
 
@@ -437,7 +439,7 @@ async def import_records(
 
             async with db.begin_nested():
                 data = await ListItemService._validate_data(
-                    db, lst, columns, incoming, existing=None
+                    db, lst, columns, incoming, existing=None, user=user
                 )
                 await ListItemService._enforce_unique(
                     db, lst.id, columns, data, exclude_id=None

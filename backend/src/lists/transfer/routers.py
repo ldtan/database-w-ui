@@ -89,7 +89,7 @@ async def import_list(
         elements = parsed if isinstance(parsed, list) else [parsed]
         # Number JSON rows by their 1-based position in the array.
         rows = ((i, element) for i, element in enumerate(elements, start=1))
-        summary = await import_records(db, lst, rows)
+        summary = await import_records(db, lst, rows, user=current_user)
     else:
         raw = await file.read()
         text = raw.decode("utf-8-sig")
@@ -97,5 +97,5 @@ async def import_list(
         # reader.line_num is the actual source line of the row just read, so
         # reported rows stay accurate even when the file has blank lines.
         rows = ((reader.line_num, row) for row in reader)
-        summary = await import_records(db, lst, rows)
+        summary = await import_records(db, lst, rows, user=current_user)
     return summary

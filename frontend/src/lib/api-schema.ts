@@ -694,6 +694,8 @@ export interface components {
             required: boolean;
             /** Default */
             default?: unknown;
+            /** Onupdate */
+            onupdate?: unknown;
             /** Help Text */
             help_text?: string | null;
             /**
