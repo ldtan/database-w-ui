@@ -349,6 +349,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deleted Items */
+        get: operations["list_deleted_items_api_lists__list_uuid__items_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/bulk-delete": {
         parameters: {
             query?: never;
@@ -400,6 +417,23 @@ export interface paths {
         head?: never;
         /** Update Item */
         patch: operations["update_item_api_lists__list_uuid__items__uuid__patch"];
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Item */
+        post: operations["restore_item_api_lists__list_uuid__items__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/lists/{list_uuid}/views/": {
@@ -801,6 +835,28 @@ export interface components {
             /** Position */
             position?: number | null;
             config?: components["schemas"]["ColumnConfig"] | null;
+        };
+        /** DeletedListItemRead */
+        DeletedListItemRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /**
+             * Permissions Inherit
+             * @default true
+             */
+            permissions_inherit: boolean;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
         };
         /** EffectiveActions */
         EffectiveActions: {
@@ -2564,6 +2620,40 @@ export interface operations {
             };
         };
     };
+    list_deleted_items_api_lists__list_uuid__items_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedListItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     bulk_delete_items_api_lists__list_uuid__items_bulk_delete_post: {
         parameters: {
             query?: never;
@@ -2711,6 +2801,38 @@ export interface operations {
                 "application/json": components["schemas"]["ListItemUpdate"];
             };
         };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_item_api_lists__list_uuid__items__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {

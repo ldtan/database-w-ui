@@ -27,6 +27,7 @@ import type {
 import { ListSettingsDialog } from "./ListSettingsDialog";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
 import { buildRecordData, resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
@@ -81,6 +82,7 @@ export function ListDetailPage() {
   const small = useMediaQuery(SMALL_SCREEN);
   const [showSettings, setShowSettings] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
+  const [showDeleted, setShowDeleted] = useState(false);
   const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
@@ -497,6 +499,17 @@ export function ListDetailPage() {
             onClick={() => setShowTransfer(true)}
             disabled={cols.length === 0}
           />
+          {/* The bin is a recovery surface gated on list-level delete (a deleted
+              record has no per-item permission to check). */}
+          {listActions.has("delete") && (
+            <Button
+              label="Deleted records"
+              icon="pi pi-trash"
+              outlined
+              onClick={() => setShowDeleted(true)}
+              disabled={cols.length === 0}
+            />
+          )}
           {/* The button still adds a record; the dropdown is the same act with a QR
               code doing the typing. */}
           {listActions.has("create") && (
@@ -813,6 +826,12 @@ export function ListDetailPage() {
         canImport={listActions.has("create") && listActions.has("edit")}
         visible={showTransfer}
         onHide={() => setShowTransfer(false)}
+      />
+      <DeletedRecordsDialog
+        listUuid={listUuid}
+        columns={cols}
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
       />
       {activeViewUuid && (
         <FilterDialog

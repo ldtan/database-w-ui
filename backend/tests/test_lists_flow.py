@@ -497,3 +497,67 @@ async def test_search_matches_lookup_and_user_labels(
     assert await search("alice") == ["Ann"]
     # And plain text still works.
     assert await search("Bo") == ["Bo"]
+
+
+async def test_deleted_records_are_listed_and_restorable(client, list_uuid, add_column):
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "keep me"}}
+    )
+    uuid = created.json()["uuid"]
+
+    assert (await client.delete(f"/api/lists/{list_uuid}/items/{uuid}")).status_code == 204
+    # Gone from the live listing...
+    assert (await client.get(f"/api/lists/{list_uuid}/items/")).json() == []
+
+    # ...but in the bin, with its deletion time and a total-count header.
+    binned = await client.get(f"/api/lists/{list_uuid}/items/deleted")
+    assert binned.status_code == 200, binned.text
+    assert binned.headers["X-Total-Count"] == "1"
+    rows = binned.json()
+    assert [r["uuid"] for r in rows] == [uuid]
+    assert rows[0]["deleted_at"] is not None
+    assert rows[0]["data"][col] == "keep me"
+
+    # Restore brings it back to the live listing and empties the bin.
+    restored = await client.post(f"/api/lists/{list_uuid}/items/{uuid}/restore")
+    assert restored.status_code == 200, restored.text
+    assert restored.json()["data"][col] == "keep me"
+    assert [i["uuid"] for i in (await client.get(f"/api/lists/{list_uuid}/items/")).json()] == [uuid]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/deleted")).json() == []
+
+
+async def test_restore_rejected_when_it_would_duplicate_a_unique_value(
+    client, list_uuid, add_column
+):
+    col = await add_column(
+        list_uuid, name="code", display_name="Code", type="text",
+        config={"unique": True},
+    )
+
+    async def add(value):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        )
+        assert resp.status_code == 201, resp.text
+        return resp.json()["uuid"]
+
+    first = await add("X")
+    # Bin the first, then let a new record take the value it held.
+    assert (await client.delete(f"/api/lists/{list_uuid}/items/{first}")).status_code == 204
+    await add("X")
+
+    # Restoring the first would now collide on the unique column.
+    resp = await client.post(f"/api/lists/{list_uuid}/items/{first}/restore")
+    assert resp.status_code == 409, resp.text
+    assert "unique" in resp.json()["detail"].lower()
+
+
+async def test_restore_of_a_live_record_is_a_404(client, list_uuid, add_column):
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "a"}}
+    )
+    uuid = created.json()["uuid"]
+    # It is not in the bin, so there is nothing to restore.
+    assert (await client.post(f"/api/lists/{list_uuid}/items/{uuid}/restore")).status_code == 404

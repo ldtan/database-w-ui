@@ -141,43 +141,42 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
-## 6. There is no trash: soft-deleted things can be neither restored nor purged from the UI
+## 6. Trash is done for records; principals and delete-for-good remain
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
 record, user or group only sets `deleted_at`, and the two purge jobs (`purge_deleted_items`,
-`purge_deleted_principals`) hard-delete once a target is past its retention window. What is
-missing is any **surface** for it — a trash listing everything currently soft-deleted, with
-**restore** and **delete-for-good** actions.
+`purge_deleted_principals`) hard-delete once a target is past its retention window.
 
-Restore does not exist as an operation yet; the soft-delete contract was built precisely to
-make it *possible* (references to a deleted target are kept intact, so a restored record comes
-back with its inbound relationships), but nothing clears `deleted_at`. So this is a new service
-method and endpoint per resource type, not just a page:
+**Records now have a bin.** Each list page has a "Deleted records" surface
+(`DeletedRecordsDialog`) backed by `GET /lists/{uuid}/items/deleted` and
+`POST /lists/{uuid}/items/{uuid}/restore` (`ListItemService.list_deleted`/`restore`). It lists
+soft-deleted rows still inside the retention window and restores them. Two things settled the
+shape and are worth keeping in mind before extending it:
 
-- **Restore** = clear `deleted_at`, with two edges. A `unique` column may have gained a
-  duplicate while the record sat in the bin, so restore has to run through `_enforce_unique`
-  and can legitimately fail. And a record can come back in a shape its column no longer accepts
-  (its `multiple` was toggled meanwhile) — the same tolerance `reconcile_shapes` exists for,
-  which is exactly why that job **includes soft-deleted rows**.
-- **Delete for good** = the purge path, run on demand for one target instead of by the cron
-  sweep. It must still clear the target's grants (see gap 3) and, for a record, its
-  now-dangling references — the purge is the only thing that hard-deletes.
+- **Authority is the list, not the record.** A soft-deleted item resolves to *no* permission
+  context (`_security_context` returns `None` for a deleted resource), so there is nothing to
+  check per record. The bin is gated on list-level `delete`; the workspace owner always
+  qualifies via the owner short-circuit. This is why the trash is **per-list and owner/grant
+  driven**, not superuser-driven — `is_superuser` is orthogonal to data access.
+- **Restore's one live edge is uniqueness.** A `unique` column may have gained a duplicate while
+  the row sat in the bin, so `restore` runs `_enforce_unique` and can legitimately 409. The
+  other two edges are free: inbound references were kept intact at delete time so they just
+  resolve again, and a stale `multiple` shape is absorbed by `coerce_shape` on read (the same
+  tolerance `reconcile_shapes` converges).
 
-Two scoping calls to make first:
+What is still missing:
 
-- **Records are cheap; lists are not.** Deleting a *list* is the deliberate exception that
-  *does* scrub, and restoring one "would mean un-cascading its columns, records, views and
-  forms — a feature that does not exist" (see "Deleting a list is the deliberate exception").
-  So a first trash is records, and maybe principals — not lists.
-- **Who may do it.** The intended scope is superusers only, but `is_superuser` is deliberately
-  **orthogonal to data access** (see "`is_superuser` and the permission model are orthogonal") —
-  a superuser administers identities, not other people's records, and gating record restore on
-  it would be the first place that stops being true. The consistent authority over data is the
-  **workspace owner** (the implicit superuser of their own data). Decide whether the bin is
-  per-workspace and owner-driven, global and superuser-driven, or both, before writing the list
-  endpoint — it changes what that query filters on, and the answer for records (owner) may
-  differ from the answer for accounts and groups (genuinely superuser, since those *are*
-  identity administration).
+- **Delete for good** = the purge path, run on demand for one record instead of by the cron
+  sweep. It must still clear the target's grants (see gap 3) and its now-dangling references —
+  the purge is the only thing that hard-deletes. Left out on purpose for now: auto-purge after
+  the retention window already handles permanent removal, so this is power, not necessity.
+- **Principals (users/groups) have no bin.** These are genuinely superuser identity
+  administration (unlike records, which are the workspace owner's), so a principal trash is a
+  *separate* surface with a *different* authority — `require_superuser`, not list ownership —
+  and probably its own page. Not folded into the per-list records bin.
+- **Lists stay out.** Deleting a *list* is the deliberate exception that *does* scrub, and
+  restoring one "would mean un-cascading its columns, records, views and forms — a feature that
+  does not exist" (see "Deleting a list is the deliberate exception").
 
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.

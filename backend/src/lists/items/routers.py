@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -16,6 +16,7 @@ from ..models import List
 from .schemas import (
     BulkDeleteRequest,
     BulkDeleteResult,
+    DeletedListItemRead,
     ItemQuery,
     ListItemCreate,
     ListItemRead,
@@ -62,6 +63,29 @@ async def list_items(
     return await ListItemService.list(
         db, lst, current_user, view_uuid=view_uuid, skip=skip, limit=limit, q=q
     )
+
+
+# Declared before GET /{uuid} so "deleted" is not parsed as a uuid. The bin is a
+# recovery surface, so it is gated on list-level `delete` rather than per-record:
+# a soft-deleted item resolves to no permission context (see PermissionService.
+# _security_context), so there is nothing to check per record. The workspace owner
+# always qualifies via the owner short-circuit.
+@router.get("/deleted", response_model=list[DeletedListItemRead])
+async def list_deleted_items(
+    response: Response,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    response.headers["X-Total-Count"] = str(
+        await ListItemService.count_deleted(db, lst)
+    )
+    return await ListItemService.list_deleted(db, lst, skip=skip, limit=limit)
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResult)
@@ -166,3 +190,25 @@ async def delete_item(
         db, current_user, ResourceType.item, item.id, Action.delete
     )
     await ListItemService.delete(db, lst, uuid)
+
+
+@router.post("/{uuid}/restore", response_model=ListItemRead)
+async def restore_item(
+    uuid: UUID,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Gated on list-level `delete`, like the bin listing: a soft-deleted record has
+    # no per-item permission context to check against.
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    try:
+        item = await ListItemService.restore(db, lst, uuid)
+    except ConflictError as exc:
+        # A unique value was taken while the record sat in the bin.
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return item

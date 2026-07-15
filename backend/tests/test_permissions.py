@@ -579,6 +579,46 @@ async def test_list_search_and_count_agree(session_factory):
         assert await ListService.count(db, owner, workspace_uuid=ws.uuid, q="zzz") == 0
 
 
+async def test_bin_authority_is_the_list_not_the_record(make_client, session_factory):
+    """The bin (view + restore) is gated on list-level `delete`, because a
+    soft-deleted record resolves to no per-item permission context."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        item = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        await ListItemService.delete(db, lst, item.uuid)
+        list_uuid, item_uuid = str(lst.uuid), str(item.uuid)
+
+    # A stranger to the list may neither see nor restore its bin.
+    async with make_client(other) as client:
+        assert (await client.get(f"/api/lists/{list_uuid}/items/deleted")).status_code == 403
+        assert (
+            await client.post(f"/api/lists/{list_uuid}/items/{item_uuid}/restore")
+        ).status_code == 403
+
+    # A list-level `delete` grant opens the bin.
+    async with session_factory() as db:
+        owner = await UserService.get_by_uuid(db, owner.uuid)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.delete],
+            ),
+        )
+
+    async with make_client(other) as client:
+        resp = await client.get(f"/api/lists/{list_uuid}/items/deleted")
+        assert resp.status_code == 200, resp.text
+        assert [r["uuid"] for r in resp.json()] == [item_uuid]
+
+    # And the owner always qualifies, grant or no grant.
+    async with make_client(owner) as client:
+        assert (await client.get(f"/api/lists/{list_uuid}/items/deleted")).status_code == 200
+
+
 async def test_http_lists_sends_total_count_header(make_client, session_factory):
     async with session_factory() as db:
         owner, _, ws, _ = await _fixture_world(db)

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -43,3 +44,9 @@ class ListItemRead(BaseModel):
     permissions_inherit: bool = True
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeletedListItemRead(ListItemRead):
+    # When the record was binned, so the UI can show "deleted 3 days ago" and how
+    # much of the retention window is left. Always set for a bin listing.
+    deleted_at: datetime

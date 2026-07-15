@@ -42,6 +42,8 @@ export type ResourceLink = Response<Schemas["ResourceLink"]>;
 export type Workspace = Response<Schemas["WorkspaceRead"]>;
 export type ListRead = Response<Schemas["ListRead"]>;
 export type ListItem = Response<Schemas["ListItemRead"]>;
+// A record in the bin: a ListItem plus when it was deleted.
+export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
 export type Person = Response<Schemas["PersonRead"]>;
 export type ApiUser = Response<Schemas["UserRead"]>;
 export type ApiUserGroup = Response<Schemas["UserGroupRead"]>;

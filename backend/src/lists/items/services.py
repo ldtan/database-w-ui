@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.orm.attributes import set_committed_value
 
+from src.core.config import settings
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from src.workspaces.models import Workspace
@@ -438,6 +439,89 @@ class ListItemService:
         if deleted:
             await db.commit()
         return deleted
+
+    # -- the bin: view and restore soft-deleted records ---------------------
+
+    @staticmethod
+    def _select_deleted(list_id: int):
+        """Records in the bin: soft-deleted and still inside the retention window.
+
+        Older ones are past `PURGE_DELETED_AFTER_DAYS` and on their way out — the
+        purge job may destroy them at any time — so they are no longer offered as
+        restorable (see gap #6 in docs/known-gaps.md). With a 0-day window the bin
+        is always empty, which is exactly "purge as soon as the job runs".
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.PURGE_DELETED_AFTER_DAYS
+        )
+        return select(ListItem).where(
+            ListItem.list_id == list_id,
+            ListItem.deleted_at.is_not(None),
+            ListItem.deleted_at >= cutoff,
+        )
+
+    @classmethod
+    async def get_deleted_by_uuid(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """A single record from the bin. `get_by_uuid` filters deleted rows out, so
+        restore needs its own fetch."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            cls._select_deleted(list_id).where(ListItem.uuid == parsed)
+        )
+        return result.scalars().first()
+
+    @classmethod
+    async def list_deleted(
+        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100
+    ) -> Sequence[ListItem]:
+        """The list's bin, most recently deleted first, shaped for rendering so its
+        reference and calculated cells read the same as in the live grid."""
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt = (
+            cls._select_deleted(lst.id)
+            .order_by(ListItem.deleted_at.desc(), ListItem.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        items = (await db.execute(stmt)).scalars().all()
+        cls._shape_for_read(columns, items)
+        return items
+
+    @classmethod
+    async def count_deleted(cls, db: AsyncSession, lst: List) -> int:
+        """How many records are in the bin — the paginator's total. Built off the
+        same predicate as the listing so the two cannot drift."""
+        stmt = select(func.count()).select_from(cls._select_deleted(lst.id).subquery())
+        return await db.scalar(stmt) or 0
+
+    @classmethod
+    async def restore(
+        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """Bring a soft-deleted record back. Returns None if it is not in the bin.
+
+        A `unique` value may have been taken while the row sat deleted, so the
+        restore runs through `_enforce_unique` and can legitimately raise
+        `ConflictError`. Nothing else is needed: inbound references were kept intact
+        at delete time, so they simply resolve again, and a stale `multiple` shape is
+        absorbed by `coerce_shape` on read.
+        """
+        item = await cls.get_deleted_by_uuid(db, lst.id, uuid)
+        if item is None:
+            return None
+
+        columns = await cls._columns_by_key(db, lst.id)
+        # exclude_id guards against the row matching itself; it is still deleted at
+        # this point anyway, so the uniqueness scan (live rows only) would skip it.
+        await cls._enforce_unique(db, lst.id, columns, item.data or {}, exclude_id=item.id)
+
+        item.deleted_at = None
+        await db.commit()
+        return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
     async def _scrub_lookup_references(
