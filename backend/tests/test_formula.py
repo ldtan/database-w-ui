@@ -61,6 +61,44 @@ def test_column_refs_excludes_function_names():
     assert column_refs(f) == frozenset({"qty", "cap", "price"})
 
 
+def test_string_functions():
+    assert calc("CONCAT(first, ' ', last)", first="John", last="Smith") == "John Smith"
+    assert calc("UPPER(name)", name="abc") == "ABC"
+    assert calc("LOWER(name)", name="ABC") == "abc"
+    assert calc("TRIM(name)", name="  hi  ") == "hi"
+    assert calc("LEN(name)", name="hello") == 5
+    assert calc("LEFT(name, 3)", name="hello") == "hel"
+    assert calc("RIGHT(name, 2)", name="hello") == "lo"
+    assert calc("REPLACE(name, 'o', '0')", name="foobar") == "f00bar"
+
+
+def test_left_and_right_with_a_non_positive_count_are_empty_not_the_whole_string():
+    # n=0 must not fall through to Python's s[-0:] == s.
+    assert calc("RIGHT(name, 0)", name="hello") == ""
+    assert calc("LEFT(name, 0)", name="hello") == ""
+
+
+def test_numbers_are_coerced_to_text_in_string_context():
+    assert calc("CONCAT('Qty: ', qty)", qty=3) == "Qty: 3"
+    # An integral float has no trailing .0.
+    assert calc("CONCAT('$', price)", price=3.0) == "$3"
+
+
+def test_arithmetic_stays_numeric_a_string_operand_blanks_it():
+    # "ab" * 3 must not become "ababab".
+    assert calc("name * 3", name="ab") is None
+    assert calc("name + qty", name="ab", qty=1) is None
+
+
+def test_string_comparison_in_a_condition():
+    assert calc("IF(status == 'done', 1, 0)", status="done") == 1
+    assert calc("IF(status == 'done', 1, 0)", status="open") == 0
+
+
+def test_a_quoted_string_literal_is_allowed():
+    assert calc("'hello'") == "hello"
+
+
 @pytest.mark.parametrize(
     "source",
     [
@@ -72,7 +110,6 @@ def test_column_refs_excludes_function_names():
         "a % b",  # nor modulo
         "lambda: 1",  # no lambdas
         "[a for a in b]",  # no comprehensions
-        '"a string"',  # no string literals
         "True",  # no boolean literals
         "IF(a, b)",  # IF needs exactly three arguments
         "round(a, b, c)",  # round takes at most two

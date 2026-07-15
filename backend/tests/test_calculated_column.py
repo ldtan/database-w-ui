@@ -99,16 +99,42 @@ async def test_formula_referencing_an_unknown_column_is_rejected(client, list_uu
     assert "unknown column" in resp.text.lower()
 
 
-async def test_formula_referencing_a_non_number_column_is_rejected(
+async def test_a_text_column_can_be_referenced_and_produce_text(client, list_uuid):
+    first = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={"name": "first", "display_name": "First", "type": "text"},
+    )
+    first_uuid = first.json()["uuid"]
+    last = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={"name": "last", "display_name": "Last", "type": "text"},
+    )
+    last_uuid = last.json()["uuid"]
+    calc = await _add_calculated(
+        client, list_uuid, "full", "CONCAT(first, ' ', last)"
+    )
+    assert calc.status_code == 201, calc.text
+    full_uuid = calc.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {first_uuid: "Ada", last_uuid: "Lovelace"}},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][full_uuid] == "Ada Lovelace"
+
+
+async def test_formula_referencing_an_unsupported_type_is_rejected(
     client, list_uuid
 ):
+    # Date columns store ISO strings but are not offered to formulas (v1).
     await client.post(
         f"/api/lists/{list_uuid}/columns/",
-        json={"name": "label", "display_name": "Label", "type": "text"},
+        json={"name": "due", "display_name": "Due", "type": "date"},
     )
-    resp = await _add_calculated(client, list_uuid, "bad", "label * 2")
+    resp = await _add_calculated(client, list_uuid, "bad", "LEN(due)")
     assert resp.status_code == 400, resp.text
-    assert "number columns" in resp.text.lower()
+    assert "number or text" in resp.text.lower()
 
 
 async def test_a_calculated_column_cannot_reference_another(client, priced_list):
@@ -116,7 +142,7 @@ async def test_a_calculated_column_cannot_reference_another(client, priced_list)
     lst = priced_list["list"]
     resp = await _add_calculated(client, lst, "double", "total * 2")
     assert resp.status_code == 400, resp.text
-    assert "number columns" in resp.text.lower()
+    assert "number or text" in resp.text.lower()
 
 
 async def test_an_injection_attempt_in_the_formula_is_rejected(client, list_uuid):

@@ -112,14 +112,19 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
     enabled: type === "lookup" && !!targetListUuid,
   });
-  // This list's own columns, so a formula can name the number columns it may use.
+  // This list's own columns, so a formula can name the columns it may reference:
+  // number columns for arithmetic, text columns for the string functions.
   const ownColumns = useQuery({
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
     enabled: type === "calculated",
   });
-  const numberNames = (ownColumns.data ?? [])
-    .filter((c) => c.type === "number" && c.uuid !== column?.uuid)
+  const referenceableNames = (ownColumns.data ?? [])
+    .filter(
+      (c) =>
+        (c.type === "number" || c.type === "text" || c.type === "long_text") &&
+        c.uuid !== column?.uuid,
+    )
     .map((c) => c.name);
 
   // A multi-value column holds an array, and the uniqueness check compares whole
@@ -396,16 +401,22 @@ export function ColumnDialog({
             />
             <small style={{ color: "var(--text-muted)" }}>
               Computed from other columns each time a record is read; it has no
-              stored value of its own. Use <code>+ - * /</code>, parentheses, and{" "}
+              stored value of its own. Numbers: <code>+ - * /</code>, parentheses,{" "}
               <code>min</code>, <code>max</code>, <code>round</code>,{" "}
-              <code>abs</code>, <code>IF(cond, a, b)</code>.
-              {numberNames.length > 0 ? (
+              <code>abs</code>. Text: <code>CONCAT</code>, <code>UPPER</code>,{" "}
+              <code>LOWER</code>, <code>TRIM</code>, <code>LEN</code>,{" "}
+              <code>LEFT</code>, <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
+              <code>IF(cond, a, b)</code>.
+              {referenceableNames.length > 0 ? (
                 <>
                   {" "}
-                  Number columns you can reference: {numberNames.join(", ")}.
+                  Columns you can reference: {referenceableNames.join(", ")}.
                 </>
               ) : (
-                <> Add a number column first — a formula can only reference those.</>
+                <>
+                  {" "}
+                  Add a number or text column first — a formula references those.
+                </>
               )}
             </small>
           </div>

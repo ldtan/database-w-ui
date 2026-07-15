@@ -326,15 +326,20 @@ class ColumnService:
                 )
             ).scalars().all()
             by_name = {c.name: c for c in siblings}
+            referenceable = {
+                ColumnType.number,
+                ColumnType.text,
+                ColumnType.long_text,
+            }
             for name in sorted(column_refs(formula)):
                 target = by_name.get(name)
                 if target is None:
                     raise ValidationError(
                         f"Formula references unknown column '{name}'"
                     )
-                if target.type != ColumnType.number:
+                if target.type not in referenceable:
                     raise ValidationError(
-                        f"Formula can only reference number columns; "
+                        f"Formula can only reference number or text columns; "
                         f"'{name}' is {target.type.value}"
                     )
             if data.get("default") is not None:

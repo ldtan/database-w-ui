@@ -11,18 +11,30 @@ handed to it; there is no path to a builtin, an attribute, or a subscript. A
 malicious or mistaken formula can at worst return a wrong number or nothing.
 
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
-literals, comparisons (for conditions), ``and``/``or``/``not``, and the functions
-``min``, ``max``, ``round``, ``abs`` and ``IF(cond, then, else)``.
+**and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
+and the functions ``min``, ``max``, ``round``, ``abs``, ``IF(cond, then, else)``,
+and the string functions ``CONCAT``, ``UPPER``, ``LOWER``, ``TRIM``, ``LEN``,
+``LEFT``, ``RIGHT`` and ``REPLACE``.
+
+Arithmetic (``+ - * /``) is numeric only — joining text is ``CONCAT``, so a
+string can never slip into ``*`` and become a silent repetition. A value can be a
+number or text depending on the formula; the column has no fixed output type.
 
 Missing data propagates as "no value": if any referenced cell is empty, the
-result is ``None`` (the cell renders blank) rather than a silent zero — an
-incomplete row should read as incomplete, not as ``0``.
+result is ``None`` (the cell renders blank) rather than a silent zero or an empty
+string — an incomplete row should read as incomplete.
 """
 import ast
 import math
-from typing import Optional
+from typing import Optional, Union
 
 from src.core.exceptions import ValidationError
+
+# Functions whose arguments and result are numbers.
+_NUMERIC_FUNCTIONS = {"min", "max", "round", "abs"}
+# Functions that operate on text. Numeric arguments are coerced to their text
+# form (``CONCAT("$", price)``), and LEN's result is a number.
+_STRING_FUNCTIONS = {"CONCAT", "UPPER", "LOWER", "TRIM", "LEN", "LEFT", "RIGHT", "REPLACE"}
 
 # Function name -> (min_args, max_args). ``None`` means unbounded.
 _FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
@@ -31,6 +43,14 @@ _FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "round": (1, 2),
     "abs": (1, 1),
     "IF": (3, 3),
+    "CONCAT": (2, None),
+    "UPPER": (1, 1),
+    "LOWER": (1, 1),
+    "TRIM": (1, 1),
+    "LEN": (1, 1),
+    "LEFT": (2, 2),
+    "RIGHT": (2, 2),
+    "REPLACE": (3, 3),
 }
 
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
@@ -125,8 +145,10 @@ def _check(node: ast.AST, refs: set[str]) -> None:
         refs.add(node.id)
 
     elif isinstance(node, ast.Constant):
-        if isinstance(node.value, bool) or not isinstance(node.value, (int, float)):
-            raise ValidationError("Only numbers are allowed as literals in a formula")
+        if isinstance(node.value, bool) or not isinstance(node.value, (int, float, str)):
+            raise ValidationError(
+                "Only numbers and quoted text are allowed as literals in a formula"
+            )
 
     else:
         raise ValidationError(
@@ -142,11 +164,12 @@ def column_refs(formula: Formula) -> frozenset[str]:
     return frozenset(formula.refs - set(_FUNCTIONS))
 
 
-def evaluate(formula: Formula, values: dict[str, object]) -> Optional[float]:
+def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, None]:
     """Compute the formula against a name->value map, or ``None``.
 
-    ``None`` on any missing operand, division by zero, or a non-finite result —
-    a calculated cell is best-effort: one bad row must not fail a whole read.
+    The result is a number or a string depending on the formula. ``None`` on any
+    missing operand, division by zero, or a non-finite result — a calculated cell
+    is best-effort: one bad row must not fail a whole read.
     """
     try:
         result = _eval(formula.tree.body, values)
@@ -162,7 +185,21 @@ def evaluate(formula: Formula, values: dict[str, object]) -> Optional[float]:
         if isinstance(result, float) and not math.isfinite(result):
             return None
         return result
+    if isinstance(result, str):
+        return result
     return None
+
+
+def _is_num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _to_text(v) -> str:
+    """A value as text, the way a spreadsheet would show it: an integral float has
+    no trailing ``.0``, so ``CONCAT("$", 3.0)`` is ``"$3"`` not ``"$3.0"``."""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
 
 
 def _eval(node: ast.AST, values: dict[str, object]):
@@ -171,7 +208,9 @@ def _eval(node: ast.AST, values: dict[str, object]):
 
     if isinstance(node, ast.Name):
         v = values.get(node.id)
-        return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+        if isinstance(v, bool):
+            return None
+        return v if isinstance(v, (int, float, str)) else None
 
     if isinstance(node, ast.UnaryOp):
         operand = _eval(node.operand, values)
@@ -185,6 +224,10 @@ def _eval(node: ast.AST, values: dict[str, object]):
         left = _eval(node.left, values)
         right = _eval(node.right, values)
         if left is None or right is None:
+            return None
+        # Arithmetic is numbers only: this is what stops "a" * 3 from becoming
+        # "aaa" (Python's string repetition). Text is joined with CONCAT instead.
+        if not (_is_num(left) and _is_num(right)):
             return None
         if isinstance(node.op, ast.Add):
             return left + right
@@ -224,15 +267,43 @@ def _eval(node: ast.AST, values: dict[str, object]):
         args = [_eval(a, values) for a in node.args]
         if any(a is None for a in args):
             return None
-        if name == "min":
-            return min(args)
-        if name == "max":
-            return max(args)
-        if name == "abs":
-            return abs(args[0])
-        # round(x) or round(x, ndigits)
-        ndigits = int(args[1]) if len(args) > 1 else None
-        return round(args[0], ndigits)
+
+        if name in _NUMERIC_FUNCTIONS:
+            # A non-number argument (e.g. a text column) blanks the cell rather
+            # than comparing strings, which min/max would otherwise do.
+            if not all(_is_num(a) for a in args):
+                return None
+            if name == "min":
+                return min(args)
+            if name == "max":
+                return max(args)
+            if name == "abs":
+                return abs(args[0])
+            # round(x) or round(x, ndigits)
+            ndigits = int(args[1]) if len(args) > 1 else None
+            return round(args[0], ndigits)
+
+        # String functions. Numeric arguments are coerced to their text form, so
+        # UPPER(price) or CONCAT("Qty ", qty) work as a spreadsheet user expects.
+        if name == "CONCAT":
+            return "".join(_to_text(a) for a in args)
+        if name == "UPPER":
+            return _to_text(args[0]).upper()
+        if name == "LOWER":
+            return _to_text(args[0]).lower()
+        if name == "TRIM":
+            return _to_text(args[0]).strip()
+        if name == "LEN":
+            return len(_to_text(args[0]))
+        if name == "REPLACE":
+            return _to_text(args[0]).replace(_to_text(args[1]), _to_text(args[2]))
+        # LEFT/RIGHT: the first n characters, or the last n. A non-positive n is
+        # the empty string (and n=0 must not fall through to Python's s[-0:] = s).
+        text = _to_text(args[0])
+        n = int(args[1])
+        if n <= 0:
+            return ""
+        return text[:n] if name == "LEFT" else text[-n:]
 
     # Unreachable: parse() rejects every other node type up front.
     raise ValidationError("Unsupported expression in formula")
