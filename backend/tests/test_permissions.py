@@ -7,6 +7,7 @@ get_current_user to act as a chosen user.
 """
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 import pytest
 import pytest_asyncio
@@ -24,6 +25,7 @@ from src.lists.items.services import ListItemService
 from src.lists.schemas import ListCreate, ListUpdate
 from src.lists.services import ListService
 from src.permissions.enums import ALL_ACTIONS, Action, ResourceType
+from src.permissions.models import PermissionGrant
 from src.permissions.schemas import GrantCreate
 from src.permissions.services import PermissionService
 from src.workspaces.schemas import WorkspaceCreate
@@ -632,3 +634,135 @@ async def test_http_lists_sends_total_count_header(make_client, session_factory)
         # The body is capped by limit, but the header reports the full match count.
         assert len(resp.json()) == 1
         assert resp.headers["X-Total-Count"] == "2"
+
+
+# --------------------------------------------------------------------------
+# Grant expiry: an expired grant confers nothing, everywhere at once.
+# --------------------------------------------------------------------------
+
+
+async def test_expired_grant_confers_nothing(session_factory):
+    """The predicate lives in `_principal_condition`, so it must bite both the
+    point check (`effective_actions`) and the collection filter (`list_query_filter`,
+    exercised here through `ListService.list`)."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        # Live: access granted, and the list shows up in "Shared with me".
+        assert Action.view in await PermissionService.effective_actions(
+            db, other, ResourceType.list, lst.id
+        )
+        shared = await ListService.list(db, other, shared_only=True)
+        assert lst.uuid in [r.uuid for r in shared]
+
+        # Force it into the past (the API's future-only guard blocks doing this the
+        # normal way — which is the point of doing it directly here).
+        grant = (
+            await db.execute(
+                select(PermissionGrant).where(PermissionGrant.user_id == other.id)
+            )
+        ).scalars().first()
+        grant.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+        await db.commit()
+
+        # Expired: confers nothing, and drops out of the collection filter too.
+        assert await PermissionService.effective_actions(
+            db, other, ResourceType.list, lst.id
+        ) == set()
+        shared = await ListService.list(db, other, shared_only=True)
+        assert lst.uuid not in [r.uuid for r in shared]
+
+
+async def test_upsert_updates_then_clears_expiry(session_factory):
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        future = datetime.now(timezone.utc) + timedelta(days=3)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+                expires_at=future,
+            ),
+        )
+        grants = await PermissionService.list_grants(
+            db, owner, ResourceType.list, lst.uuid
+        )
+        assert grants[0].expires_at is not None
+
+        # Re-sharing without an expiry clears the previous one (verbatim write).
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        grants = await PermissionService.list_grants(
+            db, owner, ResourceType.list, lst.uuid
+        )
+        assert grants[0].expires_at is None
+
+
+async def test_http_future_expiry_grants_access_and_past_is_rejected(
+    make_client, session_factory
+):
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        list_uuid, other_uuid = str(lst.uuid), str(other.uuid)
+
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+
+    async with make_client(owner) as client:
+        # A past expiry is refused up front rather than stored inert.
+        bad = await client.post(
+            "/api/permissions/grants",
+            json={
+                "resource_type": "list",
+                "resource_uuid": list_uuid,
+                "user_uuid": other_uuid,
+                "actions": ["view"],
+                "expires_at": past,
+            },
+        )
+        assert bad.status_code == 422, bad.text
+
+        ok = await client.post(
+            "/api/permissions/grants",
+            json={
+                "resource_type": "list",
+                "resource_uuid": list_uuid,
+                "user_uuid": other_uuid,
+                "actions": ["view"],
+                "expires_at": future,
+            },
+        )
+        assert ok.status_code == 201, ok.text
+        assert ok.json()["expires_at"] is not None
+        # The listing carries the expiry back to the Share panel.
+        grants = (
+            await client.get(
+                f"/api/permissions/grants?resource_type=list&resource_uuid={list_uuid}"
+            )
+        ).json()
+        assert grants[0]["expires_at"] is not None
+
+    # While the grant is live, the grantee can open the list.
+    async with make_client(other) as client:
+        assert (await client.get(f"/api/lists/{list_uuid}")).status_code == 200

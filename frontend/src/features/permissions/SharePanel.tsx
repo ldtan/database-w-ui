@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { MultiSelect } from "primereact/multiselect";
 import { Button } from "primereact/button";
+import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
 import { Message } from "primereact/message";
 
@@ -29,6 +30,18 @@ export interface SharePanelProps {
 }
 
 const ACTION_OPTIONS = ACTIONS.map((a) => ({ label: a.label, value: a.value }));
+
+/** How an expiry reads on a grant row: nothing, an "Expired" flag, or "in N days".
+ *  The backend already stops honouring an expired grant; this is just the label. */
+function expiryLabel(
+  expiresAt: string | null | undefined,
+): { text: string; expired: boolean } | null {
+  if (!expiresAt) return null;
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return { text: "Expired", expired: true };
+  const days = Math.ceil(ms / 86_400_000);
+  return { text: days <= 1 ? "Expires today" : `Expires in ${days}d`, expired: false };
+}
 
 /** Who may do what to one resource. The body of the Share dialog, split out so the
  *  list's own permissions can live inside List settings while records and forms
@@ -80,17 +93,23 @@ export function SharePanel({
 
   const [principal, setPrincipal] = useState<string | null>(null);
   const [actions, setActions] = useState<PermissionAction[]>(["view"]);
+  const [expiresAt, setExpiresAt] = useState<Date | null>(null);
 
   const upsert = useMutation({
     mutationFn: (vars: {
       kind: string;
       uuid: string;
       actions: PermissionAction[];
+      // Sent verbatim: the backend writes it as given, so an edit that omits it
+      // would clear the grant's expiry. Editing actions on an existing row passes
+      // the grant's current value; the add form passes the picker's.
+      expiresAt: string | null;
     }) =>
       api.post<Grant>("/permissions/grants", {
         resource_type: resourceType,
         resource_uuid: resourceUuid,
         actions: vars.actions,
+        expires_at: vars.expiresAt,
         ...(vars.kind === "user"
           ? { user_uuid: vars.uuid }
           : { group_uuid: vars.uuid }),
@@ -99,6 +118,7 @@ export function SharePanel({
       invalidate();
       setPrincipal(null);
       setActions(["view"]);
+      setExpiresAt(null);
     },
     onError: (err) =>
       toast.error(
@@ -141,7 +161,12 @@ export function SharePanel({
   function onAdd() {
     if (!principal || actions.length === 0) return;
     const [kind, uuid] = principal.split(":");
-    upsert.mutate({ kind, uuid, actions });
+    upsert.mutate({
+      kind,
+      uuid,
+      actions,
+      expiresAt: expiresAt ? expiresAt.toISOString() : null,
+    });
   }
 
   return (
@@ -202,6 +227,18 @@ export function SharePanel({
             className="flex-1"
             style={{ minWidth: 220 }}
           />
+          <Calendar
+            value={expiresAt}
+            onChange={(e) => setExpiresAt((e.value as Date) ?? null)}
+            minDate={new Date()}
+            showButtonBar
+            showIcon
+            showTime
+            hourFormat="24"
+            dateFormat="yy-mm-dd"
+            placeholder="Expires (optional)"
+            className="w-64"
+          />
           <Button
             label="Add"
             icon="pi pi-plus"
@@ -227,24 +264,65 @@ export function SharePanel({
           const name = isUser ? grant.user_username : grant.group_name;
           const kind = isUser ? "user" : "group";
           const uuid = (grant.user_uuid ?? grant.group_uuid)!;
+          const expiry = expiryLabel(grant.expires_at);
           return (
-            <div key={grant.uuid} className="flex items-center gap-2">
-              <i className={isUser ? "pi pi-user" : "pi pi-users"} />
-              <span className="flex-1 truncate">{name}</span>
-              <MultiSelect
-                value={grant.actions}
-                options={ACTION_OPTIONS}
-                onChange={(e) => upsert.mutate({ kind, uuid, actions: e.value })}
-                display="chip"
-                style={{ maxWidth: 300 }}
-              />
-              <Button
-                icon="pi pi-trash"
-                text
-                severity="danger"
-                aria-label={`Remove ${name}`}
-                onClick={() => remove.mutate(grant.uuid)}
-              />
+            <div key={grant.uuid} className="flex flex-col gap-1">
+              <div className="flex items-center gap-2">
+                <i className={isUser ? "pi pi-user" : "pi pi-users"} />
+                <span className="flex-1 truncate">{name}</span>
+                <MultiSelect
+                  value={grant.actions}
+                  options={ACTION_OPTIONS}
+                  // Editing actions must resend the grant's expiry, or the backend's
+                  // verbatim write would clear it.
+                  onChange={(e) =>
+                    upsert.mutate({
+                      kind,
+                      uuid,
+                      actions: e.value,
+                      expiresAt: grant.expires_at ?? null,
+                    })
+                  }
+                  display="chip"
+                  style={{ maxWidth: 300 }}
+                />
+                <Button
+                  icon="pi pi-trash"
+                  text
+                  severity="danger"
+                  aria-label={`Remove ${name}`}
+                  onClick={() => remove.mutate(grant.uuid)}
+                />
+              </div>
+              {/* Expiry: set/extend/clear (the button bar's Clear removes it), plus a
+                  status once one is set. */}
+              <div className="flex items-center gap-2 pl-6 text-sm">
+                <span style={{ color: "var(--text-muted)" }}>Access expires:</span>
+                <Calendar
+                  value={grant.expires_at ? new Date(grant.expires_at) : null}
+                  onChange={(e) =>
+                    upsert.mutate({
+                      kind,
+                      uuid,
+                      actions: grant.actions,
+                      expiresAt: e.value ? (e.value as Date).toISOString() : null,
+                    })
+                  }
+                  minDate={new Date()}
+                  showButtonBar
+                  showTime
+                  hourFormat="24"
+                  dateFormat="yy-mm-dd"
+                  placeholder="Never"
+                  className="w-64"
+                />
+                {expiry &&
+                  (expiry.expired ? (
+                    <span className="text-red-600 font-medium">{expiry.text}</span>
+                  ) : (
+                    <span style={{ color: "var(--text-muted)" }}>{expiry.text}</span>
+                  ))}
+              </div>
             </div>
           );
         })}

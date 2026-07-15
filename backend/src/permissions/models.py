@@ -1,4 +1,5 @@
 from __future__ import annotations
+from datetime import datetime  # noqa: TC003 — resolved at runtime by Mapped[] introspection
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -33,6 +34,13 @@ class PermissionGrant(BaseModel):
     )
     # Granted actions as their string values (see enums.Action).
     actions: Mapped[list] = mapped_column(JSONB, default=list)
+
+    # When the grant stops conferring access. None means it never expires. Enforced
+    # centrally in PermissionService._principal_condition, so an expired grant is
+    # invisible to every authorization read at once.
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
 
     user: Mapped[Optional["User"]] = relationship("User")
     group: Mapped[Optional["UserGroup"]] = relationship("UserGroup")

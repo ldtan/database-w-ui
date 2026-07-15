@@ -301,6 +301,21 @@ is imported by `main.py`, `tests/conftest.py`, and `migrations/env.py`. A model 
 from it fails three different silent ways — worst of all in `env.py`, where autogenerate
 sees the table as absent from the models and emits a **`DROP TABLE`**.
 
+**Grant expiry is enforced in exactly one predicate, and new grant-reads must go
+through it.** A grant may carry an `expires_at`; the "still live" check
+(`or_(expires_at IS NULL, expires_at > now())`) lives in
+`PermissionService._principal_condition`, which every authorization read funnels
+through — `effective_actions`, `effective_actions_bulk`, and the three collection
+filters (`workspace_view_filter`, `list_query_filter`, `item_view_filter`). So an
+expired grant is invisible everywhere at once. Any *new* path that queries
+`permission_grants` for authorization must use `_principal_condition` (not roll its
+own principal clause) or it will silently honor expired grants. Compared against DB
+`now()`, not a Python timestamp. The owner short-circuit is above the grant lookup,
+so **owners never expire** — only grants do. Management paths (`upsert_grant`,
+`list_grants`, `revoke_grant`) deliberately build their own clause so a re-share can
+still find and update an already-expired row; `upsert_grant` writes `expires_at`
+verbatim, so a re-share that omits it clears the expiry (the Share panel resends it).
+
 **Never lazy-load a relationship after a commit.** The session factory sets
 `expire_on_commit=False` precisely because a lazy reload under asyncpg raises
 `MissingGreenlet`. In particular, `PermissionService` never touches `user.groups` — it

@@ -1,7 +1,7 @@
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select, true
+from sqlalchemy import and_, func, or_, select, true
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
@@ -97,14 +97,30 @@ class PermissionService:
         )
         return [row[0] for row in rows.all()]
 
+    @staticmethod
+    def _not_expired() -> ColumnElement[bool]:
+        """A grant confers access only while unexpired. Compared against the DB clock
+        (`now()`), so it is consistent within a transaction and timezone-correct."""
+        return or_(
+            PermissionGrant.expires_at.is_(None),
+            PermissionGrant.expires_at > func.now(),
+        )
+
     @classmethod
     def _principal_condition(
         cls, user_id: int, group_ids: Sequence[int]
     ) -> ColumnElement[bool]:
+        """Matches grants held by this user (or one of their groups) that are still
+        live. Every authorization read funnels through here — the per-resource checks
+        (`effective_actions`, `effective_actions_bulk`) and the collection-visibility
+        filters (`workspace_view_filter`, `list_query_filter`, `item_view_filter`) —
+        so folding expiry in here makes an expired grant invisible to all of them at
+        once. Grant *management* builds its own principal clause and is unaffected, so
+        a re-share can still find and update an expired row."""
         cond: ColumnElement[bool] = PermissionGrant.user_id == user_id
         if group_ids:
             cond = or_(cond, PermissionGrant.group_id.in_(group_ids))
-        return cond
+        return and_(cond, cls._not_expired())
 
     @classmethod
     async def effective_actions(
@@ -383,6 +399,9 @@ class PermissionService:
 
         if existing is not None:
             existing.actions = actions
+            # Written verbatim: re-sharing with no expiry clears a previous one, so
+            # the caller must resend an expiry it means to keep (the Share panel does).
+            existing.expires_at = payload.expires_at
             grant_uuid = existing.uuid
         else:
             grant = PermissionGrant(
@@ -391,6 +410,7 @@ class PermissionService:
                 user_id=user_id,
                 group_id=group_id,
                 actions=actions,
+                expires_at=payload.expires_at,
             )
             db.add(grant)
             await db.flush()
@@ -486,4 +506,5 @@ class PermissionService:
             group_uuid=grant.group.uuid if grant.group else None,
             group_name=grant.group.name if grant.group else None,
             actions=[Action(a) for a in (grant.actions or [])],
+            expires_at=grant.expires_at,
         )

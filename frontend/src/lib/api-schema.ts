@@ -1019,6 +1019,8 @@ export interface components {
             group_uuid?: string | null;
             /** Actions */
             actions: components["schemas"]["Action"][];
+            /** Expires At */
+            expires_at?: string | null;
         };
         /** GrantRead */
         GrantRead: {
@@ -1043,6 +1045,8 @@ export interface components {
             group_name?: string | null;
             /** Actions */
             actions: components["schemas"]["Action"][];
+            /** Expires At */
+            expires_at?: string | null;
         };
         /** GroupBy */
         GroupBy: {

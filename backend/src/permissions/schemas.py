@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 
@@ -14,11 +15,25 @@ class GrantCreate(BaseModel):
     user_uuid: Optional[UUID] = None
     group_uuid: Optional[UUID] = None
     actions: list[Action] = Field(min_length=1)
+    # When the grant should stop conferring access. None (the default) never expires.
+    expires_at: Optional[datetime] = None
 
     @model_validator(mode="after")
     def _exactly_one_principal(self):
         if (self.user_uuid is None) == (self.group_uuid is None):
             raise ValueError("Provide exactly one of user_uuid or group_uuid")
+        return self
+
+    @model_validator(mode="after")
+    def _expiry_in_the_future(self):
+        if self.expires_at is not None:
+            # Accept naive datetimes as UTC so an ISO string without an offset does
+            # not slip past this check; a past expiry is inert, so reject it plainly.
+            when = self.expires_at
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=timezone.utc)
+            if when <= datetime.now(timezone.utc):
+                raise ValueError("expires_at must be in the future")
         return self
 
 
@@ -31,6 +46,9 @@ class GrantRead(BaseModel):
     group_uuid: Optional[UUID] = None
     group_name: Optional[str] = None
     actions: list[Action]
+    # None means the grant never expires. A grant already past this is listed (so the
+    # owner can see and renew or remove it) but confers nothing.
+    expires_at: Optional[datetime] = None
 
 
 class EffectiveActions(BaseModel):
