@@ -114,6 +114,40 @@ async def test_delete_workspace_cascades_to_lists_and_descendants(
         assert active == 0, f"{name} not soft-deleted when workspace deleted"
 
 
+async def test_new_list_autoprovisions_audit_columns(client, workspace_uuid):
+    resp = await client.post(
+        "/api/lists/",
+        json={"name": "audit", "display_name": "Audit", "workspace_uuid": workspace_uuid},
+    )
+    assert resp.status_code == 201, resp.text
+    list_uuid = resp.json()["uuid"]
+
+    columns = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    names = {col["name"] for col in columns}
+    assert {"created_at", "updated_at", "created_by", "updated_by"} <= names
+
+    created_at = next(col for col in columns if col["name"] == "created_at")
+    updated_at = next(col for col in columns if col["name"] == "updated_at")
+    created_by = next(col for col in columns if col["name"] == "created_by")
+    updated_by = next(col for col in columns if col["name"] == "updated_by")
+
+    assert created_at["type"] == "datetime"
+    assert created_at["config"]["default"] == "now"
+    assert created_at["config"]["read_only"] is True
+
+    assert updated_at["type"] == "datetime"
+    assert updated_at["config"]["onupdate"] == "now"
+    assert updated_at["config"]["read_only"] is True
+
+    assert created_by["type"] == "user"
+    assert created_by["config"]["default"] == "current_user"
+    assert created_by["config"]["read_only"] is True
+
+    assert updated_by["type"] == "user"
+    assert updated_by["config"]["onupdate"] == "current_user"
+    assert updated_by["config"]["read_only"] is True
+
+
 async def test_list_autoprovisions_view_and_forms(client, list_uuid):
     views = (await client.get(f"/api/lists/{list_uuid}/views/")).json()
     forms = (await client.get(f"/api/lists/{list_uuid}/forms/")).json()

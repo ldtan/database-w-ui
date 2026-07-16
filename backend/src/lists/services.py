@@ -358,11 +358,52 @@ class ListService:
 
     @staticmethod
     def _provision_defaults(db: AsyncSession, lst: List) -> None:
-        """Seed a new list with a default grid view and create/update forms.
+        """Seed a new list with default audit columns, a grid view and forms.
 
         Forms start with an empty ``fields`` list, which the convention treats as
         "all columns" until the user customizes the layout.
         """
+        for name, display_name, col_type, config, position in [
+            (
+                "created_at",
+                "Created at",
+                ColumnType.datetime,
+                {"default": "now", "read_only": True},
+                1000,
+            ),
+            (
+                "updated_at",
+                "Updated at",
+                ColumnType.datetime,
+                {"onupdate": "now", "read_only": True},
+                1001,
+            ),
+            (
+                "created_by",
+                "Created by",
+                ColumnType.user,
+                {"default": "current_user", "read_only": True},
+                1002,
+            ),
+            (
+                "updated_by",
+                "Updated by",
+                ColumnType.user,
+                {"onupdate": "current_user", "read_only": True},
+                1003,
+            ),
+        ]:
+            db.add(
+                Column(
+                    list_id=lst.id,
+                    name=name,
+                    display_name=display_name,
+                    type=col_type,
+                    position=position,
+                    config=config,
+                )
+            )
+
         db.add(
             View(
                 list_id=lst.id,
