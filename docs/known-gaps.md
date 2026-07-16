@@ -181,40 +181,6 @@ What is still missing:
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
 
-## 7. New lists start with no audit columns (created_at / updated_at / created_by / updated_by)
-
-A freshly created list has exactly the columns someone adds by hand. The common four — when a
-record was created and last changed, and by whom — are now **buildable from the machinery in
-place**: the column `default` and `onupdate` values give `created_at` a `today`/`now` default,
-`updated_at` an `onupdate: now`, `created_by` a `current_user` default, and `updated_by` an
-`onupdate: current_user`. On-update values are already auto-managed — re-stamped on every edit
-and not settable by hand — which is exactly the audit-column contract, so no new backend concept
-is required; the work is seeding them.
-
-`ListService.create` would add the four columns once the list row exists. The design calls to
-make:
-
-- **Ordinary columns, or protected ones?** The config-driven design means anything seeded here
-  shows up in the grid, the record forms and exports for free — but an audit column a user can
-  freely edit, reorder into the middle, or delete is only half an audit column. `updated_*` are
-  already un-settable via `onupdate`; `created_*` are plain defaults and *can* be overwritten on
-  create unless marked `read_only` — which today is a UI hint, **not enforced** (see
-  `ColumnConfig`). Decide whether these are deletable/renamable at all, and whether their
-  read-only-ness needs to become enforced rather than advisory.
-- **Name collisions.** Column names are unique per list (`uq_columns_list_name`). Seeding runs
-  at creation on an empty list, so there is no existing data to collide with, but the four names
-  become reserved from that point — a user who wanted a plain `created_at` of their own can't
-  have it.
-- **New lists only.** Existing lists are unaffected; there is no backfill, and adding these to a
-  list after the fact is just the normal "add column" flow. A per-list opt-out at creation is
-  worth considering — not every scratch list wants four audit columns.
-
-Note `created_by`/`updated_by` are `user` columns, so they label by **username** and store a
-uuid, like every principal cell — which is the right privacy posture (see "A user cell must
-never resolve to a person's real name").
-
----
-
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers
