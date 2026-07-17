@@ -17,6 +17,7 @@ import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import type {
   Column,
+  FilterGroup,
   Form,
   ListItem,
   ListRead,
@@ -106,6 +107,7 @@ export function ListDetailPage() {
   // Debounced so a query goes out per pause, not per keystroke.
   const q = useDebounced(search);
   const [groupBy, setGroupBy] = useState<string | null>(null);
+  const [filterConfig, setFilterConfig] = useState<FilterGroup | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
@@ -190,6 +192,7 @@ export function ListDetailPage() {
     setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
     setPageSize(view.config.page_size ?? 25);
     setGroupBy(view.config.group_by?.column_uuid ?? null);
+    setFilterConfig(view.config.filters ?? { conjunction: "and", conditions: [] });
     setHiddenColumns(view.config.hidden_columns ?? []);
     setColumnOrder(view.config.column_order ?? []);
     setSelection([]); // selection doesn't carry across views
@@ -383,7 +386,9 @@ export function ListDetailPage() {
   }
 
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
-  const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
+  const activeFilters =
+    filterConfig ?? activeView?.config.filters ?? { conjunction: "and", conditions: [] };
+  const filterCount = activeFilters.conditions?.length ?? 0;
   const groupColumn = groupBy
     ? (cols.find((c) => c.uuid === groupBy) ?? null)
     : null;
@@ -397,10 +402,7 @@ export function ListDetailPage() {
         ]
       : [],
     page_size: pageSize,
-    filters: activeView?.config.filters ?? {
-      conjunction: "and",
-      conditions: [],
-    },
+    filters: activeFilters,
     group_by: groupBy ? { column_uuid: groupBy } : null,
     hidden_columns: hiddenColumns,
     column_order: columnOrder,
@@ -432,8 +434,9 @@ export function ListDetailPage() {
     onGroupBy: setGroupBy,
     filterCount,
     onOpenFilter: () => setShowFilter(true),
-    // Filters live on the view, so editing them is a change to that view.
-    canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
+    // Filters can be used in the current session even when the caller may not
+    // persist them back to the saved view.
+    canFilter: !!activeViewUuid && canView(activeViewUuid, "view"),
   };
 
   // The cards have no column header to sort by, so the page sorts for them —
@@ -839,6 +842,11 @@ export function ListDetailPage() {
           viewUuid={activeViewUuid}
           columns={cols}
           baseConfig={currentConfig}
+          onApply={(config) =>
+            setFilterConfig(
+              config.filters ?? { conjunction: "and", conditions: [] },
+            )
+          }
           visible={showFilter}
           onHide={() => setShowFilter(false)}
         />
