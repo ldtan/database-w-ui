@@ -170,6 +170,7 @@ export function ListDetailPage() {
   const canItem = useEffectiveActionsMap(
     "item",
     (items.data ?? []).map((item) => item.uuid),
+    listActions,
   );
   const canView = useEffectiveActionsMap(
     "view",

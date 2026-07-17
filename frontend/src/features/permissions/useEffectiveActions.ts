@@ -38,6 +38,7 @@ interface ResourceActions {
 export function useEffectiveActionsMap(
   resourceType: ResourceType,
   uuids: string[],
+  fallbackActions?: ActionSet,
 ): (uuid: string, action: PermissionAction) => boolean {
   // Sorted so a reorder of the same rows reuses the cached response.
   const key = [...uuids].sort();
@@ -57,5 +58,9 @@ export function useEffectiveActionsMap(
   for (const row of query.data ?? []) {
     byUuid.set(row.resource_uuid, new Set(row.actions));
   }
-  return (uuid, action) => byUuid.get(uuid)?.has(action) ?? false;
+  return (uuid, action) => {
+    const rowActions = byUuid.get(uuid);
+    if (rowActions) return rowActions.has(action);
+    return fallbackActions?.has(action) ?? false;
+  };
 }
