@@ -46,6 +46,7 @@ class ViewCreate(BaseModel):
     name: NameSlug
     display_name: str
     position: int = 0
+    description: Optional[str] = None
     config: ViewConfig = Field(default_factory=ViewConfig)
 
 
@@ -53,6 +54,7 @@ class ViewUpdate(BaseModel):
     name: Optional[NameSlug] = None
     display_name: Optional[str] = None
     position: Optional[int] = None
+    description: Optional[str] = None
     config: Optional[ViewConfig] = None
     # Changing this requires 'share' on the view.
     permissions_inherit: Optional[bool] = None
@@ -63,6 +65,7 @@ class ViewRead(BaseModel):
     name: str
     display_name: str
     position: int
+    description: Optional[str] = None
     config: dict
     permissions_inherit: bool = True
 

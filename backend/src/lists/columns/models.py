@@ -22,6 +22,7 @@ class Column(BaseModel):
     display_name: Mapped[str] = mapped_column(sa.String(255))
     type: Mapped[ColumnType] = mapped_column(sa.Enum(ColumnType, name="column_type"))
     position: Mapped[int] = mapped_column(sa.Integer, default=0)
+    description: Mapped[str] = mapped_column(sa.Text, nullable=True)
     # Type-specific settings (options, precision, target list, required, ...).
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
 

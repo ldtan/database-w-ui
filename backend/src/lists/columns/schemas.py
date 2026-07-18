@@ -64,6 +64,7 @@ class ColumnCreate(BaseModel):
     display_name: str
     type: ColumnType
     position: int = 0
+    description: Optional[str] = None
     config: ColumnConfig = Field(default_factory=ColumnConfig)
 
 
@@ -71,6 +72,7 @@ class ColumnUpdate(BaseModel):
     name: Optional[NameSlug] = None
     display_name: Optional[str] = None
     position: Optional[int] = None
+    description: Optional[str] = None
     config: Optional[ColumnConfig] = None
 
 
@@ -96,6 +98,7 @@ class ColumnRead(BaseModel):
     display_name: str
     type: ColumnType
     position: int
+    description: Optional[str] = None
     config: dict
 
     model_config = ConfigDict(from_attributes=True)
