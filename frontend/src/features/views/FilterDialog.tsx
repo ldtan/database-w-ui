@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
+import { Message } from "primereact/message";
 
-import type { Column, FilterCondition, ViewConfig } from "../../lib/types";
+import { api, ApiError } from "../../lib/api";
+import type { Column, FilterCondition, View, ViewConfig } from "../../lib/types";
 import { FilterConditionsEditor, cleanConditions } from "./FilterConditionsEditor";
 
 interface Props {
@@ -10,7 +13,6 @@ interface Props {
   viewUuid: string;
   columns: Column[];
   baseConfig: ViewConfig;
-  onApply?: (config: ViewConfig) => void;
   visible: boolean;
   onHide: () => void;
 }
@@ -18,20 +20,24 @@ interface Props {
 /**
  * Edit the active view's filter.
  *
- * Applying a filter updates the page's live view state for the current session.
- * It is persisted only when the user explicitly saves the view later.
+ * Unlike the rest of the toolbar, this saves immediately: a filter lives on the
+ * view, so changing it *is* a change to the view (hence the `configure` permission
+ * the page checks before offering the button). It PATCHes the whole config —
+ * `baseConfig` is the page's current state, so applying a filter does not silently
+ * discard the sort or column order you had set but not saved.
  *
  * The conditions themselves are edited by `FilterConditionsEditor`, which the
  * import dialog also uses to pick which records to export.
  */
 export function FilterDialog({
   listUuid,
+  viewUuid,
   columns,
   baseConfig,
-  onApply,
   visible,
   onHide,
 }: Props) {
+  const queryClient = useQueryClient();
   const [conjunction, setConjunction] = useState<"and" | "or">("and");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
@@ -42,18 +48,27 @@ export function FilterDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  function handleApply() {
-    const config: ViewConfig = {
-      ...baseConfig,
-      filters: { conjunction, conditions: cleanConditions(conditions) },
-    };
-    onApply?.(config);
-    onHide();
-  }
+  const apply = useMutation({
+    mutationFn: () => {
+      const config: ViewConfig = {
+        ...baseConfig,
+        filters: { conjunction, conditions: cleanConditions(conditions) },
+      };
+      return api.patch<View>(`/lists/${listUuid}/views/${viewUuid}`, { config });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      onHide();
+    },
+  });
 
   return (
     <AppDialog header="Filter" visible={visible} onHide={onHide} style={{ width: 560 }}>
       <div className="flex flex-col gap-3">
+        {apply.error instanceof ApiError && (
+          <Message severity="error" text={apply.error.message} />
+        )}
 
         <FilterConditionsEditor
           listUuid={listUuid}
@@ -66,7 +81,11 @@ export function FilterDialog({
 
         <div className="flex justify-end gap-2">
           <Button label="Cancel" text onClick={onHide} />
-          <Button label="Apply" onClick={handleApply} />
+          <Button
+            label="Apply"
+            onClick={() => apply.mutate()}
+            loading={apply.isPending}
+          />
         </div>
       </div>
     </AppDialog>
