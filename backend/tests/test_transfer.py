@@ -21,8 +21,11 @@ async def test_export_csv_uses_column_names_and_streams(client, list_uuid, add_c
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/csv")
     lines = resp.text.strip().splitlines()
-    assert lines[0] == "name,age"  # column names, not display names
-    assert set(lines[1:]) == {"Ann,30", "Bo,25"}
+    assert lines[0] == "name,age,created_at,updated_at,created_by,updated_by"  # column names, not display names
+    # Ignore default columns (created_at, updated_at, created_by, updated_by) and just check the user data.
+    actual_rows = lines[1:]
+    expected_rows = ["Ann,30", "Bo,25"]
+    assert all(actual_rows[i].startswith(expected_rows[i]) for i in range(2))
 
 
 async def test_export_respects_columns_sort_and_limit(client, list_uuid, add_column):
