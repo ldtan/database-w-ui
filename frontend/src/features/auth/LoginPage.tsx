@@ -52,7 +52,7 @@ export function LoginPage() {
               autoFocus
             />
           </div>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2 w-full">
             <label htmlFor="password">Password</label>
             <Password
               id="password"
@@ -61,7 +61,7 @@ export function LoginPage() {
               feedback={false}
               toggleMask
               inputStyle={{ width: "100%" }}
-              style={{ width: "100%" }}
+              style={{ width: "100%", display: "block" }}
             />
           </div>
           <Button type="submit" label="Sign in" loading={loading} />
