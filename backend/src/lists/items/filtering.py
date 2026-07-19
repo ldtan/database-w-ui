@@ -41,6 +41,8 @@ def _condition(cond: dict, columns: dict[str, Column]):
         return field != _as_text(value)
     if op == "contains":
         return field.ilike(f"%{value}%")
+    if op == "does_not_contain":
+        return field.notilike(f"%{value}%")
     if op == "is_empty":
         return or_(field.is_(None), field == "")
     if op == "is_not_empty":

@@ -14,6 +14,7 @@ export const OPERATORS = [
   { label: "is", value: "is" },
   { label: "is not", value: "is_not" },
   { label: "contains", value: "contains" },
+  { label: "does not contain", value: "does_not_contain" },
   { label: "is empty", value: "is_empty" },
   { label: "is not empty", value: "is_not_empty" },
   { label: ">", value: ">" },
