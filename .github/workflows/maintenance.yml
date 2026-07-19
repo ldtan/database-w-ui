@@ -46,6 +46,12 @@ jobs:
       - name: Converge record shapes
         run: uv run python -m src.maintenance.reconcile_shapes
 
+      - name: Purge deleted workspaces
+        run: uv run python -m src.maintenance.purge_deleted_workspaces
+
+      - name: Purge deleted lists
+        run: uv run python -m src.maintenance.purge_deleted_lists
+
       - name: Purge deleted records
         run: uv run python -m src.maintenance.purge_deleted_items
 
