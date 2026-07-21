@@ -331,6 +331,13 @@ export function NavDrawer({ visible, onHide }: Props) {
             active={pathname === "/people"}
             onNavigate={onHide}
           />
+          <NavLink
+            to="/guide"
+            label="Guide"
+            icon="pi pi-book"
+            active={pathname === "/guide"}
+            onNavigate={onHide}
+          />
         </nav>
 
         {/* Out of the navigation and pinned to the floor: logging out is not a
