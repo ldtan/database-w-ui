@@ -9,13 +9,14 @@ export interface Crumb {
 }
 
 /**
- * The trail always roots at Workspaces (the home icon). Crumbs render through
- * react-router Links rather than MenuItem.url, which would do a full page reload.
+ * The trail always roots at the home dashboard (the home icon). Crumbs render
+ * through react-router Links rather than MenuItem.url, which would do a full page
+ * reload.
  */
 export function Breadcrumbs({ items }: { items: Crumb[] }) {
   const home: MenuItem = {
     template: () => (
-      <Link to="/" className="p-menuitem-link" aria-label="Workspaces">
+      <Link to="/" className="p-menuitem-link" aria-label="Home">
         <span className="pi pi-home" />
       </Link>
     ),

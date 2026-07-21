@@ -246,9 +246,16 @@ export function NavDrawer({ visible, onHide }: Props) {
         <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
           <NavLink
             to="/"
-            label="Workspaces"
+            label="Home"
             icon="pi pi-home"
             active={pathname === "/"}
+            onNavigate={onHide}
+          />
+          <NavLink
+            to="/workspaces"
+            label="Workspaces"
+            icon="pi pi-th-large"
+            active={pathname === "/workspaces"}
             onNavigate={onHide}
           />
 

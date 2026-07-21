@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/AppLayout";
 import { LoginPage } from "./features/auth/LoginPage";
+import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { WorkspacesPage } from "./features/workspaces/WorkspacesPage";
 import { ListsPage } from "./features/lists/ListsPage";
 import { ListDetailPage } from "./features/lists/ListDetailPage";
@@ -27,10 +28,11 @@ export function App() {
           </RequireAuth>
         }
       >
-        <Route index element={<WorkspacesPage />} />
+        <Route index element={<DashboardPage />} />
         <Route path="guide" element={<GuidePage />} />
         <Route path="people" element={<PeoplePage />} />
         <Route path="profile" element={<ProfilePage />} />
+        <Route path="workspaces" element={<WorkspacesPage />} />
         <Route path="workspaces/:workspaceUuid" element={<ListsPage />} />
         <Route path="lists/:listUuid" element={<ListDetailPage />} />
       </Route>
