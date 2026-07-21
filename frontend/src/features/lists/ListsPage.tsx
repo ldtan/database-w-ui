@@ -150,7 +150,12 @@ export function ListsPage() {
   return (
     <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
       <ConfirmDialog />
-      <Breadcrumbs items={[{ label: workspace.data?.display_name ?? "Lists" }]} />
+      <Breadcrumbs
+        items={[
+          { label: "Workspaces", to: "/workspaces" },
+          { label: workspace.data?.display_name ?? "Lists" },
+        ]}
+      />
       <h1 className="text-xl font-semibold">
         {workspace.data?.display_name ?? "Lists"}
       </h1>

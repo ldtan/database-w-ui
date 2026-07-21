@@ -27,7 +27,7 @@ import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 const ROWS = 10;
 
 /**
- * The home page: your workspaces, plus the lists shared with you directly.
+ * The Workspaces page: your workspaces, plus the lists shared with you directly.
  *
  * That second section is not a convenience. A list can be granted without its
  * workspace, in which case the workspace is invisible to you and the list hangs off

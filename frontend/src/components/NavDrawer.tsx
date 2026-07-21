@@ -246,9 +246,16 @@ export function NavDrawer({ visible, onHide }: Props) {
         <nav className="flex flex-col gap-1 flex-1 overflow-y-auto">
           <NavLink
             to="/"
-            label="Workspaces"
+            label="Home"
             icon="pi pi-home"
             active={pathname === "/"}
+            onNavigate={onHide}
+          />
+          <NavLink
+            to="/workspaces"
+            label="Workspaces"
+            icon="pi pi-th-large"
+            active={pathname === "/workspaces"}
             onNavigate={onHide}
           />
 
@@ -329,6 +336,13 @@ export function NavDrawer({ visible, onHide }: Props) {
             label="People"
             icon="pi pi-users"
             active={pathname === "/people"}
+            onNavigate={onHide}
+          />
+          <NavLink
+            to="/guide"
+            label="Guide"
+            icon="pi pi-book"
+            active={pathname === "/guide"}
             onNavigate={onHide}
           />
         </nav>

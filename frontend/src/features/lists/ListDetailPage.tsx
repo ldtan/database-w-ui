@@ -151,6 +151,7 @@ export function ListDetailPage() {
     retry: false,
   });
   const crumbs: Crumb[] = [
+    { label: "Workspaces", to: "/workspaces" },
     ...(workspace.data
       ? [
           {

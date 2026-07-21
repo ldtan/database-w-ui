@@ -43,6 +43,12 @@ export function AppLayout() {
             />
           ) : (
             <>
+              <Link to="/workspaces" className="no-underline">
+                <Button label="Workspaces" icon="pi pi-th-large" text />
+              </Link>
+              <Link to="/guide" className="no-underline">
+                <Button label="Guide" icon="pi pi-book" text />
+              </Link>
               <Link to="/people" className="no-underline">
                 <Button label="People" icon="pi pi-users" text />
               </Link>
