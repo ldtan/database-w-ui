@@ -800,6 +800,8 @@ export interface components {
              * @default 0
              */
             position: number;
+            /** Description */
+            description?: string | null;
             config?: components["schemas"]["ColumnConfig"];
         };
         /** ColumnRead */
@@ -816,6 +818,8 @@ export interface components {
             type: components["schemas"]["ColumnType"];
             /** Position */
             position: number;
+            /** Description */
+            description?: string | null;
             /** Config */
             config: {
                 [key: string]: unknown;
@@ -834,6 +838,8 @@ export interface components {
             display_name?: string | null;
             /** Position */
             position?: number | null;
+            /** Description */
+            description?: string | null;
             config?: components["schemas"]["ColumnConfig"] | null;
         };
         /** DeletedListItemRead */
@@ -1374,6 +1380,11 @@ export interface components {
             /** Users */
             users?: components["schemas"]["ResourceLink"][];
             /**
+             * Is System
+             * @default false
+             */
+            is_system: boolean;
+            /**
              * Is Deleted
              * @default false
              */
@@ -1475,6 +1486,8 @@ export interface components {
              * @default 0
              */
             position: number;
+            /** Description */
+            description?: string | null;
             config?: components["schemas"]["ViewConfig"];
         };
         /** ViewRead */
@@ -1490,6 +1503,8 @@ export interface components {
             display_name: string;
             /** Position */
             position: number;
+            /** Description */
+            description?: string | null;
             /** Config */
             config: {
                 [key: string]: unknown;
@@ -1508,6 +1523,8 @@ export interface components {
             display_name?: string | null;
             /** Position */
             position?: number | null;
+            /** Description */
+            description?: string | null;
             config?: components["schemas"]["ViewConfig"] | null;
             /** Permissions Inherit */
             permissions_inherit?: boolean | null;
