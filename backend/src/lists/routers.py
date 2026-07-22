@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
+from src.auth.users.services import UserService
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
@@ -14,7 +15,7 @@ from src.workspaces.services import WorkspaceService
 
 from .dependencies import get_list_or_404
 from .models import List
-from .schemas import DeletedListRead, ListCreate, ListRead, ListUpdate
+from .schemas import DeletedListRead, ListCreate, ListRead, ListTransfer, ListUpdate
 from .services import ListService
 
 from .columns.routers import router as columns_router
@@ -156,6 +157,56 @@ async def update_list(
     if updated is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
     return updated
+
+
+@router.post("/{list_uuid}/transfer", response_model=ListRead)
+async def transfer_list(
+    list_uuid: UUID,
+    payload: ListTransfer,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Hand a list to another user — it moves into their immutable "Incoming"
+    workspace and becomes theirs.
+
+    Owner-only, and deliberately *not* the generic cross-workspace move: that move
+    requires `configure` on the target workspace, which nobody holds on a stranger's
+    inbox. Transferring instead resolves the recipient's inbox itself, so the only
+    authorization is being the list's current owner — the giver can only give away
+    what is fully theirs. Existing shares survive the move; the giver's implicit
+    owner access ends with it (see ListService.transfer_to_user).
+    """
+    lst = await ListService.get_any_by_uuid(db, list_uuid)
+    if lst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
+        )
+    # Owner-only: ownership flows through the workspace, so the caller must own the
+    # list's current workspace. This is the whole authorization — no grant qualifies.
+    if lst.workspace is None or lst.workspace.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the list's owner can transfer it",
+        )
+
+    recipient = await UserService.get_by_uuid(db, payload.user_uuid)
+    if recipient is None or not recipient.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_uuid does not reference an active user",
+        )
+    if recipient.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot transfer a list to yourself",
+        )
+
+    transferred = await ListService.transfer_to_user(db, lst.uuid, recipient.id)
+    if transferred is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
+        )
+    return transferred
 
 
 @router.delete("/{list_uuid}", status_code=status.HTTP_204_NO_CONTENT)

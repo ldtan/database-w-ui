@@ -196,10 +196,16 @@ export function WorkspacesPage() {
             <div className="flex items-center justify-between">
               <Link to={`/workspaces/${ws.uuid}`} className="no-underline">
                 <div className="font-medium">{ws.display_name}</div>
-                <div className="text-sm text-gray-500">{ws.name}</div>
+                <div className="text-sm text-gray-500">
+                  {ws.is_system
+                    ? "Lists other people have transferred to you"
+                    : ws.name}
+                </div>
               </Link>
+              {/* The Incoming inbox is immutable — no rename/delete/share; the
+                  recipient acts on the lists inside it, not on the box. */}
               <div className="flex gap-1">
-                {can(ws.uuid, "share") && (
+                {!ws.is_system && can(ws.uuid, "share") && (
                   <Button
                     icon="pi pi-share-alt"
                     text
@@ -207,7 +213,7 @@ export function WorkspacesPage() {
                     onClick={() => setSharing(ws)}
                   />
                 )}
-                {can(ws.uuid, "configure") && (
+                {!ws.is_system && can(ws.uuid, "configure") && (
                   <Button
                     icon="pi pi-pencil"
                     text
@@ -218,7 +224,7 @@ export function WorkspacesPage() {
                     }}
                   />
                 )}
-                {can(ws.uuid, "delete") && (
+                {!ws.is_system && can(ws.uuid, "delete") && (
                   <Button
                     icon="pi pi-trash"
                     text

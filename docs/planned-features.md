@@ -113,7 +113,22 @@ reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a sta
 
 ---
 
-## 3. List ownership transfer (hand a list to another user)
+## 3. List ownership transfer (hand a list to another user) — **implemented**
+
+**Shipped** via the "Incoming workspace" model. `POST /lists/{uuid}/transfer` `{ user_uuid }`
+moves a list into the recipient's immutable, lazily-created `incoming` workspace, making them
+its owner. Owner-only; the giver's implicit access ends with the move; existing shares survive
+(grants point at the list by `resource_id`, unchanged). A name clash on landing auto-suffixes
+(`tasks` → `tasks_2`). The recipient files it by moving it out (feature 4) or rejects it by
+deleting it. See `ListService.transfer_to_user`, `WorkspaceService.get_or_create_inbox`, and
+`tests/test_list_transfer.py`; UI is the "Transfer to user" mode of `MoveOrTransferDialog`.
+
+The decisions taken (from the three the design flagged): **email model** (anyone who owns a list
+can send it; no accept flow), **owner-only** to give, **shares preserved** / giver loses access.
+The consent tradeoff is documented in [known gaps](known-gaps.md). The design rationale below is
+kept for context.
+
+---
 
 Give a single list to a different user, so it becomes theirs — they own it, it counts against
 their storage, it shows up as their list, and the original owner keeps or loses access per the
@@ -160,27 +175,27 @@ should be able to dump lists into your workspace), which means an ownership tran
 
 ---
 
-## 4. Move lists across workspaces — **already implemented; UI missing**
+## 4. Move lists across workspaces — **implemented**
 
-**Backend: done.** `PATCH /lists/{uuid}` with `workspace_uuid` in the body moves a list to
-another workspace (`ListUpdate.workspace_uuid` → `ListService.update` sets `workspace_id`). The
+**Backend.** `PATCH /lists/{uuid}` with `workspace_uuid` moves a list to another workspace. The
 router requires `configure` on **both** the source list and the target workspace
-(`routers.py:139-147`), so you can only move between workspaces you're entitled to configure.
-Children (columns, records, views, forms) follow by `list_id`; list-level grants survive because
+(`routers.py`), so you can only move between workspaces you're entitled to configure. Children
+(columns, records, views, forms) follow by `list_id`; list-level grants survive because
 `resource_id` is unchanged. A name already taken in the target workspace 409s.
 
-**Frontend: no control exists.** `ListSettingsDialog` receives `workspaceUuid` only as read-only
-context and never lets the user change it — grep confirms no workspace picker anywhere in the
-list UI. So the capability ships but is unreachable.
+> **Load-bearing fix.** This path was latently broken: `get_any_by_uuid` eager-loads
+> `List.workspace`, and a loaded many-to-one **overwrites a bare `workspace_id` change on
+> flush** — so setting the scalar FK silently left the list where it was. `ListService.update`
+> (and the new transfer) now assign the **relationship** (`lst.workspace = target`), not the FK.
+> Any future move must do the same. `tests/test_list_transfer.py` covers it end-to-end.
 
-**To close the gap:**
-- **Add the control.** A "Move to workspace…" picker in `ListSettingsDialog`, populated from the
-  user's `configure`-able workspaces, PATCHing `workspace_uuid`. Handle the 409 (name taken) with
-  the same inline message the rename path uses.
-- **Same-owner is the common case** (reorganizing your own workspaces) and needs nothing more.
-  **Cross-owner is where this becomes feature 3** — the moment the target workspace has a
-  different owner, this *is* an ownership transfer, with all the consent and grant questions
-  §3 raises. Keep the plain picker to same-owner targets; route cross-owner through §3's flow.
+**Frontend.** The "Move to workspace" mode of `MoveOrTransferDialog`, reachable from each list's
+controls on `ListsPage`, lists the workspaces the caller can `configure` (own + granted), minus
+the current one and every immutable inbox, and PATCHes `workspace_uuid`.
+
+**Same-owner is the common case** (reorganizing your own workspaces). **Cross-owner** is feature
+3's job — pushing a list onto a stranger goes through `/transfer` (their inbox), because nobody
+holds `configure` on someone else's workspace.
 
 ---
 
@@ -238,8 +253,8 @@ cloner owns (via its workspace), so it starts private, like any freshly created 
 
 - **1 + 2** share one conversion-and-backfill engine; type conversion is best *delivered as* a
   guided data migration (add column → migrate → drop), which makes it reversible.
-- **3 + 4** are the same move, split by whether the target workspace has a different owner. 4 is
-  built and only needs a UI for the same-owner case; 3 is the consent-and-grants layer for the
-  cross-owner case.
+- **3 + 4** shipped together: the same move, split by whether the target workspace has a
+  different owner. Same-owner is a plain workspace picker (`configure` on the target); cross-owner
+  is a transfer into the recipient's immutable inbox (owner-only, no target `configure` needed).
 - **5** is independent, but its uuid-remapping discipline is the same one **3/4 get for free**
   (a move keeps uuids; a clone must not).

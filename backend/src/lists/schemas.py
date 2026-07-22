@@ -33,6 +33,12 @@ class ListUpdate(BaseModel):
     permissions_inherit: Optional[bool] = None
 
 
+class ListTransfer(BaseModel):
+    # The user to hand the list to. It moves into that user's immutable "Incoming"
+    # workspace, making them its owner. Owner-only (enforced in the router).
+    user_uuid: UUID
+
+
 class ListRead(ListBase):
     uuid: UUID
     workspace: ResourceLink

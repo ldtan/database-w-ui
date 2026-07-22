@@ -294,6 +294,31 @@ imports from `auth.users.services` → `workspaces.services`, so a module-level
 creates an import cycle. The deferred function-local imports in `list_visible`, `ListService.list`,
 `ListItemService.list`/`query`, `ViewService.list`, and `FormService.list` are load-bearing.
 
+**Moving a list between workspaces must assign the `workspace` relationship, not the
+`workspace_id` FK.** `ListService.get_any_by_uuid` eager-loads `List.workspace`
+(`selectinload`), and SQLAlchemy's unit of work treats a *loaded* many-to-one as
+authoritative: on flush it writes the FK from the relationship, **silently overwriting a
+bare `lst.workspace_id = …` assignment** and leaving the list where it was. Both
+`ListService.update` (the cross-workspace move) and `transfer_to_user` therefore do
+`lst.workspace = target`. This was latent for the whole life of the move feature — it had no
+UI and no test, so nothing ever exercised it — and `tests/test_list_transfer.py` now pins it.
+Any new code that re-parents a list has the same trap.
+
+**Ownership transfer is the "email" model: a list is pushed, not offered.** Handing a list to
+another user (`POST /lists/{uuid}/transfer`) moves it into that user's **immutable `incoming`
+workspace** (`is_system`, minted lazily by `WorkspaceService.get_or_create_inbox`, name
+reserved so an ordinary workspace can't occupy the slot). There is deliberately **no
+accept/consent step** — anyone who *owns* a list can drop it on anyone, exactly as email lets
+anyone write to you; the recipient's recourse is to move it out or delete it. The authorization
+is owner-only *on the source* (ownership flows through the workspace, so the caller must own the
+list's current workspace) — **not** `configure` on the target, which is why transfer is a
+separate endpoint from the generic move (nobody holds `configure` on a stranger's inbox). The
+inbox is guarded like a system group: `WorkspaceService._guard_system_workspace` refuses to
+rename or delete it (its *lists* stay ordinary, so the recipient can still move or delete them).
+Existing grants survive the move (they key on the list's `resource_id`, unchanged), so the
+giver's previously-shared users keep access; only the giver's *implicit owner* access ends. A
+name clash on landing auto-suffixes rather than 409ing.
+
 **The PrimeReact theme hardcodes its colors.** `lara-light-cyan/theme.css` defines
 `--primary-color` / `--surface-*` and then never references them (zero `var(--primary-*)`
 usages in the file), so overriding those variables recolors nothing. Theming works only

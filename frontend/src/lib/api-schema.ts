@@ -207,6 +207,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/workspaces/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deleted Workspaces */
+        get: operations["list_deleted_workspaces_api_workspaces_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_uuid}": {
         parameters: {
             query?: never;
@@ -224,6 +241,40 @@ export interface paths {
         head?: never;
         /** Update Workspace */
         patch: operations["update_workspace_api_workspaces__workspace_uuid__patch"];
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Workspace */
+        post: operations["restore_workspace_api_workspaces__workspace_uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/workspaces/{workspace_uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge Workspace */
+        delete: operations["purge_workspace_api_workspaces__workspace_uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/lists/": {
@@ -251,6 +302,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deleted Lists */
+        get: operations["list_deleted_lists_api_lists_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}": {
         parameters: {
             query?: never;
@@ -268,6 +336,68 @@ export interface paths {
         head?: never;
         /** Update List */
         patch: operations["update_list_api_lists__list_uuid__patch"];
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer List
+         * @description Hand a list to another user — it moves into their immutable "Incoming"
+         *     workspace and becomes theirs.
+         *
+         *     Owner-only, and deliberately *not* the generic cross-workspace move: that move
+         *     requires `configure` on the target workspace, which nobody holds on a stranger's
+         *     inbox. Transferring instead resolves the recipient's inbox itself, so the only
+         *     authorization is being the list's current owner — the giver can only give away
+         *     what is fully theirs. Existing shares survive the move; the giver's implicit
+         *     owner access ends with it (see ListService.transfer_to_user).
+         */
+        post: operations["transfer_list_api_lists__list_uuid__transfer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore List */
+        post: operations["restore_list_api_lists__list_uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge List */
+        delete: operations["purge_list_api_lists__list_uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/lists/{list_uuid}/columns/": {
@@ -431,6 +561,23 @@ export interface paths {
         /** Restore Item */
         post: operations["restore_item_api_lists__list_uuid__items__uuid__restore_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge Item */
+        delete: operations["purge_item_api_lists__list_uuid__items__uuid__permanent_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -864,6 +1011,68 @@ export interface components {
              */
             deleted_at: string;
         };
+        /** DeletedListRead */
+        DeletedListRead: {
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description?: string | null;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            workspace: components["schemas"]["ResourceLink"];
+            primary_column?: components["schemas"]["ResourceLink"] | null;
+            /**
+             * Permissions Inherit
+             * @default true
+             */
+            permissions_inherit: boolean;
+            /** Owner Username */
+            owner_username?: string | null;
+            /** Workspace Display Name */
+            workspace_display_name?: string | null;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+        };
+        /** DeletedWorkspaceRead */
+        DeletedWorkspaceRead: {
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description?: string | null;
+            /** Settings */
+            settings?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /**
+             * Is System
+             * @default false
+             */
+            is_system: boolean;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+        };
         /** EffectiveActions */
         EffectiveActions: {
             /** Actions */
@@ -1180,6 +1389,14 @@ export interface components {
             owner_username?: string | null;
             /** Workspace Display Name */
             workspace_display_name?: string | null;
+        };
+        /** ListTransfer */
+        ListTransfer: {
+            /**
+             * User Uuid
+             * Format: uuid
+             */
+            user_uuid: string;
         };
         /** ListUpdate */
         ListUpdate: {
@@ -1559,6 +1776,11 @@ export interface components {
              * Format: uuid
              */
             uuid: string;
+            /**
+             * Is System
+             * @default false
+             */
+            is_system: boolean;
         };
         /** WorkspaceUpdate */
         WorkspaceUpdate: {
@@ -2105,6 +2327,38 @@ export interface operations {
             };
         };
     };
+    list_deleted_workspaces_api_workspaces_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedWorkspaceRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_workspace_api_workspaces__workspace_uuid__get: {
         parameters: {
             query?: never;
@@ -2200,6 +2454,66 @@ export interface operations {
             };
         };
     };
+    restore_workspace_api_workspaces__workspace_uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_workspace_api_workspaces__workspace_uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_lists_api_lists__get: {
         parameters: {
             query?: {
@@ -2257,6 +2571,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deleted_lists_api_lists_deleted_get: {
+        parameters: {
+            query: {
+                /** @description The workspace whose bin to read */
+                workspace_uuid: string;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeletedListRead"][];
                 };
             };
             /** @description Validation Error */
@@ -2353,6 +2701,101 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ListRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_list_api_lists__list_uuid__transfer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListTransfer"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_list_api_lists__list_uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_list_api_lists__list_uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -2863,6 +3306,36 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ListItemRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_item_api_lists__list_uuid__items__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

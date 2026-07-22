@@ -21,6 +21,14 @@ class Workspace(BaseModel):
     display_name: Mapped[str] = mapped_column(sa.String(255))
     description: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # The per-user "Incoming" workspace that transferred lists land in. Lazily
+    # created on the first transfer to a user, and immutable thereafter: it cannot
+    # be renamed or deleted (see WorkspaceService._guard_system_workspace), so it
+    # stays a stable drop point. Its *lists* are ordinary — the recipient moves them
+    # out into a real workspace, or deletes them to reject the transfer.
+    is_system: Mapped[bool] = mapped_column(
+        sa.Boolean, default=False, server_default=sa.false(), nullable=False
+    )
 
     owner: Mapped["User"] = relationship("User")
 

@@ -27,6 +27,9 @@ class WorkspaceUpdate(BaseModel):
 
 class WorkspaceRead(WorkspaceBase):
     uuid: UUID
+    # True only for the per-user "Incoming" workspace transferred lists land in. The
+    # UI hides rename/delete for it, because it is immutable server-side too.
+    is_system: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
