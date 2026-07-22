@@ -7,11 +7,17 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
-from src.core.exceptions import ConflictError
+from src.core.exceptions import ConflictError, PermissionDeniedError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from .models import Workspace
 from .schemas import WorkspaceCreate, WorkspaceUpdate
+
+# The reserved name/label of every user's "Incoming" workspace — the immutable drop
+# point transferred lists land in (see get_or_create_inbox). The name is reserved so
+# an ordinary workspace can never occupy the slot (see create).
+INBOX_NAME = "incoming"
+INBOX_DISPLAY = "Incoming"
 
 
 class WorkspaceService:
@@ -108,10 +114,26 @@ class WorkspaceService:
         )
         return await db.scalar(stmt) or 0
 
+    @staticmethod
+    def _guard_system_workspace(workspace: Workspace) -> None:
+        """A system workspace (the transfers inbox) is immutable: it cannot be
+        renamed, re-described, moved into, or deleted. Mirrors the system-group
+        guard. Its *lists* stay ordinary, so the recipient can still move a
+        transferred list out or delete it — only the workspace itself is frozen."""
+        if workspace.is_system:
+            raise PermissionDeniedError(
+                f"The {INBOX_DISPLAY!r} workspace is immutable"
+            )
+
     @classmethod
     async def create(
         cls, db: AsyncSession, owner_id: int, payload: WorkspaceCreate
     ) -> Workspace:
+        # Keep the inbox slot free: an ordinary workspace may not take the reserved
+        # name, so get_or_create_inbox can always mint it without colliding on the
+        # per-owner unique index.
+        if payload.name == INBOX_NAME:
+            raise ConflictError(f"{INBOX_NAME!r} is a reserved workspace name")
         workspace = Workspace(
             owner_id=owner_id,
             name=payload.name,
@@ -151,6 +173,42 @@ class WorkspaceService:
         )
 
     @classmethod
+    async def get_or_create_inbox(cls, db: AsyncSession, owner_id: int) -> Workspace:
+        """The user's immutable "Incoming" workspace, minted on first use.
+
+        Transferred lists land here (see ``ListService.transfer_to_user``). Looked up
+        by ``is_system`` rather than by name, so a user who happens to have named an
+        ordinary workspace before the reservation existed can't be mistaken for it —
+        though ``create`` now reserves the name, so the slot is free to mint.
+
+        Flushes but does not commit: the caller (a transfer) owns the transaction, so
+        the inbox and the list move land atomically. Idempotent — returns the existing
+        inbox if there is one.
+        """
+        existing = (
+            await db.execute(
+                select(Workspace).where(
+                    Workspace.owner_id == owner_id,
+                    Workspace.is_system.is_(True),
+                    Workspace.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if existing is not None:
+            return existing
+
+        inbox = Workspace(
+            owner_id=owner_id,
+            name=INBOX_NAME,
+            display_name=INBOX_DISPLAY,
+            description="Lists other people have transferred to you.",
+            is_system=True,
+        )
+        db.add(inbox)
+        await db.flush()
+        return inbox
+
+    @classmethod
     async def update(
         cls,
         db: AsyncSession,
@@ -161,12 +219,17 @@ class WorkspaceService:
         workspace = await cls.get_any_by_uuid(db, uuid)
         if workspace is None:
             return None
+        # The inbox is immutable — refuse before touching any field.
+        cls._guard_system_workspace(workspace)
 
         data = payload.model_dump(exclude_unset=True)
         if data.get("name") is None:
             data.pop("name", None)
         if data.get("display_name") is None:
             data.pop("display_name", None)
+        # An ordinary workspace may not be renamed onto the reserved inbox slot.
+        if data.get("name") == INBOX_NAME:
+            raise ConflictError(f"{INBOX_NAME!r} is a reserved workspace name")
 
         for field, value in data.items():
             setattr(workspace, field, value)
@@ -179,7 +242,7 @@ class WorkspaceService:
             await db.rollback()
             raise ConflictError("A workspace with this name already exists") from exc
 
-        return await cls.get_by_uuid(db, owner_id, target_uuid)
+        return await cls.get_any_by_uuid(db, target_uuid)
 
     @classmethod
     async def delete(
@@ -189,6 +252,9 @@ class WorkspaceService:
         workspace = await cls.get_any_by_uuid(db, uuid)
         if workspace is None:
             return False
+        # The inbox cannot be deleted, only emptied — its lists are the recipient's
+        # to move out or delete individually.
+        cls._guard_system_workspace(workspace)
 
         # Deferred import avoids a module cycle (lists.services imports this one).
         from src.lists.services import ListService

@@ -28,6 +28,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "views", title: "Views: saved ways of looking" },
   { id: "forms", title: "Forms: shape the entry screen" },
   { id: "sharing", title: "Sharing and permissions" },
+  { id: "transfer", title: "Moving and giving a list away" },
   { id: "people", title: "People, groups, and your profile" },
   { id: "import-export", title: "Import and export" },
   { id: "bin", title: "Recovering deleted records" },
@@ -615,6 +616,53 @@ export function GuidePage() {
           <Ui>Unique permissions</Ui> to ignore access handed down from its workspace
           and use only the people you add here. Sharing with a group grants everyone
           in it — a quick way to give a whole team access at once.
+        </Callout>
+      </Section>
+
+      <Section id="transfer" title="Moving and giving a list away">
+        <p>
+          A list doesn’t have to stay where you made it. Open a workspace to see its
+          lists; each one has a <Ui>Move or transfer</Ui> button (the paper-plane
+          icon), alongside Share, Rename, and Delete.
+        </p>
+        <p>
+          <strong>Move it to another workspace.</strong> Choose{" "}
+          <Ui>Move to workspace</Ui>, pick one of your other workspaces, and click{" "}
+          <Ui>Move</Ui>. Everything travels with it — columns, records, views, and
+          forms — and everyone you’ve already shared it with keeps their access. You can
+          only move a list into a workspace you’re allowed to set up.
+        </p>
+        <p>
+          <strong>Give it to another person.</strong> Choose{" "}
+          <Ui>Transfer to user</Ui>, pick the person, and click <Ui>Transfer</Ui>. The
+          list becomes theirs:
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            It lands in that person’s <Ui>Incoming</Ui> workspace — a folder everyone
+            has for lists sent to them.
+          </li>
+          <li>
+            They become the owner, so <strong>you lose access</strong> unless they later
+            share it back. People you’d already shared it with keep theirs.
+          </li>
+          <li>Only a list’s owner can give it away.</li>
+          <li>
+            The person receiving it can keep it — moving it out of{" "}
+            <Ui>Incoming</Ui> into a workspace of their own — or turn it down by deleting
+            it.
+          </li>
+        </ul>
+        <Callout tone="tip" title="Your Incoming folder">
+          Once someone transfers you a list, an <Ui>Incoming</Ui> workspace appears among
+          your workspaces. You can’t rename or delete it — it’s just a landing spot — but
+          the lists inside are yours to move elsewhere or remove.
+        </Callout>
+        <Callout tone="warn" title="Transferring is one-way">
+          After you transfer a list it belongs to the other person; getting it back means
+          asking them to transfer or share it to you. If you only want someone to help
+          with a list, <a href="#sharing" style={{ color: "var(--brand)" }}>share it</a>{" "}
+          with them instead of transferring it.
         </Callout>
       </Section>
 

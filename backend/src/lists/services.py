@@ -239,7 +239,10 @@ class ListService:
                     raise UnknownReferenceError(
                         "workspace_uuid does not reference a workspace"
                     )
-                lst.workspace_id = workspace.id
+                # Assign the relationship, not the scalar FK: List.workspace is
+                # eager-loaded, and a loaded many-to-one overwrites a bare
+                # workspace_id change on flush, leaving the list in place.
+                lst.workspace = workspace
 
         # Treat an explicit null name as "leave unchanged" rather than clearing it.
         if data.get("name") is None:
@@ -260,6 +263,66 @@ class ListService:
             await db.rollback()
             raise ConflictError("A list with this name already exists") from exc
 
+        return await cls.get_any_by_uuid(db, target_uuid)
+
+    @staticmethod
+    async def _free_name_in_workspace(
+        db: AsyncSession, workspace_id: int, base: str, exclude_id: int
+    ) -> str:
+        """A list ``name`` unique among the live lists of ``workspace_id``.
+
+        Returns ``base`` when it is free, else ``base_2``, ``base_3``, … — used when
+        a transfer lands a list in an inbox that already holds one of that name, so a
+        transfer never fails on a per-workspace name clash. The suffix keeps the
+        NameSlug shape (lowercase letters/digits/underscores)."""
+        rows = await db.execute(
+            select(List.name).where(
+                List.workspace_id == workspace_id,
+                List.deleted_at.is_(None),
+                List.id != exclude_id,
+            )
+        )
+        taken = set(rows.scalars().all())
+        if base not in taken:
+            return base
+        n = 2
+        while f"{base}_{n}" in taken:
+            n += 1
+        return f"{base}_{n}"
+
+    @classmethod
+    async def transfer_to_user(
+        cls, db: AsyncSession, uuid: Union[str, UUID], recipient_id: int
+    ) -> Optional[List]:
+        """Hand a list to another user by moving it into their "Incoming" workspace.
+
+        Ownership here *is* workspace membership, so a transfer is a move into a
+        workspace the recipient owns — their immutable inbox, minted on demand. The
+        router enforces that the caller is the list's current owner before calling.
+
+        Grants are deliberately left untouched: a grant points at the list by
+        ``resource_id``, which does not change, so existing shares survive the move.
+        The giver's access was the implicit workspace-owner short-circuit, and it ends
+        the moment the list leaves their workspace — no grant to revoke. The recipient
+        becomes the new implicit owner. (See docs/planned-features.md #3.)
+        """
+        lst = await cls.get_any_by_uuid(db, uuid)
+        if lst is None:
+            return None
+
+        inbox = await WorkspaceService.get_or_create_inbox(db, recipient_id)
+        # A list name is unique per workspace; auto-suffix so the landing never 409s.
+        lst.name = await cls._free_name_in_workspace(
+            db, inbox.id, lst.name, exclude_id=lst.id
+        )
+        # Assign the relationship, not the scalar FK: get_any_by_uuid eager-loads
+        # List.workspace, and a loaded many-to-one overwrites a bare workspace_id
+        # change on flush — so setting the FK alone silently leaves the list put.
+        lst.workspace = inbox
+
+        await db.flush()
+        target_uuid = lst.uuid
+        await db.commit()
         return await cls.get_any_by_uuid(db, target_uuid)
 
     @classmethod

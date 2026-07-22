@@ -14,6 +14,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { NameFields } from "../../components/NameFields";
+import { useCurrentUser } from "../../lib/auth";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
 import { useDebounced } from "../../lib/useDebounced";
@@ -24,6 +25,7 @@ import {
   useEffectiveActionsMap,
 } from "../permissions/useEffectiveActions";
 import { DeletedListsDialog } from "./DeletedListsDialog";
+import { MoveOrTransferDialog } from "./MoveOrTransferDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits.
@@ -44,6 +46,7 @@ export function ListsPage() {
   const { workspaceUuid = "" } = useParams();
   const queryClient = useQueryClient();
   const toast = useToast();
+  const me = useCurrentUser();
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["lists", workspaceUuid] });
     queryClient.invalidateQueries({ queryKey: ["effective"] });
@@ -95,6 +98,7 @@ export function ListsPage() {
   });
 
   const [renaming, setRenaming] = useState<ListRead | null>(null);
+  const [moving, setMoving] = useState<ListRead | null>(null);
   const [names, setNames] = useState({ displayName: "", name: "" });
   const rename = useMutation({
     mutationFn: () =>
@@ -237,6 +241,14 @@ export function ListsPage() {
                     }}
                   />
                 )}
+                {can(list.uuid, "configure") && (
+                  <Button
+                    icon="pi pi-send"
+                    text
+                    aria-label="Move or transfer list"
+                    onClick={() => setMoving(list)}
+                  />
+                )}
                 {can(list.uuid, "delete") && (
                   <Button
                     icon="pi pi-trash"
@@ -312,6 +324,18 @@ export function ListsPage() {
           </div>
         </div>
       </AppDialog>
+
+      <MoveOrTransferDialog
+        list={moving}
+        currentWorkspaceUuid={workspaceUuid}
+        // Only the owner may transfer; a configure-grant holder can still move.
+        canTransfer={!!me && moving?.owner_username === me.username}
+        onHide={() => setMoving(null)}
+        onDone={() => {
+          setMoving(null);
+          invalidate();
+        }}
+      />
 
       <DeletedListsDialog
         workspaceUuid={workspaceUuid}

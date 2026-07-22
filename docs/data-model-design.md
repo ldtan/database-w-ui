@@ -112,6 +112,7 @@ The tenancy container. A user owns workspaces; lists live inside them.
 | `display_name` | `str(255)`      | UI label (D6). Not unique. |
 | `description`  | `Text` nullable | Optional. |
 | `settings`     | `JSONB` default `{}` | Misc workspace-level settings. |
+| `is_system`    | `bool` default `false` | Marks the per-user **"Incoming"** workspace that transferred lists land in (see the lists notes below). Immutable — cannot be renamed or deleted; minted lazily on the first transfer to a user. |
 
 ### `lists`
 
@@ -135,8 +136,15 @@ Notes:
   `(workspace_id, name)` for lists, both `WHERE deleted_at IS NULL`.
 - **Auto-provisioning (implemented):** creating a list seeds a default `grid` view and
   default `create`/`update` forms (§7, §8).
-- Lists are created with a `workspace_uuid` in the body and can be moved between
-  workspaces via update.
+- Lists are created with a `workspace_uuid` in the body and can be **moved** between
+  workspaces via update (`PATCH` with `workspace_uuid`; requires `configure` on both the
+  list and the target workspace). A list can also be **transferred to another user** via
+  `POST /lists/{uuid}/transfer`: ownership flows through the workspace, so the transfer
+  moves the list into the recipient's immutable `is_system` "Incoming" workspace (minted on
+  demand), making them the owner. Owner-only; existing grants survive (they key on the
+  unchanged `resource_id`); the giver's implicit access ends. Both must assign the
+  `workspace` **relationship**, not the `workspace_id` FK — see
+  [known gaps](known-gaps.md). Details in [planned features §3–4](planned-features.md).
 
 ---
 
@@ -439,6 +447,11 @@ each is enabled. Field layout is JSONB (D5).
 - **Incremental (streaming) import parsing:** bulk import inserts row-by-row with batched
   commits, but reads the whole uploaded file into memory first. For very large uploads,
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
+
+See [Planned features](planned-features.md) for the larger asked-for capabilities that build
+on this model — column type conversion, column data migration, list ownership transfer,
+cross-workspace moves (backend already built), and list cloning — each with its load-bearing
+details and open decisions.
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
