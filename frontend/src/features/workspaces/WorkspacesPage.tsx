@@ -20,6 +20,7 @@ import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
+import { DeletedWorkspacesDialog } from "./DeletedWorkspacesDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits — a client-side filter over one fetched page would
@@ -91,6 +92,7 @@ export function WorkspacesPage() {
   const sharedTotal = shared.data?.total ?? 0;
 
   const [displayName, setDisplayName] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const create = useMutation({
     mutationFn: (name: string) =>
       api.post<Workspace>("/workspaces/", {
@@ -150,7 +152,15 @@ export function WorkspacesPage() {
     <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
       <ConfirmDialog />
       <Breadcrumbs items={[{ label: "Workspaces" }]} />
-      <h1 className="text-xl font-semibold">Workspaces</h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">Workspaces</h1>
+        <Button
+          label="Deleted"
+          icon="pi pi-trash"
+          text
+          onClick={() => setShowDeleted(true)}
+        />
+      </div>
 
       <form onSubmit={onCreate} className="flex gap-2">
         <InputText
@@ -328,6 +338,11 @@ export function WorkspacesPage() {
           </div>
         </div>
       </AppDialog>
+
+      <DeletedWorkspacesDialog
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
+      />
     </div>
   );
 }

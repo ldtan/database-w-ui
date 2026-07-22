@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
 
+from src.core.config import settings
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from src.workspaces.models import Workspace
@@ -355,6 +356,144 @@ class ListService:
                 )
                 .values(data=ListItem.data.op("-")(key))
             )
+
+    # -- the bin: view, restore, and purge soft-deleted lists ---------------
+
+    @staticmethod
+    def _select_deleted(workspace_id: int):
+        """Lists in a workspace's bin: soft-deleted and still inside the retention
+        window. Older ones are past ``PURGE_DELETED_AFTER_DAYS`` and on their way out,
+        so they are no longer offered as restorable — exactly as the records bin does.
+
+        Scoped to a live workspace, so these are lists deleted on their own; a list
+        that went down with its workspace lives in that workspace's own bin instead.
+        """
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.PURGE_DELETED_AFTER_DAYS
+        )
+        return select(List).where(
+            List.workspace_id == workspace_id,
+            List.deleted_at.is_not(None),
+            List.deleted_at >= cutoff,
+        )
+
+    @classmethod
+    async def list_deleted_for_workspace(
+        cls, db: AsyncSession, workspace_id: int, skip: int = 0, limit: int = 100
+    ) -> Sequence[List]:
+        """A workspace's list bin, most recently deleted first."""
+        stmt = (
+            cls._select_deleted(workspace_id)
+            .options(
+                selectinload(List.workspace), selectinload(List.primary_column)
+            )
+            .order_by(List.deleted_at.desc(), List.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return (await db.execute(stmt)).scalars().all()
+
+    @classmethod
+    async def count_deleted_for_workspace(
+        cls, db: AsyncSession, workspace_id: int
+    ) -> int:
+        """How many lists are in the workspace's bin — the paginator's total, built
+        off the same predicate as the listing so the two cannot drift."""
+        stmt = select(func.count()).select_from(
+            cls._select_deleted(workspace_id).subquery()
+        )
+        return await db.scalar(stmt) or 0
+
+    @classmethod
+    async def get_deleted_by_uuid(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[List]:
+        """A single list from the bin, regardless of owner — the router enforces the
+        permission. ``get_any_by_uuid`` filters deleted rows out, so restore/purge
+        need their own fetch. The workspace is eager-loaded so the caller can gate on
+        it and render the row."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.PURGE_DELETED_AFTER_DAYS
+        )
+        result = await db.execute(
+            select(List)
+            .where(
+                List.uuid == parsed,
+                List.deleted_at.is_not(None),
+                List.deleted_at >= cutoff,
+            )
+            .options(
+                selectinload(List.workspace), selectinload(List.primary_column)
+            )
+        )
+        return result.scalars().first()
+
+    @classmethod
+    async def restore(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[List]:
+        """Bring a soft-deleted list back, along with the columns, records, views and
+        forms that went down with it. Returns None if it is not in the bin.
+
+        Delete stamped the list and every descendant with one identical ``deleted_at``
+        (see ``_cascade_descendants``); restore reverses exactly that set by matching
+        it, so a record the user had binned on its own — a different timestamp — stays
+        in the records bin.
+
+        A list name is unique per workspace among live rows, so restoring can collide
+        with a name taken while this one sat deleted and raise ``ConflictError`` (409).
+
+        Note: references *into* this list were scrubbed when it was deleted (see
+        ``delete``), so cross-list lookups pointing at its rows are not brought back —
+        the list, its columns, and its records are.
+        """
+        lst = await cls.get_deleted_by_uuid(db, uuid)
+        if lst is None:
+            return None
+
+        when = lst.deleted_at
+        for model in _LIST_CHILD_MODELS:
+            await db.execute(
+                update(model)
+                .where(model.list_id == lst.id, model.deleted_at == when)
+                .values(deleted_at=None)
+            )
+        lst.deleted_at = None
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError("A list with this name already exists") from exc
+        return await cls.get_any_by_uuid(db, uuid)
+
+    @classmethod
+    async def restore_for_workspace(
+        cls, db: AsyncSession, workspace_id: int, when: datetime
+    ) -> None:
+        """Un-delete the lists (and their descendants) a workspace took down when it
+        was deleted — those stamped with the workspace's own ``deleted_at``. Lists the
+        owner had binned independently carry a different timestamp and are left alone.
+        Does not commit — the caller (workspace restore) owns the transaction."""
+        rows = await db.execute(
+            select(List.id).where(
+                List.workspace_id == workspace_id, List.deleted_at == when
+            )
+        )
+        list_ids = list(rows.scalars().all())
+        if not list_ids:
+            return
+        for model in _LIST_CHILD_MODELS:
+            await db.execute(
+                update(model)
+                .where(model.list_id.in_(list_ids), model.deleted_at == when)
+                .values(deleted_at=None)
+            )
+        await db.execute(
+            update(List).where(List.id.in_(list_ids)).values(deleted_at=None)
+        )
 
     @staticmethod
     def _provision_defaults(db: AsyncSession, lst: List) -> None:

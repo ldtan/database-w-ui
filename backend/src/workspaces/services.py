@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
@@ -6,6 +6,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.exceptions import ConflictError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
@@ -199,3 +200,104 @@ class WorkspaceService:
         workspace.deleted_at = now
         await db.commit()
         return True
+
+    # -- the bin: view, restore, and purge soft-deleted workspaces ----------
+
+    @staticmethod
+    def _select_deleted(owner_id: int):
+        """Workspaces in an owner's bin: soft-deleted and still inside the retention
+        window. Older ones are past ``PURGE_DELETED_AFTER_DAYS`` and on their way out
+        — the purge job may destroy them at any time — so they are no longer offered
+        as restorable, exactly as the records bin does."""
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.PURGE_DELETED_AFTER_DAYS
+        )
+        return select(Workspace).where(
+            Workspace.owner_id == owner_id,
+            Workspace.deleted_at.is_not(None),
+            Workspace.deleted_at >= cutoff,
+        )
+
+    @classmethod
+    async def list_deleted_for_owner(
+        cls, db: AsyncSession, owner_id: int, skip: int = 0, limit: int = 100
+    ) -> Sequence[Workspace]:
+        """An owner's bin, most recently deleted first. The bin is owner-scoped: a
+        deleted workspace resolves to no permission context (see
+        ``PermissionService._security_context``), so there is nothing to grant a
+        non-owner against — restoring a whole workspace is the owner's call."""
+        stmt = (
+            cls._select_deleted(owner_id)
+            .order_by(Workspace.deleted_at.desc(), Workspace.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        return (await db.execute(stmt)).scalars().all()
+
+    @classmethod
+    async def count_deleted_for_owner(cls, db: AsyncSession, owner_id: int) -> int:
+        """How many workspaces are in the owner's bin — the paginator's total, built
+        off the same predicate as the listing so the two cannot drift."""
+        stmt = select(func.count()).select_from(
+            cls._select_deleted(owner_id).subquery()
+        )
+        return await db.scalar(stmt) or 0
+
+    @classmethod
+    async def get_deleted_by_uuid(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[Workspace]:
+        """A single workspace from the bin, regardless of owner — the router enforces
+        ownership. ``get_any_by_uuid`` filters deleted rows out, so restore/purge need
+        their own fetch."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        cutoff = datetime.now(timezone.utc) - timedelta(
+            days=settings.PURGE_DELETED_AFTER_DAYS
+        )
+        result = await db.execute(
+            select(Workspace).where(
+                Workspace.uuid == parsed,
+                Workspace.deleted_at.is_not(None),
+                Workspace.deleted_at >= cutoff,
+            )
+        )
+        return result.scalars().first()
+
+    @classmethod
+    async def restore(
+        cls, db: AsyncSession, uuid: Union[str, UUID]
+    ) -> Optional[Workspace]:
+        """Bring a soft-deleted workspace back, along with the lists (and their
+        descendants) that went down *with it*. Returns None if it is not in the bin.
+
+        The cascade delete stamped the workspace and everything it took down with one
+        identical ``deleted_at``; restore reverses exactly that set by matching it, so
+        a list the owner had binned on its own — a different timestamp — stays binned.
+
+        A workspace name is unique per owner among live rows, so a name freed while
+        this one sat deleted can be taken; restoring then collides and raises
+        ``ConflictError`` (HTTP 409), just as a record restore can.
+
+        Note: references *into* this workspace's lists were scrubbed at delete time
+        (see ``ListService.delete``), so cross-list lookups pointing at them are not
+        brought back — the lists themselves and their records are.
+        """
+        workspace = await cls.get_deleted_by_uuid(db, uuid)
+        if workspace is None:
+            return None
+
+        # Deferred import avoids a module cycle (lists.services imports this one).
+        from src.lists.services import ListService
+
+        await ListService.restore_for_workspace(
+            db, workspace.id, workspace.deleted_at
+        )
+        workspace.deleted_at = None
+        try:
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError("A workspace with this name already exists") from exc
+        return await cls.get_any_by_uuid(db, uuid)

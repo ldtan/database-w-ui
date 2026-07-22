@@ -44,6 +44,12 @@ export type ListRead = Response<Schemas["ListRead"]>;
 export type ListItem = Response<Schemas["ListItemRead"]>;
 // A record in the bin: a ListItem plus when it was deleted.
 export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
+// Bin rows for workspaces and lists: the read shape plus when it was deleted. The
+// backend exposes DeletedWorkspaceRead / DeletedListRead, so `npm run gen:api` will
+// fold these into the generated schema; until it is re-run they mirror them here by
+// extension, exactly as DeletedListItem does through the generated model.
+export type DeletedWorkspace = Workspace & { deleted_at: string };
+export type DeletedList = ListRead & { deleted_at: string };
 export type Person = Response<Schemas["PersonRead"]>;
 export type ApiUser = Response<Schemas["UserRead"]>;
 export type ApiUserGroup = Response<Schemas["UserGroupRead"]>;

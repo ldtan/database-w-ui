@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -48,3 +49,9 @@ class ListRead(ListBase):
     workspace_display_name: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeletedListRead(ListRead):
+    # When the list was binned, so the UI can show how long it has left in the
+    # retention window. Always set for a bin listing.
+    deleted_at: datetime

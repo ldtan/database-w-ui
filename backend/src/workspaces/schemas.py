@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -28,3 +29,9 @@ class WorkspaceRead(WorkspaceBase):
     uuid: UUID
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DeletedWorkspaceRead(WorkspaceRead):
+    # When the workspace was binned, so the UI can show how long it has left in the
+    # retention window. Always set for a bin listing.
+    deleted_at: datetime

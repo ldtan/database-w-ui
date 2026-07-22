@@ -23,6 +23,7 @@ import {
   useEffectiveActions,
   useEffectiveActionsMap,
 } from "../permissions/useEffectiveActions";
+import { DeletedListsDialog } from "./DeletedListsDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits.
@@ -78,6 +79,7 @@ export function ListsPage() {
   );
 
   const [displayName, setDisplayName] = useState("");
+  const [showDeleted, setShowDeleted] = useState(false);
   const create = useMutation({
     mutationFn: (name: string) =>
       api.post<ListRead>("/lists/", {
@@ -156,9 +158,19 @@ export function ListsPage() {
           { label: workspace.data?.display_name ?? "Lists" },
         ]}
       />
-      <h1 className="text-xl font-semibold">
-        {workspace.data?.display_name ?? "Lists"}
-      </h1>
+      <div className="flex items-center justify-between gap-2">
+        <h1 className="text-xl font-semibold">
+          {workspace.data?.display_name ?? "Lists"}
+        </h1>
+        {workspaceActions.has("delete") && (
+          <Button
+            label="Deleted lists"
+            icon="pi pi-trash"
+            text
+            onClick={() => setShowDeleted(true)}
+          />
+        )}
+      </div>
 
       {workspaceActions.has("configure") && (
         <form onSubmit={onCreate} className="flex gap-2">
@@ -300,6 +312,12 @@ export function ListsPage() {
           </div>
         </div>
       </AppDialog>
+
+      <DeletedListsDialog
+        workspaceUuid={workspaceUuid}
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
+      />
     </div>
   );
 }

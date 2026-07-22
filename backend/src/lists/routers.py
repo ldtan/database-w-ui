@@ -14,7 +14,7 @@ from src.workspaces.services import WorkspaceService
 
 from .dependencies import get_list_or_404
 from .models import List
-from .schemas import ListCreate, ListRead, ListUpdate
+from .schemas import DeletedListRead, ListCreate, ListRead, ListUpdate
 from .services import ListService
 
 from .columns.routers import router as columns_router
@@ -86,6 +86,36 @@ async def list_lists(
     )
 
 
+# Declared before GET /{list_uuid} so "deleted" is not parsed as a uuid. Scoped to
+# one workspace and gated on that workspace's `delete`: a soft-deleted list resolves
+# to no permission context (see PermissionService._security_context), so the check
+# has to sit on the live parent — the same reason the records bin is gated on its
+# list rather than the record.
+@router.get("/deleted", response_model=list[DeletedListRead])
+async def list_deleted_lists(
+    response: Response,
+    workspace_uuid: UUID = Query(..., description="The workspace whose bin to read"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    workspace = await WorkspaceService.get_any_by_uuid(db, workspace_uuid)
+    if workspace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, workspace.id, Action.delete
+    )
+    response.headers["X-Total-Count"] = str(
+        await ListService.count_deleted_for_workspace(db, workspace.id)
+    )
+    return await ListService.list_deleted_for_workspace(
+        db, workspace.id, skip=skip, limit=limit
+    )
+
+
 @router.get("/{list_uuid}", response_model=ListRead)
 async def get_list(lst: List = Depends(get_list_or_404)):
     return lst
@@ -138,6 +168,34 @@ async def delete_list(
         db, current_user, ResourceType.list, lst.id, Action.delete
     )
     await ListService.delete(db, lst.uuid)
+
+
+@router.post("/{list_uuid}/restore", response_model=ListRead)
+async def restore_list(
+    list_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Gated on the parent workspace's `delete`, like the bin listing: the list itself
+    # is deleted and resolves to no permission context. Restore also revives the
+    # list's columns, records, views and forms (see ListService.restore).
+    lst = await ListService.get_deleted_by_uuid(db, list_uuid)
+    if lst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
+        )
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, lst.workspace_id, Action.delete
+    )
+    try:
+        restored = await ListService.restore(db, list_uuid)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if restored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
+        )
+    return restored
 
 
 # Child resources are scoped under a single list: /lists/{list_uuid}/<child>
