@@ -198,6 +198,25 @@ async def restore_list(
     return restored
 
 
+@router.delete("/{list_uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_list(
+    list_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Gated on the parent workspace's `delete`, like the bin and restore. Only a list
+    # already in the bin can be purged; a live one 404s here (soft-delete it first).
+    lst = await ListService.get_deleted_by_uuid(db, list_uuid)
+    if lst is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
+        )
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, lst.workspace_id, Action.delete
+    )
+    await ListService.purge(db, list_uuid)
+
+
 # Child resources are scoped under a single list: /lists/{list_uuid}/<child>
 router.include_router(columns_router)
 router.include_router(items_router)

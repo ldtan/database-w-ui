@@ -524,6 +524,42 @@ class ListItemService:
         return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
+    async def purge(
+        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+    ) -> bool:
+        """Permanently destroy a single record from the bin. Returns False if it is
+        not in the bin.
+
+        Irreversible, and it does the two things soft-delete deliberately left alone,
+        because now the row really is going: it scrubs the inbound lookup references
+        that were kept intact so a restore could resolve them, and deletes the record's
+        permission grants — polymorphic with no foreign key, so nothing else would —
+        before deleting the row. One transaction, mirroring the item purge job.
+        """
+        item = await cls.get_deleted_by_uuid(db, lst.id, uuid)
+        if item is None:
+            return False
+
+        item_id = item.id
+        # References into this row go first: once it is gone the cells pointing at it
+        # would be unresolvable, and nothing else would clean them.
+        await cls._scrub_lookup_references(db, lst.uuid, item.uuid)
+        # Grants before the row: they point at it polymorphically, so hard-deleting
+        # the row would leave them orphaned at an id that no longer exists.
+        await db.execute(
+            sa.text(
+                "DELETE FROM permission_grants "
+                "WHERE resource_type = 'item' AND resource_id = :id"
+            ),
+            {"id": item_id},
+        )
+        await db.execute(
+            sa.text("DELETE FROM list_items WHERE id = :id"), {"id": item_id}
+        )
+        await db.commit()
+        return True
+
+    @classmethod
     async def _scrub_lookup_references(
         cls, db: AsyncSession, list_uuid: UUID, deleted_item_uuid: UUID
     ) -> None:

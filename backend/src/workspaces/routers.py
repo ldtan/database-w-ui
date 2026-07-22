@@ -155,3 +155,21 @@ async def restore_workspace(
             status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
         )
     return restored
+
+
+@router.delete(
+    "/{workspace_uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT
+)
+async def purge_workspace(
+    workspace_uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Owner-only, like restore: a deleted workspace has no resolvable permission
+    # context. Only a binned workspace can be purged; a live one 404s here.
+    workspace = await WorkspaceService.get_deleted_by_uuid(db, workspace_uuid)
+    if workspace is None or workspace.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
+    await WorkspaceService.purge(db, workspace_uuid)

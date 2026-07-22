@@ -212,3 +212,19 @@ async def restore_item(
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     return item
+
+
+@router.delete("/{uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_item(
+    uuid: UUID,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Gated on list-level `delete`, like the bin listing and restore. Only a record
+    # already in the bin can be purged; a live one 404s here (soft-delete it first).
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    if not await ListItemService.purge(db, lst, uuid):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")

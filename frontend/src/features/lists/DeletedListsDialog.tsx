@@ -5,6 +5,7 @@ import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 import { Paginator } from "primereact/paginator";
+import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
@@ -73,6 +74,30 @@ export function DeletedListsDialog({
       ),
   });
 
+  const purge = useMutation({
+    mutationFn: (uuid: string) => api.del(`/lists/${uuid}/permanent`),
+    onSuccess: () => {
+      // Gone for good; only the bin changes.
+      queryClient.invalidateQueries({ queryKey: ["lists", "deleted", workspaceUuid] });
+      toast.success("List permanently deleted");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not delete list",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+
+  const confirmPurge = (uuid: string) =>
+    confirmDialog({
+      message:
+        "Permanently delete this list and all its records? This cannot be undone.",
+      header: "Delete permanently",
+      icon: "pi pi-exclamation-triangle",
+      acceptClassName: "p-button-danger",
+      accept: () => purge.mutate(uuid),
+    });
+
   return (
     <AppDialog
       header="Deleted lists"
@@ -134,16 +159,28 @@ export function DeletedListsDialog({
               />
               <DataColumn
                 header=""
-                style={{ width: "7rem" }}
+                style={{ width: "11rem" }}
                 body={(row: DeletedList) => (
-                  <Button
-                    label="Restore"
-                    icon="pi pi-replay"
-                    text
-                    size="small"
-                    onClick={() => restore.mutate(row.uuid)}
-                    loading={restore.isPending && restore.variables === row.uuid}
-                  />
+                  <div className="flex gap-1">
+                    <Button
+                      label="Restore"
+                      icon="pi pi-replay"
+                      text
+                      size="small"
+                      onClick={() => restore.mutate(row.uuid)}
+                      loading={restore.isPending && restore.variables === row.uuid}
+                    />
+                    <Button
+                      icon="pi pi-trash"
+                      text
+                      size="small"
+                      severity="danger"
+                      aria-label="Delete permanently"
+                      tooltip="Delete permanently"
+                      onClick={() => confirmPurge(row.uuid)}
+                      loading={purge.isPending && purge.variables === row.uuid}
+                    />
+                  </div>
                 )}
               />
             </DataTable>

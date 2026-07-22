@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import func, or_, select, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -494,6 +494,49 @@ class ListService:
         await db.execute(
             update(List).where(List.id.in_(list_ids)).values(deleted_at=None)
         )
+
+    @classmethod
+    async def purge(cls, db: AsyncSession, uuid: Union[str, UUID]) -> bool:
+        """Permanently destroy a single soft-deleted list and everything under it.
+        Returns False if it is not in the bin.
+
+        Mirrors the list purge job's cascade, but for one list in a single
+        transaction: break the circular ``primary_column_id`` foreign key, delete the
+        polymorphic grants of the list and its descendants (nothing else does), then
+        the records, views, forms, columns, and finally the list. Inbound references
+        were already scrubbed when the list was soft-deleted, so there is nothing to
+        clear here. Irreversible.
+        """
+        lst = await cls.get_deleted_by_uuid(db, uuid)
+        if lst is None:
+            return False
+
+        ids = [lst.id]
+        # Break the circular dependency (lists.primary_column_id -> columns.id) first,
+        # or deleting the columns violates the foreign key.
+        await db.execute(
+            text("UPDATE lists SET primary_column_id = NULL WHERE id = ANY(:ids)"),
+            {"ids": ids},
+        )
+        await db.execute(
+            text(
+                """
+                DELETE FROM permission_grants
+                 WHERE (resource_type = 'list' AND resource_id = ANY(:ids))
+                    OR (resource_type = 'item' AND resource_id IN (SELECT id FROM list_items WHERE list_id = ANY(:ids)))
+                    OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:ids)))
+                    OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:ids)))
+                """
+            ),
+            {"ids": ids},
+        )
+        await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:ids)"), {"ids": ids})
+        await db.execute(text("DELETE FROM views WHERE list_id = ANY(:ids)"), {"ids": ids})
+        await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:ids)"), {"ids": ids})
+        await db.execute(text("DELETE FROM columns WHERE list_id = ANY(:ids)"), {"ids": ids})
+        await db.execute(text("DELETE FROM lists WHERE id = ANY(:ids)"), {"ids": ids})
+        await db.commit()
+        return True
 
     @staticmethod
     def _provision_defaults(db: AsyncSession, lst: List) -> None:

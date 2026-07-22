@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -301,3 +301,69 @@ class WorkspaceService:
             await db.rollback()
             raise ConflictError("A workspace with this name already exists") from exc
         return await cls.get_any_by_uuid(db, uuid)
+
+    @classmethod
+    async def purge(cls, db: AsyncSession, uuid: Union[str, UUID]) -> bool:
+        """Permanently destroy a single soft-deleted workspace and everything under
+        it. Returns False if it is not in the bin.
+
+        Mirrors the workspace purge job's cascade, but for one workspace in a single
+        transaction: run the list cascade for its lists (break the circular foreign
+        key, delete descendant grants, then records/views/forms/columns/lists), then
+        the workspace's own grants, then the workspace. Inbound references were already
+        scrubbed at soft-delete time. Irreversible.
+        """
+        workspace = await cls.get_deleted_by_uuid(db, uuid)
+        if workspace is None:
+            return False
+
+        workspace_ids = [workspace.id]
+        list_ids = list(
+            (
+                await db.execute(
+                    text(
+                        "SELECT id FROM lists WHERE workspace_id = ANY(:workspace_ids)"
+                    ),
+                    {"workspace_ids": workspace_ids},
+                )
+            ).scalars().all()
+        )
+        if list_ids:
+            # Break the circular dependency (lists.primary_column_id -> columns.id).
+            await db.execute(
+                text(
+                    "UPDATE lists SET primary_column_id = NULL WHERE id = ANY(:list_ids)"
+                ),
+                {"list_ids": list_ids},
+            )
+            await db.execute(
+                text(
+                    """
+                    DELETE FROM permission_grants
+                     WHERE (resource_type = 'list' AND resource_id = ANY(:list_ids))
+                        OR (resource_type = 'item' AND resource_id IN (SELECT id FROM list_items WHERE list_id = ANY(:list_ids)))
+                        OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:list_ids)))
+                        OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:list_ids)))
+                    """
+                ),
+                {"list_ids": list_ids},
+            )
+            await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM views WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM columns WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM lists WHERE id = ANY(:list_ids)"), {"list_ids": list_ids})
+
+        await db.execute(
+            text(
+                "DELETE FROM permission_grants "
+                "WHERE resource_type = 'workspace' AND resource_id = ANY(:workspace_ids)"
+            ),
+            {"workspace_ids": workspace_ids},
+        )
+        await db.execute(
+            text("DELETE FROM workspaces WHERE id = ANY(:workspace_ids)"),
+            {"workspace_ids": workspace_ids},
+        )
+        await db.commit()
+        return True
