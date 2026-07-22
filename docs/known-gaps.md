@@ -319,6 +319,21 @@ Existing grants survive the move (they key on the list's `resource_id`, unchange
 giver's previously-shared users keep access; only the giver's *implicit owner* access ends. A
 name clash on landing auto-suffixes rather than 409ing.
 
+**Cloning a list remaps column uuids; get it wrong and records render blank.** `POST
+/lists/{uuid}/clone` (`ListService.clone`) copies a list into the same workspace — structure
+always, records only when `with_records` is set. The clone's columns are new rows with new
+uuids, so record `data` is keyed against columns that no longer exist unless every reference
+is rewritten through an old→new column-uuid map: the `data` keys, `primary_column_id`, and
+the column-uuid refs inside view configs (`filters`/`sorts`/`group_by`/`hidden_columns`/
+`column_order`) and form configs (`fields[].column_uuid`). Cell *values* are copied verbatim
+— choice option ids and lookup/user/group target uuids stay valid — and a **self-referencing
+lookup is deliberately left pointing at the original list** (config and cells), so the clone
+"reaches into" its source rather than needing a row-uuid remap; pointing it at the clone
+instead is the deferred alternative. Two easy-to-miss rules: cloning must **not** call
+`_provision_defaults` (it copies the source's real columns/views/forms, so seeding defaults
+would duplicate them), and it must **not** copy grants (the clone is a new resource the cloner
+owns, private like any new list). `tests/test_list_clone.py` pins the remap.
+
 **The PrimeReact theme hardcodes its colors.** `lara-light-cyan/theme.css` defines
 `--primary-color` / `--surface-*` and then never references them (zero `var(--primary-*)`
 usages in the file), so overriding those variables recolors nothing. Theming works only

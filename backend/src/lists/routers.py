@@ -15,7 +15,14 @@ from src.workspaces.services import WorkspaceService
 
 from .dependencies import get_list_or_404
 from .models import List
-from .schemas import DeletedListRead, ListCreate, ListRead, ListTransfer, ListUpdate
+from .schemas import (
+    DeletedListRead,
+    ListClone,
+    ListCreate,
+    ListRead,
+    ListTransfer,
+    ListUpdate,
+)
 from .services import ListService
 
 from .columns.routers import router as columns_router
@@ -207,6 +214,39 @@ async def transfer_list(
             status_code=status.HTTP_404_NOT_FOUND, detail="List not found"
         )
     return transferred
+
+
+@router.post(
+    "/{list_uuid}/clone",
+    response_model=ListRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def clone_list(
+    payload: ListClone,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Duplicate a list into its own workspace — structure always, records optionally.
+
+    Reading the source needs 'view' (enforced by the dependency); creating the copy
+    is a configuration change on the same workspace, so it needs 'configure' there —
+    the same gate `create_list` applies. Columns get new uuids and every reference to
+    them (record data keys, primary column, view/form configs) is remapped; grants
+    are not copied, so the clone starts private like any new list.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.workspace, lst.workspace_id, Action.configure
+    )
+    try:
+        cloned = await ListService.clone(
+            db, lst.uuid, with_records=payload.with_records
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if cloned is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="List not found")
+    return cloned
 
 
 @router.delete("/{list_uuid}", status_code=status.HTTP_204_NO_CONTENT)

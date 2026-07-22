@@ -366,6 +366,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/clone": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Clone List
+         * @description Duplicate a list into its own workspace — structure always, records optionally.
+         *
+         *     Reading the source needs 'view' (enforced by the dependency); creating the copy
+         *     is a configuration change on the same workspace, so it needs 'configure' there —
+         *     the same gate `create_list` applies. Columns get new uuids and every reference to
+         *     them (record data keys, primary column, view/form configs) is remapped; grants
+         *     are not copied, so the clone starts private like any new list.
+         */
+        post: operations["clone_list_api_lists__list_uuid__clone_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/restore": {
         parameters: {
             query?: never;
@@ -1309,6 +1335,14 @@ export interface components {
              * @default 100
              */
             limit: number;
+        };
+        /** ListClone */
+        ListClone: {
+            /**
+             * With Records
+             * @default false
+             */
+            with_records: boolean;
         };
         /** ListCreate */
         ListCreate: {
@@ -2730,6 +2764,41 @@ export interface operations {
         responses: {
             /** @description Successful Response */
             200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clone_list_api_lists__list_uuid__clone_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ListClone"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
                 headers: {
                     [name: string]: unknown;
                 };

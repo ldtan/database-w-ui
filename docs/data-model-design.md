@@ -145,6 +145,15 @@ Notes:
   unchanged `resource_id`); the giver's implicit access ends. Both must assign the
   `workspace` **relationship**, not the `workspace_id` FK — see
   [known gaps](known-gaps.md). Details in [planned features §3–4](planned-features.md).
+- A list can be **cloned** via `POST /lists/{uuid}/clone` `{ with_records }` — a copy in
+  the same workspace, structure always, records optionally. Because records are keyed by
+  column **uuid** (D2), the clone's new columns get new uuids and every reference is
+  rewritten through an old→new column-uuid map: record `data` keys, `primary_column_id`,
+  and the column-uuid refs in view/form configs. Cell *values* copy verbatim (choice ids,
+  lookup/user/group uuids); a self-lookup is left pointing at the original list. Unlike a
+  create, cloning does **not** run `_provision_defaults` (it copies the source's real
+  columns/views/forms) and does **not** copy grants — the clone starts private. Details in
+  [planned features §5](planned-features.md).
 
 ---
 
@@ -449,9 +458,9 @@ each is enabled. Field layout is JSONB (D5).
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
 See [Planned features](planned-features.md) for the larger asked-for capabilities that build
-on this model — column type conversion, column data migration, list ownership transfer,
-cross-workspace moves (backend already built), and list cloning — each with its load-bearing
-details and open decisions.
+on this model. List ownership transfer, cross-workspace moves, and list cloning are now
+**built**; column type conversion and column data migration remain, each with its
+load-bearing details and open decisions.
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), lookup orphan cleanup on

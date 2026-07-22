@@ -29,6 +29,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "forms", title: "Forms: shape the entry screen" },
   { id: "sharing", title: "Sharing and permissions" },
   { id: "transfer", title: "Moving and giving a list away" },
+  { id: "duplicate", title: "Duplicating a list" },
   { id: "people", title: "People, groups, and your profile" },
   { id: "import-export", title: "Import and export" },
   { id: "bin", title: "Recovering deleted records" },
@@ -663,6 +664,41 @@ export function GuidePage() {
           asking them to transfer or share it to you. If you only want someone to help
           with a list, <a href="#sharing" style={{ color: "var(--brand)" }}>share it</a>{" "}
           with them instead of transferring it.
+        </Callout>
+      </Section>
+
+      <Section id="duplicate" title="Duplicating a list">
+        <p>
+          Need a second list just like one you already have — a fresh month’s tracker,
+          or a template to build on? Open a workspace and click the{" "}
+          <Ui>Duplicate</Ui> button (the copy icon) on any list.
+        </p>
+        <ol className="flex flex-col gap-2">
+          <li>
+            Decide whether to bring the data along. By default the copy takes only the{" "}
+            <em>structure</em> — the columns, views, and forms — and starts empty. Tick{" "}
+            <Ui>Also copy the records</Ui> if you want every row copied too.
+          </li>
+          <li>
+            Click <Ui>Duplicate</Ui>. The copy appears in the same workspace with a name
+            like <em>contacts_copy</em>, which you can rename afterward.
+          </li>
+        </ol>
+        <ul className="flex flex-col gap-1">
+          <li>
+            The copy is entirely your own and starts <strong>private</strong> — none of
+            the original’s sharing comes across, so you decide who sees it.
+          </li>
+          <li>
+            It’s made where the original lives. To put it in another workspace, duplicate
+            it here and then <a href="#transfer" style={{ color: "var(--brand)" }}>move
+            it</a>.
+          </li>
+        </ul>
+        <Callout tone="tip" title="Structure now, data later">
+          Leaving the records out is the quick way to turn a finished list into a
+          reusable template — duplicate it empty, then fill the copy fresh. Copy the
+          records when you truly want a running duplicate of everything as it stands.
         </Callout>
       </Section>
 

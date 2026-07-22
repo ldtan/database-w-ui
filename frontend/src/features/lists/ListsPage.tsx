@@ -26,6 +26,7 @@ import {
 } from "../permissions/useEffectiveActions";
 import { DeletedListsDialog } from "./DeletedListsDialog";
 import { MoveOrTransferDialog } from "./MoveOrTransferDialog";
+import { CloneListDialog } from "./CloneListDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits.
@@ -99,6 +100,7 @@ export function ListsPage() {
 
   const [renaming, setRenaming] = useState<ListRead | null>(null);
   const [moving, setMoving] = useState<ListRead | null>(null);
+  const [cloning, setCloning] = useState<ListRead | null>(null);
   const [names, setNames] = useState({ displayName: "", name: "" });
   const rename = useMutation({
     mutationFn: () =>
@@ -249,6 +251,16 @@ export function ListsPage() {
                     onClick={() => setMoving(list)}
                   />
                 )}
+                {/* Cloning writes a new list into *this* workspace, so it is gated on
+                    the workspace's `configure`, not the source list's. */}
+                {workspaceActions.has("configure") && (
+                  <Button
+                    icon="pi pi-copy"
+                    text
+                    aria-label="Duplicate list"
+                    onClick={() => setCloning(list)}
+                  />
+                )}
                 {can(list.uuid, "delete") && (
                   <Button
                     icon="pi pi-trash"
@@ -333,6 +345,15 @@ export function ListsPage() {
         onHide={() => setMoving(null)}
         onDone={() => {
           setMoving(null);
+          invalidate();
+        }}
+      />
+
+      <CloneListDialog
+        list={cloning}
+        onHide={() => setCloning(null)}
+        onDone={() => {
+          setCloning(null);
           invalidate();
         }}
       />

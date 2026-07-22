@@ -1,3 +1,4 @@
+from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
@@ -324,6 +325,213 @@ class ListService:
         target_uuid = lst.uuid
         await db.commit()
         return await cls.get_any_by_uuid(db, target_uuid)
+
+    @staticmethod
+    async def _free_copy_name(
+        db: AsyncSession, workspace_id: int, base: str
+    ) -> str:
+        """A free list ``name`` for a clone in ``workspace_id``: ``base_copy``, then
+        ``base_copy_2``, ``base_copy_3``, … The suffix keeps the NameSlug shape
+        (lowercase letters/digits/underscores) and the name unique per workspace."""
+        rows = await db.execute(
+            select(List.name).where(
+                List.workspace_id == workspace_id, List.deleted_at.is_(None)
+            )
+        )
+        taken = set(rows.scalars().all())
+        candidate = f"{base}_copy"
+        if candidate not in taken:
+            return candidate
+        n = 2
+        while f"{candidate}_{n}" in taken:
+            n += 1
+        return f"{candidate}_{n}"
+
+    @staticmethod
+    def _remap_view_config(config: dict, col_map: dict[str, str]) -> dict:
+        """Rewrite every column-uuid reference in a view's config through ``col_map``.
+
+        A view names columns by uuid in its filters, sorts, group_by, hidden_columns
+        and column_order (views/schemas.ViewConfig); a clone's columns are new rows
+        with new uuids, so each reference has to be repointed or the cloned view
+        would filter/sort/hide the *source's* columns. Operates on the raw dict (not
+        the typed schema) so an unrecognised or legacy shape is copied through
+        untouched rather than rejected. References with no mapping are left as-is."""
+        cfg = deepcopy(config or {})
+
+        def remap(value):
+            return col_map.get(value, value)
+
+        filters = cfg.get("filters")
+        if isinstance(filters, dict):
+            for cond in filters.get("conditions", []) or []:
+                if isinstance(cond, dict) and "column_uuid" in cond:
+                    cond["column_uuid"] = remap(cond["column_uuid"])
+        for sort in cfg.get("sorts", []) or []:
+            if isinstance(sort, dict) and "column_uuid" in sort:
+                sort["column_uuid"] = remap(sort["column_uuid"])
+        group_by = cfg.get("group_by")
+        if isinstance(group_by, dict) and "column_uuid" in group_by:
+            group_by["column_uuid"] = remap(group_by["column_uuid"])
+        if isinstance(cfg.get("hidden_columns"), list):
+            cfg["hidden_columns"] = [remap(c) for c in cfg["hidden_columns"]]
+        if isinstance(cfg.get("column_order"), list):
+            cfg["column_order"] = [remap(c) for c in cfg["column_order"]]
+        return cfg
+
+    @staticmethod
+    def _remap_form_config(config: dict, col_map: dict[str, str]) -> dict:
+        """Rewrite each ``fields[].column_uuid`` in a form's config through
+        ``col_map`` (forms/schemas.FormConfig), for the same reason views are
+        remapped. Unmapped references are left untouched."""
+        cfg = deepcopy(config or {})
+        for field in cfg.get("fields", []) or []:
+            if isinstance(field, dict) and "column_uuid" in field:
+                field["column_uuid"] = col_map.get(
+                    field["column_uuid"], field["column_uuid"]
+                )
+        return cfg
+
+    @classmethod
+    async def clone(
+        cls,
+        db: AsyncSession,
+        uuid: Union[str, UUID],
+        *,
+        with_records: bool,
+    ) -> Optional[List]:
+        """Duplicate a list into its own workspace, structure and (optionally) data.
+
+        The integrity rule is that records are keyed by column **uuid**: the clone's
+        columns are new rows with new uuids, so every uuid reference — the record
+        ``data`` keys, ``primary_column_id``, and the column-uuid references inside
+        view and form configs — is rewritten through an old→new column-uuid map. Get
+        that wrong and the clone's records render blank (see docs/planned-features.md
+        #5). Values inside cells are copied verbatim: ``choice`` option ids and
+        lookup/user/group target uuids stay valid, and a self-referencing lookup is
+        deliberately left pointing at the *original* list (config and cells both), so
+        no row-uuid remap is needed.
+
+        Unlike ``create``, this does **not** call ``_provision_defaults`` — the clone
+        copies the source's real columns/views/forms, so seeding defaults on top would
+        duplicate them. Grants are not copied and no inherit flags are carried over:
+        the clone is a fresh list the cloner owns, private like any newly created list.
+        The router enforces 'view' on the source and 'configure' on its workspace.
+        """
+        source = await cls.get_any_by_uuid(db, uuid)
+        if source is None:
+            return None
+
+        clone = List(
+            workspace_id=source.workspace_id,
+            name=await cls._free_copy_name(db, source.workspace_id, source.name),
+            display_name=f"{source.display_name} (copy)",
+            description=source.description,
+            settings=deepcopy(source.settings or {}),
+        )
+        db.add(clone)
+        await db.flush()  # assign clone.id / clone.uuid
+
+        # Clone columns first, then flush so the new uuids exist to build the map.
+        source_columns = (
+            await db.execute(
+                select(Column)
+                .where(Column.list_id == source.id, Column.deleted_at.is_(None))
+                .order_by(Column.position, Column.id)
+            )
+        ).scalars().all()
+        pairs: list[tuple[Column, Column]] = []
+        for col in source_columns:
+            new_col = Column(
+                list_id=clone.id,
+                name=col.name,
+                display_name=col.display_name,
+                type=col.type,
+                position=col.position,
+                description=col.description,
+                config=deepcopy(col.config or {}),
+            )
+            db.add(new_col)
+            pairs.append((col, new_col))
+        await db.flush()  # assign each new column's uuid
+
+        # old column uuid (str) -> new column uuid (str), the map every reference
+        # below is rewritten through. Keyed by str because record data keys and the
+        # uuids stored inside view/form configs are JSON strings.
+        col_map = {str(old.uuid): str(new.uuid) for old, new in pairs}
+
+        # Repoint the primary/display column at the cloned column.
+        if source.primary_column_id is not None:
+            for old, new in pairs:
+                if old.id == source.primary_column_id:
+                    clone.primary_column = new
+                    break
+
+        source_views = (
+            await db.execute(
+                select(View)
+                .where(View.list_id == source.id, View.deleted_at.is_(None))
+                .order_by(View.position, View.id)
+            )
+        ).scalars().all()
+        for view in source_views:
+            db.add(
+                View(
+                    list_id=clone.id,
+                    name=view.name,
+                    display_name=view.display_name,
+                    position=view.position,
+                    description=view.description,
+                    config=cls._remap_view_config(view.config, col_map),
+                )
+            )
+
+        source_forms = (
+            await db.execute(
+                select(Form)
+                .where(Form.list_id == source.id, Form.deleted_at.is_(None))
+                .order_by(Form.id)
+            )
+        ).scalars().all()
+        for form in source_forms:
+            db.add(
+                Form(
+                    list_id=clone.id,
+                    name=form.name,
+                    display_name=form.display_name,
+                    type=form.type,
+                    is_default=form.is_default,
+                    config=cls._remap_form_config(form.config, col_map),
+                )
+            )
+
+        if with_records:
+            source_items = (
+                await db.execute(
+                    select(ListItem)
+                    .where(
+                        ListItem.list_id == source.id,
+                        ListItem.deleted_at.is_(None),
+                    )
+                    .order_by(ListItem.id)
+                )
+            ).scalars().all()
+            for item in source_items:
+                data = {
+                    col_map.get(key, key): value
+                    for key, value in (item.data or {}).items()
+                }
+                db.add(ListItem(list_id=clone.id, data=data))
+
+        try:
+            await db.flush()
+            new_uuid = clone.uuid
+            await db.commit()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError("A list with this name already exists") from exc
+
+        return await cls.get_any_by_uuid(db, new_uuid)
 
     @classmethod
     async def delete(cls, db: AsyncSession, uuid: Union[str, UUID]) -> bool:
