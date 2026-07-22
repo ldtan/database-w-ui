@@ -440,6 +440,11 @@ each is enabled. Field layout is JSONB (D5).
   commits, but reads the whole uploaded file into memory first. For very large uploads,
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
+See [Planned features](planned-features.md) for the larger asked-for capabilities that build
+on this model — column type conversion, column data migration, list ownership transfer,
+cross-workspace moves (backend already built), and list cloning — each with its load-bearing
+details and open decisions.
+
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
 single-record delete (§6), cascade soft delete for lists/workspaces with
