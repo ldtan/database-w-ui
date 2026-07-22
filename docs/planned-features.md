@@ -199,7 +199,30 @@ holds `configure` on someone else's workspace.
 
 ---
 
-## 5. Clone a list (with or without its records)
+## 5. Clone a list (with or without its records) — **implemented**
+
+**Shipped.** `POST /lists/{uuid}/clone` `{ with_records }` duplicates a list into its
+own workspace. Structure (columns, views, forms) is always copied; records only when
+`with_records` is true. The clone's columns are new rows with new uuids, and every
+reference is rewritten through an old→new column-uuid map: the record `data` keys,
+`primary_column_id`, and the column-uuid references inside view configs (`filters`,
+`sorts`, `group_by`, `hidden_columns`, `column_order`) and form configs
+(`fields[].column_uuid`). `choice` option ids and `calculated` formulas (which name
+columns by *name*) copy verbatim. Grants are **not** copied and `_provision_defaults`
+is **not** called — the clone copies the source's real columns/views/forms and starts
+private, like any newly created list. The name auto-suffixes to a free slug
+(`tasks` → `tasks_copy`, then `tasks_copy_2`). Reading the source needs `view`;
+writing the copy needs `configure` on the workspace (the same gate as create). See
+`ListService.clone` and `tests/test_list_clone.py`; UI is the "Duplicate" action on
+`ListsPage` (a checkbox opts records in).
+
+The decisions taken (from the three the design flagged): **structure-only by default**
+(records opt-in), **same workspace** with an auto-suggested name (move it elsewhere
+afterward with feature 4), and a self-referencing lookup **left pointing at the
+original list** — so its config `target_list_uuid` and its cells copy verbatim, no
+row-uuid remap. The design rationale below is kept for context.
+
+---
 
 Duplicate a list's structure — and optionally its data — into a new list.
 

@@ -39,6 +39,12 @@ class ListTransfer(BaseModel):
     user_uuid: UUID
 
 
+class ListClone(BaseModel):
+    # Duplicate the list into the same workspace. Structure (columns, views, forms)
+    # is always copied; records come along only when this is true.
+    with_records: bool = False
+
+
 class ListRead(ListBase):
     uuid: UUID
     workspace: ResourceLink
