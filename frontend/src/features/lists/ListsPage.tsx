@@ -14,6 +14,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { NameFields } from "../../components/NameFields";
+import { RowActions } from "../../components/RowActions";
 import { useCurrentUser } from "../../lib/auth";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
@@ -220,57 +221,57 @@ export function ListsPage() {
                 <div className="font-medium">{list.display_name}</div>
                 <div className="text-sm text-gray-500">{list.name}</div>
               </Link>
-              <div className="flex gap-1">
-                {can(list.uuid, "share") && (
-                  <Button
-                    icon="pi pi-share-alt"
-                    text
-                    aria-label="Share list"
-                    onClick={() => setSharingUuid(list.uuid)}
-                  />
-                )}
-                {can(list.uuid, "configure") && (
-                  <Button
-                    icon="pi pi-pencil"
-                    text
-                    aria-label="Rename list"
-                    onClick={() => {
+              {/* Share and Edit stay as buttons; the rest fold into an overflow
+                  menu so a busy list row never crowds. */}
+              <RowActions
+                maxVisible={2}
+                actions={[
+                  {
+                    key: "share",
+                    icon: "pi pi-share-alt",
+                    label: "Share list",
+                    visible: can(list.uuid, "share"),
+                    onClick: () => setSharingUuid(list.uuid),
+                  },
+                  {
+                    key: "edit",
+                    icon: "pi pi-pencil",
+                    label: "Rename list",
+                    visible: can(list.uuid, "configure"),
+                    onClick: () => {
                       setRenaming(list);
                       setNames({
                         displayName: list.display_name,
                         name: list.name,
                       });
-                    }}
-                  />
-                )}
-                {can(list.uuid, "configure") && (
-                  <Button
-                    icon="pi pi-send"
-                    text
-                    aria-label="Move or transfer list"
-                    onClick={() => setMoving(list)}
-                  />
-                )}
-                {/* Cloning writes a new list into *this* workspace, so it is gated on
-                    the workspace's `configure`, not the source list's. */}
-                {workspaceActions.has("configure") && (
-                  <Button
-                    icon="pi pi-copy"
-                    text
-                    aria-label="Duplicate list"
-                    onClick={() => setCloning(list)}
-                  />
-                )}
-                {can(list.uuid, "delete") && (
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    aria-label="Delete list"
-                    onClick={() => confirmDelete(list)}
-                  />
-                )}
-              </div>
+                    },
+                  },
+                  {
+                    key: "move",
+                    icon: "pi pi-send",
+                    label: "Move or transfer list",
+                    visible: can(list.uuid, "configure"),
+                    onClick: () => setMoving(list),
+                  },
+                  {
+                    // Cloning writes a new list into *this* workspace, so it is gated
+                    // on the workspace's `configure`, not the source list's.
+                    key: "duplicate",
+                    icon: "pi pi-copy",
+                    label: "Duplicate list",
+                    visible: workspaceActions.has("configure"),
+                    onClick: () => setCloning(list),
+                  },
+                  {
+                    key: "delete",
+                    icon: "pi pi-trash",
+                    label: "Delete list",
+                    severity: "danger",
+                    visible: can(list.uuid, "delete"),
+                    onClick: () => confirmDelete(list),
+                  },
+                ]}
+              />
             </div>
           </Card>
         ))}

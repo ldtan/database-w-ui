@@ -15,6 +15,7 @@ import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
+import { RowActions } from "../../components/RowActions";
 import type {
   Column,
   Form,
@@ -725,46 +726,36 @@ export function ListDetailPage() {
           <DataColumn
             header=""
             style={{ width: "9rem" }}
+            // RowActions stops click propagation itself, so an action never also
+            // toggles the row's selection.
             body={(row: ListItem) => (
-              <div className="flex gap-1">
-                {canItem(row.uuid, "edit") && (
-                  <Button
-                    icon="pi pi-pencil"
-                    text
-                    size="small"
-                    aria-label="Edit record"
-                    onClick={(e) => {
-                      e.stopPropagation(); // don't also toggle row selection
-                      setRecordDialog({ open: true, item: row });
-                    }}
-                  />
-                )}
-                {canItem(row.uuid, "share") && (
-                  <Button
-                    icon="pi pi-share-alt"
-                    text
-                    size="small"
-                    aria-label="Share record"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSharingItemUuid(row.uuid);
-                    }}
-                  />
-                )}
-                {canItem(row.uuid, "delete") && (
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    size="small"
-                    aria-label="Delete record"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      confirmDeleteItem(row);
-                    }}
-                  />
-                )}
-              </div>
+              <RowActions
+                size="small"
+                actions={[
+                  {
+                    key: "edit",
+                    icon: "pi pi-pencil",
+                    label: "Edit record",
+                    visible: canItem(row.uuid, "edit"),
+                    onClick: () => setRecordDialog({ open: true, item: row }),
+                  },
+                  {
+                    key: "share",
+                    icon: "pi pi-share-alt",
+                    label: "Share record",
+                    visible: canItem(row.uuid, "share"),
+                    onClick: () => setSharingItemUuid(row.uuid),
+                  },
+                  {
+                    key: "delete",
+                    icon: "pi pi-trash",
+                    label: "Delete record",
+                    severity: "danger",
+                    visible: canItem(row.uuid, "delete"),
+                    onClick: () => confirmDeleteItem(row),
+                  },
+                ]}
+              />
             )}
           />
         </DataTable>

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Button } from "primereact/button";
 import { Checkbox } from "primereact/checkbox";
 import { Paginator } from "primereact/paginator";
+
+import { RowActions } from "../../components/RowActions";
 
 import type { Column, ListItem, PermissionAction } from "../../lib/types";
 import type { PrincipalType } from "../principals/PrincipalControls";
@@ -161,34 +162,33 @@ export function RecordCards({
                 <label htmlFor={`sel-${item.uuid}`} className="text-sm mr-auto">
                   Select
                 </label>
-                {can(item.uuid, "edit") && (
-                  <Button
-                    icon="pi pi-pencil"
-                    text
-                    size="small"
-                    aria-label="Edit record"
-                    onClick={() => onEdit(item)}
-                  />
-                )}
-                {can(item.uuid, "share") && (
-                  <Button
-                    icon="pi pi-share-alt"
-                    text
-                    size="small"
-                    aria-label="Share record"
-                    onClick={() => onShare(item)}
-                  />
-                )}
-                {can(item.uuid, "delete") && (
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    size="small"
-                    aria-label="Delete record"
-                    onClick={() => onDelete(item)}
-                  />
-                )}
+                <RowActions
+                  size="small"
+                  actions={[
+                    {
+                      key: "edit",
+                      icon: "pi pi-pencil",
+                      label: "Edit record",
+                      visible: can(item.uuid, "edit"),
+                      onClick: () => onEdit(item),
+                    },
+                    {
+                      key: "share",
+                      icon: "pi pi-share-alt",
+                      label: "Share record",
+                      visible: can(item.uuid, "share"),
+                      onClick: () => onShare(item),
+                    },
+                    {
+                      key: "delete",
+                      icon: "pi pi-trash",
+                      label: "Delete record",
+                      severity: "danger",
+                      visible: can(item.uuid, "delete"),
+                      onClick: () => onDelete(item),
+                    },
+                  ]}
+                />
               </div>
             </div>
           </div>

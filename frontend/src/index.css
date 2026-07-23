@@ -16,3 +16,10 @@ body {
 a {
   color: inherit;
 }
+
+/* A destructive action collapsed into RowActions' overflow menu keeps the red cue
+   it has as an icon button. Unlayered, so it wins over PrimeReact's menu defaults. */
+.row-action-danger .p-menuitem-link .p-menuitem-text,
+.row-action-danger .p-menuitem-link .p-menuitem-icon {
+  color: var(--accent, #d33);
+}
