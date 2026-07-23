@@ -88,8 +88,8 @@ export function FilterConditionsEditor({
         const col = columns.find((c) => c.uuid === cond.column_uuid);
         const needsValue = !NO_VALUE_OPS.has(cond.operator);
         const options = (col?.config.options ?? []).map((o) => ({
-          label: o.label,
-          value: o.id,
+          label: o,
+          value: o,
         }));
         return (
           // Wraps rather than overflows: column + operator + value + remove is more

@@ -76,9 +76,10 @@ function RecordField({
         />
       );
     case "choice": {
+      // Options are the values: a cell stores the label itself.
       const options = (column.config.options ?? []).map((o) => ({
-        label: o.label,
-        value: o.id,
+        label: o,
+        value: o,
       }));
       return (
         <Dropdown

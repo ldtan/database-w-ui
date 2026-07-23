@@ -239,9 +239,49 @@ async def test_choice_shorthand_expands_and_validates(client, list_uuid, add_col
         config={"choices": "Todo;Doing;Done"},
     )
     column = (await client.get(f"/api/lists/{list_uuid}/columns/{col}")).json()
-    assert [o["id"] for o in column["config"]["options"]] == ["todo", "doing", "done"]
-    assert (await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: "todo"}})).status_code == 201
+    assert column["config"]["options"] == ["Todo", "Doing", "Done"]
+    # A cell stores the option itself — the visible label, exactly.
+    assert (await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: "Todo"}})).status_code == 201
+    assert (await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: "todo"}})).status_code == 400
     assert (await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: "nope"}})).status_code == 400
+
+
+async def test_choice_duplicate_options_rejected(client, list_uuid):
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "status", "display_name": "Status", "type": "choice",
+            "config": {"choices": "Todo;Todo"},
+        },
+    )
+    assert resp.status_code == 400
+    assert "unique" in resp.json()["detail"].lower()
+
+
+async def test_choice_default_must_be_an_option(client, list_uuid):
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "status", "display_name": "Status", "type": "choice",
+            "config": {"choices": "Todo;Done", "default": "Doing"},
+        },
+    )
+    assert resp.status_code == 400
+    assert "not one of" in resp.json()["detail"].lower()
+
+
+async def test_choice_config_patch_keeps_options(client, list_uuid, add_column):
+    col = await add_column(
+        list_uuid, name="status", display_name="Status", type="choice",
+        config={"choices": "Todo;Done"},
+    )
+    # A config PATCH that doesn't resend options must not wipe the set.
+    resp = await client.patch(
+        f"/api/lists/{list_uuid}/columns/{col}",
+        json={"config": {"required": True}},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["config"]["options"] == ["Todo", "Done"]
 
 
 async def test_dynamic_default_today(client, list_uuid, add_column):

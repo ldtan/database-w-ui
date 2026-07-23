@@ -9,7 +9,7 @@ import { PrincipalCell, type PrincipalType } from "../principals/PrincipalContro
  *
  * Shared by the grid and the card list — the two are different layouts of the same
  * data, and a value that renders one way in a table and another way in a card is a
- * bug waiting to happen (it already would have been: link, choice and temporal
+ * bug waiting to happen (it already would have been: link and temporal
  * columns each have rules that live only here).
  */
 export function renderCell(
@@ -49,10 +49,6 @@ export function renderCell(
   }
   if (column.type === "checkbox") {
     return value ? "✓" : "✗";
-  }
-  if (column.type === "choice") {
-    const option = column.config.options?.find((o) => o.id === value);
-    return option?.label ?? String(value);
   }
   if (column.type === "link") {
     const href = safeHref(column, value);

@@ -407,7 +407,7 @@ class ListService:
         ``data`` keys, ``primary_column_id``, and the column-uuid references inside
         view and form configs — is rewritten through an old→new column-uuid map. Get
         that wrong and the clone's records render blank (see docs/planned-features.md
-        #5). Values inside cells are copied verbatim: ``choice`` option ids and
+        #5). Values inside cells are copied verbatim: ``choice`` labels and
         lookup/user/group target uuids stay valid, and a self-referencing lookup is
         deliberately left pointing at the *original* list (config and cells both), so
         no row-uuid remap is needed.

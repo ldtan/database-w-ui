@@ -65,37 +65,21 @@ join them** — the schema will not remind you:
   window. Anything still *inside* the window is left alone, because it can still be restored and
   its sharing should come back with it.
 
-## 4. A choice column is written by option **id**, and nobody can see an id
+## 4. Records can hold a choice option that no longer exists
 
-`validate_scalar` accepts a `choice` value only if it is one of the column's option **ids**.
-An id is generated once, by slugifying the label the column was created with (`_slugify`:
-"In progress" → `in_progress`), and is then **never shown anywhere in the UI** — the grid,
-the form and the filters all display the *label*. Renaming an option keeps the old id, so the
-two drift apart on purpose: records keep pointing at the right option across an edit.
+Resolved predecessor: choice cells used to store an invisible option **id** (a slug of the
+label), which made every out-of-band write — CSV/JSON import, QR codes — demand a value
+nobody could see. Options are now plain labels and a cell stores the label itself (D3 in
+the data-model doc), so that whole class of problem is gone.
 
-So every way of writing a record from outside the app — CSV/JSON import, and now a QR code —
-requires a value nobody can look up:
-
-```json
-{ "status": "in_progress" }   // works
-{ "status": "In progress" }   // rejected: 'In progress' is not a valid option
-```
-
-`GET /lists/{uuid}/columns/` does return the ids, so it is *discoverable*; it is simply not
-discoverable by the person writing the file, who is reading the screen. (References do not
-have this problem: `lookup`, `user` and `group` all accept a **name** on write and resolve it
-themselves — see `_as_uuid`, which returns `None` for a label and falls through to a label
-match. Choice is the one reference-ish type that does not.)
-
-The fix is one place, not two: teach `validate_scalar` to fall back to a case-insensitive
-**label** match when the value is not an id, exactly as the reference types already do. That
-closes it for import and QR at once. It needs a decision first, though — two options with the
-same label, or a label that happens to equal another option's id, must be rejected rather than
-guessed, which is the same "one unambiguous match" rule `_reference_inputs` uses.
-
-Do **not** paper over this in the frontend. The QR scanner deliberately owns none of the
-backend's validation rules (see `qrFill.ts`), and a label→id map in the browser would be the
-first crack in that: a second rulebook, in the copy that falls behind.
+What remains is the flip side, accepted deliberately: **editing an option's spelling is a
+remove+add**, and records holding the removed label keep it. Such a cell still displays
+(the grid shows the stored string as-is) but fails validation on its next write, so whoever
+edits that record must pick a current option. There is no cascade-rename — the `choices`
+shorthand cannot tell a rename from a remove+add, and guessing would rewrite records on a
+guess. If bulk relabeling ever matters, it belongs in the planned column **data migration**
+feature (planned-features #2), which is built for exactly this find→replace-across-records
+shape.
 
 ---
 
@@ -326,7 +310,7 @@ uuids, so record `data` is keyed against columns that no longer exist unless eve
 is rewritten through an old→new column-uuid map: the `data` keys, `primary_column_id`, and
 the column-uuid refs inside view configs (`filters`/`sorts`/`group_by`/`hidden_columns`/
 `column_order`) and form configs (`fields[].column_uuid`). Cell *values* are copied verbatim
-— choice option ids and lookup/user/group target uuids stay valid — and a **self-referencing
+— choice labels and lookup/user/group target uuids stay valid — and a **self-referencing
 lookup is deliberately left pointing at the original list** (config and cells), so the clone
 "reaches into" its source rather than needing a row-uuid remap; pointing it at the clone
 instead is the deferred alternative. Two easy-to-miss rules: cloning must **not** call

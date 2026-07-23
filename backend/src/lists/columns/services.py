@@ -105,7 +105,7 @@ class ColumnService:
 
         if "config" in data:
             # A column's type is immutable after creation; re-validate the new
-            # config against the existing type, preserving choice option ids.
+            # config against the existing type, preserving settings not resent.
             column.config = await cls._validate_config(
                 db, lst, column.type, payload.config, existing=column.config
             )
@@ -247,7 +247,7 @@ class ColumnService:
         """Validate type-specific settings and return the JSON-ready dict to store.
 
         ``existing`` is the column's current stored config (on update), used to
-        keep choice option ids stable across edits.
+        keep settings the caller did not resend (choice options included).
         """
         # Only the keys the caller explicitly set on this request, so that on
         # update the merge below preserves stored settings left unspecified.
@@ -257,23 +257,26 @@ class ColumnService:
             options = resolve_choice_options(data, existing)
             if not options:
                 raise ValidationError("A choice column requires at least one option")
-            ids = [opt["id"] for opt in options]
-            if len(ids) != len(set(ids)):
-                raise ValidationError("Choice option ids must be unique")
+            if len(options) != len(set(options)):
+                raise ValidationError("Choice options must be unique")
             data["options"] = options
             data.pop("choices", None)
-            # Let a default be given by option label; store it as the option id.
-            default = data.get("default")
-            if isinstance(default, str) and default not in set(ids):
-                by_label = {opt["label"]: opt["id"] for opt in options}
-                if default in by_label:
-                    data["default"] = by_label[default]
 
         # On update, a config PATCH merges onto the stored config rather than
         # replacing it, so settings the caller didn't resend are preserved.
         if existing:
             for key, value in existing.items():
                 data.setdefault(key, value)
+
+        if type_ == ColumnType.choice:
+            # A cell stores the option itself, so a default must be one of them.
+            # Checked after the merge: an edit that drops an option must not let
+            # a stored default keep pointing at it.
+            default = data.get("default")
+            if isinstance(default, str) and default not in set(data["options"]):
+                raise ValidationError(
+                    f"'{default}' is not one of the column's options"
+                )
 
         if type_ == ColumnType.lookup:
             target_list_uuid = data.get("target_list_uuid")

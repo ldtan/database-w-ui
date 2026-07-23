@@ -126,11 +126,9 @@ The one thing a code is refused is a field this form does not have: it cannot re
 column the **create form** excludes, or write one it marks read-only. That is a fact about
 the form, not a judgement about a value.
 
-One consequence to know: a **choice** column is written by its option *id* (`in_progress`),
-not the label the UI shows ("In progress"), because that is all the backend accepts — the
-same wart CSV/JSON import has. It is written up as gap #4 in
-[`docs/known-gaps.md`](../docs/known-gaps.md); the fix belongs in `validate_scalar`, not
-here.
+A **choice** column is written by the option itself — the same label the UI shows
+("In progress") — since a choice cell stores the label and the backend validates by
+exact membership. A QR can therefore be authored straight off the screen.
 
 Scanning uses `html5-qrcode`, with **an image fallback that is not a nicety**:
 `getUserMedia` needs a camera and a secure context (HTTPS, or localhost), so on a desktop

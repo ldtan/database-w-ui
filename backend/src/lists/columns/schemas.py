@@ -8,12 +8,6 @@ from src.core.schemas import NameSlug
 from .enums import ColumnType
 
 
-class ChoiceOption(BaseModel):
-    id: str
-    label: str
-    color: Optional[str] = None
-
-
 class ColumnConfig(BaseModel):
     """Type-specific column settings. Only the keys relevant to a column's
     ``type`` are meaningful; the service validates the combination."""
@@ -43,9 +37,9 @@ class ColumnConfig(BaseModel):
     # link
     allowed_schemes: Optional[list[str]] = None  # defaults to ["http", "https"]
     label: Optional[str] = None  # fixed anchor text; falls back to the URL itself
-    # choice
+    # choice — options are plain labels; a cell stores the label itself
     choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
-    options: Optional[list[ChoiceOption]] = None  # full control (ids, colors)
+    options: Optional[list[str]] = None  # canonical form, e.g. ["Todo", "Doing"]
     multiple: Optional[bool] = None
     # lookup
     target_list_uuid: Optional[UUID] = None

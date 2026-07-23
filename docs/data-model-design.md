@@ -39,9 +39,14 @@ column's immutable `uuid`. Because of that, renaming a column (either identifier
 free and never orphans data. This is the single most important integrity rule in the
 system.
 
-### D3 — Choice options carry stable IDs
-A `choice` column stores its options as `[{id, label, color}]`. A record stores the
-**option `id`**, not the label. Renaming/recoloring an option never touches records.
+### D3 — Choice options are plain labels; a cell stores the label
+A `choice` column stores its options as a list of label strings, and a record stores
+the **label itself**. The value on screen is the value in the database — import, QR
+codes and the API all speak the same string. The trade-off is deliberate: renaming an
+option is a remove+add, and records holding the old label keep it (they display as-is
+but must pick a current option on their next edit). An earlier design carried stable
+per-option ids to make renames free, but the id was invisible everywhere in the UI
+while being required on every out-of-band write — a worse trade.
 
 ### D4 — Links/lookups reference rows by `uuid`, with no DB-level FK
 A `lookup` column stores the target row's `uuid` (or an array of uuids). There is no
@@ -197,7 +202,7 @@ Common `config` keys (all optional unless noted):
 | `long_text`   | `string`                                   | `min_length?`, `max_length?`, `pattern?` |
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
-| `choice`      | option `id` (or `[id, …]` if multi)        | `choices?` (shorthand) **or** `options: [{id, label, color}]`; `multiple?` |
+| `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
@@ -228,11 +233,10 @@ Notes:
 - **Dynamic defaults:** temporal columns accept `default: "today"` (date) or `"now"`
   (time/datetime), resolved to the current value at insert time rather than stored as a
   fixed literal.
-- `choice` — options carry stable `id`s (D3); records store the id. The `choices`
-  shorthand (`"Todo;Doing;Done"`) is expanded server-side into `options` with generated
-  ids; on update, ids for **unchanged labels are preserved** so records stay valid.
-  Explicit `options` (with colors) override the shorthand. A choice `default` may be given
-  as an option label and is stored as the id.
+- `choice` — options are plain labels and records store the label (D3). The `choices`
+  shorthand (`"Todo;Doing;Done"`) is split server-side into `options`; explicit
+  `options` (a list of strings) override the shorthand. Labels must be unique within
+  the column, and a `default` must be one of them.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the lookup's
   `display_column_uuid`, falling back to the target list's `primary_column_id`
   (`display_column_key`). A lookup column cannot have a `default`. Like `user`/`group`, a cell
@@ -299,17 +303,13 @@ A new type must be added to **every** frontend touchpoint or it half-works: `lib
   "config": {
     "required": true,
     "multiple": false,
-    "options": [
-      {"id": "opt_todo",  "label": "To do", "color": "#gray"},
-      {"id": "opt_doing", "label": "Doing", "color": "#blue"},
-      {"id": "opt_done",  "label": "Done",  "color": "#green"}
-    ]
+    "options": ["To do", "Doing", "Done"]
   }
 }
 ```
 
-The same column can be created with the shorthand instead — the server expands it into
-`options` with generated ids (`todo`, `doing`, `done`):
+The same column can be created with the shorthand instead — the server splits it into
+`options`:
 
 ```jsonc
 { "name": "status", "display_name": "Status", "type": "choice",
@@ -475,7 +475,7 @@ Because the DB does not enforce record-level constraints, the service layer MUST
 
 1. Validate each `data` value against its column `type` and `config` on write.
 2. Enforce `required`, `unique`, `min`/`max`, `max_length` where configured.
-3. Resolve/validate `choice` values against current option ids.
+3. Validate `choice` values against the current option labels (exact match).
 4. Validate `lookup` uuids exist in the target list; clean up stale refs on delete.
 5. Validate `name` against the `NameSlug` pattern and scope all uniqueness checks —
    list `name` per owner; column/view/form `name` per list — excluding soft-deleted rows.
