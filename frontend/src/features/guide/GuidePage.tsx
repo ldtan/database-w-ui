@@ -24,6 +24,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "column-types", title: "The column types, explained" },
   { id: "records", title: "Step 4 · Add records" },
   { id: "nested-lookups", title: "Linked columns that narrow each other" },
+  { id: "formulas", title: "Calculated columns: writing a formula" },
   { id: "qr", title: "Add records with a QR code" },
   { id: "find", title: "Find records: search, sort, group, filter" },
   { id: "views", title: "Views: saved ways of looking" },
@@ -33,7 +34,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "duplicate", title: "Duplicating a list" },
   { id: "people", title: "People, groups, and your profile" },
   { id: "import-export", title: "Import and export" },
-  { id: "bin", title: "Recovering deleted records" },
+  { id: "bin", title: "Recovering things you deleted" },
   { id: "appearance", title: "Appearance and themes" },
   { id: "tips", title: "Tips and troubleshooting" },
 ];
@@ -54,6 +55,23 @@ function Ui({ children }: { children: ReactNode }) {
     >
       {children}
     </span>
+  );
+}
+
+/** A snippet of formula text, set in monospace so it reads as something to type
+ *  literally rather than as prose. */
+function Code({ children }: { children: ReactNode }) {
+  return (
+    <code
+      className="rounded px-1 text-sm"
+      style={{
+        background: "var(--surface-2)",
+        color: "var(--text)",
+        fontFamily: "monospace",
+      }}
+    >
+      {children}
+    </code>
   );
 }
 
@@ -130,7 +148,7 @@ const TYPE_HELP: Record<string, string> = {
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
   lookup: "A link to a row in another one of your lists — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
-  calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it.",
+  calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
 };
 
 export function GuidePage() {
@@ -262,6 +280,13 @@ export function GuidePage() {
             you are and lets you step back up.
           </li>
         </ul>
+        <p>
+          Your <Link to="/" style={{ color: "var(--brand)" }}>home page</Link> is a
+          dashboard: how many workspaces you have and how many lists other people
+          have shared with you, then cards for your most recent workspaces and those
+          shared lists, so you can jump straight back into what you were doing.
+          Underneath, <Ui>Explore</Ui> links to the main corners of the app.
+        </p>
         <Callout tone="tip" title="On a phone?">
           On a small screen the top links fold into a menu — tap the ☰ button on the
           right to open a drawer with your workspaces, their lists, and everything
@@ -308,8 +333,8 @@ export function GuidePage() {
           <li>Click the list’s name to open it.</li>
         </ol>
         <p>
-          A brand-new list is empty and has no columns yet — so the next step is to
-          decide what details each contact should have.
+          A brand-new list has no records and none of your own columns yet — so the
+          next step is to decide what details each contact should have.
         </p>
       </Section>
 
@@ -366,6 +391,16 @@ export function GuidePage() {
             record is created or edited.
           </li>
         </ul>
+        <Callout tone="tip" title="Four columns are already there">
+          Every list starts with <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
+          <Ui>Created by</Ui> and <Ui>Updated by</Ui>. The app fills them in for you
+          — when the record was made and last changed, and by whom — so nobody types
+          into them, and they’re kept out of the add/edit screen. They still show in
+          the table, where you can hide them like any column, and you can switch them
+          on in a form (see{" "}
+          <a href="#forms" style={{ color: "var(--brand)" }}>Forms</a>) if you’d like
+          people to see them while editing.
+        </Callout>
         <Callout tone="warn" title="A type is forever">
           You can rename a column and change its other settings any time, but you{" "}
           <strong>cannot change its type</strong> once it exists, because your records
@@ -394,11 +429,12 @@ export function GuidePage() {
           Text, Number, Checkbox, Choice, and Date cover almost everything. The
           people-, link-, lookup-, and formula-style columns are powerful extras you
           can reach for later — they’re covered under{" "}
-          <a href="#sharing" style={{ color: "var(--brand)" }}>sharing</a> and{" "}
+          <a href="#sharing" style={{ color: "var(--brand)" }}>sharing</a>,{" "}
           <a href="#nested-lookups" style={{ color: "var(--brand)" }}>
             linked columns
           </a>
-          , and below.
+          , and{" "}
+          <a href="#formulas" style={{ color: "var(--brand)" }}>formulas</a>.
         </Callout>
       </Section>
 
@@ -517,6 +553,152 @@ export function GuidePage() {
           Nesting an existing column doesn’t break records already saved, even ones
           whose pairing no longer matches. Nothing is checked until someone edits
           that particular field — so you can tidy old rows at your own pace.
+        </Callout>
+      </Section>
+
+      <Section id="formulas" title="Calculated columns: writing a formula">
+        <p>
+          A <Ui>Calculated (formula)</Ui> column doesn’t hold anything you type. It
+          holds a <strong>formula</strong>, and its value is worked out from the
+          other columns of the same record every time you look at it. Change a{" "}
+          <em>Quantity</em>, and the <em>Total</em> beside it is already right —
+          there is nothing to refresh and nothing to keep in step.
+        </p>
+        <p>
+          Add one under <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Add column</Ui>,
+          pick the type, and type the formula into the <Ui>Formula</Ui> box. The
+          dialog lists, underneath, the columns you’re allowed to name.
+        </p>
+
+        <h3 className="font-semibold pt-1">Naming your columns</h3>
+        <p>
+          A formula refers to a column by its <strong>short name</strong> — the one
+          shown in brackets beside it in the columns list, like{" "}
+          <Code>unit_price</Code> — not by its pretty display name. Only three kinds
+          of column can be named: <strong>Number</strong>,{" "}
+          <strong>Single line text</strong>, and <strong>Long text</strong>. Dates,
+          choices, tick boxes, people, and linked columns can’t be used in a
+          formula yet, and neither can another calculated column.
+        </p>
+
+        <h3 className="font-semibold pt-1">Doing sums</h3>
+        <p>
+          Use <Code>+</Code>, <Code>-</Code>, <Code>*</Code> (times),{" "}
+          <Code>/</Code> (divided by) and brackets, exactly as you would on paper:{" "}
+          <Code>(qty * price) - discount</Code>. These work on numbers only — to
+          join words together see <Code>CONCAT</Code> below.
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>min(a, b, …)</Code> — the smallest of the values given.
+          </li>
+          <li>
+            <Code>max(a, b, …)</Code> — the largest.
+          </li>
+          <li>
+            <Code>round(number)</Code> or <Code>round(number, places)</Code> —{" "}
+            <Code>round(total, 2)</Code> gives you pence or cents.
+          </li>
+          <li>
+            <Code>abs(number)</Code> — the value without its minus sign.
+          </li>
+        </ul>
+
+        <h3 className="font-semibold pt-1">Working with words</h3>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>CONCAT(a, b, …)</Code> — sticks pieces together.{" "}
+            <Code>CONCAT(first_name, " ", last_name)</Code> gives{" "}
+            <em>Ada Lovelace</em>. Numbers are welcome too:{" "}
+            <Code>CONCAT("$", price)</Code>.
+          </li>
+          <li>
+            <Code>UPPER(text)</Code> / <Code>LOWER(text)</Code> — the same words in
+            capitals, or all in small letters.
+          </li>
+          <li>
+            <Code>TRIM(text)</Code> — removes stray spaces from either end.
+          </li>
+          <li>
+            <Code>LEN(text)</Code> — how many characters it has, as a number.
+          </li>
+          <li>
+            <Code>LEFT(text, n)</Code> / <Code>RIGHT(text, n)</Code> — the first, or
+            last, <em>n</em> characters. <Code>LEFT(surname, 1)</Code> gives an
+            initial.
+          </li>
+          <li>
+            <Code>REPLACE(text, find, replace_with)</Code> — swaps every occurrence
+            of one bit of text for another.
+          </li>
+        </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          Text you type into a formula yourself goes in quotes —{" "}
+          <Code>"Ms. "</Code> — so the app can tell it apart from a column name.
+        </p>
+
+        <h3 className="font-semibold pt-1">Choosing between two answers</h3>
+        <p>
+          <Code>IF(condition, then, otherwise)</Code> gives the second value when
+          the condition holds and the third when it doesn’t:{" "}
+          <Code>IF(qty &gt; 100, "Bulk", "Standard")</Code>, or{" "}
+          <Code>IF(paid &gt;= total, 0, total - paid)</Code>.
+        </p>
+        <p>
+          Conditions compare with <Code>&gt;</Code>, <Code>&lt;</Code>,{" "}
+          <Code>&gt;=</Code>, <Code>&lt;=</Code>, <Code>==</Code> (is exactly) and{" "}
+          <Code>!=</Code> (is not), and you can join them with <Code>and</Code>,{" "}
+          <Code>or</Code> and <Code>not</Code>. Note the{" "}
+          <strong>double</strong> equals sign for “is equal to”.
+        </p>
+
+        <h3 className="font-semibold pt-1">A few worked examples</h3>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>round(qty * unit_price, 2)</Code> — a line total, to two decimal
+            places.
+          </li>
+          <li>
+            <Code>CONCAT(TRIM(first_name), " ", UPPER(LEFT(last_name, 1)), ".")</Code>{" "}
+            — <em>Ada L.</em>
+          </li>
+          <li>
+            <Code>IF(LEN(notes) &gt; 0, "Has notes", "—")</Code> — a tidy flag
+            column.
+          </li>
+          <li>
+            <Code>max(0, total - paid)</Code> — what’s still owed, never negative.
+          </li>
+        </ul>
+
+        <Callout tone="warn" title="What a calculated column can’t do">
+          <ul className="flex flex-col gap-1 m-0">
+            <li>
+              It has no stored value, so you can’t type into it, give it a{" "}
+              <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> or{" "}
+              <Ui>Unique</Ui>.
+            </li>
+            <li>
+              You can’t sort, filter, or search on it — those work on saved values,
+              and this one is worked out fresh each time.
+            </li>
+            <li>
+              Exports leave it out, and a value for it in an imported file is
+              ignored, so a file this app writes always imports cleanly back in.
+            </li>
+          </ul>
+        </Callout>
+        <Callout tone="tip" title="A blank cell means “not yet”">
+          If any column the formula names is empty on that record, the result is
+          blank (—) rather than zero — an unfinished row should look unfinished.
+          Dividing by zero comes out blank the same way, so one odd record never
+          spoils the rest of the list.
+        </Callout>
+        <Callout tone="warn" title="Renaming breaks a formula quietly">
+          Formulas find columns by their short name. If you rename a column a
+          formula uses, the formula stops finding it and those cells simply go
+          blank — no error. After renaming, open the calculated column and update
+          the formula to match.
         </Callout>
       </Section>
 
@@ -658,6 +840,12 @@ export function GuidePage() {
           </li>
           <li>Click <Ui>Save</Ui> to apply. New fields start out shown and editable.</li>
         </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          The four automatic columns — <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
+          <Ui>Created by</Ui>, <Ui>Updated by</Ui> — are the exception: they start
+          hidden and not editable, since the app maintains them. Tick <Ui>Shown</Ui>{" "}
+          if you want them visible while someone fills the form in.
+        </p>
       </Section>
 
       <Section id="sharing" title="Sharing and permissions">
@@ -705,6 +893,15 @@ export function GuidePage() {
           <Ui>Unique permissions</Ui> to ignore access handed down from its workspace
           and use only the people you add here. Sharing with a group grants everyone
           in it — a quick way to give a whole team access at once.
+        </Callout>
+        <Callout tone="tip" title="Sharing with everybody">
+          One group, <Ui>Authenticated Users</Ui>, is built in and always means
+          “everyone with an account here”, including people who join later. Share
+          with it when something is meant for the whole organisation. On the{" "}
+          <Ui>People</Ui> page it looks like a group with no members: that’s
+          expected, since membership is automatic rather than a list someone
+          maintains. For the same reason the app won’t let anyone rename, edit, or
+          delete it.
         </Callout>
       </Section>
 
@@ -860,16 +1057,50 @@ export function GuidePage() {
         </Callout>
       </Section>
 
-      <Section id="bin" title="Recovering deleted records">
+      <Section id="bin" title="Recovering things you deleted">
         <p>
-          Deleted a record by mistake? Open the list and click <Ui>Deleted records</Ui>
-          . You’ll see recently deleted rows; click <Ui>Restore</Ui> next to one to
-          bring it back into the list.
+          Deleting doesn’t destroy anything straight away. Records, lists, and whole
+          workspaces each go to a <strong>bin</strong> you can fetch them back from.
+        </p>
+        <ul className="flex flex-col gap-2">
+          <li>
+            <strong>A record.</strong> Open the list and click{" "}
+            <Ui>Deleted records</Ui>.
+          </li>
+          <li>
+            <strong>A list.</strong> Open the workspace it was in and click{" "}
+            <Ui>Deleted lists</Ui>.
+          </li>
+          <li>
+            <strong>A workspace.</strong> Go to <Ui>Workspaces</Ui> and click{" "}
+            <Ui>Deleted workspaces</Ui>.
+          </li>
+        </ul>
+        <p>
+          Each shows what was removed and when. Click <Ui>Restore</Ui> beside an
+          entry to bring it back, with everything it contained. Beside that sits a
+          red bin icon, <Ui>Delete permanently</Ui>, for when you want something
+          gone now rather than at the end of its window — it asks you to confirm,
+          and there is no undo.
         </p>
         <Callout tone="warn" title="There’s a time limit">
-          Deleted records are only kept for a while (a retention window). Once that
+          Deleted things are only kept for a while (a retention window). Once that
           passes they’re gone for good and can’t be restored — so recover anything
           important soon.
+        </Callout>
+        <Callout tone="tip" title="A list deleted with its workspace">
+          Restoring a workspace brings its lists back with it. That’s why a list that
+          went down with its workspace isn’t in the <Ui>Deleted lists</Ui> bin on its
+          own — restore the workspace and you’ll find it inside.
+        </Callout>
+        <Callout tone="warn" title="Links to a deleted list don’t come back">
+          If other lists had{" "}
+          <a href="#nested-lookups" style={{ color: "var(--brand)" }}>
+            link columns
+          </a>{" "}
+          pointing at a list you delete, those cells are emptied — they’d point at
+          nothing. Restoring the list brings back its own records, but not the links
+          other lists had to it; you’d pick those again.
         </Callout>
       </Section>
 
@@ -921,6 +1152,19 @@ export function GuidePage() {
             <strong>A search found nothing on this page.</strong> Search covers the
             whole list and jumps you to the first page of matches — if it’s empty,
             there really are no matches.
+          </li>
+          <li>
+            <strong>My calculated column went blank.</strong> Usually one of the
+            columns its{" "}
+            <a href="#formulas" style={{ color: "var(--brand)" }}>formula</a> reads
+            is empty on that record — which shows as blank on purpose. If{" "}
+            <em>every</em> record went blank at once, a column the formula names was
+            probably renamed; update the formula to the new short name.
+          </li>
+          <li>
+            <strong>I can’t sort or filter by my formula column.</strong> Calculated
+            values aren’t stored, they’re worked out as you look — so there’s
+            nothing for sorting, filtering, or search to match on.
           </li>
         </ul>
         <p className="pt-2">
