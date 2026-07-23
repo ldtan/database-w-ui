@@ -23,6 +23,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "columns", title: "Step 3 · Add columns" },
   { id: "column-types", title: "The column types, explained" },
   { id: "records", title: "Step 4 · Add records" },
+  { id: "nested-lookups", title: "Linked columns that narrow each other" },
   { id: "qr", title: "Add records with a QR code" },
   { id: "find", title: "Find records: search, sort, group, filter" },
   { id: "views", title: "Views: saved ways of looking" },
@@ -128,7 +129,7 @@ const TYPE_HELP: Record<string, string> = {
   link: "A web address that becomes clickable. You can show friendly words in place of the address.",
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
-  lookup: "A link to a row in another one of your lists — for example, linking an order to a customer.",
+  lookup: "A link to a row in another one of your lists — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
   calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it.",
 };
 
@@ -393,7 +394,11 @@ export function GuidePage() {
           Text, Number, Checkbox, Choice, and Date cover almost everything. The
           people-, link-, lookup-, and formula-style columns are powerful extras you
           can reach for later — they’re covered under{" "}
-          <a href="#sharing" style={{ color: "var(--brand)" }}>sharing</a> and below.
+          <a href="#sharing" style={{ color: "var(--brand)" }}>sharing</a> and{" "}
+          <a href="#nested-lookups" style={{ color: "var(--brand)" }}>
+            linked columns
+          </a>
+          , and below.
         </Callout>
       </Section>
 
@@ -429,6 +434,89 @@ export function GuidePage() {
           If a list has no columns yet, the add screen just says{" "}
           <Ui>Add a column first.</Ui> Set up at least one column (previous step)
           before adding records.
+        </Callout>
+      </Section>
+
+      <Section
+        id="nested-lookups"
+        title="Linked columns that narrow each other"
+      >
+        <p>
+          A <Ui>Lookup (link to another list)</Ui> column normally offers every
+          row of the list it points at. When two of those columns belong
+          together — a{" "}
+          <em>Country</em> and a <em>City</em> on the same record — you can{" "}
+          <strong>nest</strong> one under the other, so choosing the first decides
+          what the second may offer. Pick <em>France</em>, and the city box only
+          suggests French cities.
+        </p>
+        <p>
+          <strong>What you need first.</strong> Three lists, in a chain: a{" "}
+          <em>Countries</em> list, a <em>Cities</em> list that itself has a link
+          column pointing at <em>Countries</em>, and the list you’re really filling
+          in (say <em>Contacts</em>) with a link to each. That middle column — the
+          one on <em>Cities</em> saying which country a city is in — is what makes
+          the narrowing possible.
+        </p>
+        <p>
+          <strong>Setting it up.</strong> In the list you’re filling in, go to{" "}
+          <Ui>Settings</Ui> → <Ui>Columns</Ui> and add or edit the <em>City</em>{" "}
+          column:
+        </p>
+        <ol className="flex flex-col gap-2">
+          <li>
+            Set its <Ui>Target list</Ui> to <em>Cities</em>, as with any link
+            column.
+          </li>
+          <li>
+            Under <Ui>Nest under (optional)</Ui>, choose <em>Country</em> — the
+            column on <em>this</em> list whose choice should do the narrowing.
+          </li>
+          <li>
+            Under <Ui>Match on</Ui>, choose the column on <em>Cities</em> that says
+            which country each city belongs to. If only one column fits, the app
+            picks it for you.
+          </li>
+          <li>Click <Ui>Save</Ui> (or <Ui>Add</Ui>).</li>
+        </ol>
+        <p>
+          <strong>What people see when adding a record.</strong> The <em>City</em>{" "}
+          box starts switched off, reading{" "}
+          <Ui>Select Country first</Ui>. Choose a country and it wakes up,
+          suggesting only that country’s cities. Change the country later and the
+          city clears itself — the old city belonged to the old country.
+        </p>
+        <p>
+          <strong>Longer chains work too.</strong> Nest <em>Country</em> under{" "}
+          <em>Continent</em> and <em>City</em> under <em>Country</em>, and the
+          boxes light up one after another as you go. Changing something near the
+          top clears everything below it.
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Ui>Nest under</Ui> only appears when a sensible pairing exists. If you
+            can’t see it, the target list has no column pointing back at the other
+            column’s list — add that link column there first.
+          </li>
+          <li>
+            To undo the nesting, set <Ui>Nest under</Ui> back to{" "}
+            <Ui>Not nested</Ui>. The column keeps its values and simply offers
+            everything again.
+          </li>
+          <li>
+            The rule is enforced wherever records are saved — typing, importing a
+            file, or filling from a QR code — so a city that doesn’t sit in the
+            chosen country is refused with a message saying so.
+          </li>
+          <li>
+            Filtering and searching are deliberately <em>not</em> narrowed: there,
+            you’re looking across the whole list, not filling in one record.
+          </li>
+        </ul>
+        <Callout tone="tip" title="Turning it on later is safe">
+          Nesting an existing column doesn’t break records already saved, even ones
+          whose pairing no longer matches. Nothing is checked until someone edits
+          that particular field — so you can tidy old rows at your own pace.
         </Callout>
       </Section>
 
@@ -814,6 +902,15 @@ export function GuidePage() {
           <li>
             <strong>I can’t change a column’s type.</strong> That’s on purpose — add a
             new column of the type you need instead.
+          </li>
+          <li>
+            <strong>A field is switched off and says “Select … first.”</strong>{" "}
+            That column is{" "}
+            <a href="#nested-lookups" style={{ color: "var(--brand)" }}>
+              nested under another
+            </a>
+            . Fill in the one it names and this field wakes up, offering only the
+            rows that go with your choice.
           </li>
           <li>
             <strong>Sorting is greyed out.</strong> Grouping fixes the order, so
