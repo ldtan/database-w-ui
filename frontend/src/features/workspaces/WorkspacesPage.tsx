@@ -14,6 +14,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { NameFields } from "../../components/NameFields";
+import { RowActions } from "../../components/RowActions";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
 import { useDebounced } from "../../lib/useDebounced";
@@ -204,36 +205,35 @@ export function WorkspacesPage() {
               </Link>
               {/* The Incoming inbox is immutable — no rename/delete/share; the
                   recipient acts on the lists inside it, not on the box. */}
-              <div className="flex gap-1">
-                {!ws.is_system && can(ws.uuid, "share") && (
-                  <Button
-                    icon="pi pi-share-alt"
-                    text
-                    aria-label="Share workspace"
-                    onClick={() => setSharing(ws)}
-                  />
-                )}
-                {!ws.is_system && can(ws.uuid, "configure") && (
-                  <Button
-                    icon="pi pi-pencil"
-                    text
-                    aria-label="Rename workspace"
-                    onClick={() => {
+              <RowActions
+                actions={[
+                  {
+                    key: "share",
+                    icon: "pi pi-share-alt",
+                    label: "Share workspace",
+                    visible: !ws.is_system && can(ws.uuid, "share"),
+                    onClick: () => setSharing(ws),
+                  },
+                  {
+                    key: "edit",
+                    icon: "pi pi-pencil",
+                    label: "Rename workspace",
+                    visible: !ws.is_system && can(ws.uuid, "configure"),
+                    onClick: () => {
                       setRenaming(ws);
                       setNames({ displayName: ws.display_name, name: ws.name });
-                    }}
-                  />
-                )}
-                {!ws.is_system && can(ws.uuid, "delete") && (
-                  <Button
-                    icon="pi pi-trash"
-                    text
-                    severity="danger"
-                    aria-label="Delete workspace"
-                    onClick={() => confirmDelete(ws)}
-                  />
-                )}
-              </div>
+                    },
+                  },
+                  {
+                    key: "delete",
+                    icon: "pi pi-trash",
+                    label: "Delete workspace",
+                    severity: "danger",
+                    visible: !ws.is_system && can(ws.uuid, "delete"),
+                    onClick: () => confirmDelete(ws),
+                  },
+                ]}
+              />
             </div>
           </Card>
         ))}
