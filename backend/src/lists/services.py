@@ -1,7 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
-from uuid import UUID
+from uuid import UUID, uuid7
 
 from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
@@ -829,6 +829,8 @@ class ListService:
         Forms start with an empty ``fields`` list, which the convention treats as
         "all columns" until the user customizes the layout.
         """
+
+        default_columns = []
         for name, display_name, col_type, config, position in [
             (
                 "created_at",
@@ -859,16 +861,17 @@ class ListService:
                 1003,
             ),
         ]:
-            db.add(
-                Column(
-                    list_id=lst.id,
-                    name=name,
-                    display_name=display_name,
-                    type=col_type,
-                    position=position,
-                    config=config,
-                )
+            default_col = Column(
+                uuid=uuid7(),
+                list_id=lst.id,
+                name=name,
+                display_name=display_name,
+                type=col_type,
+                position=position,
+                config=config,
             )
+            db.add(default_col)
+            default_columns.append(default_col)
 
         db.add(
             View(
@@ -879,6 +882,17 @@ class ListService:
                 config=ViewConfig().model_dump(mode="json"),
             )
         )
+
+        default_fields_config = [
+            {
+                "order": i,
+                "enable": False,
+                "included": False,
+                "column_uuid": str(col.uuid),
+                "label_override": None,
+            }
+            for i, col in enumerate(default_columns)
+        ]
         db.add(
             Form(
                 list_id=lst.id,
@@ -886,7 +900,7 @@ class ListService:
                 display_name="Create",
                 type=FormType.create,
                 is_default=True,
-                config={"fields": []},
+                config={"fields": default_fields_config},
             )
         )
         db.add(
@@ -896,7 +910,7 @@ class ListService:
                 display_name="Update",
                 type=FormType.update,
                 is_default=True,
-                config={"fields": []},
+                config={"fields": default_fields_config},
             )
         )
 
