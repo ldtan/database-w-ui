@@ -5,9 +5,6 @@ import type { Column } from "./types";
 export function displayText(column: Column, value: unknown): string {
   if (value === null || value === undefined || value === "") return "";
   if (column.type === "checkbox") return value ? "✓" : "✗";
-  if (column.type === "choice") {
-    const option = column.config.options?.find((o) => o.id === value);
-    return option?.label ?? String(value);
-  }
+  // A choice cell stores the option itself, so the default path covers it.
   return String(value);
 }

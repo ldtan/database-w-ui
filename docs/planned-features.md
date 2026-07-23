@@ -26,7 +26,7 @@ Change a column's `type` after it has records — `text` → `number`, `choice` 
 
 **Why it's not a config edit.** `type` is **immutable after creation** today (data-model §4,
 §5), and deliberately so. Every record stores a value under the column's uuid whose *shape and
-meaning* are the current type's: a `choice` cell holds an option **id**, a `lookup` holds a
+meaning* are the current type's: a `choice` cell holds an option label, a `lookup` holds a
 target-row **uuid**, a `number` holds a JSON number, a `date` holds an ISO string. Changing the
 type reinterprets every one of those stored values, and most cross-type pairs need the bytes
 themselves rewritten, not just the declared type.
@@ -37,8 +37,8 @@ by the `reconcile_shapes` cron (known-gaps: "Toggling a column's `multiple`"). T
 read, converge in the background" pattern is the right instinct — a synchronous UPDATE over every
 row inside a web request is measured at ~25s per 1M rows holding row locks, which is not
 acceptable. But a type conversion **cannot** be tolerated on read the way a shape mismatch can:
-`"42"` and `42` are the same value in two shapes, whereas `"in progress"` and the choice id
-`in_progress` are not — one has to be *computed* from the other. So conversion needs an explicit,
+`"42"` and `42` are the same value in two shapes, whereas `"May 4, 2026"` and the date
+`2026-05-04` are not — one has to be *computed* from the other. So conversion needs an explicit,
 chunked, killable backfill job (model it on `reconcile_shapes.py`), not a read-time coercion.
 
 **The conversion matrix is where the real work is.** A few are lossless and cheap; most are
@@ -47,10 +47,10 @@ not:
 - **Widening temporal** — `date` → `datetime` appends a time; the reverse truncates it. Safe-ish.
 - **`number` ↔ `text`** — `str(n)` always works; `text` → `number` is `_parse_cell`'s job and
   will reject non-numeric cells (per-cell failure, see the policy question below).
-- **`choice` ↔ `text`** — leaving `choice`, expand each stored **id** to its **label** (the
-  inverse of what the grid shows). Entering `choice`, match each text value to an option label
-  (case-insensitively) or mint a new option — the same label→id problem called out in known-gaps
-  gap 4.
+- **`choice` ↔ `text`** — leaving `choice` is free: the cell already holds the label, only
+  the declared type changes. Entering `choice`, either mint an option per distinct text value
+  or match against a provided option set and fail the stragglers (per-cell failure, see the
+  policy question below).
 - **Reference types (`lookup`/`user`/`group`)** — the cell holds a uuid. Converting *to* `text`
   means resolving the label (exactly what export's `_LabelResolver` does, permissions and all);
   converting *from* `text` means resolving a label back to a uuid (what import does). Reuse those
@@ -207,7 +207,7 @@ own workspace. Structure (columns, views, forms) is always copied; records only 
 reference is rewritten through an old→new column-uuid map: the record `data` keys,
 `primary_column_id`, and the column-uuid references inside view configs (`filters`,
 `sorts`, `group_by`, `hidden_columns`, `column_order`) and form configs
-(`fields[].column_uuid`). `choice` option ids and `calculated` formulas (which name
+(`fields[].column_uuid`). `choice` cell values and `calculated` formulas (which name
 columns by *name*) copy verbatim. Grants are **not** copied and `_provision_defaults`
 is **not** called — the clone copies the source's real columns/views/forms and starts
 private, like any newly created list. The name auto-suffixes to a free slug
@@ -238,8 +238,9 @@ list whose records render blank. Everything else follows from it:
   `sorts`, `group_by`, `hidden_columns`, `column_order`, and a form's `fields[].column_uuid` all
   have to be remapped through the same table, or the cloned views/forms point at the source's
   columns.
-- **`choice` option ids** live in `config` and can be copied verbatim — records store the id, and
-  the clone's records store the same ids against the same (copied) options. No remap needed there.
+- **`choice` options** live in `config` and can be copied verbatim — records store the label,
+  and the clone's records hold the same labels against the same (copied) options. No remap
+  needed there.
 
 **Lookups and self-references.** A `lookup` column stores `target_list_uuid` in config and
 target-row uuids in cells.

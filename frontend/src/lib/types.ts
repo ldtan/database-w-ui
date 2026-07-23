@@ -63,17 +63,12 @@ export type PermissionAction = Schemas["Action"];
 
 // ---- The config blobs: shapes the backend validates but does not publish ----
 
-export interface ChoiceOption {
-  id: string;
-  label: string;
-  color?: string | null;
-}
-
 export interface ColumnConfig {
   required?: boolean;
   default?: unknown;
   onupdate?: unknown;
-  options?: ChoiceOption[];
+  /** Choice options are plain labels; a cell stores the label itself. */
+  options?: string[];
   target_list_uuid?: string;
   display_column_uuid?: string;
   multiple?: boolean;

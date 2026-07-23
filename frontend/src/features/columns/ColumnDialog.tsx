@@ -17,7 +17,7 @@ import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
-import type { ChoiceOption, Column, ColumnType, ListRead } from "../../lib/types";
+import type { Column, ColumnType, ListRead } from "../../lib/types";
 
 // The dynamic default/on-update token a type auto-fills with, and its human label.
 // Temporal columns stamp the current date/time; a user column stamps the actor.
@@ -76,7 +76,7 @@ export function ColumnDialog({
   const [defaultText, setDefaultText] = useState(""); // text / long_text / link
   const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
   const [defaultChecked, setDefaultChecked] = useState(false);
-  const [defaultChoice, setDefaultChoice] = useState<string | null>(null); // by label
+  const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
   const [defaultTemporal, setDefaultTemporal] = useState(""); // "" | token | SPECIFIC
   const [defaultDate, setDefaultDate] = useState<Date | null>(null); // when SPECIFIC
   const [defaultUser, setDefaultUser] = useState(""); // "" | "current_user"
@@ -128,10 +128,7 @@ export function ColumnDialog({
     setMin((config.min as number) ?? null);
     setMax((config.max as number) ?? null);
     setIntegerOnly(!!config.integer_only);
-    // Options carry stable ids; resend them as labels so unchanged ones keep theirs.
-    setChoices(
-      ((config.options as ChoiceOption[]) ?? []).map((o) => o.label).join(";"),
-    );
+    setChoices(((config.options as string[]) ?? []).join(";"));
     setLinkText((config.label as string) ?? "");
     setTargetListUuid((config.target_list_uuid as string) ?? null);
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
@@ -144,12 +141,8 @@ export function ColumnDialog({
     if (typeof def === "string") setDefaultText(def);
     if (typeof def === "number") setDefaultNumber(def);
     setDefaultChecked(def === true);
-    // A choice default is stored as an option id; show it by its label.
-    const opt = ((config.options as ChoiceOption[]) ?? []).find(
-      (o) => o.id === def,
-    );
-    if (opt) setDefaultChoice(opt.label);
-    else if (typeof def === "string") setDefaultChoice(def);
+    // A choice default is stored as the option itself.
+    if (typeof def === "string") setDefaultChoice(def);
     if (isTemporal(column.type)) {
       const token = dynamicToken(column.type);
       if (def == null) setDefaultTemporal("");
@@ -210,7 +203,7 @@ export function ColumnDialog({
     type !== "lookup" &&
     type !== "group" &&
     !(supportsOnUpdate && onUpdate !== "");
-  // Option labels for the choice "default option" dropdown (ids are assigned server-side).
+  // Options for the choice "default option" dropdown, from the shorthand as typed.
   const choiceLabels = choices
     .split(";")
     .map((s) => s.trim())

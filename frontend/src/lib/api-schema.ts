@@ -890,15 +890,6 @@ export interface components {
             /** Deleted */
             deleted: number;
         };
-        /** ChoiceOption */
-        ChoiceOption: {
-            /** Id */
-            id: string;
-            /** Label */
-            label: string;
-            /** Color */
-            color?: string | null;
-        };
         /**
          * ColumnConfig
          * @description Type-specific column settings. Only the keys relevant to a column's
@@ -951,7 +942,7 @@ export interface components {
             /** Choices */
             choices?: string | null;
             /** Options */
-            options?: components["schemas"]["ChoiceOption"][] | null;
+            options?: string[] | null;
             /** Multiple */
             multiple?: boolean | null;
             /** Target List Uuid */

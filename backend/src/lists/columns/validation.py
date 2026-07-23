@@ -89,20 +89,16 @@ def parse_temporal(column_type: ColumnType, value):
     return parser(value)
 
 
-def _slugify(label: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", label.lower()).strip("_") or "option"
-
-
-def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[dict]:
-    """Return the canonical option list for a choice column.
+def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[str]:
+    """Return the canonical option list for a choice column: plain labels.
 
     Explicit ``options`` win. Otherwise the ``choices`` shorthand ("A;B;C") is
-    expanded, reusing an existing option's id for an unchanged label so records
-    keep pointing at the right option across edits.
+    split. A cell stores the label itself, so there is nothing to keep stable
+    here — an option that changes spelling is simply a different option.
     """
     options = config.get("options")
     if options:
-        return options
+        return [str(label).strip() for label in options if str(label).strip()]
 
     choices = config.get("choices")
     if choices is None:
@@ -110,27 +106,7 @@ def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[dict]
         # (a config update shouldn't silently wipe the option set).
         return list((existing or {}).get("options", []) or [])
 
-    existing_by_label = {
-        opt["label"]: opt["id"] for opt in (existing or {}).get("options", []) or []
-    }
-    labels = [raw.strip() for raw in choices.split(";") if raw.strip()]
-    # Reserve ids reused for unchanged labels up front, so a generated slug can
-    # never collide with one assigned to a later label (e.g. "done" vs "Done").
-    seen: set[str] = {
-        existing_by_label[label] for label in labels if label in existing_by_label
-    }
-    result: list[dict] = []
-    for label in labels:
-        oid = existing_by_label.get(label)
-        if oid is None:
-            oid = base = _slugify(label)
-            i = 2
-            while oid in seen:
-                oid = f"{base}_{i}"
-                i += 1
-            seen.add(oid)
-        result.append({"id": oid, "label": label})
-    return result
+    return [raw.strip() for raw in choices.split(";") if raw.strip()]
 
 
 def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
@@ -243,15 +219,15 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
             _expect(name, "a boolean")
 
     elif column_type == ColumnType.choice:
-        valid_ids = {opt["id"] for opt in config.get("options", []) or []}
+        valid = set(config.get("options", []) or [])
         if config.get("multiple"):
             if not isinstance(value, list):
-                _expect(name, "a list of option ids")
+                _expect(name, "a list of options")
             candidates = value
         else:
             candidates = [value]
         for item in candidates:
-            if item not in valid_ids:
+            if item not in valid:
                 raise ValidationError(
                     f"'{item}' is not a valid option for column '{name}'"
                 )
