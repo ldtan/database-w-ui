@@ -62,6 +62,33 @@ export function deserialize(column: Column, raw: unknown): unknown {
   return parseTemporal(column.type, raw) ?? raw;
 }
 
+/**
+ * Every lookup column nested (directly or transitively) under `changedUuid`,
+ * via `config.parent_column_uuid` edges. When a parent's value changes, these
+ * are the cells whose selections no longer mean anything and must be cleared —
+ * a city picked for the old country must not survive the country changing.
+ */
+export function nestedDescendants(
+  columns: Column[],
+  changedUuid: string,
+): string[] {
+  const children = new Map<string, string[]>();
+  for (const column of columns) {
+    const parent = column.config.parent_column_uuid;
+    if (!parent) continue;
+    children.set(parent, [...(children.get(parent) ?? []), column.uuid]);
+  }
+  const found: string[] = [];
+  const queue = [...(children.get(changedUuid) ?? [])];
+  while (queue.length > 0) {
+    const uuid = queue.shift()!;
+    if (found.includes(uuid)) continue; // config cycles cannot loop us
+    found.push(uuid);
+    queue.push(...(children.get(uuid) ?? []));
+  }
+  return found;
+}
+
 /** What the backend treats as "no value": null, "", and the empty list. */
 export function isEmptyValue(value: unknown): boolean {
   return (

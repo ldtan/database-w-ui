@@ -718,7 +718,99 @@ class ListItemService:
             if config.get("required") and cls._is_empty(result.get(key)):
                 raise ValidationError(f"Column '{column.name}' is required")
 
+        # Nested lookups are a cross-cell rule, so they are checked over the
+        # merged record rather than per column — whichever order the cells
+        # arrived in, parent and child are both settled by now.
+        await cls._enforce_nested_lookups(db, lst, columns, result, incoming, existing)
+
         return result
+
+    @classmethod
+    async def _enforce_nested_lookups(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        columns: dict[str, Column],
+        result: dict,
+        incoming: dict,
+        existing: Optional[dict],
+    ) -> None:
+        """Reject a nested lookup value that does not belong to the parent's.
+
+        Only values being *added* are checked — the same `kept` rule as
+        `_validate_lookup`: a stale pairing already stored must not make the
+        record unsaveable, it is surfaced when the cell itself is edited. A
+        dangling pairing (parent or filter column since deleted) is skipped
+        rather than enforced, matching how the picker degrades; the cascade in
+        ColumnService normally clears those.
+        """
+        for key, column in columns.items():
+            if column.type != ColumnType.lookup:
+                continue
+            config = column.config or {}
+            parent_key = config.get("parent_column_uuid")
+            filter_key = config.get("target_filter_column_uuid")
+            if parent_key is None or filter_key is None:
+                continue
+            if key not in incoming:
+                # An untouched cell keeps whatever it holds, however stale.
+                continue
+            new = _as_set(result.get(key)) - _as_set((existing or {}).get(key))
+            if not new:
+                continue  # kept or cleared — nothing added to check
+            parent_key, filter_key = str(parent_key), str(filter_key)
+            parent = columns.get(parent_key)
+            if parent is None or parent.type != ColumnType.lookup:
+                continue
+            target_list_id = await cls._lookup_target_id(db, lst, column, config)
+            if not await cls._nested_filter_live(db, target_list_id, filter_key):
+                continue
+
+            parent_set = _as_set(result.get(parent_key))
+            if not parent_set:
+                raise ValidationError(
+                    f"Column '{column.name}' requires '{parent.name}' to be "
+                    "set first"
+                )
+            # `_validate_lookup` already resolved labels to uuids and refused
+            # unknown/deleted rows, so every uuid in `new` names a real target
+            # row; this only asks whether those rows belong to the parent's.
+            rows = await db.execute(
+                select(ListItem.uuid, ListItem.data[filter_key]).where(
+                    ListItem.list_id == target_list_id,
+                    ListItem.uuid.in_(new),
+                )
+            )
+            for _, cell in rows.all():
+                if not (_as_set(cell) & parent_set):
+                    raise ValidationError(
+                        f"Column '{column.name}': the selected row does not "
+                        f"belong to the selected '{parent.name}'"
+                    )
+
+    @classmethod
+    async def _nested_filter_live(
+        cls, db: AsyncSession, target_list_id: int, filter_key: str
+    ) -> bool:
+        """Whether a nesting's filter column is still a live column of the
+        target list. Cached per request, like `_lookup_target_id` — import
+        calls the write path once per row."""
+        cache = db.info.setdefault("nested_filter_columns", {})
+        cache_key = (target_list_id, filter_key)
+        if cache_key not in cache:
+            cache[cache_key] = (
+                (
+                    await db.execute(
+                        select(Column.id).where(
+                            Column.list_id == target_list_id,
+                            Column.uuid == coerce_uuid(filter_key),
+                            Column.deleted_at.is_(None),
+                        )
+                    )
+                ).scalars().first()
+                is not None
+            )
+        return cache[cache_key]
 
     @classmethod
     async def _enforce_unique(

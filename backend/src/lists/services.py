@@ -460,6 +460,19 @@ class ListService:
         # uuids stored inside view/form configs are JSON strings.
         col_map = {str(old.uuid): str(new.uuid) for old, new in pairs}
 
+        # A nested lookup's parent is a *sibling* column, which was just cloned —
+        # remap it so the clone nests under its own parent, not the original's.
+        # `target_filter_column_uuid` is left alone: it names a column of the
+        # target list, whose uuids are unchanged (even for a self-referencing
+        # lookup, which keeps pointing at the original list — see above).
+        for _, new_col in pairs:
+            config = new_col.config or {}
+            parent_uuid = config.get("parent_column_uuid")
+            if parent_uuid is not None and str(parent_uuid) in col_map:
+                config = dict(config)
+                config["parent_column_uuid"] = col_map[str(parent_uuid)]
+                new_col.config = config
+
         # Repoint the primary/display column at the cloned column.
         if source.primary_column_id is not None:
             for old, new in pairs:

@@ -15,7 +15,12 @@ import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
-import { buildRecordData, deserialize, resolveFields } from "./recordValues";
+import {
+  buildRecordData,
+  deserialize,
+  nestedDescendants,
+  resolveFields,
+} from "./recordValues";
 
 interface Props {
   listUuid: string;
@@ -37,12 +42,18 @@ function RecordField({
   value,
   disabled,
   onChange,
+  columns,
+  values,
 }: {
   listUuid: string;
   column: Column;
   value: unknown;
   disabled: boolean;
   onChange: (v: unknown) => void;
+  /** The full column set and current draft, for editors whose behavior depends
+   *  on a *sibling* cell — today, a nested lookup filtering by its parent. */
+  columns?: Column[];
+  values?: Record<string, unknown>;
 }) {
   const id = `field-${column.uuid}`;
   switch (column.type) {
@@ -136,7 +147,23 @@ function RecordField({
           disabled={disabled}
         />
       );
-    case "lookup":
+    case "lookup": {
+      // Nested lookup: the parent's *draft* value (not the stored one) drives
+      // what this picker may offer. A pairing whose parent column is gone
+      // degrades to a plain picker, matching the backend's tolerance.
+      const parentUuid = column.config.parent_column_uuid;
+      const parent = parentUuid
+        ? columns?.find((c) => c.uuid === parentUuid && c.type === "lookup")
+        : undefined;
+      let parentValues: string[] | undefined;
+      if (parent && values) {
+        const raw = values[parent.uuid];
+        parentValues = Array.isArray(raw)
+          ? raw.map(String)
+          : raw
+            ? [String(raw)]
+            : [];
+      }
       return (
         <LookupField
           listUuid={listUuid}
@@ -144,8 +171,11 @@ function RecordField({
           value={value}
           disabled={disabled}
           onChange={onChange}
+          parentValues={parentValues}
+          parentLabel={parent?.display_name}
         />
       );
+    }
     case "user":
     case "group":
       return (
@@ -272,8 +302,18 @@ export function RecordFormDialog({
               value={values[column.uuid]}
               disabled={!enabled}
               onChange={(v) =>
-                setValues((prev) => ({ ...prev, [column.uuid]: v }))
+                setValues((prev) => {
+                  const next = { ...prev, [column.uuid]: v };
+                  // A changed parent invalidates every lookup nested under it,
+                  // transitively: their selections belonged to the old value.
+                  for (const uuid of nestedDescendants(columns, column.uuid)) {
+                    next[uuid] = null;
+                  }
+                  return next;
+                })
               }
+              columns={columns}
+              values={values}
             />
           </div>
         ))}

@@ -71,6 +71,10 @@ export interface ColumnConfig {
   options?: string[];
   target_list_uuid?: string;
   display_column_uuid?: string;
+  /** Nested lookup: the sibling lookup whose value filters this one's options,
+   *  and the target-list lookup column the filter matches on. Set together. */
+  parent_column_uuid?: string | null;
+  target_filter_column_uuid?: string | null;
   multiple?: boolean;
   allowed_schemes?: string[];
   label?: string;

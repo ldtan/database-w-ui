@@ -165,6 +165,30 @@ What is still missing:
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
 
+---
+
+## 7. Nested lookups: stale pairs survive, and the picker filter is advisory
+
+A nested lookup (planned-features #6) enforces its parent/child pairing **only on values
+being added**. That is the same deal choice options struck (gap 4): enabling nesting over a
+column with existing data leaves mismatched cells exactly as they are — they render fine,
+survive edits to *other* cells, and even survive being re-sent unchanged (a keep, not an
+add). The pairing bites the moment the cell itself gains a new value. There is no scan, no
+migration, no cascade-fix; if bulk cleanup ever matters it belongs in the planned data
+migration feature, same as choice relabeling.
+
+Two consequences worth knowing before extending it:
+
+- **`?parent_value=` on the options endpoint is a convenience, not a boundary.** A client
+  that omits it gets the unfiltered search a plain lookup gets — deliberately, because label
+  resolution, view-filter value pickers and QR fills all hit the same endpoint with no parent
+  context. Consistency is guaranteed by `_enforce_nested_lookups` on the write path, which
+  import and QR submissions share. Don't "fix" the endpoint to require the param.
+- **A dangling pairing degrades, everywhere.** Deleting or retargeting the parent or the
+  filter column cascade-clears the pairing (`_clear_dependent_nesting`), but if a stale one
+  is ever encountered anyway (a race, a hand-edited config), the picker, the record dialog
+  and the write validation all treat the column as a plain lookup rather than erroring.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

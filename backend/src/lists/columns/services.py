@@ -4,6 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from sqlalchemy import null as sa_null, select
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -104,11 +105,23 @@ class ColumnService:
         data = payload.model_dump(exclude_unset=True)
 
         if "config" in data:
+            old_target = (column.config or {}).get("target_list_uuid")
             # A column's type is immutable after creation; re-validate the new
             # config against the existing type, preserving settings not resent.
             column.config = await cls._validate_config(
-                db, lst, column.type, payload.config, existing=column.config
+                db,
+                lst,
+                column.type,
+                payload.config,
+                existing=column.config,
+                current_uuid=column.uuid,
             )
+            new_target = (column.config or {}).get("target_list_uuid")
+            if old_target is not None and str(old_target) != str(new_target):
+                # Retargeting silently invalidates any nesting pairing that
+                # references this column — the filter column no longer points
+                # where the pairing assumed. Un-nest the dependents.
+                await cls._clear_dependent_nesting(db, column)
             data.pop("config")
         if data.get("name") is None:
             data.pop("name", None)
@@ -144,6 +157,8 @@ class ColumnService:
         # Don't leave the list pointing at a deleted primary field.
         if lst.primary_column_id == column.id:
             lst.primary_column_id = None
+        # Nor a nested lookup pointing at a deleted parent or filter column.
+        await cls._clear_dependent_nesting(db, column)
         await db.commit()
         return True
 
@@ -157,6 +172,7 @@ class ColumnService:
         q: Optional[str] = None,
         uuids: Optional[Sequence[UUID]] = None,
         limit: Optional[int] = None,
+        parent_values: Optional[Sequence[UUID]] = None,
     ) -> list[dict]:
         """Rows of a lookup's target list, as ``{uuid, label}`` options.
 
@@ -224,6 +240,24 @@ class ColumnService:
             stmt = stmt.where(ListItem.uuid.in_(uuids))
         else:
             stmt = stmt.where(ListItem.deleted_at.is_(None))
+            # Nested lookup: a search offers only rows belonging to the parent's
+            # selection. Resolving (`uuids`) is deliberately unfiltered — a held
+            # value must always get its label, however stale. The filter column
+            # comes from stored config, never from the caller; on a column that
+            # is not nested the param is ignored, so a picker racing a config
+            # edit degrades to an unfiltered search rather than erroring.
+            filter_uuid = config.get("target_filter_column_uuid")
+            if parent_values and filter_uuid is not None:
+                # `?|` is true for a scalar cell equal to any of the values and
+                # for an array cell sharing any element — both target shapes.
+                stmt = stmt.where(
+                    ListItem.data[str(filter_uuid)].has_any(
+                        sa.literal(
+                            [str(u) for u in parent_values],
+                            postgresql.ARRAY(sa.Text),
+                        )
+                    )
+                )
         if q and q.strip() and key:
             stmt = stmt.where(
                 ListItem.deleted_at.is_(None),
@@ -236,18 +270,22 @@ class ColumnService:
             for uuid, text, deleted_at in rows
         ]
 
-    @staticmethod
+    @classmethod
     async def _validate_config(
+        cls,
         db: AsyncSession,
         lst: List,
         type_: ColumnType,
         config: ColumnConfig,
         existing: Optional[dict] = None,
+        current_uuid: Optional[UUID] = None,
     ) -> dict:
         """Validate type-specific settings and return the JSON-ready dict to store.
 
         ``existing`` is the column's current stored config (on update), used to
         keep settings the caller did not resend (choice options included).
+        ``current_uuid`` is the column being updated (absent on create), needed
+        to refuse a nested lookup nesting under itself or its own descendants.
         """
         # Only the keys the caller explicitly set on this request, so that on
         # update the merge below preserves stored settings left unspecified.
@@ -314,6 +352,10 @@ class ColumnService:
                         "display_column_uuid does not reference a column of the "
                         "target list"
                     )
+
+            await cls._validate_nesting(
+                db, lst, data, target_list_id, current_uuid
+            )
 
         if type_ == ColumnType.calculated:
             from .formula import column_refs, parse
@@ -403,3 +445,135 @@ class ColumnService:
             validate_scalar(type_, data, "default", default)
 
         return data
+
+    @staticmethod
+    async def _validate_nesting(
+        db: AsyncSession,
+        lst: List,
+        data: dict,
+        target_list_id: int,
+        current_uuid: Optional[UUID],
+    ) -> None:
+        """Check a lookup's nesting pair, if configured (see ColumnConfig).
+
+        Runs after the config merge, so a PATCH that resends neither key is
+        checked against what is stored — an edit cannot silently break an
+        existing pairing.
+        """
+        parent_uuid = coerce_uuid(data.get("parent_column_uuid"))
+        filter_uuid = coerce_uuid(data.get("target_filter_column_uuid"))
+        if parent_uuid is None and filter_uuid is None:
+            return
+        if parent_uuid is None or filter_uuid is None:
+            raise ValidationError(
+                "parent_column_uuid and target_filter_column_uuid must be "
+                "set together"
+            )
+        if current_uuid is not None and parent_uuid == current_uuid:
+            raise ValidationError("A lookup column cannot be nested under itself")
+
+        # The parent is a sibling: same list, and itself a lookup — its cell is
+        # what the filter compares against, so anything else has no row uuid to
+        # match on.
+        siblings = {
+            str(column.uuid): column
+            for column in (
+                await db.execute(
+                    select(Column).where(
+                        Column.list_id == lst.id, Column.deleted_at.is_(None)
+                    )
+                )
+            ).scalars().all()
+        }
+        parent = siblings.get(str(parent_uuid))
+        if parent is None:
+            raise UnknownReferenceError(
+                "parent_column_uuid does not reference a column of this list"
+            )
+        if parent.type != ColumnType.lookup:
+            raise ValidationError(
+                f"Cannot nest under '{parent.name}': it is not a lookup column"
+            )
+
+        # The filter column lives on *this* column's target list and must point
+        # back at the parent's target list — that is what makes the pairing mean
+        # "target rows belonging to the parent's selection".
+        filter_column = (
+            await db.execute(
+                select(Column).where(
+                    Column.list_id == target_list_id,
+                    Column.uuid == filter_uuid,
+                    Column.deleted_at.is_(None),
+                )
+            )
+        ).scalars().first()
+        if filter_column is None:
+            raise UnknownReferenceError(
+                "target_filter_column_uuid does not reference a column of the "
+                "target list"
+            )
+        if filter_column.type != ColumnType.lookup:
+            raise ValidationError(
+                f"Cannot match on '{filter_column.name}': it is not a lookup "
+                "column"
+            )
+        parent_target = (parent.config or {}).get("target_list_uuid")
+        filter_target = (filter_column.config or {}).get("target_list_uuid")
+        if (
+            parent_target is None
+            or filter_target is None
+            or str(parent_target) != str(filter_target)
+        ):
+            raise ValidationError(
+                f"'{filter_column.name}' does not point at the same list as "
+                f"'{parent.name}'"
+            )
+
+        # Nesting edges must form a forest: walk up from the parent and refuse
+        # to close a loop. Chains (A under B under C) are fine.
+        if current_uuid is not None:
+            seen = set()
+            cursor = parent
+            while cursor is not None:
+                if cursor.uuid == current_uuid:
+                    raise ValidationError(
+                        "Nesting would create a cycle between lookup columns"
+                    )
+                if str(cursor.uuid) in seen:
+                    break
+                seen.add(str(cursor.uuid))
+                next_uuid = (cursor.config or {}).get("parent_column_uuid")
+                cursor = (
+                    siblings.get(str(next_uuid)) if next_uuid is not None else None
+                )
+
+    @staticmethod
+    async def _clear_dependent_nesting(db: AsyncSession, column: Column) -> None:
+        """Un-nest every lookup whose pairing references ``column``.
+
+        Called when a column is deleted or a parent lookup is retargeted —
+        either way the pairing no longer means anything, and a dangling one
+        would quietly stop filtering. Mirrors how `delete` nulls a list's
+        `primary_column_id` rather than blocking the delete. Parent references
+        are same-list, filter-column references come from other lists, so the
+        scan is global.
+        """
+        uuid_text = str(column.uuid)
+        dependents = (
+            await db.execute(
+                select(Column).where(
+                    Column.deleted_at.is_(None),
+                    sa.or_(
+                        Column.config["parent_column_uuid"].astext == uuid_text,
+                        Column.config["target_filter_column_uuid"].astext
+                        == uuid_text,
+                    ),
+                )
+            )
+        ).scalars().all()
+        for dependent in dependents:
+            config = dict(dependent.config or {})
+            config["parent_column_uuid"] = None
+            config["target_filter_column_uuid"] = None
+            # Reassigned, not mutated, so SQLAlchemy sees the JSONB change.
+            dependent.config = config
