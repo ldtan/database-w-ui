@@ -46,6 +46,14 @@ class ColumnConfig(BaseModel):
     # which column of the target list to show as each row's label; defaults to
     # the target list's primary column when unset
     display_column_uuid: Optional[UUID] = None
+    # nested lookup: this column's options are constrained by what a sibling
+    # lookup (the "parent") holds. `parent_column_uuid` names that sibling on the
+    # same list; `target_filter_column_uuid` names the lookup column *on this
+    # column's target list* that points at the parent's target list — a target
+    # row is offered only when its filter cell matches the parent's value.
+    # Set and unset together; the service validates the pairing.
+    parent_column_uuid: Optional[UUID] = None
+    target_filter_column_uuid: Optional[UUID] = None
     # calculated — an expression over other columns of this list, by name. The
     # column stores nothing; the value is computed on read. See columns/formula.py.
     formula: Optional[str] = None

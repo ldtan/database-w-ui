@@ -69,6 +69,12 @@ export function ColumnDialog({
   const [linkText, setLinkText] = useState("");
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
+  // Nested lookup: the sibling lookup this one nests under, and the target-list
+  // lookup column its filter matches on. Set and cleared together.
+  const [parentColumnUuid, setParentColumnUuid] = useState<string | null>(null);
+  const [targetFilterColumnUuid, setTargetFilterColumnUuid] = useState<
+    string | null
+  >(null);
   const [multiple, setMultiple] = useState(false);
   const [formula, setFormula] = useState("");
   // Default value — one piece of state per family of column type; only the one
@@ -113,6 +119,8 @@ export function ColumnDialog({
       setLinkText("");
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
+      setParentColumnUuid(null);
+      setTargetFilterColumnUuid(null);
       setMultiple(false);
       setFormula("");
       resetDefaults();
@@ -132,6 +140,10 @@ export function ColumnDialog({
     setLinkText((config.label as string) ?? "");
     setTargetListUuid((config.target_list_uuid as string) ?? null);
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
+    setParentColumnUuid((config.parent_column_uuid as string) ?? null);
+    setTargetFilterColumnUuid(
+      (config.target_filter_column_uuid as string) ?? null,
+    );
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
 
@@ -170,12 +182,12 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
     enabled: type === "lookup" && !!targetListUuid,
   });
-  // This list's own columns, so a formula can name the columns it may reference:
-  // number columns for arithmetic, text columns for the string functions.
+  // This list's own columns — for a formula, the columns it may reference; for a
+  // lookup, the sibling lookups it could nest under.
   const ownColumns = useQuery({
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
-    enabled: type === "calculated",
+    enabled: type === "calculated" || type === "lookup",
   });
   const referenceableNames = (ownColumns.data ?? [])
     .filter(
@@ -184,6 +196,31 @@ export function ColumnDialog({
         c.uuid !== column?.uuid,
     )
     .map((c) => c.name);
+
+  // Nested lookup candidates. A sibling lookup qualifies as a parent when the
+  // target list has at least one lookup column pointing back at the sibling's
+  // target — that column is what the filter matches on ("Cities.Country" for a
+  // "Country" parent). Both dropdowns are derived, so an impossible pairing is
+  // simply never offered.
+  const targetLookups = (targetColumns.data ?? []).filter(
+    (c) => c.type === "lookup" && !!c.config.target_list_uuid,
+  );
+  const parentOptions = (ownColumns.data ?? []).filter(
+    (c) =>
+      c.type === "lookup" &&
+      c.uuid !== column?.uuid &&
+      !!c.config.target_list_uuid &&
+      targetLookups.some(
+        (t) => t.config.target_list_uuid === c.config.target_list_uuid,
+      ),
+  );
+  const parentColumn =
+    parentOptions.find((c) => c.uuid === parentColumnUuid) ?? null;
+  const matchOptions = parentColumn
+    ? targetLookups.filter(
+        (t) => t.config.target_list_uuid === parentColumn.config.target_list_uuid,
+      )
+    : [];
 
   // A multi-value column holds an array, and the uniqueness check compares whole
   // stored values — so it would ask whether two records picked the *same set*,
@@ -235,6 +272,12 @@ export function ColumnDialog({
         config.target_list_uuid = targetListUuid;
         config.display_column_uuid = displayColumnUuid;
         config.multiple = multiple;
+        // Always sent, like `unique`: a config PATCH merges, so un-nesting
+        // requires explicit nulls rather than omitted keys.
+        config.parent_column_uuid = parentColumnUuid;
+        config.target_filter_column_uuid = parentColumnUuid
+          ? targetFilterColumnUuid
+          : null;
       }
 
       // Default value — sent for every type that supports one (not lookup, group,
@@ -455,6 +498,9 @@ export function ColumnDialog({
                 onChange={(e) => {
                   setTargetListUuid(e.value);
                   setDisplayColumnUuid(null); // columns differ per target list
+                  // A nesting pairing is specific to the old target list.
+                  setParentColumnUuid(null);
+                  setTargetFilterColumnUuid(null);
                 }}
                 placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
                 filter
@@ -477,6 +523,66 @@ export function ColumnDialog({
                   showClear
                   filter
                 />
+              </div>
+            )}
+            {targetListUuid && (parentOptions.length > 0 || parentColumnUuid) && (
+              <div className="flex flex-col gap-2">
+                <label htmlFor="col-nest-parent">Nest under (optional)</label>
+                <Dropdown
+                  inputId="col-nest-parent"
+                  value={parentColumnUuid}
+                  options={parentOptions.map((c) => ({
+                    label: c.display_name,
+                    value: c.uuid,
+                  }))}
+                  onChange={(e) => {
+                    const next = (e.value as string) ?? null;
+                    setParentColumnUuid(next);
+                    // The match column depends on the parent; re-derive it, and
+                    // save a click when only one column qualifies.
+                    const candidates = next
+                      ? targetLookups.filter((t) => {
+                          const parent = parentOptions.find(
+                            (c) => c.uuid === next,
+                          );
+                          return (
+                            t.config.target_list_uuid ===
+                            parent?.config.target_list_uuid
+                          );
+                        })
+                      : [];
+                    setTargetFilterColumnUuid(
+                      candidates.length === 1 ? candidates[0].uuid : null,
+                    );
+                  }}
+                  placeholder="Not nested"
+                  showClear
+                />
+                <small style={{ color: "var(--text-muted)" }}>
+                  What's selected there decides which rows this column offers —
+                  pick a country first, get only its cities.
+                </small>
+                {parentColumnUuid && (
+                  <>
+                    <label htmlFor="col-nest-match">Match on</label>
+                    <Dropdown
+                      inputId="col-nest-match"
+                      value={targetFilterColumnUuid}
+                      options={matchOptions.map((c) => ({
+                        label: c.display_name,
+                        value: c.uuid,
+                      }))}
+                      onChange={(e) =>
+                        setTargetFilterColumnUuid((e.value as string) ?? null)
+                      }
+                      placeholder="Select a column…"
+                    />
+                    <small style={{ color: "var(--text-muted)" }}>
+                      The target list's column that links each row to a{" "}
+                      {parentColumn?.display_name ?? "parent"} selection.
+                    </small>
+                  </>
+                )}
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -667,6 +773,8 @@ export function ColumnDialog({
               !displayName.trim() ||
               !isValidName(name) ||
               (type === "lookup" && !targetListUuid) ||
+              // A half-configured nesting: the pairing is set together or not at all.
+              (type === "lookup" && !!parentColumnUuid && !targetFilterColumnUuid) ||
               (isCalculated && !formula.trim())
             }
           />

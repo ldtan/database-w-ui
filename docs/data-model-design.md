@@ -203,7 +203,7 @@ Common `config` keys (all optional unless noted):
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?` |
-| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?` |
+| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together) |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
 | `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
@@ -243,6 +243,10 @@ Notes:
   accepts a uuid **or** a label and stores the uuid — which is what lets an exported file,
   where the label is what's written, be imported straight back. A label matching more than one
   row is rejected (row labels are not unique), so ambiguity is an error, never a guess.
+  A lookup may also **nest** under a sibling lookup (`parent_column_uuid` +
+  `target_filter_column_uuid`, set together): the target list's filter column points back at
+  the parent's target, and what the parent cell holds constrains which target rows the child
+  may add (options filtering is opt-in per request; writes enforce). See planned-features #6.
 - `link` — **the scheme is a security boundary, not a preference.** The value is rendered as
   an anchor, so a `javascript:` or `data:` URL would be stored XSS. A value must parse as an
   absolute URL whose scheme is in the column's `allowed_schemes`, and a column may only

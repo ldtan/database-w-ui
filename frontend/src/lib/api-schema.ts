@@ -949,6 +949,10 @@ export interface components {
             target_list_uuid?: string | null;
             /** Display Column Uuid */
             display_column_uuid?: string | null;
+            /** Parent Column Uuid */
+            parent_column_uuid?: string | null;
+            /** Target Filter Column Uuid */
+            target_filter_column_uuid?: string | null;
             /** Formula */
             formula?: string | null;
         };
@@ -3041,6 +3045,8 @@ export interface operations {
                 uuid?: string[] | null;
                 /** @description Defaults to the number of uuids asked for, else a page of suggestions */
                 limit?: number | null;
+                /** @description On a nested lookup, offer only rows whose filter cell matches any of these parent-row uuids; ignored on other columns */
+                parent_value?: string[] | null;
             };
             header?: never;
             path: {

@@ -153,6 +153,8 @@ function LookupPicker({
   onChange,
   inputId,
   style,
+  parentValues,
+  parentLabel,
 }: {
   listUuid: string;
   column: Column;
@@ -162,15 +164,26 @@ function LookupPicker({
   onChange: (v: unknown) => void;
   inputId?: string;
   style?: React.CSSProperties;
+  // Nested lookup, decided by the *caller*: undefined means "not nested in this
+  // context" — the grid, filter editors and label resolution stay unfiltered.
+  // An empty array means the parent is unset, so there is nothing to offer yet.
+  parentValues?: string[];
+  parentLabel?: string;
 }) {
   const uuids = useMemo(
     () => (multiple ? ((value as string[]) ?? []) : value ? [String(value)] : []),
     [value, multiple],
   );
   // The current value is a row uuid; its label has to be fetched to show it, as it
-  // is not necessarily among whatever the last search returned.
+  // is not necessarily among whatever the last search returned — and, on a nested
+  // lookup, a stale value may not be offered by any filtered search at all.
   const result = useQuery(labelQuery(listUuid, column.uuid, uuids));
   const resolved = toLabels(uuids, result);
+
+  const awaitingParent = parentValues !== undefined && parentValues.length === 0;
+  const parentQuery = (parentValues ?? [])
+    .map((u) => `parent_value=${u}&`)
+    .join("");
 
   return (
     <ReferencePicker
@@ -180,7 +193,11 @@ function LookupPicker({
       search={async (term) => {
         const q = term.trim() ? `q=${encodeURIComponent(term.trim())}&` : "";
         const rows = await api.get<LookupOption[]>(
-          optionsUrl(listUuid, column.uuid, `${q}limit=${SUGGESTION_LIMIT}`),
+          optionsUrl(
+            listUuid,
+            column.uuid,
+            `${q}${parentQuery}limit=${SUGGESTION_LIMIT}`,
+          ),
         );
         return rows.map((r) => ({
           label: r.label || fallback(r.uuid),
@@ -188,8 +205,10 @@ function LookupPicker({
         }));
       }}
       onChange={onChange}
-      placeholder="Search rows…"
-      disabled={disabled}
+      placeholder={
+        awaitingParent ? `Select ${parentLabel ?? "the parent"} first` : "Search rows…"
+      }
+      disabled={disabled || awaitingParent}
       inputId={inputId}
       style={style}
     />
@@ -202,12 +221,17 @@ export function LookupField({
   value,
   disabled,
   onChange,
+  parentValues,
+  parentLabel,
 }: {
   listUuid: string;
   column: Column;
   value: unknown;
   disabled: boolean;
   onChange: (v: unknown) => void;
+  /** See LookupPicker: undefined = not nested here, [] = parent unset. */
+  parentValues?: string[];
+  parentLabel?: string;
 }) {
   return (
     <LookupPicker
@@ -218,6 +242,8 @@ export function LookupField({
       disabled={disabled}
       onChange={onChange}
       inputId={`field-${column.uuid}`}
+      parentValues={parentValues}
+      parentLabel={parentLabel}
     />
   );
 }

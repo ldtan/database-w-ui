@@ -273,6 +273,49 @@ cloner owns (via its workspace), so it starts private, like any freshly created 
 
 ---
 
+## 6. Nested lookup columns — **implemented**
+
+**Shipped.** A lookup column B can nest under a sibling lookup A when B's target list
+has a lookup column pointing back at A's target list (Cities have a Country; picking a
+Country narrows the Cities — and chains compose, so Continent → Country → City works
+pairwise with no extra machinery). The pairing lives in B's config as
+`parent_column_uuid` (the sibling A) + `target_filter_column_uuid` (the lookup on B's
+target list), validated in `ColumnService._validate_nesting`: both keys set together or
+not at all, both live lookups in the right places, the filter column's target equal to
+the parent's target, and no cycles. Matching is **any-overlap** throughout — a
+`multiple` parent, child, or filter cell all work, using the same `?|` idiom the search
+path uses — so toggling `multiple` later never invalidates a pairing.
+
+The decisions taken:
+
+- **The options filter is opt-in per request, not baked into the endpoint.**
+  `GET .../options?parent_value=<uuid>` (repeatable) constrains a *search*; the server
+  derives the filter column from stored config and ignores the param on an un-nested
+  column. Resolve mode (`uuid=`) is deliberately unfiltered — a held value must always
+  get its label — and so are the view-filter value picker and QR label resolution,
+  which have no parent context.
+- **Writes are the enforcement point.** `ListItemService._enforce_nested_lookups`
+  (end of `_validate_data`, so import and QR fills inherit it) rejects values being
+  **added** whose target row doesn't match the merged record's parent cell, and rejects
+  an add while the parent is empty. Kept and untouched values pass — enabling nesting
+  over existing data never locks a record (the choice-options precedent; see
+  known-gaps).
+- **Deleting or retargeting a referenced column cascade-clears the pairing**
+  (`_clear_dependent_nesting`, global scan since filter references are cross-list),
+  the same shape as `delete` nulling `primary_column_id`. Read/write paths tolerate a
+  dangling pairing by degrading to a plain lookup.
+- **Clone remaps `parent_column_uuid` through `col_map`** (the parent is a sibling,
+  which was cloned) and leaves `target_filter_column_uuid` verbatim (it names a column
+  of the target list, whose uuids don't change).
+
+UI: ColumnDialog offers "Nest under" only for siblings with a qualifying filter column
+and auto-picks the "Match on" column when only one qualifies; the record editor
+disables a nested picker until its parent is set ("Select Country first"), filters
+suggestions by the parent's *draft* value, and clears descendants transitively when a
+parent changes. See `tests/test_nested_lookup.py`.
+
+---
+
 ## How these compose
 
 - **1 + 2** share one conversion-and-backfill engine; type conversion is best *delivered as* a
