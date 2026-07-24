@@ -316,6 +316,33 @@ parent changes. See `tests/test_nested_lookup.py`.
 
 ---
 
+## 7. Cross-workspace lookup targets — **implemented**
+
+**Shipped.** A `lookup` column may point at **any list the creator can `view`** — one in
+another of their own workspaces, or one shared with them — not just a list they own. The
+config-time gate in `ColumnService._validate_config` was relaxed from a same-owner
+workspace join to `PermissionService.has(view)` on the target, with the acting user threaded
+through `ColumnService.create`/`update`. A target the caller cannot view is refused
+indistinguishably from one that doesn't exist, so `target_list_uuid` can't be used to probe
+for a stranger's lists.
+
+**Resolution was already permission-correct, so nothing there changed.** `lookup_options`,
+export and search each re-check the **reader's** `view` on the target per-caller (data-model
+D4; [known gaps](known-gaps.md): "Resolving a label means reading the target list"), so a
+cross-owner target never leaks a label — a viewer who lacks target access sees uuid stubs,
+exactly as before. Relaxing the *create-time* check simply lets a lookup point where
+resolution could already safely follow. The one behavioral shift, documented in known gaps:
+a target you don't own can have your access revoked or be deleted independently of the
+referencing list, so "degrade to uuid stubs" becomes routine rather than exceptional.
+
+UI: ColumnDialog gains a **Workspace** selector above **Target list** (defaults to the
+current workspace, plus a "Shared with me" bucket), so lists sharing a name across
+workspaces are unambiguous; on edit it resolves the stored target's workspace to open on the
+right bucket. See `tests/test_lookup_options.py` (own-other-workspace, shared-in, and
+refused-when-unviewable).
+
+---
+
 ## How these compose
 
 - **1 + 2** share one conversion-and-backfill engine; type conversion is best *delivered as* a
