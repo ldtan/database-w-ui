@@ -420,6 +420,20 @@ precisely because only the server knows a row's label (`display_column_key`) —
 user cannot read. Still to convert: `GroupDialog` (member picker) and `PeoplePage`
 (person-name annotations).
 
+**A lookup can target any list its creator can `view`, and cross-workspace targets make
+"degrade to uuid stubs" a routine state, not a rare one.** The config-time check was
+relaxed from "a list you own" to "a list you can `view`" (`ColumnService._validate_config`),
+so a lookup may point at another of your workspaces or at a list shared to you. Nothing
+about resolution changed — it already re-checks the *reader's* `view` on the target
+per-caller (the note below), which is what keeps a cross-owner target from leaking. What
+*does* change: a target you don't own can have your access revoked or be deleted entirely
+at any time, independent of the referencing list. When that happens the cells fall back to
+uuid stubs (`LookupCell`, `retry: false`) exactly as they always could — it just stops
+being exceptional. A target the creator cannot view is refused indistinguishably from one
+that doesn't exist, so the `target_list_uuid` field can't be used to probe for a stranger's
+lists. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
+refused-when-unviewable.
+
 **Resolving a label means reading the target list, so it obeys the *target's* permissions,
 not the exported/edited list's.** `view` on a list must not hand over the contents of a
 different list it happens to point at. The options endpoint enforces this, and so does export

@@ -147,7 +147,7 @@ const TYPE_HELP: Record<string, string> = {
   link: "A web address that becomes clickable. You can show friendly words in place of the address.",
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
-  lookup: "A link to a row in another one of your lists — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
+  lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
   calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
 };
 
@@ -501,8 +501,9 @@ export function GuidePage() {
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            Set its <Ui>Target list</Ui> to <em>Cities</em>, as with any link
-            column.
+            Pick the <Ui>Workspace</Ui> that holds <em>Cities</em> (the current one
+            by default, or <Ui>Shared with me</Ui> for a list someone shared), then
+            set the <Ui>Target list</Ui> to <em>Cities</em>, as with any link column.
           </li>
           <li>
             Under <Ui>Nest under (optional)</Ui>, choose <em>Country</em> — the

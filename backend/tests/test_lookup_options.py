@@ -322,6 +322,115 @@ async def test_resolving_more_rows_than_a_search_page_is_not_truncated(
     assert len(page.json()) == 25
 
 
+async def _own_list(subject_client):
+    """A workspace and empty list belonging to whoever `subject_client` is, to
+    hang a lookup column on."""
+    ws = (
+        await subject_client.post(
+            "/api/workspaces/", json={"name": "ow", "display_name": "Other WS"}
+        )
+    ).json()["uuid"]
+    lst = (
+        await subject_client.post(
+            "/api/lists/",
+            json={"name": "mine", "display_name": "Mine", "workspace_uuid": ws},
+        )
+    ).json()["uuid"]
+    return lst
+
+
+async def test_lookup_can_target_another_of_your_own_workspaces(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """A lookup's target need not share the referencing list's workspace: any
+    list you own qualifies, across all of your workspaces."""
+    other_ws = (
+        await client.post(
+            "/api/workspaces/", json={"name": "w2", "display_name": "Workspace 2"}
+        )
+    ).json()["uuid"]
+    target, _ = await _target_with_rows(client, other_ws, add_column, ["Alpha"])
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={
+            "name": "school",
+            "display_name": "School",
+            "type": "lookup",
+            "config": {"target_list_uuid": target},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+
+async def test_lookup_can_target_a_list_shared_with_you(
+    client, make_client, session_factory, workspace_uuid, add_column
+):
+    """The point of cross-workspace lookups: a list shared to you (view) from
+    another user's workspace is a valid target."""
+    target, _ = await _target_with_rows(client, workspace_uuid, add_column, ["Alpha"])
+
+    async with session_factory() as db:
+        other = await UserService.create(
+            db, UserCreate(username="linker", email="linker@example.com", password="pw")
+        )
+        other_uuid = str(other.uuid)
+
+    granted = await client.post(  # the owner shares the target with `other`
+        "/api/permissions/grants",
+        json={
+            "resource_type": "list",
+            "resource_uuid": target,
+            "user_uuid": other_uuid,
+            "actions": ["view"],
+        },
+    )
+    assert granted.status_code == 201, granted.text
+
+    async with make_client(other) as linker:
+        lst = await _own_list(linker)
+        resp = await linker.post(
+            f"/api/lists/{lst}/columns/",
+            json={
+                "name": "school",
+                "display_name": "School",
+                "type": "lookup",
+                "config": {"target_list_uuid": target},
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+
+async def test_lookup_target_you_cannot_view_is_refused_like_it_is_missing(
+    client, make_client, session_factory, workspace_uuid, add_column
+):
+    """You cannot point a lookup at a list you were never given. The refusal is
+    indistinguishable from the list not existing, so the field can't be used to
+    probe for lists a stranger holds."""
+    target, _ = await _target_with_rows(client, workspace_uuid, add_column, ["Alpha"])
+    # Deliberately not shared with `other`.
+
+    async with session_factory() as db:
+        other = await UserService.create(
+            db,
+            UserCreate(username="outsider", email="outsider@example.com", password="pw"),
+        )
+
+    async with make_client(other) as outsider:
+        lst = await _own_list(outsider)
+        resp = await outsider.post(
+            f"/api/lists/{lst}/columns/",
+            json={
+                "name": "school",
+                "display_name": "School",
+                "type": "lookup",
+                "config": {"target_list_uuid": target},
+            },
+        )
+        assert resp.status_code == 400, resp.text
+        assert "view" in resp.json()["detail"].lower()
+
+
 async def test_search_by_lookup_label_obeys_the_target_lists_permissions(
     client, make_client, session_factory, workspace_uuid, list_uuid, add_column
 ):
