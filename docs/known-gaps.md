@@ -387,6 +387,22 @@ correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. An
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
 
+**"Live records" is polling, and its refresh must stay a permissioned re-read — never a
+data push.** An open list refetches its records every `VITE_LIVE_REFRESH_SECONDS` (default
+5, `0` disables) through the `useLiveList` hook (`frontend/src/lib/useLiveList.ts`), paused
+while the tab is hidden **and** after 5 minutes with no user activity on a still-visible tab
+(so a list left open on screen stops polling until touched). It works precisely *because*
+each refresh is an ordinary
+`GET /items/`, so it inherits the `item_view_filter` above and can never surface a row the
+viewer can't see — the client is told nothing except "look again." Two things follow that
+are easy to get wrong when this grows into server push (planned-features #8): a live event
+must carry **only** "list changed," never record data (a fan-out of rows would bypass the
+per-record filter every subscriber is entitled to differently); and the future SSE stream
+must hold **no pooled DB connection** while open (see the two-connection rule below), or a
+long-lived subscriber pins a session for its whole life. One operational note: on Render's
+free tier a focused, open tab polling keeps the single instance awake — fine for a demo,
+but it spends free hours.
+
 **A `user` cell must never resolve to a person's real name.** `/auth/users` is readable by
 any authenticated user (the Share dialog needs to list principals), but person records are
 private — owner or superuser only. So `user` columns label by **username**, in both
