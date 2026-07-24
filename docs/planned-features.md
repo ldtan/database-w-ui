@@ -343,6 +343,73 @@ refused-when-unviewable).
 
 ---
 
+## 8. Live records (an open list reflects other people's changes) — **polling shipped, push planned**
+
+**Shipped (polling).** An open list now refetches its records on an interval, so a row
+someone else creates, edits or deletes shows up without a manual reload. It is one hook,
+`useLiveList(listUuid)` (`frontend/src/lib/useLiveList.ts`), spread into the list's items
+`useQuery` in `ListDetailPage`. Today its body hands react-query a `refetchInterval` of
+`LIVE_REFRESH_SECONDS` (`lib/config.ts`, from `VITE_LIVE_REFRESH_SECONDS`, default **5s**,
+`0` disables). Two guardrails hold the idle cost at zero: polling is **paused while the tab
+is hidden** (`refetchIntervalInBackground: false`), *and* **paused after `IDLE_AFTER_MS`
+(5 min) with no user activity on a still-visible tab** — a list left open on screen stops
+refetching (and, on the free tier, stops keeping the instance awake) until the next
+interaction.
+
+**The load-bearing principle: a live update carries no record data.** Each refresh is a
+normal, permissioned `GET /items/`, which re-applies `item_view_filter` — so a poll can
+never surface a row the viewer can't see. This is not just a property of polling; it is the
+*constraint the push design must also honour* (below). Per-record permissions are subtle
+enough that the safe move is to never ship record data down a fan-out channel at all — you
+signal "something changed," and each client re-reads through the endpoint that already knows
+what it may see.
+
+**Why polling first (the deliberate v1 trade).** On the free tier the API is a **single
+uvicorn process** (deploy/render/render.yaml), and react-query, the 401→refresh flow, and
+`keepPreviousData` are all already in place — so polling is ~an hour of work, is multi-worker
+correct *for free* (every poll is an independent permissioned request; there is no fan-out to
+get wrong), and sidesteps the auth friction below. The costs accepted: up to one interval of
+latency, and a wasted query per *focused, active* tab. One caveat to know: on Render's free
+tier an actively-used open tab polling **keeps the single instance awake** (it is traffic),
+which is fine for a demo but spends free hours — the idle guardrail above caps this to tabs
+someone is actually using, not ones merely left open.
+
+**Planned (server push, near-instant).** When "live" needs to feel instant, or many viewers
+watch one list (where polling's idle queries add up), replace the hook's body with a
+Server-Sent Events subscription — **no call site changes**, which is the whole point of the
+seam. The shape:
+
+- **Transport is SSE consumed via `fetch`, not the native `EventSource`.** Auth is a Bearer
+  token in `localStorage` (`api.ts`), and `EventSource` cannot set an `Authorization` header;
+  a streamed `fetch` response can. This also lets a token expiring mid-stream reconnect
+  through the existing refresh path rather than dropping silently.
+- **A content-free endpoint**, `GET /lists/{uuid}/events`, **gated on list `view`** at
+  connect, emitting only "list changed." It must **hold no pooled DB connection while
+  streaming** — it waits on an in-memory queue, or the stream would pin a session for its
+  whole life and exhaust the pool (see known-gaps on the two-connection rule). The client
+  calls `queryClient.invalidateQueries(["items", listUuid])` per event, debounced so a
+  200-row import fires one refetch, not 200.
+- **Fan-out behind a two-method broker** (`subscribe(list_id)` / `notify(list_id)`), emitted
+  from the one choke point every record write already passes through
+  (`ListItemService.create`/`update`/`delete`/`bulk_delete`/`restore` + import). An
+  **in-process asyncio broker is correct on today's single instance**; a paid/multi-worker
+  deploy — or record-mutating crons running in a *separate* process (`reconcile_shapes`,
+  purge) — needs **Postgres `LISTEN/NOTIFY`** instead: writers `NOTIFY` inside the write
+  transaction (delivered on commit, so a rolled-back write signals nothing), and each worker
+  holds **one dedicated listener connection created at startup, outside the request pool**.
+  Building the broker interface now makes that a localized swap, the same way the deploy
+  already defers the Alembic pre-deploy hook until it is paid for.
+
+**Needs a decision (only when push is built):**
+- **What else is "live."** Scoped to records here. The same channel extends to column, view
+  and form changes; decide whether a schema change should also nudge open viewers or stay
+  manual.
+- **Debounce/coalesce window** for bursty writes (imports), and whether the originating
+  client suppresses its own echo (it already invalidates locally on its mutation) via a
+  client id, or just tolerates one redundant refetch.
+
+---
+
 ## How these compose
 
 - **1 + 2** share one conversion-and-backfill engine; type conversion is best *delivered as* a
@@ -352,3 +419,6 @@ refused-when-unviewable).
   is a transfer into the recipient's immutable inbox (owner-only, no target `configure` needed).
 - **5** is independent, but its uuid-remapping discipline is the same one **3/4 get for free**
   (a move keeps uuids; a clone must not).
+- **8** stands alone and touches none of the data-shape work; its one shared idea is the
+  permission boundary — a live signal never carries record data, so every client re-reads
+  through the endpoint that already enforces `item_view_filter`.

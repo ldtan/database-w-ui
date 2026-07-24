@@ -13,6 +13,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
+import { useLiveList } from "../../lib/useLiveList";
 import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
 import { RowActions } from "../../components/RowActions";
@@ -118,7 +119,12 @@ export function ListDetailPage() {
     queryKey: ["columns", listUuid],
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
   });
+  // Live records: keep this list current as other people add/edit/remove rows.
+  // Spread first so the query's own keys/fn win; today it supplies a polling
+  // `refetchInterval`, later an SSE subscription (see useLiveList).
+  const live = useLiveList(listUuid);
   const items = useQuery({
+    ...live,
     // The search is part of the key: it is applied server-side, so the result is a
     // different set of records, not a filtered view of the same one.
     queryKey: ["items", listUuid, activeViewUuid, q],
