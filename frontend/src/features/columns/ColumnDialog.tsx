@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
@@ -17,7 +17,7 @@ import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
-import type { Column, ColumnType, ListRead } from "../../lib/types";
+import type { Column, ColumnType, ListRead, Workspace } from "../../lib/types";
 
 // The dynamic default/on-update token a type auto-fills with, and its human label.
 // Temporal columns stamp the current date/time; a user column stamps the actor.
@@ -32,6 +32,9 @@ function dynamicLabel(type: ColumnType): string {
 }
 // Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
 const SPECIFIC = "__specific__";
+// Sentinel for the lookup "Workspace" dropdown: lists shared with the user from
+// other people's workspaces, which don't belong to a workspace the user owns.
+const SHARED = "__shared__";
 
 interface Props {
   listUuid: string;
@@ -67,6 +70,10 @@ export function ColumnDialog({
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
   const [linkText, setLinkText] = useState("");
+  // Which workspace's lists the target dropdown is drawn from. A lookup can point
+  // at any list the user can view — their own across workspaces, or one shared
+  // with them (the SHARED bucket). Defaults to the current list's workspace.
+  const [targetWorkspace, setTargetWorkspace] = useState<string | null>(null);
   const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
   // Nested lookup: the sibling lookup this one nests under, and the target-list
@@ -117,6 +124,7 @@ export function ColumnDialog({
       setIntegerOnly(false);
       setChoices("");
       setLinkText("");
+      setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
       setParentColumnUuid(null);
@@ -138,6 +146,9 @@ export function ColumnDialog({
     setIntegerOnly(!!config.integer_only);
     setChoices(((config.options as string[]) ?? []).join(";"));
     setLinkText((config.label as string) ?? "");
+    // Left null so the seeding effect can resolve which workspace the stored
+    // target lives in (the config only records the list, not its workspace).
+    setTargetWorkspace(null);
     setTargetListUuid((config.target_list_uuid as string) ?? null);
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
     setParentColumnUuid((config.parent_column_uuid as string) ?? null);
@@ -167,15 +178,69 @@ export function ColumnDialog({
     if (column.type === "user" && def === "current_user")
       setDefaultUser("current_user");
     if (typeof config.onupdate === "string") setOnUpdate(config.onupdate);
-  }, [visible, column]);
+  }, [visible, column, workspaceUuid]);
 
-  // Lists in this workspace are the candidate lookup targets (self included).
-  const lists = useQuery({
-    queryKey: ["lists", workspaceUuid],
-    queryFn: () =>
-      api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
-    enabled: type === "lookup" && !!workspaceUuid,
+  // The workspaces the user owns, plus a "Shared with me" bucket — the scopes a
+  // lookup target may be drawn from.
+  const myWorkspaces = useQuery({
+    queryKey: ["workspaces-all"],
+    queryFn: () => api.get<Workspace[]>(`/workspaces/?limit=1000`),
+    enabled: type === "lookup",
   });
+
+  // On edit, the stored config names only the target list, not its workspace, so
+  // resolve which bucket it lives in and open the selector there. Fetching the
+  // list tells us its workspace; if that isn't one the user owns (or the fetch is
+  // forbidden), it must have been shared with them.
+  const storedTarget = column?.config.target_list_uuid as string | undefined;
+  const needSeed = type === "lookup" && !!storedTarget && targetWorkspace === null;
+  const seedMeta = useQuery({
+    queryKey: ["list-meta", storedTarget],
+    queryFn: () => api.get<ListRead>(`/lists/${storedTarget}`),
+    enabled: needSeed,
+    retry: false,
+  });
+  useEffect(() => {
+    if (!needSeed || seedMeta.isLoading || myWorkspaces.isLoading) return;
+    const wsUuid = seedMeta.data?.workspace?.uuid ?? null;
+    const mine = (myWorkspaces.data ?? []).some((w) => w.uuid === wsUuid);
+    setTargetWorkspace(wsUuid && mine ? wsUuid : SHARED);
+  }, [
+    needSeed,
+    seedMeta.isLoading,
+    seedMeta.data,
+    myWorkspaces.isLoading,
+    myWorkspaces.data,
+  ]);
+
+  // Candidate target lists in the chosen workspace (self included), or every list
+  // shared with the user when the SHARED bucket is chosen.
+  const lists = useQuery({
+    queryKey: ["lookup-target-lists", targetWorkspace],
+    queryFn: () =>
+      api.get<ListRead[]>(
+        targetWorkspace === SHARED
+          ? `/lists/?shared=true&limit=1000`
+          : `/lists/?workspace_uuid=${targetWorkspace}&limit=1000`,
+      ),
+    enabled: type === "lookup" && !!targetWorkspace,
+  });
+  // Keep the currently-selected target visible even before its workspace's lists
+  // load (the moment the dialog opens on edit): show it, labelled from the seed
+  // fetch, until the full list arrives.
+  const listOptions = useMemo(() => {
+    const opts = (lists.data ?? []).map((l) => ({
+      label: l.display_name,
+      value: l.uuid,
+    }));
+    if (targetListUuid && !opts.some((o) => o.value === targetListUuid)) {
+      opts.unshift({
+        label: seedMeta.data?.display_name ?? "…",
+        value: targetListUuid,
+      });
+    }
+    return opts;
+  }, [lists.data, targetListUuid, seedMeta.data]);
   // Columns of the chosen target list, offered as the label to show per row.
   const targetColumns = useQuery({
     queryKey: ["columns", targetListUuid],
@@ -487,14 +552,41 @@ export function ColumnDialog({
         {type === "lookup" && (
           <>
             <div className="flex flex-col gap-2">
+              <label htmlFor="col-target-ws">Workspace</label>
+              <Dropdown
+                inputId="col-target-ws"
+                value={targetWorkspace}
+                options={[
+                  ...(myWorkspaces.data ?? []).map((w) => ({
+                    label: w.display_name,
+                    value: w.uuid,
+                  })),
+                  { label: "Shared with me", value: SHARED },
+                ]}
+                onChange={(e) => {
+                  setTargetWorkspace(e.value);
+                  // The list, its display column and any nesting all belong to
+                  // the workspace being left; clear them so nothing dangles.
+                  setTargetListUuid(null);
+                  setDisplayColumnUuid(null);
+                  setParentColumnUuid(null);
+                  setTargetFilterColumnUuid(null);
+                }}
+                placeholder={
+                  myWorkspaces.isLoading ? "Loading…" : "Select a workspace…"
+                }
+                filter
+              />
+              <small style={{ color: "var(--text-muted)" }}>
+                Point at a list in any of your workspaces, or one shared with you.
+              </small>
+            </div>
+            <div className="flex flex-col gap-2">
               <label htmlFor="col-target">Target list</label>
               <Dropdown
                 inputId="col-target"
                 value={targetListUuid}
-                options={(lists.data ?? []).map((l) => ({
-                  label: l.display_name,
-                  value: l.uuid,
-                }))}
+                options={listOptions}
                 onChange={(e) => {
                   setTargetListUuid(e.value);
                   setDisplayColumnUuid(null); // columns differ per target list

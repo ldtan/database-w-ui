@@ -31,7 +31,7 @@ async def create_column(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     try:
-        return await ColumnService.create(db, lst, payload)
+        return await ColumnService.create(db, lst, payload, current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
@@ -127,7 +127,7 @@ async def update_column(
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     try:
-        column = await ColumnService.update(db, lst, column.uuid, payload)
+        column = await ColumnService.update(db, lst, column.uuid, payload, current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:

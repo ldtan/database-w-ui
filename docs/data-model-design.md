@@ -239,7 +239,12 @@ Notes:
   the column, and a `default` must be one of them.
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the lookup's
   `display_column_uuid`, falling back to the target list's `primary_column_id`
-  (`display_column_key`). A lookup column cannot have a `default`. Like `user`/`group`, a cell
+  (`display_column_key`). A lookup column cannot have a `default`. Its **target may be any
+  list the creator can `view`** — their own, one in another of their workspaces, or one
+  shared with them — not just a list they own; the target that can't be viewed is refused
+  like one that doesn't exist, so the field can't probe for a stranger's lists. Config-time
+  validation checks the *creator's* `view`; resolving labels later re-checks the *reader's*
+  `view` on the target (see known-gaps), so a cross-workspace target never leaks. Like `user`/`group`, a cell
   accepts a uuid **or** a label and stores the uuid — which is what lets an exported file,
   where the label is what's written, be imported straight back. A label matching more than one
   row is rejected (row labels are not unique), so ambiguity is an error, never a guess.

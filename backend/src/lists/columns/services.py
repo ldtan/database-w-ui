@@ -11,7 +11,6 @@ from sqlalchemy.orm import selectinload
 
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
-from src.workspaces.models import Workspace
 
 from ..items.models import ListItem
 from ..models import List
@@ -66,9 +65,11 @@ class ColumnService:
 
     @classmethod
     async def create(
-        cls, db: AsyncSession, lst: List, payload: ColumnCreate
+        cls, db: AsyncSession, lst: List, payload: ColumnCreate, user
     ) -> Column:
-        config = await cls._validate_config(db, lst, payload.type, payload.config)
+        config = await cls._validate_config(
+            db, lst, payload.type, payload.config, user
+        )
         column = Column(
             list_id=lst.id,
             name=payload.name,
@@ -97,6 +98,7 @@ class ColumnService:
         lst: List,
         uuid: Union[str, UUID],
         payload: ColumnUpdate,
+        user,
     ) -> Optional[Column]:
         column = await cls.get_by_uuid(db, lst.id, uuid)
         if column is None:
@@ -113,6 +115,7 @@ class ColumnService:
                 lst,
                 column.type,
                 payload.config,
+                user,
                 existing=column.config,
                 current_uuid=column.uuid,
             )
@@ -277,11 +280,14 @@ class ColumnService:
         lst: List,
         type_: ColumnType,
         config: ColumnConfig,
+        user,
         existing: Optional[dict] = None,
         current_uuid: Optional[UUID] = None,
     ) -> dict:
         """Validate type-specific settings and return the JSON-ready dict to store.
 
+        ``user`` is the caller: a lookup may point at any list they can *view*,
+        so its target is checked against their permissions, not the list's owner.
         ``existing`` is the column's current stored config (on update), used to
         keep settings the caller did not resend (choice options included).
         ``current_uuid`` is the column being updated (absent on create), needed
@@ -322,21 +328,33 @@ class ColumnService:
                 raise ValidationError("A lookup column requires a target_list_uuid")
             if data.get("default") is not None:
                 raise ValidationError("A lookup column cannot have a default value")
-            result = await db.execute(
-                select(List.id)
-                .join(Workspace, List.workspace_id == Workspace.id)
-                .where(
-                    List.uuid == coerce_uuid(target_list_uuid),
-                    Workspace.owner_id == lst.workspace.owner_id,
-                    List.deleted_at.is_(None),
-                    Workspace.deleted_at.is_(None),
+            # A lookup may target any list the caller can *view* — their own,
+            # one in another of their workspaces, or one shared with them.
+            # Resolving labels already re-checks the target's permissions per
+            # caller (see `lookup_options`), so this only has to establish that
+            # this user may read the target at all. Deferred import: a
+            # module-level one cycles back through auth/workspaces services.
+            from src.permissions.enums import Action, ResourceType
+            from src.permissions.services import PermissionService
+
+            target = (
+                await db.execute(
+                    select(List).where(
+                        List.uuid == coerce_uuid(target_list_uuid),
+                        List.deleted_at.is_(None),
+                    )
                 )
-            )
-            target_list_id = result.scalars().first()
-            if target_list_id is None:
+            ).scalars().first()
+            # A target the caller cannot view is reported exactly like one that
+            # does not exist, so the field cannot be used to probe for the
+            # existence of lists the caller was never given.
+            if target is None or not await PermissionService.has(
+                db, user, ResourceType.list, target.id, Action.view
+            ):
                 raise UnknownReferenceError(
-                    "target_list_uuid does not reference a list you own"
+                    "target_list_uuid does not reference a list you can view"
                 )
+            target_list_id = target.id
 
             display_column_uuid = data.get("display_column_uuid")
             if display_column_uuid is not None:
