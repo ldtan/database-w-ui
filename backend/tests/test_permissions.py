@@ -506,9 +506,11 @@ async def test_http_effective_batch(make_client, session_factory):
         assert resp.status_code == 200, resp.text
         actions = {row["resource_uuid"]: set(row["actions"]) for row in resp.json()}
 
-    assert actions[str(lst.uuid)] == {"view"}
-    assert actions[str(editable.uuid)] == {"view", "edit"}
-    assert actions[str(readonly.uuid)] == {"view"}
+    # `view` confers `lookup` — reading a resource includes reading a label out of
+    # it — so it rides along on every one of these.
+    assert actions[str(lst.uuid)] == {"view", "lookup"}
+    assert actions[str(editable.uuid)] == {"view", "edit", "lookup"}
+    assert actions[str(readonly.uuid)] == {"view", "lookup"}
 
     # The owner short-circuits to full access on every resource in the batch.
     async with make_client(owner) as client:

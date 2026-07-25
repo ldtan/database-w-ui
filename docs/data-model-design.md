@@ -524,12 +524,35 @@ Partial unique indexes keep one grant per `(resource, user)` and per `(resource,
 
 ### Actions and implication
 
-`view, create, edit, delete, configure, share, manage`. `view/create/edit/delete`
-act on records and on reading/deleting the resource; `configure` covers list
-settings, columns, forms, and views; `share` manages a resource's own grants;
-`manage` is full control. A granted action expands to what it implies —
-`manage → all`; `configure/share/edit/create/delete → {self, view}` — and a
-principal's effective set is the union over all applicable grants.
+`view, create, edit, delete, configure, share, manage, lookup`.
+`view/create/edit/delete` act on records and on reading/deleting the resource;
+`configure` covers list settings, columns, forms, and views; `share` manages a
+resource's own grants; `manage` is full control. A granted action expands to what it
+implies — `manage → all`; `configure/share/edit/create/delete → {self, view, lookup}`;
+`view → {view, lookup}` — and a principal's effective set is the union over all
+applicable grants.
+
+`lookup` is the one action that does **not** open the resource. It lets other
+people's lookup columns resolve the list's row labels while the list itself stays
+invisible: absent from `GET /lists/`, absent from "Shared with me", and refused by
+`GET /lists/{it}` and everything beneath it. It is what a shared reference list
+("Schools", "Departments") wants, and it is why the collection filters
+(`workspace_view_filter`, `list_query_filter`) test the stored actions against
+`CONFERRED_BY[view]` rather than matching on the existence of a grant row. Because
+`view` confers `lookup`, every grant written before the action existed keeps
+resolving labels unchanged.
+
+Two consequences worth stating plainly:
+
+- **What `lookup` discloses** is the display column's value for every row the
+  per-record filter still allows — enumerable and searchable through the options
+  endpoint (`?q=`). It is "read one or two columns of every row", not a peephole.
+  It deliberately does *not* expose the target's schema: `GET /lists/{it}/columns/`
+  stays refused, so the label column falls back to the target's own default.
+- **The target picker needs an exception.** A list you cannot name is a list you
+  cannot point a column at, so `GET /lists/?lookup_targets=true` widens the query
+  from `view` to `lookup`. It is off by default and the column dialog is its only
+  caller.
 
 ### Inheritance and the "unique" break
 

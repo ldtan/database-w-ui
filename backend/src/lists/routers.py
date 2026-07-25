@@ -66,6 +66,13 @@ async def list_lists(
     response: Response,
     workspace_uuid: Optional[UUID] = Query(None),
     shared: bool = Query(False, description="Only lists the caller does not own"),
+    lookup_targets: bool = Query(
+        False,
+        description=(
+            "Also include lists shared only as lookup targets — lists the caller "
+            "holds 'lookup' but not 'view' on. For the lookup target picker."
+        ),
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match list name or display name"),
@@ -77,10 +84,19 @@ async def list_lists(
     The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
     which is what a paginator needs; the body stays a plain array, so callers that
     just want the list (the nav drawer, the column picker) are unaffected.
+
+    ``lookup_targets`` is off by default, so every existing caller keeps showing only
+    lists the caller can open — a lookup-only list stays out of the nav and out of
+    "Shared with me", which is the point of that grant.
     """
     response.headers["X-Total-Count"] = str(
         await ListService.count(
-            db, current_user, workspace_uuid=workspace_uuid, shared_only=shared, q=q
+            db,
+            current_user,
+            workspace_uuid=workspace_uuid,
+            shared_only=shared,
+            q=q,
+            lookup_targets=lookup_targets,
         )
     )
     return await ListService.list(
@@ -91,6 +107,7 @@ async def list_lists(
         skip=skip,
         limit=limit,
         q=q,
+        lookup_targets=lookup_targets,
     )
 
 

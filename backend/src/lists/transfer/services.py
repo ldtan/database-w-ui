@@ -144,7 +144,7 @@ class _LabelResolver:
                 )
             ).scalars().first()
             if target is None or not await PermissionService.has(
-                self._db, self._user, ResourceType.list, target.id, Action.view
+                self._db, self._user, ResourceType.list, target.id, Action.lookup
             ):
                 self._scope_of[key] = None
                 continue
@@ -163,7 +163,7 @@ class _LabelResolver:
                     "list_id": target.id,
                     "display_key": display_key,
                     "visible": await PermissionService.item_view_filter(
-                        self._db, self._user, target
+                        self._db, self._user, target, Action.lookup
                     ),
                 }
                 self._cache[scope] = {}

@@ -197,7 +197,7 @@ class ListItemService:
         the label, and it lives in another table. So resolve the label to uuids here,
         then match cells against them.
 
-        A lookup obeys the target list's permissions — `view` on it, then the
+        A lookup obeys the target list's permissions — `lookup` on it, then the
         per-record filter — exactly as the picker and the export do: searching must
         not become a way to learn what is in a list you cannot read.
         """
@@ -231,7 +231,7 @@ class ListItemService:
             )
         ).scalars().first()
         if target is None or not await PermissionService.has(
-            db, user, ResourceType.list, target.id, Action.view
+            db, user, ResourceType.list, target.id, Action.lookup
         ):
             return []
 
@@ -244,7 +244,9 @@ class ListItemService:
             .where(
                 ListItem.list_id == target.id,
                 ListItem.deleted_at.is_(None),
-                await PermissionService.item_view_filter(db, user, target),
+                await PermissionService.item_view_filter(
+                    db, user, target, Action.lookup
+                ),
                 ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE),
             )
             .limit(_SEARCH_REF_MAX)

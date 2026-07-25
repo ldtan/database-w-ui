@@ -1,7 +1,9 @@
 from typing import Optional, Sequence, Union
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import and_, func, or_, select, true
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql.elements import ColumnElement
@@ -16,7 +18,7 @@ from src.lists.models import List
 from src.lists.views.models import View
 from src.workspaces.models import Workspace
 
-from .enums import ALL_ACTIONS, Action, ResourceType, expand_actions
+from .enums import ALL_ACTIONS, CONFERRED_BY, Action, ResourceType, expand_actions
 from .models import PermissionGrant
 from .schemas import GrantCreate, GrantRead
 
@@ -119,6 +121,23 @@ class PermissionService:
         # every collection filter that shares this helper.
         ids += await cls._system_group_ids(db)
         return ids
+
+    @staticmethod
+    def _confers(action: Action) -> ColumnElement[bool]:
+        """Matches grants whose stored actions confer ``action``.
+
+        The collection filters below are SQL and cannot call ``expand_actions``, so
+        they test the action list against ``CONFERRED_BY`` with jsonb ``?|`` — true
+        when the array holds any of those strings. Matching on the existence of a
+        grant row instead, as they used to, would put a lookup-only list straight
+        back into "Shared with me" and defeat the grant.
+        """
+        return PermissionGrant.actions.has_any(
+            sa.literal(
+                [granted.value for granted in CONFERRED_BY[action]],
+                postgresql.ARRAY(sa.Text),
+            )
+        )
 
     @staticmethod
     def _not_expired() -> ColumnElement[bool]:
@@ -312,23 +331,34 @@ class PermissionService:
     async def workspace_view_filter(
         cls, db: AsyncSession, user: User
     ) -> ColumnElement[bool]:
-        """Condition for a Workspace select: owner, or holds a workspace-level grant."""
+        """Condition for a Workspace select: owner, or holds a workspace-level grant
+        that confers ``view`` (see ``_confers``)."""
         group_ids = await cls._group_ids(db, user.id)
         granted = select(PermissionGrant.resource_id).where(
             PermissionGrant.resource_type == ResourceType.workspace,
             cls._principal_condition(user.id, group_ids),
+            cls._confers(Action.view),
         )
         return or_(Workspace.owner_id == user.id, Workspace.id.in_(granted))
 
     @classmethod
     async def list_query_filter(
-        cls, db: AsyncSession, user: User
+        cls, db: AsyncSession, user: User, action: Action = Action.view
     ) -> ColumnElement[bool]:
         """Condition for a List select (joined to its Workspace): a list is visible
-        when the caller owns the workspace, has a direct list grant, or inherits a
-        workspace grant (and the list still inherits)."""
+        when the caller owns the workspace, has a direct list grant conferring
+        ``action``, or inherits a workspace grant conferring it (and the list still
+        inherits).
+
+        ``action`` defaults to ``view``, so a lookup-only grant — a list whose
+        *values* may be read through someone else's lookup column while the list
+        itself stays unlisted — does not reach "Shared with me", the only surface
+        those lists would otherwise appear on. The lookup target picker passes
+        ``lookup`` to get the wider set it must offer; nothing else should."""
         group_ids = await cls._group_ids(db, user.id)
-        principal = cls._principal_condition(user.id, group_ids)
+        principal = and_(
+            cls._principal_condition(user.id, group_ids), cls._confers(action)
+        )
         granted_lists = select(PermissionGrant.resource_id).where(
             PermissionGrant.resource_type == ResourceType.list, principal
         )
@@ -346,9 +376,18 @@ class PermissionService:
 
     @classmethod
     async def item_view_filter(
-        cls, db: AsyncSession, user: User, lst: List
+        cls, db: AsyncSession, user: User, lst: List, action: Action = Action.view
     ) -> ColumnElement[bool]:
-        """Condition for a ListItem select inside ``lst``."""
+        """Condition for a ListItem select inside ``lst``.
+
+        ``action`` is the list-level access being exercised. It is ``view`` for every
+        read of the records themselves, and ``lookup`` for the paths that only
+        resolve a row's *label* (the options endpoint, the export formatter, search
+        by linked label). A lookup-only grantee holds no ``view``, so leaving this at
+        the default would drop them to "items granted individually" — an empty picker
+        rather than the reference list they were given. Per-record grants still apply
+        either way: ``lookup`` relaxes the list-level gate, not row-level ones.
+        """
         if user.id == lst.workspace.owner_id:
             return true()
         group_ids = await cls._group_ids(db, user.id)
@@ -356,7 +395,7 @@ class PermissionService:
             PermissionGrant.resource_type == ResourceType.item,
             cls._principal_condition(user.id, group_ids),
         )
-        list_viewable = await cls.has(db, user, ResourceType.list, lst.id, Action.view)
+        list_viewable = await cls.has(db, user, ResourceType.list, lst.id, action)
         if list_viewable:
             return or_(ListItem.permissions_inherit.is_(True), ListItem.id.in_(granted))
         return ListItem.id.in_(granted)

@@ -12,6 +12,9 @@ from sqlalchemy.sql.elements import ColumnElement
 from src.core.config import settings
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
+# The enums are a leaf module (no service imports), so unlike PermissionService —
+# deferred throughout this file — they can be imported here without a cycle.
+from src.permissions.enums import Action
 from src.workspaces.models import Workspace
 from src.workspaces.services import WorkspaceService
 
@@ -78,6 +81,7 @@ class ListService:
         workspace_uuid: Optional[Union[str, UUID]],
         shared_only: bool,
         q: Optional[str],
+        action: Action = Action.view,
     ) -> list[ColumnElement[bool]]:
         """The WHERE conditions for a visible-lists query, shared by ``list`` and
         ``count`` so the page and its total can never describe different queries.
@@ -87,7 +91,7 @@ class ListService:
         conds: list[ColumnElement[bool]] = [
             List.deleted_at.is_(None),
             Workspace.deleted_at.is_(None),
-            await PermissionService.list_query_filter(db, user),
+            await PermissionService.list_query_filter(db, user, action),
         ]
         if workspace_uuid is not None:
             conds.append(Workspace.uuid == coerce_uuid(workspace_uuid))
@@ -113,6 +117,7 @@ class ListService:
         skip: int = 0,
         limit: int = 100,
         q: Optional[str] = None,
+        lookup_targets: bool = False,
     ) -> Sequence[ListRead]:
         """Lists the user can view (owned, directly granted, or inherited from a
         workspace grant), optionally scoped to one workspace or filtered by ``q``.
@@ -122,13 +127,28 @@ class ListService:
         workspace the user cannot open — this is what backs the "Shared with me"
         section, the only way to reach them.
 
+        ``lookup_targets`` widens the query from ``view`` to ``lookup``, adding the
+        lists shared *only* as lookup targets. It exists for one caller — the target
+        picker in the column dialog — because a list granted `lookup` is deliberately
+        absent everywhere else, and a target you cannot name is a target you cannot
+        point a column at. It names lists the caller cannot open; that is the minimum
+        the grant has to disclose to be usable, and no more than the grantee already
+        learns from the labels it lets them resolve.
+
         Each row is enriched with its workspace owner's username, and with the
         workspace's display name *only when the caller can view that workspace* —
         naming a workspace the caller was denied would leak it.
         """
         from src.permissions.services import PermissionService
 
-        conds = await cls._visible_conditions(db, user, workspace_uuid, shared_only, q)
+        conds = await cls._visible_conditions(
+            db,
+            user,
+            workspace_uuid,
+            shared_only,
+            q,
+            Action.lookup if lookup_targets else Action.view,
+        )
         stmt = (
             select(List)
             .join(Workspace, List.workspace_id == Workspace.id)
@@ -172,9 +192,17 @@ class ListService:
         workspace_uuid: Optional[Union[str, UUID]] = None,
         shared_only: bool = False,
         q: Optional[str] = None,
+        lookup_targets: bool = False,
     ) -> int:
         """Total matching lists, ignoring skip/limit — what the paginator needs."""
-        conds = await cls._visible_conditions(db, user, workspace_uuid, shared_only, q)
+        conds = await cls._visible_conditions(
+            db,
+            user,
+            workspace_uuid,
+            shared_only,
+            q,
+            Action.lookup if lookup_targets else Action.view,
+        )
         stmt = (
             select(func.count(func.distinct(List.id)))
             .select_from(List)
