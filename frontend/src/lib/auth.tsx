@@ -12,7 +12,11 @@ import type { ApiUser } from "./types";
 
 interface AuthContextValue {
   isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (
+    username: string,
+    password: string,
+    remember?: boolean,
+  ) => Promise<void>;
   logout: () => void;
 }
 
@@ -23,10 +27,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => !!getAccessToken(),
   );
 
-  const login = useCallback(async (username: string, password: string) => {
-    await apiLogin(username, password);
-    setAuthenticated(true);
-  }, []);
+  const login = useCallback(
+    async (username: string, password: string, remember = true) => {
+      await apiLogin(username, password, remember);
+      setAuthenticated(true);
+    },
+    [],
+  );
 
   const logout = useCallback(() => {
     clearTokens();

@@ -4,6 +4,7 @@ import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Password } from "primereact/password";
 import { Button } from "primereact/button";
+import { Checkbox } from "primereact/checkbox";
 import { Message } from "primereact/message";
 
 import { useAuth } from "../../lib/auth";
@@ -21,6 +22,7 @@ export function LoginPage() {
   const navigate = useNavigate();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +31,7 @@ export function LoginPage() {
     setError(null);
     setLoading(true);
     try {
-      await login(username, password);
+      await login(username, password, remember);
       navigate("/");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
@@ -63,6 +65,14 @@ export function LoginPage() {
               inputStyle={{ width: "100%" }}
               style={{ width: "100%", display: "block" }}
             />
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
+              inputId="remember"
+              checked={remember}
+              onChange={(e) => setRemember(!!e.checked)}
+            />
+            <label htmlFor="remember">Remember me</label>
           </div>
           <Button type="submit" label="Sign in" loading={loading} />
         </form>

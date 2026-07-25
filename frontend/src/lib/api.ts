@@ -4,22 +4,41 @@
 const ACCESS_KEY = "dbui.access";
 const REFRESH_KEY = "dbui.refresh";
 
+// Tokens live in exactly one of two stores, chosen by the "Remember me" flag at
+// login: localStorage persists across browser restarts, sessionStorage is dropped
+// when the tab closes. Reads prefer localStorage but fall back to sessionStorage,
+// and writes clear the other store so a stale persistent token can never outlive a
+// session-only login.
+function readToken(key: string): string | null {
+  return localStorage.getItem(key) ?? sessionStorage.getItem(key);
+}
+
 export function getAccessToken(): string | null {
-  return localStorage.getItem(ACCESS_KEY);
+  return readToken(ACCESS_KEY);
 }
 
 function getRefreshToken(): string | null {
-  return localStorage.getItem(REFRESH_KEY);
+  return readToken(REFRESH_KEY);
 }
 
-function setTokens(access: string, refresh: string): void {
-  localStorage.setItem(ACCESS_KEY, access);
-  localStorage.setItem(REFRESH_KEY, refresh);
+// The store currently holding tokens, so a refresh writes back where login put them.
+function activeStorage(): Storage {
+  return sessionStorage.getItem(REFRESH_KEY) != null ? sessionStorage : localStorage;
+}
+
+function setTokens(access: string, refresh: string, storage: Storage): void {
+  const other = storage === localStorage ? sessionStorage : localStorage;
+  other.removeItem(ACCESS_KEY);
+  other.removeItem(REFRESH_KEY);
+  storage.setItem(ACCESS_KEY, access);
+  storage.setItem(REFRESH_KEY, refresh);
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(ACCESS_KEY);
-  localStorage.removeItem(REFRESH_KEY);
+  for (const store of [localStorage, sessionStorage]) {
+    store.removeItem(ACCESS_KEY);
+    store.removeItem(REFRESH_KEY);
+  }
 }
 
 export class ApiError extends Error {
@@ -43,7 +62,24 @@ async function extractDetail(res: Response, fallback: string): Promise<string> {
   return fallback;
 }
 
-async function refreshTokens(): Promise<boolean> {
+// The server rotates refresh tokens: each refresh revokes the token it was given
+// and issues a new one, so a token works exactly once. When the access token
+// expires, several in-flight requests can 401 at the same moment; if each fired
+// its own refresh they would all present the same token, the first would revoke it,
+// and the rest would fail and log the user out. Collapse concurrent callers onto a
+// single in-flight refresh so the token is spent once and everyone shares the result.
+let inFlightRefresh: Promise<boolean> | null = null;
+
+function refreshTokens(): Promise<boolean> {
+  if (!inFlightRefresh) {
+    inFlightRefresh = performRefresh().finally(() => {
+      inFlightRefresh = null;
+    });
+  }
+  return inFlightRefresh;
+}
+
+async function performRefresh(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
   const res = await fetch("/api/auth/tokens/refresh", {
@@ -56,7 +92,7 @@ async function refreshTokens(): Promise<boolean> {
     return false;
   }
   const data = await res.json();
-  setTokens(data.access_token, data.refresh_token);
+  setTokens(data.access_token, data.refresh_token, activeStorage());
   return true;
 }
 
@@ -131,7 +167,13 @@ export const api = {
     requestRaw(path, { method: "POST", body: form }).then((r) => r.json() as Promise<T>),
 };
 
-export async function login(username: string, password: string): Promise<void> {
+// `remember` picks where the token pair is stored: true (default) keeps you signed
+// in across browser restarts, false confines the session to the current tab.
+export async function login(
+  username: string,
+  password: string,
+  remember = true,
+): Promise<void> {
   const form = new URLSearchParams();
   form.set("username", username);
   form.set("password", password);
@@ -144,5 +186,9 @@ export async function login(username: string, password: string): Promise<void> {
     throw new ApiError(res.status, await extractDetail(res, "Login failed"));
   }
   const data = await res.json();
-  setTokens(data.access_token, data.refresh_token);
+  setTokens(
+    data.access_token,
+    data.refresh_token,
+    remember ? localStorage : sessionStorage,
+  );
 }
