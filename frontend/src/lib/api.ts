@@ -43,7 +43,24 @@ async function extractDetail(res: Response, fallback: string): Promise<string> {
   return fallback;
 }
 
-async function refreshTokens(): Promise<boolean> {
+// The server rotates refresh tokens: each refresh revokes the token it was given
+// and issues a new one, so a token works exactly once. When the access token
+// expires, several in-flight requests can 401 at the same moment; if each fired
+// its own refresh they would all present the same token, the first would revoke it,
+// and the rest would fail and log the user out. Collapse concurrent callers onto a
+// single in-flight refresh so the token is spent once and everyone shares the result.
+let inFlightRefresh: Promise<boolean> | null = null;
+
+function refreshTokens(): Promise<boolean> {
+  if (!inFlightRefresh) {
+    inFlightRefresh = performRefresh().finally(() => {
+      inFlightRefresh = null;
+    });
+  }
+  return inFlightRefresh;
+}
+
+async function performRefresh(): Promise<boolean> {
   const refresh = getRefreshToken();
   if (!refresh) return false;
   const res = await fetch("/api/auth/tokens/refresh", {
