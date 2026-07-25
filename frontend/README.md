@@ -64,8 +64,9 @@ src/
   lib/            # api client (fetch + auth/refresh), auth + theme + toast contexts,
                   # query client, hand-written API types, and small shared helpers:
                   # links (safeHref), temporal, slug, people, useMediaQuery, useDebounced
-  components/     # app shell: AppLayout, NavDrawer (mobile nav), AppDialog, NameFields,
-                  # Breadcrumbs, ThemeSwitcher
+  components/     # app shell: AppLayout, NavDrawer (mobile nav), AccountMenu + UserAvatar
+                  # (the header's account control), AppDialog, NameFields, Breadcrumbs,
+                  # ThemeSwitcher
   features/
     auth/         # login (the only unauthenticated page)
     workspaces/   # workspaces + the lists shared with you directly
@@ -151,9 +152,11 @@ Below it:
   value. It is a second *layout*, not a second implementation — both render values with
   `renderCell` and order them with `sortRows`, and they share selection, page size and
   row actions. A value or an order that differed between them is a bug.
-- **The header navigation becomes a drawer** (`components/NavDrawer.tsx`): workspaces,
-  their lists (fetched lazily, per expanded workspace), the lists shared with you, your
-  profile at the top and Log out at the foot.
+- **The header navigation becomes a drawer** (`components/NavDrawer.tsx`): your account
+  at the top — profile, then Log out — followed by workspaces, their lists (fetched
+  lazily, per expanded workspace), and the lists shared with you. The header's account
+  avatar (`components/AccountMenu.tsx`) is dropped below the breakpoint rather than
+  duplicated: the drawer already carries that band.
 - **Sorting moves to the toolbar.** Cards have no column header to click, so a "Sort by"
   dropdown drives the same state the grid's headers do.
 - **Dialogs go near-fullscreen.** Every dialog is `components/AppDialog.tsx`, which

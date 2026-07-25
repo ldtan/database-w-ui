@@ -2,13 +2,12 @@ import { useEffect, useState } from "react";
 import { Link, Outlet } from "react-router-dom";
 import { Button } from "primereact/button";
 
-import { useAuth } from "../lib/auth";
 import { SMALL_SCREEN, useMediaQuery } from "../lib/useMediaQuery";
+import { AccountMenu } from "./AccountMenu";
 import { NavDrawer } from "./NavDrawer";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
 export function AppLayout() {
-  const { logout } = useAuth();
   // The same 640px the records switch to cards at — one breakpoint, so the app
   // does not develop two ideas of what a small screen is.
   const small = useMediaQuery(SMALL_SCREEN);
@@ -30,7 +29,9 @@ export function AppLayout() {
         <div className="flex items-center gap-1 sm:gap-2">
           {/* The theme controls stay out of the drawer on every screen: they are two
               icons wide, and a light/dark toggle you have to open a panel for is a
-              toggle you stop using. */}
+              toggle you stop using. The account avatar does not — on a phone the
+              drawer already carries the account band, and a second way to reach it
+              would cost a third of the header to say the same thing twice. */}
           <ThemeSwitcher />
           {small ? (
             <Button
@@ -52,15 +53,7 @@ export function AppLayout() {
               <Link to="/people" className="no-underline">
                 <Button label="People" icon="pi pi-users" text />
               </Link>
-              <Link to="/profile" className="no-underline">
-                <Button label="Profile" icon="pi pi-user" text />
-              </Link>
-              <Button
-                label="Log out"
-                icon="pi pi-sign-out"
-                text
-                onClick={logout}
-              />
+              <AccountMenu />
             </>
           )}
         </div>

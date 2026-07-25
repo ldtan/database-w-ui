@@ -7,21 +7,12 @@ import { Sidebar } from "primereact/sidebar";
 import { api } from "../lib/api";
 import { useAuth, useCurrentUser } from "../lib/auth";
 import { fullName, useMyPerson } from "../lib/people";
-import type { ListRead, Person, Workspace } from "../lib/types";
+import type { ListRead, Workspace } from "../lib/types";
+import { UserAvatar } from "./UserAvatar";
 
 interface Props {
   visible: boolean;
   onHide: () => void;
-}
-
-/** Nothing in the model holds a picture — `Person` is names and a birth date — so
- *  the circle is initials, from the profile if there is one and from the username
- *  otherwise. It is shaped for an <img> if an avatar ever lands. */
-function initials(person: Person | null, username: string): string {
-  if (person) {
-    return `${person.first_name[0] ?? ""}${person.last_name[0] ?? ""}`.toUpperCase();
-  }
-  return (username[0] ?? "?").toUpperCase();
 }
 
 /** Who you are signed in as, and the way to your profile.
@@ -49,18 +40,7 @@ function ProfileHeader({
       className="no-underline flex items-center gap-3 rounded px-2 py-3"
       style={{ background: active ? "var(--brand-tint)" : "transparent" }}
     >
-      <span
-        className="flex items-center justify-center rounded-full shrink-0 font-semibold"
-        style={{
-          width: "2.75rem",
-          height: "2.75rem",
-          background: "var(--brand)",
-          color: "#fff",
-        }}
-        aria-hidden
-      >
-        {initials(person.data ?? null, me.username)}
-      </span>
+      <UserAvatar person={person.data} username={me.username} />
       <span className="flex flex-col min-w-0">
         {name && (
           <span
@@ -232,12 +212,36 @@ export function NavDrawer({ visible, onHide }: Props) {
       position="left"
       style={{ width: "min(20rem, 85vw)" }}
     >
-      {/* Three bands, so the drawer reads top to bottom as: who you are, where you
-          can go, and the way out. The middle band is the only one that scrolls —
-          a long list of workspaces must not push Log out off the end of the world,
-          which is exactly what a single scrolling column does. */}
+      {/* Two bands: your account, then everywhere you can go. The account band holds
+          both of the things you do with an account — open your profile, or leave —
+          which is the same pairing the header's avatar menu makes, so the two
+          surfaces do not teach different habits.
+
+          Only the navigation band scrolls. Keeping the account band above it means a
+          long list of workspaces cannot push it off the end of the world, which is
+          exactly what a single scrolling column does. */}
       <div className="flex flex-col h-full">
         <ProfileHeader active={pathname === "/profile"} onNavigate={onHide} />
+        {/* Its own row under the profile rather than an item in the list below:
+            logging out is not a place you go, and it is the one thing here you never
+            want to hit by aiming at something else. */}
+        {/* The icon and text are children rather than the `icon`/`label` props: those
+            render a label with `flex: 1`, which centres the words and leaves Log out
+            floating in the middle of the drawer, lined up with nothing above or below
+            it. The padding and gap are the nav rows' own, so the icon sits in the
+            same column as theirs. */}
+        <Button
+          text
+          className="flex items-center gap-2"
+          style={{ justifyContent: "flex-start", padding: "0.5rem" }}
+          onClick={() => {
+            onHide();
+            logout();
+          }}
+        >
+          <i className="pi pi-sign-out" />
+          <span>Log out</span>
+        </Button>
         <hr
           className="my-2 border-0 border-t"
           style={{ borderColor: "var(--border)" }}
@@ -345,24 +349,6 @@ export function NavDrawer({ visible, onHide }: Props) {
             </>
           )}
         </nav>
-
-        {/* Out of the navigation and pinned to the floor: logging out is not a
-            place you go, and it is the one item here you never want to hit by
-            aiming at something else. */}
-        <hr
-          className="mt-2 mb-1 border-0 border-t"
-          style={{ borderColor: "var(--border)" }}
-        />
-        <Button
-          label="Log out"
-          icon="pi pi-sign-out"
-          text
-          className="justify-start"
-          onClick={() => {
-            onHide();
-            logout();
-          }}
-        />
       </div>
     </Sidebar>
   );
