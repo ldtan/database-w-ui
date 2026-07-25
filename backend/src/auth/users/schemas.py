@@ -1,7 +1,14 @@
-from typing import Literal, Optional, List
+from typing import Any, Literal, Optional, List, get_args
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, ConfigDict, Field
+from pydantic import (
+    BaseModel,
+    EmailStr,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_validator,
+)
 
 from src.core.schemas import ResourceLink
 
@@ -13,13 +20,15 @@ from src.core.schemas import ResourceLink
 ThemeId = Literal["modern", "nordic", "brutalist", "luxury"]
 ThemeMode = Literal["light", "dark"]
 
+_SETTING_VALUES = {"theme": set(get_args(ThemeId)), "mode": set(get_args(ThemeMode))}
+
 
 class UserSettings(BaseModel):
     """UI preferences that follow the account, restored wherever it logs in.
 
-    Lenient on the way out: a stored blob can hold a key this build has never heard
-    of — written by a newer deploy, then rolled back — and a read of /me must not
-    500 over it. Writes are strict; see UserSettingsUpdate.
+    Lenient on the way out: a stored blob can hold a key *or a value* this build has
+    never heard of — written by a newer deploy, then rolled back — and a read of /me
+    must not 500 over it. Writes are strict; see UserSettingsUpdate.
 
     Defaults mirror DEFAULT_THEME/DEFAULT_MODE in frontend/src/lib/theme.tsx, so an
     account that has never saved anything looks identical to a fresh browser.
@@ -28,6 +37,27 @@ class UserSettings(BaseModel):
     theme: ThemeId = "modern"
     mode: ThemeMode = "light"
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unrecognised_values(cls, data: Any) -> Any:
+        """Fall back to the default for a value outside the union.
+
+        `extra="ignore"` covers a key we do not know; this covers a key we do know
+        carrying a value we do not — the likelier rollback, since adding a palette
+        means an existing key gains a value rather than a new key appearing. Dropping
+        it here lets the field default apply, so the user sees the default theme for
+        one session instead of an unloadable app. Only reads pass through this:
+        writes are validated as UserSettingsUpdate, where the same value is a 422.
+        """
+        if not isinstance(data, dict):
+            return data
+        return {
+            key: value
+            for key, value in data.items()
+            if key not in _SETTING_VALUES
+            or (isinstance(value, str) and value in _SETTING_VALUES[key])
+        }
 
 
 class UserSettingsUpdate(BaseModel):
@@ -44,6 +74,21 @@ class UserSettingsUpdate(BaseModel):
     theme: Optional[ThemeId] = None
     mode: Optional[ThemeMode] = None
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("theme", "mode", mode="before")
+    @classmethod
+    def _reject_explicit_null(cls, value: Any) -> Any:
+        """`None` means "not sent", so it must not be sendable.
+
+        The merge keys off `exclude_unset`, which cannot tell an omitted key from one
+        explicitly set to null — so without this an explicit null is stored, and then
+        no read can deserialize it, 500ing /me and the all-users listing for everyone
+        rather than just the caller. A validator rather than dropping it at the merge:
+        the request is malformed, and the caller should hear so.
+        """
+        if value is None:
+            raise ValueError("must not be null; omit the key to leave it unchanged")
+        return value
 
 
 class UserBase(BaseModel):

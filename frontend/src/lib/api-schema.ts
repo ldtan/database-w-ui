@@ -1718,9 +1718,9 @@ export interface components {
          * UserSettings
          * @description UI preferences that follow the account, restored wherever it logs in.
          *
-         *     Lenient on the way out: a stored blob can hold a key this build has never heard
-         *     of — written by a newer deploy, then rolled back — and a read of /me must not
-         *     500 over it. Writes are strict; see UserSettingsUpdate.
+         *     Lenient on the way out: a stored blob can hold a key *or a value* this build has
+         *     never heard of — written by a newer deploy, then rolled back — and a read of /me
+         *     must not 500 over it. Writes are strict; see UserSettingsUpdate.
          *
          *     Defaults mirror DEFAULT_THEME/DEFAULT_MODE in frontend/src/lib/theme.tsx, so an
          *     account that has never saved anything looks identical to a fresh browser.

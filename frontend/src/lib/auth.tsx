@@ -8,6 +8,7 @@ import {
 import { useQuery } from "@tanstack/react-query";
 
 import { api, clearTokens, getAccessToken, login as apiLogin } from "./api";
+import { queryClient } from "./queryClient";
 import type { ApiUser } from "./types";
 
 interface AuthContextValue {
@@ -27,9 +28,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => !!getAccessToken(),
   );
 
+  // Nothing cached survives an account boundary. Query keys are shared and mostly
+  // say *what* rather than *whose* (`["me"]`, `["items", uuid]`), so a second account
+  // signing in on the same tab would be served the first one's data until each query
+  // refetched — reading someone else's rows, and writing their preferences back to
+  // its own account. Cleared on the way in as well as out, because a session can end
+  // without `logout` running at all: a refresh token that expires just drops the
+  // tokens (see api.ts) and leaves the cache behind.
   const login = useCallback(
     async (username: string, password: string, remember = true) => {
       await apiLogin(username, password, remember);
+      queryClient.clear();
       setAuthenticated(true);
     },
     [],
@@ -38,6 +47,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const logout = useCallback(() => {
     clearTokens();
     setAuthenticated(false);
+    queryClient.clear();
   }, []);
 
   return (

@@ -24,6 +24,8 @@ import type { ApiUser, UserSettings } from "./types";
  * - **A change made on another device lands on the next load, not live.** Consistent
  *   with the rest of the app, which turns off refetch-on-focus and refreshes on
  *   explicit invalidation rather than polling.
+ * - **Nothing crosses an account boundary.** Everything below is keyed to whose
+ *   settings we are holding, because this component outlives any one session.
  */
 export function ThemeSync() {
   const { isAuthenticated } = useAuth();
@@ -31,11 +33,15 @@ export function ThemeSync() {
   const { theme, mode, revision, applyRemote } = useTheme();
 
   const settings = me?.settings;
+  const uuid = me?.uuid;
 
   // What the server is known to hold, and null before we have heard from it. Both
   // directions read it: an inbound apply records the value first, so the re-render
   // it causes finds nothing to push and the two directions do not chase each other.
   const serverValue = useRef<UserSettings | null>(null);
+  // Whose values those are. This component never unmounts, so without it a second
+  // account signing in on the same tab would be synced against the first one's.
+  const serverUuid = useRef<string | null>(null);
   // The local revision as of sign-in, to tell "the user has already picked
   // something in this session" from "these are just the values the page loaded with".
   const revisionAtSignIn = useRef(revision);
@@ -46,10 +52,21 @@ export function ThemeSync() {
       // ones, and re-baseline the revision so toggles made on the login screen do
       // not read as a pending change belonging to whoever logs in next.
       serverValue.current = null;
+      serverUuid.current = null;
       revisionAtSignIn.current = revision;
       return;
     }
-    if (!settings) return;
+    if (!settings || !uuid) return;
+
+    if (serverUuid.current !== null && serverUuid.current !== uuid) {
+      // A different account, without the sign-out above having run — a session that
+      // expired mid-use, say. Everything held here belongs to the previous user: the
+      // values, and a revision counting their changes. Start over, or the incoming
+      // account both inherits their theme and has its own overwritten with it.
+      serverValue.current = null;
+      revisionAtSignIn.current = revision;
+    }
+    serverUuid.current = uuid;
 
     if (serverValue.current === null) {
       serverValue.current = settings;
@@ -68,13 +85,19 @@ export function ThemeSync() {
     }
 
     const previous = serverValue.current;
-    const next = { theme, mode };
+    // Only what actually differs. Sending both keys every time would defeat the
+    // merge the endpoint is built around: a tab that toggled dark would also push
+    // whatever theme its own state happens to hold, reverting a palette chosen in
+    // another tab, or one this device has not heard about yet.
+    const patch: Partial<UserSettings> = {};
+    if (previous.theme !== theme) patch.theme = theme;
+    if (previous.mode !== mode) patch.mode = mode;
     // Recorded before the request, not after: the PATCH resolving updates the cached
     // user, which re-runs this effect, and without this it would queue a second
     // identical write.
-    serverValue.current = next;
+    serverValue.current = { theme, mode };
     api
-      .patch<ApiUser>("/auth/users/me/settings", next)
+      .patch<ApiUser>("/auth/users/me/settings", patch)
       .then((user) => queryClient.setQueryData(["me"], user))
       .catch(() => {
         // Leave the device on the user's choice — they can see it, and it is in
@@ -82,7 +105,7 @@ export function ThemeSync() {
         // retries rather than assuming the save landed.
         serverValue.current = previous;
       });
-  }, [isAuthenticated, settings, theme, mode, revision, applyRemote]);
+  }, [isAuthenticated, uuid, settings, theme, mode, revision, applyRemote]);
 
   return null;
 }
