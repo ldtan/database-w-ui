@@ -267,11 +267,15 @@ export function GuidePage() {
           </li>
           <li>
             <Ui>Workspaces</Ui> lists your folders, <Ui>People</Ui> shows accounts and
-            groups, <Ui>Guide</Ui> brings you here, and <Ui>Profile</Ui> is your own
-            details. <Ui>Log out</Ui> signs you off.
+            groups, and <Ui>Guide</Ui> brings you here.
           </li>
           <li>
-            The two small icons near the top switch the look between light and dark
+            The circle at the far right is <strong>your account</strong> — it shows
+            your initials. Click it to see who you are signed in as, and to reach{" "}
+            <Ui>Profile</Ui> (your own details) or <Ui>Log out</Ui>.
+          </li>
+          <li>
+            The two small icons in the same bar switch the look between light and dark
             and between colour themes — see{" "}
             <a href="#appearance" style={{ color: "var(--brand)" }}>Appearance</a>.
           </li>
@@ -290,7 +294,8 @@ export function GuidePage() {
         <Callout tone="tip" title="On a phone?">
           On a small screen the top links fold into a menu — tap the ☰ button on the
           right to open a drawer with your workspaces, their lists, and everything
-          else.
+          else. Your account is at the top of that drawer, with <Ui>Log out</Ui> just
+          beneath it, so there is no separate circle to look for.
         </Callout>
       </Section>
 
@@ -1008,8 +1013,9 @@ export function GuidePage() {
             Everyone has a <Link to="/profile" style={{ color: "var(--brand)" }}>
               Profile
             </Link>{" "}
-            page for their own name and details. Filling it in is optional and doesn’t
-            affect signing in.
+            page for their own name and details, reached from the account circle at
+            the top right. Filling it in is optional and doesn’t affect signing in.
+            The name you put there is what your initials in that circle come from.
           </li>
         </ul>
         <Callout tone="tip" title="Changing your password">
