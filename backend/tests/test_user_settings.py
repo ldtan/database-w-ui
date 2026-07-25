@@ -3,8 +3,8 @@
 Theme and light/dark used to live only in localStorage, so they were a property of
 the browser rather than the account. These cover the two properties that make the
 move to the server safe: a write merges rather than replaces (so one tab cannot
-undo another), and a read tolerates keys it does not recognise (so a rollback does
-not turn every /me into a 500).
+undo another) and refuses anything it cannot store, and a read tolerates keys and
+values it does not recognise (so a rollback does not turn every /me into a 500).
 """
 from contextlib import asynccontextmanager
 
@@ -119,6 +119,46 @@ async def test_an_unknown_key_is_rejected(make_client, session_factory):
         # Neither attempt left anything behind.
         resp = await client.get("/api/auth/users/me")
         assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+
+
+async def test_a_null_value_is_rejected(make_client, session_factory):
+    """Null is how the merge spells "not sent", so it must not be storable.
+
+    The blob has no room for one: every read validates against a non-optional union,
+    so a stored null would 500 not just /me but the all-users listing any signed-in
+    caller hits — one malformed request degrading the app for everybody.
+    """
+    async with session_factory() as db:
+        user = await _make_user(db, "nuller")
+
+    async with make_client(user) as client:
+        resp = await client.patch(SETTINGS_URL, json={"theme": None})
+        assert resp.status_code == 422
+
+        # Alongside a valid key, so the whole write is refused rather than half-applied.
+        resp = await client.patch(SETTINGS_URL, json={"theme": None, "mode": "dark"})
+        assert resp.status_code == 422
+
+        resp = await client.get("/api/auth/users/me")
+        assert resp.status_code == 200
+        assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+
+
+async def test_a_read_tolerates_an_unrecognised_stored_value(
+    make_client, session_factory
+):
+    """The likelier shape of a rollback than an unknown key: a deploy that adds a
+    palette writes an existing key with a value this build has no name for."""
+    async with session_factory() as db:
+        user = await _make_user(db, "futuretheme")
+        user.settings = {"theme": "sunset", "mode": "dark"}
+        await db.commit()
+
+    async with make_client(user) as client:
+        resp = await client.get("/api/auth/users/me")
+        assert resp.status_code == 200
+        # The unreadable key falls back to its default; the readable one is untouched.
+        assert resp.json()["settings"] == {"theme": "modern", "mode": "dark"}
 
 
 async def test_a_read_tolerates_an_unrecognised_stored_key(
