@@ -18,7 +18,13 @@ from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash, verify_password
 from .models import AUTHENTICATED_USERS_NAME, User, UserGroup
-from .schemas import UserCreate, UserGroupCreate, UserGroupUpdate, UserUpdate
+from .schemas import (
+    UserCreate,
+    UserGroupCreate,
+    UserGroupUpdate,
+    UserSettingsUpdate,
+    UserUpdate,
+)
 
 
 async def _scrub_column_references(
@@ -219,6 +225,37 @@ class UserService:
         except IntegrityError as exc:
             await db.rollback()
             raise ConflictError("Username or email is already in use") from exc
+
+        return await cls.get_by_uuid(db, target_uuid)
+
+    @classmethod
+    async def update_settings(
+        cls,
+        db: AsyncSession,
+        uuid: Union[str, UUID],
+        payload: UserSettingsUpdate,
+    ) -> Optional[User]:
+        """Merge UI preferences onto the stored blob.
+
+        Deliberately not routed through `update`: that method carries the password
+        and superuser guards, and its `exclude_none=True` cannot express "this key
+        was sent" separately from "this key is null", which is exactly the
+        distinction a merge needs.
+        """
+        user = await cls.get_by_uuid(db, uuid)
+        if user is None:
+            return None
+
+        # exclude_unset, not exclude_none: a key the caller omitted keeps its stored
+        # value, so a tab that only knows about `mode` cannot wipe a `theme` set
+        # elsewhere. Assigning a *new* dict is required — a plain JSONB-mapped dict
+        # is not mutation-tracked, so an in-place update would never flush.
+        incoming = payload.model_dump(exclude_unset=True, mode="json")
+        user.settings = {**(user.settings or {}), **incoming}
+
+        await db.flush()
+        target_uuid = user.uuid
+        await db.commit()
 
         return await cls.get_by_uuid(db, target_uuid)
 

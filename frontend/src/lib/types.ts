@@ -53,6 +53,10 @@ export type DeletedList = ListRead & { deleted_at: string };
 export type Person = Response<Schemas["PersonRead"]>;
 export type ApiUser = Response<Schemas["UserRead"]>;
 export type ApiUserGroup = Response<Schemas["UserGroupRead"]>;
+// Unlike the config blobs below, this one *is* published: the backend types it as a
+// Pydantic model rather than a dict, so there is nothing to keep in step by hand.
+export type UserSettings = Response<Schemas["UserSettings"]>;
+export type UserSettingsUpdate = Schemas["UserSettingsUpdate"];
 export type Grant = Response<Schemas["GrantRead"]>;
 
 export type ColumnType = Schemas["ColumnType"];

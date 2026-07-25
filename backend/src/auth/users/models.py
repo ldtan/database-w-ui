@@ -1,6 +1,7 @@
 from typing import Optional
 
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.dialects.postgresql import JSONB
 import sqlalchemy as sa
 
 from src.core.models import BaseModel
@@ -38,6 +39,14 @@ class User(BaseModel):
     is_superuser: Mapped[bool] = mapped_column(
         sa.Boolean, default=False, server_default=sa.false(), nullable=False
     )
+    # UI preferences that should follow the account rather than the browser — theme
+    # and light/dark today. A blob rather than columns because these are read as a
+    # unit on every /me and never queried individually; a blob on `users` rather than
+    # a side table because a join on the most-requested row in the app buys nothing
+    # for a handful of scalars. Written by merge (see UserService.update_settings),
+    # so an unrecognised key from a newer build survives a rollback instead of being
+    # dropped by the first save from the older one.
+    settings: Mapped[dict] = mapped_column(JSONB, default=dict)
     groups: Mapped[list["UserGroup"]] = relationship(
         "UserGroup",
         secondary=user_group_association,
