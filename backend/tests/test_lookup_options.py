@@ -428,7 +428,7 @@ async def test_lookup_target_you_cannot_view_is_refused_like_it_is_missing(
             },
         )
         assert resp.status_code == 400, resp.text
-        assert "view" in resp.json()["detail"].lower()
+        assert "look up" in resp.json()["detail"].lower()
 
 
 async def test_search_by_lookup_label_obeys_the_target_lists_permissions(

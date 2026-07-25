@@ -432,20 +432,22 @@ picker over an unbounded set has the same two jobs, and they need different answ
 `PrincipalControls` (users/groups) and `LookupControls` (target rows) both do this now; the
 lookup one goes through `GET /lists/{list}/columns/{column}/options`, which is server-side
 precisely because only the server knows a row's label (`display_column_key`) — and it applies
-`view` on the target list plus the per-record filter, so a picker can never offer a row its
+`lookup` on the target list plus the per-record filter, so a picker can never offer a row its
 user cannot read. Still to convert: `GroupDialog` (member picker) and `PeoplePage`
 (person-name annotations).
 
-**A lookup can target any list its creator can `view`, and cross-workspace targets make
+**A lookup can target any list its creator can `lookup`, and cross-workspace targets make
 "degrade to uuid stubs" a routine state, not a rare one.** The config-time check was
 relaxed from "a list you own" to "a list you can `view`" (`ColumnService._validate_config`),
-so a lookup may point at another of your workspaces or at a list shared to you. Nothing
-about resolution changed — it already re-checks the *reader's* `view` on the target
+and then to "a list you can `lookup`" — which `view` confers, so that second step widened
+the set without changing any existing answer. A lookup may therefore point at another of
+your workspaces, at a list shared to you, or at one shared *only* as a lookup target.
+Nothing about resolution changed — it re-checks the *reader's* access to the target
 per-caller (the note below), which is what keeps a cross-owner target from leaking. What
 *does* change: a target you don't own can have your access revoked or be deleted entirely
 at any time, independent of the referencing list. When that happens the cells fall back to
 uuid stubs (`LookupCell`, `retry: false`) exactly as they always could — it just stops
-being exceptional. A target the creator cannot view is refused indistinguishably from one
+being exceptional. A target the creator cannot read is refused indistinguishably from one
 that doesn't exist, so the `target_list_uuid` field can't be used to probe for a stranger's
 lists. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
 refused-when-unviewable.
@@ -456,6 +458,29 @@ different list it happens to point at. The options endpoint enforces this, and s
 (`_lookup_row_labels`) — a caller who cannot read the target gets uuids instead of labels,
 which is what they saw before labels existed. Any new surface that resolves a lookup label
 needs the same check; `test_export_does_not_leak_labels_from_an_unreadable_target` pins it.
+
+**The `lookup` action is that check's other half: a list can be shared *as a lookup target
+only*.** Granting `lookup` lets other people's lookup columns resolve the list's labels
+while the list stays out of `GET /lists/`, out of "Shared with me", and refused by
+`GET /lists/{it}` — a reference list ("Schools", "Departments") without handing it over.
+Three things this rests on, all easy to break:
+
+- **The collection filters must test actions, not grant existence.** `list_query_filter`
+  and `workspace_view_filter` now require `CONFERRED_BY[view]` via jsonb `?|`. Revert
+  either to matching any grant row and the lookup-only list reappears in "Shared with me",
+  silently undoing the grant. (This also settled a pre-existing oddity: a grant with an
+  empty action list used to list the resource while permitting nothing on it.)
+- **`item_view_filter` takes the action being exercised.** It short-circuits on the
+  list-level check, so at the default (`view`) a lookup-only grantee falls through to
+  "only items granted individually" — an empty picker. The three label paths (options,
+  export, search by linked label) pass `lookup`. Per-record grants still apply either way:
+  `lookup` relaxes the list-level gate, not row-level ones.
+- **The target picker needs `GET /lists/?lookup_targets=true`.** A list you cannot name is
+  a list you cannot point a column at. That flag is the single deliberate exception to
+  "lookup-only lists are invisible", it is off by default, and `ColumnDialog`'s shared-lists
+  query is its only caller. The schema stays hidden even then — `GET /lists/{it}/columns/`
+  is still refused, so the dialog hides the label-column dropdown (`targetSchemaHidden`) and
+  the server's fallback picks the label. `tests/test_lookup_grants.py` pins all of it.
 
 **A row's label falls back: the lookup's `display_column_uuid`, else the target's primary
 column, else its *first* column.** That last step is load-bearing — `primary_column_id` is

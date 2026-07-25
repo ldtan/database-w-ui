@@ -865,8 +865,9 @@ export function GuidePage() {
             group.
           </li>
           <li>
-            Give them access — either a one-click role (<Ui>Viewer</Ui>,{" "}
-            <Ui>Editor</Ui>, or <Ui>Manager</Ui>) or tick the exact actions you want.
+            Give them access — either a one-click role (<Ui>Lookup only</Ui>,{" "}
+            <Ui>Viewer</Ui>, <Ui>Editor</Ui>, or <Ui>Manager</Ui>) or tick the exact
+            actions you want.
           </li>
           <li>
             Optionally set an <Ui>Expires (optional)</Ui> date so access ends by
@@ -882,11 +883,33 @@ export function GuidePage() {
           <li><strong>Configure</strong> — change settings, columns, forms, and views.</li>
           <li><strong>Share</strong> — manage who has access.</li>
           <li><strong>Manage</strong> — full control (includes all of the above).</li>
+          <li>
+            <strong>Lookup</strong> — use the list as a lookup target: its values can
+            be picked and shown in someone else’s lookup column, but the list itself
+            stays hidden.
+          </li>
         </ul>
         <p style={{ color: "var(--text-muted)" }}>
-          The roles are just shortcuts: <em>Viewer</em> = View; <em>Editor</em> =
-          View, Create, Edit, Delete; <em>Manager</em> = full control.
+          The roles are just shortcuts: <em>Lookup only</em> = Lookup;{" "}
+          <em>Viewer</em> = View; <em>Editor</em> = View, Create, Edit, Delete;{" "}
+          <em>Manager</em> = full control. Anyone who can View can also look up, so
+          you only need <em>Lookup</em> on its own.
         </p>
+        <Callout tone="tip" title="Sharing a list you don’t want to hand over">
+          <p>
+            <Ui>Lookup</Ui> is for the lists that exist to be referenced —{" "}
+            <em>Schools</em>, <em>Departments</em>, <em>Countries</em>. Share one that
+            way and other people can point a lookup column at it and see its labels in
+            their own records, but it never appears in their{" "}
+            <Ui>Shared with me</Ui> and they cannot open it, browse its records, or see
+            what columns it has.
+          </p>
+          <p>
+            It still shows them the values of the labelling column for every row they
+            can reach, so use it for reference data rather than for a list with
+            something to hide in it.
+          </p>
+        </Callout>
         <Callout tone="tip" title="Good to know">
           The owner of an item always keeps full access. A row shows a friendly
           reminder like <Ui>Expires today</Ui> when access is ending, and{" "}

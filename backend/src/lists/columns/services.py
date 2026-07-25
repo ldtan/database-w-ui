@@ -185,8 +185,9 @@ class ColumnService:
         same `display_column_key` the export and the import use, so a label means
         the same thing everywhere.
 
-        Sees exactly what the caller may see: `view` on the target list, then the
-        per-record filter. A picker must never offer a row its user cannot read.
+        Sees exactly what the caller may see: `lookup` on the target list (which
+        `view` confers), then the per-record filter. A picker must never offer a row
+        its user cannot read.
         """
         # Deferred like the other permission call sites: a module-level import
         # cycles back through auth/workspaces services.
@@ -214,7 +215,7 @@ class ColumnService:
                 f"Lookup column '{column.name}' points at a missing target list"
             )
         await PermissionService.require(
-            db, user, ResourceType.list, target.id, Action.view
+            db, user, ResourceType.list, target.id, Action.lookup
         )
 
         # Asking for specific rows means wanting all of them: a search's page size
@@ -230,7 +231,9 @@ class ColumnService:
             ListItem.uuid, label.label("label"), ListItem.deleted_at
         ).where(
             ListItem.list_id == target.id,
-            await PermissionService.item_view_filter(db, user, target),
+            await PermissionService.item_view_filter(
+                db, user, target, Action.lookup
+            ),
         )
 
         # Resolving and offering are different questions, and a deleted row answers
@@ -328,12 +331,15 @@ class ColumnService:
                 raise ValidationError("A lookup column requires a target_list_uuid")
             if data.get("default") is not None:
                 raise ValidationError("A lookup column cannot have a default value")
-            # A lookup may target any list the caller can *view* — their own,
-            # one in another of their workspaces, or one shared with them.
-            # Resolving labels already re-checks the target's permissions per
-            # caller (see `lookup_options`), so this only has to establish that
-            # this user may read the target at all. Deferred import: a
-            # module-level one cycles back through auth/workspaces services.
+            # A lookup may target any list the caller can `lookup` — their own,
+            # one in another of their workspaces, one shared with them, or one
+            # shared *only* as a lookup target. That last case is the whole reason
+            # to grant `lookup`, so it has to be enough to build the column, not
+            # just to read it afterwards. Resolving labels re-checks the target's
+            # permissions per caller (see `lookup_options`), so this only has to
+            # establish that this user may read a label out of the target at all.
+            # Deferred import: a module-level one cycles back through
+            # auth/workspaces services.
             from src.permissions.enums import Action, ResourceType
             from src.permissions.services import PermissionService
 
@@ -345,14 +351,14 @@ class ColumnService:
                     )
                 )
             ).scalars().first()
-            # A target the caller cannot view is reported exactly like one that
+            # A target the caller cannot read is reported exactly like one that
             # does not exist, so the field cannot be used to probe for the
             # existence of lists the caller was never given.
             if target is None or not await PermissionService.has(
-                db, user, ResourceType.list, target.id, Action.view
+                db, user, ResourceType.list, target.id, Action.lookup
             ):
                 raise UnknownReferenceError(
-                    "target_list_uuid does not reference a list you can view"
+                    "target_list_uuid does not reference a list you can look up"
                 )
             target_list_id = target.id
 

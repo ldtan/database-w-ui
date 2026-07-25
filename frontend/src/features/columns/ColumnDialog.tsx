@@ -215,12 +215,19 @@ export function ColumnDialog({
 
   // Candidate target lists in the chosen workspace (self included), or every list
   // shared with the user when the SHARED bucket is chosen.
+  //
+  // `lookup_targets=true` on the shared query adds the lists granted `lookup` but
+  // not `view` — shared *only* as a lookup target, so absent from every other
+  // listing by design. Without it they are unreachable: the picker would not name
+  // them and the column could not be built. They are always in someone else's
+  // workspace (you hold `view` on your own), so the owned-workspace query has no
+  // use for the flag.
   const lists = useQuery({
     queryKey: ["lookup-target-lists", targetWorkspace],
     queryFn: () =>
       api.get<ListRead[]>(
         targetWorkspace === SHARED
-          ? `/lists/?shared=true&limit=1000`
+          ? `/lists/?shared=true&lookup_targets=true&limit=1000`
           : `/lists/?workspace_uuid=${targetWorkspace}&limit=1000`,
       ),
     enabled: type === "lookup" && !!targetWorkspace,
@@ -242,11 +249,19 @@ export function ColumnDialog({
     return opts;
   }, [lists.data, targetListUuid, seedMeta.data]);
   // Columns of the chosen target list, offered as the label to show per row.
+  //
+  // A target shared only as a lookup target (granted `lookup`, not `view`) refuses
+  // this: `lookup` hands over row labels, not the target's schema. So it can 403,
+  // and that is a normal state rather than an error to retry — the label column and
+  // the nesting pair simply cannot be chosen, and the server's own fallback (the
+  // target's primary column, else its first) supplies the label.
   const targetColumns = useQuery({
     queryKey: ["columns", targetListUuid],
     queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
     enabled: type === "lookup" && !!targetListUuid,
+    retry: false,
   });
+  const targetSchemaHidden = targetColumns.isError;
   // This list's own columns — for a formula, the columns it may reference; for a
   // lookup, the sibling lookups it could nest under.
   const ownColumns = useQuery({
@@ -598,7 +613,14 @@ export function ColumnDialog({
                 filter
               />
             </div>
-            {targetListUuid && (
+            {targetListUuid && targetSchemaHidden && (
+              <small style={{ color: "var(--text-muted)" }}>
+                This list is shared with you as a lookup target only, so its
+                columns aren&apos;t yours to browse. Rows will be labelled by the
+                list&apos;s own default column.
+              </small>
+            )}
+            {targetListUuid && !targetSchemaHidden && (
               <div className="flex flex-col gap-2">
                 <label htmlFor="col-display">Column to show</label>
                 <Dropdown

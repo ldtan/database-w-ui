@@ -10,7 +10,7 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
-import { ACTIONS, ROLE_PRESETS } from "../../lib/permissions";
+import { actionsFor, presetsFor } from "../../lib/permissions";
 import type {
   ApiUser,
   ApiUserGroup,
@@ -29,7 +29,10 @@ export interface SharePanelProps {
   active?: boolean;
 }
 
-const ACTION_OPTIONS = ACTIONS.map((a) => ({ label: a.label, value: a.value }));
+// Not a module constant: some actions only mean something on some resource types
+// (`lookup` on a list or workspace, never on a record, view, or form).
+const actionOptions = (resourceType: ResourceType) =>
+  actionsFor(resourceType).map((a) => ({ label: a.label, value: a.value }));
 
 /** How an expiry reads on a grant row: nothing, an "Expired" flag, or "in N days".
  *  The backend already stops honouring an expired grant; this is just the label. */
@@ -209,7 +212,7 @@ export function SharePanel({
           className="w-full"
         />
         <div className="flex flex-wrap items-center gap-2">
-          {ROLE_PRESETS.map((preset) => (
+          {presetsFor(resourceType).map((preset) => (
             <Button
               key={preset.label}
               label={preset.label}
@@ -220,7 +223,7 @@ export function SharePanel({
           ))}
           <MultiSelect
             value={actions}
-            options={ACTION_OPTIONS}
+            options={actionOptions(resourceType)}
             onChange={(e) => setActions(e.value)}
             placeholder="Actions"
             display="chip"
@@ -272,7 +275,7 @@ export function SharePanel({
                 <span className="flex-1 truncate">{name}</span>
                 <MultiSelect
                   value={grant.actions}
-                  options={ACTION_OPTIONS}
+                  options={actionOptions(resourceType)}
                   // Editing actions must resend the grant's expiry, or the backend's
                   // verbatim write would clear it.
                   onChange={(e) =>

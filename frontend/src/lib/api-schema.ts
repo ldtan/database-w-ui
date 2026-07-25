@@ -291,6 +291,10 @@ export interface paths {
          *     The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
          *     which is what a paginator needs; the body stays a plain array, so callers that
          *     just want the list (the nav drawer, the column picker) are unaffected.
+         *
+         *     ``lookup_targets`` is off by default, so every existing caller keeps showing only
+         *     lists the caller can open — a lookup-only list stays out of the nav and out of
+         *     "Shared with me", which is the point of that grant.
          */
         get: operations["list_lists_api_lists__get"];
         put?: never;
@@ -846,9 +850,17 @@ export interface components {
          *     ``view/create/edit/delete`` act on records and on reading/deleting the resource
          *     itself; ``configure`` covers list settings, columns, forms, and views;
          *     ``share`` manages a resource's own grants; ``manage`` is full control.
+         *
+         *     ``lookup`` is the one action that does *not* open the resource: it lets a
+         *     principal resolve the list's row labels from a lookup column pointed at it,
+         *     while the list itself stays out of their "Shared with me" and cannot be
+         *     opened. It is what a shared reference list ("Countries", "Departments")
+         *     wants — see ``ROLE_PRESETS['lookup only']`` and the collection filters in
+         *     ``PermissionService``, which deliberately ignore a grant that confers only
+         *     this.
          * @enum {string}
          */
-        Action: "view" | "create" | "edit" | "delete" | "configure" | "share" | "manage";
+        Action: "view" | "create" | "edit" | "delete" | "configure" | "share" | "manage" | "lookup";
         /** Body_import_list_api_lists__list_uuid__import_post */
         Body_import_list_api_lists__list_uuid__import_post: {
             /** File */
@@ -2549,6 +2561,8 @@ export interface operations {
                 workspace_uuid?: string | null;
                 /** @description Only lists the caller does not own */
                 shared?: boolean;
+                /** @description Also include lists shared only as lookup targets — lists the caller holds 'lookup' but not 'view' on. For the lookup target picker. */
+                lookup_targets?: boolean;
                 skip?: number;
                 limit?: number;
                 /** @description Match list name or display name */
