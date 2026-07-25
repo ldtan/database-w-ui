@@ -12,6 +12,7 @@ from .schemas import (
     UserGroupRead,
     UserGroupUpdate,
     UserRead,
+    UserSettingsUpdate,
     UserUpdate,
 )
 from .services import UserGroupService, UserService
@@ -96,12 +97,31 @@ async def list_users(
     )
 
 
-# Declared before /{uuid} so "me" is not parsed as a uuid.
+# Declared before /{uuid} so "me" is not parsed as a uuid. The same goes for the
+# /me/... routes below.
 @router.get("/me", response_model=UserRead)
 async def get_me(current_user: User = Depends(get_current_user)):
     """Who the caller is. The frontend has only a token otherwise, so it needs this
     to know whether to show the account-administration UI."""
     return current_user
+
+
+@router.patch("/me/settings", response_model=UserRead)
+async def update_my_settings(
+    payload: UserSettingsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save UI preferences against the account so they follow the user to any device.
+
+    Self-only by construction — it takes no uuid — so none of the authorization in
+    `update_user` applies. Returns the whole user rather than just the settings so
+    the caller can drop the response straight into its cached `me`.
+    """
+    user = await UserService.update_settings(db, current_user.uuid, payload)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
 
 
 @router.get("/{uuid}", response_model=UserRead)

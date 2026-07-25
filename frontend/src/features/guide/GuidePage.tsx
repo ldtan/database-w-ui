@@ -1139,8 +1139,12 @@ export function GuidePage() {
           The two small icons near the top right change how the app looks. One flips
           between <strong>light</strong> and <strong>dark</strong>; the other picks a
           colour theme (there are several, from a clean modern look to a bold
-          high-contrast one). Your choice is remembered on your device — pick whatever
-          is easiest on your eyes.
+          high-contrast one). Pick whatever is easiest on your eyes.
+        </p>
+        <p>
+          Your choice is saved to your account, not to the browser, so signing in on
+          another computer or phone brings it with you. Changing it anywhere changes
+          it everywhere the next time you open the app.
         </p>
       </Section>
 

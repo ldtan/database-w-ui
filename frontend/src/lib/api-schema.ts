@@ -129,6 +129,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/users/me/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update My Settings
+         * @description Save UI preferences against the account so they follow the user to any device.
+         *
+         *     Self-only by construction — it takes no uuid — so none of the authorization in
+         *     `update_user` applies. Returns the whole user rather than just the settings so
+         *     the caller can drop the response straight into its cached `me`.
+         */
+        patch: operations["update_my_settings_api_auth_users_me_settings_patch"];
+        trace?: never;
+    };
     "/api/auth/users/{uuid}": {
         parameters: {
             query?: never;
@@ -1683,11 +1707,54 @@ export interface components {
             is_superuser: boolean;
             /** Groups */
             groups?: components["schemas"]["ResourceLink"][];
+            settings?: components["schemas"]["UserSettings"];
             /**
              * Is Deleted
              * @default false
              */
             is_deleted: boolean;
+        };
+        /**
+         * UserSettings
+         * @description UI preferences that follow the account, restored wherever it logs in.
+         *
+         *     Lenient on the way out: a stored blob can hold a key this build has never heard
+         *     of — written by a newer deploy, then rolled back — and a read of /me must not
+         *     500 over it. Writes are strict; see UserSettingsUpdate.
+         *
+         *     Defaults mirror DEFAULT_THEME/DEFAULT_MODE in frontend/src/lib/theme.tsx, so an
+         *     account that has never saved anything looks identical to a fresh browser.
+         */
+        UserSettings: {
+            /**
+             * Theme
+             * @default modern
+             * @enum {string}
+             */
+            theme: "modern" | "nordic" | "brutalist" | "luxury";
+            /**
+             * Mode
+             * @default light
+             * @enum {string}
+             */
+            mode: "light" | "dark";
+        };
+        /**
+         * UserSettingsUpdate
+         * @description PATCH body for preferences.
+         *
+         *     Every field is optional because a write merges onto the stored blob and touches
+         *     only the keys actually sent — two tabs changing different preferences do not
+         *     clobber each other. `extra="forbid"` so a mistyped key is a 422 rather than a
+         *     preference that silently never takes effect. There is no null-to-clear: to reset
+         *     one, send its default value, which keeps "absent means untouched" the only
+         *     reading of a missing key.
+         */
+        UserSettingsUpdate: {
+            /** Theme */
+            theme?: ("modern" | "nordic" | "brutalist" | "luxury") | null;
+            /** Mode */
+            mode?: ("light" | "dark") | null;
         };
         /** UserUpdate */
         UserUpdate: {
@@ -2038,6 +2105,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserRead"];
+                };
+            };
+        };
+    };
+    update_my_settings_api_auth_users_me_settings_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserSettingsUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

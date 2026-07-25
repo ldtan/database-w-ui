@@ -62,8 +62,9 @@ Two things stay hand-written, on purpose:
 ```
 src/
   lib/            # api client (fetch + auth/refresh), auth + theme + toast contexts,
-                  # query client, hand-written API types, and small shared helpers:
-                  # links (safeHref), temporal, slug, people, useMediaQuery, useDebounced
+                  # themeSync (ties the theme to the account), query client, hand-written
+                  # API types, and small shared helpers: links (safeHref), temporal, slug,
+                  # people, useMediaQuery, useDebounced
   components/     # app shell: AppLayout, NavDrawer (mobile nav), AccountMenu + UserAvatar
                   # (the header's account control), AppDialog, NameFields, Breadcrumbs,
                   # ThemeSwitcher
@@ -179,6 +180,13 @@ instead of the hand-written `src/lib/types.ts`.
 - Colors come from the theme, never from Tailwind: `themes.css` defines every palette
   against `data-theme` / `data-mode` on `<html>`, so reach for `var(--brand)`,
   `var(--text-muted)`, `var(--border)` — a `text-blue-500` will not follow the theme.
+- The theme is stored **against the account** (`users.settings`), so it follows the user
+  between devices. `localStorage` is still written, but only as this device's cache: the
+  inline script in `index.html` needs something synchronous to read before first paint,
+  and a fetched value cannot arrive that early. `lib/themeSync.tsx` reconciles the two —
+  the account's copy is applied once on sign-in, and every later change here is pushed
+  up. It lives outside `ThemeProvider` because that provider wraps `AuthProvider` and so
+  cannot ask who is signed in.
 - Server state is TanStack Query with **shared keys** (`["items", listUuid]`,
   `["columns", listUuid]`, `["person", "me"]`…). Two components asking the same question
   make one request, and a dialog's `invalidateQueries` refreshes the page behind it.

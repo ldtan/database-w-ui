@@ -101,6 +101,15 @@ User
 `Workspace` is the tenancy boundary: a user owns workspaces, and a list's ownership
 flows through its workspace (§3). It is also the natural boundary for future sharing.
 
+`User` also carries a `settings` `JSONB` column (default `{}`) holding account-level UI
+preferences — colour theme and light/dark today. Unlike the free-form
+`workspaces.settings` / `lists.settings` blobs below, it is validated against a fixed
+Pydantic schema (`UserSettings`), so it is published in the OpenAPI document and the
+frontend's types are generated rather than hand-mirrored. Writes go through
+`PATCH /auth/users/me/settings` and **merge**: only the keys sent are touched, so a client
+that has never heard of a key cannot drop it. Preferences belong to the account rather
+than the browser, which is what lets them follow a user between devices.
+
 ---
 
 ## 3. `workspaces` and `lists`

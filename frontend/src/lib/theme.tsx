@@ -71,6 +71,19 @@ interface ThemeContextValue {
   setTheme: (theme: ThemeId) => void;
   setMode: (mode: ThemeMode) => void;
   toggleMode: () => void;
+  /**
+   * Bumped by `setTheme`/`setMode` — that is, by the user — and *not* by
+   * `applyRemote`. It is how `ThemeSync` tells a choice someone just made from one
+   * it pushed down from the account, which is the difference between saving a
+   * preference and echoing it back and forth forever.
+   */
+  revision: number;
+  /**
+   * Apply the values stored against the account, without counting as a local
+   * change. Writes localStorage like the setters do, so the pre-paint script in
+   * `index.html` has them on the next load.
+   */
+  applyRemote: (theme: ThemeId, mode: ThemeMode) => void;
 }
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -86,10 +99,16 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  *
  * `index.html` applies the saved values before first paint; without that the page
  * flashes the default theme on every load.
+ *
+ * localStorage is the device's cache, not the record: the account's copy on the
+ * server is what follows the user between devices (see `ThemeSync`). It stays
+ * because a value fetched over the network cannot arrive before first paint, and
+ * the pre-paint script needs something synchronous to read.
  */
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [theme, setThemeState] = useState<ThemeId>(readTheme);
   const [mode, setModeState] = useState<ThemeMode>(readMode);
+  const [revision, setRevision] = useState(0);
 
   // Reflect the current selection onto <html> so themes.css can key off it.
   useEffect(() => {
@@ -101,20 +120,29 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   const setTheme = useCallback((next: ThemeId) => {
     localStorage.setItem(THEME_KEY, next);
     setThemeState(next);
+    setRevision((r) => r + 1);
   }, []);
 
   const setMode = useCallback((next: ThemeMode) => {
     localStorage.setItem(MODE_KEY, next);
     setModeState(next);
+    setRevision((r) => r + 1);
   }, []);
 
   const toggleMode = useCallback(() => {
     setMode(mode === "dark" ? "light" : "dark");
   }, [mode, setMode]);
 
+  const applyRemote = useCallback((nextTheme: ThemeId, nextMode: ThemeMode) => {
+    localStorage.setItem(THEME_KEY, nextTheme);
+    localStorage.setItem(MODE_KEY, nextMode);
+    setThemeState(nextTheme);
+    setModeState(nextMode);
+  }, []);
+
   const value = useMemo(
-    () => ({ theme, mode, setTheme, setMode, toggleMode }),
-    [theme, mode, setTheme, setMode, toggleMode],
+    () => ({ theme, mode, setTheme, setMode, toggleMode, revision, applyRemote }),
+    [theme, mode, setTheme, setMode, toggleMode, revision, applyRemote],
   );
 
   return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;

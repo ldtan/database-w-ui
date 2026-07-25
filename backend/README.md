@@ -157,7 +157,7 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 
 | Area | Endpoints |
 |------|-----------|
-| Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD |
+| Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD; `PATCH …/users/me/settings` (UI preferences, merged onto the stored blob) |
 | Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}` |
 | Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}` |
 | Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side) |
