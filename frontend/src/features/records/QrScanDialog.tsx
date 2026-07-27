@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Html5Qrcode, Html5QrcodeSupportedFormats } from "html5-qrcode";
 import { Button } from "primereact/button";
 import { FileUpload, type FileUploadHandlerEvent } from "primereact/fileupload";
@@ -17,9 +17,28 @@ interface Props {
   error: string | null;
   onScan: (text: string) => void;
   onHide: () => void;
+  /** Keep reading codes after each one, instead of stopping at the first. */
+  continuous?: boolean;
+  /** The session's own status — a tally, a log — shown under the preview. */
+  children?: ReactNode;
+  /** "Cancel" reads wrong once codes have already been accepted. */
+  closeLabel?: string;
 }
 
 const REGION_ID = "qr-scan-region";
+/**
+ * How long the same code is ignored for in continuous mode.
+ *
+ * A camera reports a code ten times a second for as long as it stays in frame, so
+ * without this one badge held up would submit a dozen records. The window is not a
+ * debounce settling on a value: the *first* sighting is what counts and the rest of
+ * the visit is dropped. It also has to expire rather than latch forever — the same
+ * person scanning in again later is a real second record, not a mistake — so five
+ * seconds, long enough to cover holding a badge steady and short enough that a
+ * genuine rescan needs no explaining.
+ */
+const DUPLICATE_WINDOW_MS = 5000;
+const DUPLICATE_HINT_MS = 2000;
 
 function messageOf(err: unknown): string {
   if (typeof err === "string") return err;
@@ -28,7 +47,13 @@ function messageOf(err: unknown): string {
 }
 
 /**
- * Read one QR code, from the camera or from an image.
+ * Read QR codes, from the camera or from an image.
+ *
+ * One code by default, and the parent closes the dialog with it. `continuous` is
+ * the attendance case: a queue of people, each with a badge, and a scanner that
+ * has to stay open across all of them. The difference is only in what counts as a
+ * repeat — see `accept` — because a camera cannot tell "still the same badge" from
+ * "the next person" on its own.
  *
  * The image fallback is not a nicety: `getUserMedia` needs HTTPS (or localhost)
  * and a camera, so on a desktop — where a good half of this app is used — the
@@ -50,9 +75,13 @@ export function QrScanDialog({
   error,
   onScan,
   onHide,
+  continuous = false,
+  children,
+  closeLabel,
 }: Props) {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [duplicate, setDuplicate] = useState(false);
   // The preview's node, captured by a ref callback rather than looked up in a
   // mount effect. PrimeReact's Dialog renders *nothing* on its first commit — it
   // flips its own `maskVisible` state in an effect — so at the moment this
@@ -64,18 +93,54 @@ export function QrScanDialog({
   const scannerRef = useRef<Html5Qrcode | null>(null);
   // Camera operations, serialized. See the note above.
   const chain = useRef<Promise<unknown>>(Promise.resolve());
-  // A camera fires its callback every frame the code stays in view; the parent is
-  // only interested in the first one.
+  // A camera fires its callback every frame the code stays in view; a one-shot
+  // scan is only interested in the first one.
   const handled = useRef(false);
-  // Kept in a ref so the effect below does not restart the camera on every render.
+  // Continuous mode's equivalent: when each code was last accepted, so the same
+  // one held in frame is dropped rather than submitted again and again.
+  const recent = useRef(new Map<string, number>());
+  const hintTimer = useRef<number | undefined>(undefined);
+  // These are read by `accept`, which the camera captured on the *first* render
+  // (see below) — so every value it reads has to come from a ref, or it would be
+  // frozen at whatever it was when the camera started.
   const onScanRef = useRef(onScan);
   onScanRef.current = onScan;
+  const continuousRef = useRef(continuous);
+  continuousRef.current = continuous;
+  const busyRef = useRef(busy);
+  busyRef.current = busy;
 
   function accept(text: string) {
+    // A code read while the parent is still submitting the last one would race it.
+    if (busyRef.current) return;
+
+    if (continuousRef.current) {
+      const now = Date.now();
+      for (const [seen, at] of recent.current) {
+        if (now - at >= DUPLICATE_WINDOW_MS) recent.current.delete(seen);
+      }
+      if (recent.current.has(text)) {
+        // Silence would look like a scanner that had stopped working.
+        setDuplicate(true);
+        window.clearTimeout(hintTimer.current);
+        hintTimer.current = window.setTimeout(
+          () => setDuplicate(false),
+          DUPLICATE_HINT_MS,
+        );
+        return;
+      }
+      recent.current.set(text, now);
+      setDuplicate(false);
+      onScanRef.current(text);
+      return;
+    }
+
     if (handled.current) return;
     handled.current = true;
     onScanRef.current(text);
   }
+
+  useEffect(() => () => window.clearTimeout(hintTimer.current), []);
 
   function startCamera(scanner: Html5Qrcode) {
     return scanner
@@ -122,6 +187,13 @@ export function QrScanDialog({
   // The parent rejected what we read (not JSON, wrong shape). The camera is still
   // running, so let the next code through — otherwise the first bad scan would
   // wedge the dialog on its error message.
+  //
+  // Continuous mode is deliberately *not* re-armed here, and must not be: the code
+  // that failed is very likely still in front of the camera, so forgetting it would
+  // resubmit it ten times a second for as long as it stayed there. Its duplicate
+  // window expiring is the re-arm, and the wait costs nothing — a code rejected for
+  // what it contains will be rejected again on sight, so the fix is a different code
+  // or a record added by hand, never an immediate retry of the same one.
   useEffect(() => {
     if (error) handled.current = false;
   }, [error]);
@@ -174,6 +246,9 @@ export function QrScanDialog({
             <span>Reading the code…</span>
           </div>
         )}
+        {duplicate && !busy && (
+          <Message severity="info" text="Already scanned just now." />
+        )}
         {error && <Message severity="error" text={error} />}
         {cameraError && (
           <Message
@@ -182,6 +257,8 @@ export function QrScanDialog({
           />
         )}
         {fileError && <Message severity="error" text={fileError} />}
+
+        {children}
 
         <div className="flex flex-wrap items-center justify-between gap-2">
           <FileUpload
@@ -194,7 +271,12 @@ export function QrScanDialog({
             uploadHandler={handleFile}
             disabled={busy}
           />
-          <Button label="Cancel" text onClick={onHide} disabled={busy} />
+          <Button
+            label={closeLabel ?? "Cancel"}
+            text
+            onClick={onHide}
+            disabled={busy}
+          />
         </div>
       </div>
     </AppDialog>
