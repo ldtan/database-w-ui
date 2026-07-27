@@ -18,7 +18,7 @@ import { ThemeSwitcher } from "./ThemeSwitcher";
  */
 export function AppSidebar() {
   return (
-    <aside className="app-sidebar">
+    <aside className="app-sidebar" data-tour="nav-rail">
       <div className="px-3 py-3">
         <Link to="/" className="app-brand px-1">
           <span className="app-brand-mark" aria-hidden>
@@ -37,6 +37,7 @@ export function AppSidebar() {
 
       <div
         className="px-3 py-2 flex items-center gap-1"
+        data-tour="nav-account"
         style={{ borderTop: "var(--border-width) solid var(--border)" }}
       >
         <div className="flex-1 min-w-0">

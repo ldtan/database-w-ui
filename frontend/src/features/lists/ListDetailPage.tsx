@@ -519,6 +519,7 @@ export function ListDetailPage() {
                 live together behind one button; the toolbar is then about the
                 data. */}
             <Button
+              data-tour="list-settings"
               label="Settings"
               icon="pi pi-cog"
               outlined
@@ -531,6 +532,7 @@ export function ListDetailPage() {
                 width of their labels. It sits between the secondary controls
                 and the primary one, which stays last. */}
             <Button
+              data-tour="list-more"
               icon="pi pi-ellipsis-h"
               text
               rounded
@@ -566,6 +568,7 @@ export function ListDetailPage() {
                 a QR code doing the typing. */}
             {listActions.has("create") && (
               <SplitButton
+                data-tour="add-record"
                 label="Add record"
                 icon="pi pi-plus"
                 onClick={() => setRecordDialog({ open: true, item: null })}
@@ -594,7 +597,7 @@ export function ListDetailPage() {
           deleted still has its records, and used to lose the search box — and,
           briefly, the sort control — along with them. Only the view-shaped
           controls come and go. */}
-      <div className="toolbar">
+      <div className="toolbar" data-tour="list-toolbar">
         {views.data && views.data.length > 0 && (
           <>
             <ViewBar

@@ -98,7 +98,8 @@ host:
   behind them.
 - [Known gaps, gotchas, and follow-ups](docs/known-gaps.md) — what is deliberately
   unfinished, behavior that surprises people, and the traps waiting for whoever edits the
-  code next. **Read before touching permissions, theming, or the schema.**
+  code next. **Read before touching permissions, theming, the schema, or any control the
+  guide and the in-app tours describe by name.**
 - [Planned features](docs/planned-features.md) — column type conversion, column data
   migration, list ownership transfer, cross-workspace moves, and list cloning: what exists
   to build on, the load-bearing details, and the decisions still open.

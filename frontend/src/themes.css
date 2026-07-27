@@ -204,6 +204,10 @@
   --success-tint: color-mix(in srgb, var(--success) 12%, var(--surface));
   --warn-tint: color-mix(in srgb, var(--warn) 12%, var(--surface));
   --danger-tint: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  /* What a tour dims the app to. Darker than a dialog's mask on purpose: a mask
+     covers something you have left, and this one has a hole in it you are meant
+     to look through. */
+  --tour-dim: hsl(var(--shadow-hsl) / 0.55);
 }
 [data-mode="dark"] {
   --brand-hover: color-mix(in srgb, var(--brand), white 16%);
@@ -232,6 +236,9 @@
   --success-tint: color-mix(in srgb, var(--success) 22%, var(--surface));
   --warn-tint: color-mix(in srgb, var(--warn) 22%, var(--surface));
   --danger-tint: color-mix(in srgb, var(--danger) 22%, var(--surface));
+  /* Near-black over an already-dark app separates less than it does over a white
+     one, so the tour dims harder here to keep the lit element obviously lit. */
+  --tour-dim: hsl(var(--shadow-hsl) / 0.72);
 }
 /* Brutalism does not do soft light. Its elevation is a hard offset block in the
    border colour, and its type is a grotesque — both of which have to be stated
@@ -2075,6 +2082,201 @@ a {
     opacity: 0;
     transform: translateY(4px);
   }
+}
+
+/* ============================================================
+   Onboarding — the help button, and the guided tours.
+
+   The tour sits above the whole app (the rail is z-index 10, the header 9), and
+   below PrimeReact's dialogs at 1100+, which it never shares a screen with.
+   ============================================================ */
+
+/* The button in the corner. Fixed, so it is in the same place on every page and
+   at every scroll position — which is the entire point of it. */
+.help-fab {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 30;
+}
+.help-fab .p-button.p-button-icon-only.p-button-rounded {
+  width: 3rem;
+  height: 3rem;
+  background: var(--brand);
+  border-color: var(--brand);
+  color: var(--brand-contrast);
+  box-shadow: var(--shadow-lg);
+}
+.help-fab .p-button.p-button-icon-only.p-button-rounded:enabled:hover {
+  background: var(--brand);
+  border-color: var(--brand);
+  filter: brightness(1.08);
+}
+/* "There is a tour here you have not taken." A dot rather than a badge with a
+   number: the count is always one or two and never the point. */
+.help-fab-dot {
+  position: absolute;
+  top: 0.1rem;
+  right: 0.1rem;
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  border: 2px solid var(--surface);
+  animation: help-dot 2.4s var(--ease) infinite;
+}
+@keyframes help-dot {
+  0%,
+  70%,
+  100% {
+    transform: scale(1);
+  }
+  85% {
+    transform: scale(1.35);
+  }
+}
+
+.help-panel .p-overlaypanel-content {
+  padding: 0.85rem;
+}
+/* The tips: an icon column and a line of text, at the size of an aside rather
+   than of body copy. */
+.help-tips {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.help-tips li {
+  display: flex;
+  gap: 0.55rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.help-tips li > i {
+  flex-shrink: 0;
+  margin-top: 0.15rem;
+  font-size: 0.8rem;
+  color: var(--brand);
+}
+
+/* Swallows the clicks. A tour is a short thing to be finished or left, not a
+   thing to half-take while the page moves about underneath it — and the
+   spotlight's dimming is a box-shadow, which paints but does not catch a
+   pointer, so this is what the pointer lands on. */
+.tour-blocker {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+}
+/* The dimming, for a step with nothing to point at. */
+.tour-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 1201;
+  background: var(--tour-dim);
+  pointer-events: none;
+  animation: tour-fade 160ms var(--ease) both;
+}
+/* And for a step that has one: an empty box over the element, dimming
+   everything outside itself with a shadow large enough to reach any corner. */
+.tour-spotlight {
+  position: fixed;
+  z-index: 1201;
+  border-radius: var(--radius);
+  pointer-events: none;
+  box-shadow:
+    0 0 0 9999px var(--tour-dim),
+    0 0 0 2px var(--brand),
+    0 0 0 6px var(--focus-ring);
+  transition:
+    top var(--transition),
+    left var(--transition),
+    width var(--transition),
+    height var(--transition);
+}
+.tour-card {
+  position: fixed;
+  z-index: 1202;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  max-height: calc(100vh - 1.5rem);
+  overflow-y: auto;
+  padding: 1rem;
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+  animation: tour-card-in 180ms var(--ease) both;
+}
+.tour-card:focus {
+  outline: none;
+}
+.tour-points {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0;
+  padding-left: 1.1rem;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.tour-points li::marker {
+  color: var(--brand);
+}
+.tour-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: var(--border-width) solid var(--border);
+}
+.tour-footer .p-button {
+  padding: 0.4rem 0.75rem;
+}
+.tour-dots {
+  display: flex;
+  gap: 0.3rem;
+}
+.tour-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--border);
+  transition: background var(--transition), width var(--transition);
+}
+.tour-dot.is-done {
+  background: var(--brand-tint-strong);
+}
+.tour-dot.is-current {
+  width: 1.1rem;
+  background: var(--brand);
+}
+@keyframes tour-fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes tour-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+/* Centred by transform, so it cannot also be animated by one — the two would
+   fight over the property and the card would land off-centre. */
+.tour-card.is-centred {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  animation-name: tour-fade;
 }
 
 /* Scrollbars, so the sidebar and the grid do not each grow a slab of default

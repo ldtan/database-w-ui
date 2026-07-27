@@ -161,6 +161,7 @@ export function WorkspacesPage() {
               onClick={() => setShowDeleted(true)}
             />
             <Button
+              data-tour="new-workspace"
               label="New workspace"
               icon="pi pi-plus"
               onClick={() => setCreating(true)}
@@ -205,9 +206,12 @@ export function WorkspacesPage() {
         />
       ) : (
         <div className="card-grid">
-          {shownWorkspaces.map((ws) => (
+          {/* The tour points at one card rather than the grid: a spotlight the
+              size of forty of them lights the page rather than a thing on it. */}
+          {shownWorkspaces.map((ws, i) => (
             <div
               key={ws.uuid}
+              data-tour={i === 0 ? "workspace-card" : undefined}
               className="surface-card link-card p-3 flex items-start justify-between gap-2"
             >
               <Link

@@ -8,6 +8,7 @@ import { useCurrentUser } from "../../lib/auth";
 import { EmptyState } from "../../components/EmptyState";
 import { SkeletonCards } from "../../components/Skeleton";
 import { fullName, useMyPerson } from "../../lib/people";
+import { useOnboarding } from "../onboarding/OnboardingProvider";
 import type { ListRead, Workspace } from "../../lib/types";
 
 /**
@@ -150,6 +151,7 @@ function SectionHeader({
 export function DashboardPage() {
   const me = useCurrentUser();
   const person = useMyPerson();
+  const { startTour } = useOnboarding();
   // The first name when there is a profile, the username when there is not —
   // "Welcome, ana" is a greeting; "Welcome, a.cruz.2" is a login prompt.
   const greeting = person.data?.first_name || me?.username;
@@ -174,7 +176,7 @@ export function DashboardPage() {
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 1100 }}>
       {/* Greeting */}
-      <section className="hero flex flex-col gap-4">
+      <section className="hero flex flex-col gap-4" data-tour="dash-hero">
         <div className="flex flex-col gap-1.5">
           <h1 className="text-2xl font-semibold">
             Welcome{greeting ? `, ${greeting}` : ""} 👋
@@ -197,6 +199,14 @@ export function DashboardPage() {
           <Link to="/guide" className="no-underline">
             <Button label="Read the guide" icon="pi pi-book" outlined />
           </Link>
+          {/* The tour is offered from the help button on every page, but the
+              greeting is where somebody who has just arrived is looking. */}
+          <Button
+            label="Show me around"
+            icon="pi pi-compass"
+            text
+            onClick={() => startTour("basics")}
+          />
         </div>
       </section>
 
