@@ -27,7 +27,8 @@ adding, renaming, or removing a column never requires a database migration.
   create lists immediately.
 - **Lists** — tables (scoped to a workspace) with settings and a designated primary/display
   column. Creating a list auto-provisions a default grid view and create/update forms.
-- **Columns** — typed fields: `text`, `long_text`, `number`, `checkbox`, `choice`,
+- **Columns** — typed fields: `text` (one line or several, per `config.text_mode`),
+  `number`, `checkbox`, `choice`,
   `lookup` (link to another list's rows), `link` (a URL, restricted to safe schemes),
   `user` / `group` (reference an account or a group), `date`, `time`, `datetime`.
   Type-specific settings live in a per-column JSONB `config`.

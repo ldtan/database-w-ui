@@ -67,10 +67,17 @@ export type PermissionAction = Schemas["Action"];
 
 // ---- The config blobs: shapes the backend validates but does not publish ----
 
+/** How a text column is edited. Unset means "single" — see TextMode below. */
+export type TextMode = "single" | "multiline";
+
 export interface ColumnConfig {
   required?: boolean;
   default?: unknown;
   onupdate?: unknown;
+  /** Text columns only. One line or several is an editing choice, not a storage
+   *  one, so it lives here rather than in `type` — which also means it can be
+   *  changed after the column exists, as `type` cannot. */
+  text_mode?: TextMode;
   /** Choice options are plain labels; a cell stores the label itself. */
   options?: string[];
   target_list_uuid?: string;

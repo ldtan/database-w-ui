@@ -400,7 +400,6 @@ class ColumnService:
             referenceable = {
                 ColumnType.number,
                 ColumnType.text,
-                ColumnType.long_text,
             }
             for name in sorted(column_refs(formula)):
                 target = by_name.get(name)

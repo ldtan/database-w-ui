@@ -12,12 +12,23 @@ import { PrincipalCell, type PrincipalType } from "../principals/PrincipalContro
  * bug waiting to happen (it already would have been: link and temporal
  * columns each have rules that live only here).
  */
+/**
+ * "compact" is a cell in a row of them — a grid cell, a card field — where every
+ * value gets one line and the row stays the height of a row. "full" is a value
+ * given the whole width of a dialog, where a multiline column may use it.
+ *
+ * The default is compact because that is what a table needs, and a value that
+ * silently grew to twenty lines inside a grid row would be the surprising one.
+ */
+export type CellVariant = "compact" | "full";
+
 export function renderCell(
   column: Column,
   row: ListItem,
   listUuid: string,
   principalUuids: Record<PrincipalType, string[]>,
   lookupUuids: Map<string, string[]>,
+  variant: CellVariant = "compact",
 ) {
   const value = row.data?.[column.uuid];
   // Reference cells are handed the uuids the *whole page* holds, and resolve them
@@ -70,6 +81,16 @@ export function renderCell(
   // Otherwise a datetime renders as its raw stored string, seconds and all.
   if (isTemporal(column.type)) {
     return displayTemporal(column.type, value);
+  }
+  // A multiline column's line breaks are content, and collapsing them was the
+  // one thing `long_text` never got right. Honoured only where there is room:
+  // in the grid the value keeps its single line.
+  if (
+    variant === "full" &&
+    column.type === "text" &&
+    column.config.text_mode === "multiline"
+  ) {
+    return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
   }
   return String(value);
 }

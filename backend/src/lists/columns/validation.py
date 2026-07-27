@@ -21,6 +21,8 @@ _TEMPORAL = {
     ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
 }
 _NUMBER_FORMATS = {"plain", "currency", "percent"}
+# How a text column is edited. Unset means "single"; see ColumnConfig.text_mode.
+TEXT_MODES = ("single", "multiline")
 
 # A link cell is rendered as an anchor, so its scheme is a security boundary,
 # not a preference: `javascript:`/`data:` URLs would be stored XSS. Columns may
@@ -111,7 +113,12 @@ def resolve_choice_options(config: dict, existing: Optional[dict]) -> list[str]:
 
 def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
     """Validate that a column's own settings are well-formed (min <= max, etc.)."""
-    if column_type in (ColumnType.text, ColumnType.long_text):
+    if column_type == ColumnType.text:
+        mode = config.get("text_mode")
+        if mode is not None and mode not in TEXT_MODES:
+            raise ValidationError(
+                f"'text_mode' must be one of {', '.join(TEXT_MODES)}"
+            )
         for key in ("min_length", "max_length"):
             v = config.get(key)
             if v is not None and (isinstance(v, bool) or not isinstance(v, int) or v < 0):
@@ -189,7 +196,7 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
 
 def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> None:
     """Validate a non-lookup value against its column type and constraints."""
-    if column_type in (ColumnType.text, ColumnType.long_text):
+    if column_type == ColumnType.text:
         if not isinstance(value, str):
             _expect(name, "a string")
         lo, hi = config.get("min_length"), config.get("max_length")

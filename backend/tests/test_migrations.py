@@ -82,6 +82,10 @@ async def _downgrade_base() -> None:
     await asyncio.to_thread(command.downgrade, _alembic_config(), "base")
 
 
+async def _upgrade_to(revision: str) -> None:
+    await asyncio.to_thread(command.upgrade, _alembic_config(), revision)
+
+
 async def test_migrations_produce_the_models_schema(migrated_url):
     """Catches a model change with no revision, and a model missing from env.py."""
     await _upgrade_head()
@@ -135,6 +139,132 @@ async def test_the_circular_foreign_key_is_created(migrated_url):
     await engine.dispose()
 
     assert "fk_lists_primary_column_id" in names
+
+
+async def test_long_text_columns_become_multiline_text(migrated_url):
+    """The data half of merge_long_text_into_text.
+
+    Every other migration test starts from an empty database, where a data
+    migration is a no-op that passes for the wrong reason. This one stops at the
+    revision before, plants a `long_text` column with a record in it, and then
+    upgrades — so what is asserted is the rewrite itself: the type moves, the
+    editor is preserved as `text_mode`, and the cell is not touched (both types
+    always held the same plain string, so any change to it would be a bug).
+
+    The soft-deleted column matters as much as the live one: leaving it behind
+    would let a restore resurrect a type ColumnType no longer has, which raises
+    on the next read rather than failing here.
+    """
+    await _upgrade_to("d2f6a8c41b93")  # the revision before the merge
+
+    engine = create_async_engine(migrated_url.render_as_string(hide_password=False))
+    body = "line one\nline two"
+    async with engine.begin() as conn:
+        # created_at/updated_at default in Python, not in the database, so raw
+        # inserts have to supply them.
+        await conn.execute(
+            sa.text(
+                "INSERT INTO users"
+                " (uuid, username, email, password, is_active, settings,"
+                "  created_at, updated_at)"
+                " VALUES (gen_random_uuid(), 'u', 'u@example.com', 'x', true,"
+                "         '{}'::jsonb, now(), now())"
+            )
+        )
+        await conn.execute(
+            sa.text(
+                "INSERT INTO workspaces"
+                " (uuid, name, display_name, owner_id, settings, created_at, updated_at)"
+                " SELECT gen_random_uuid(), 'w', 'W', id, '{}'::jsonb, now(), now()"
+                "   FROM users"
+            )
+        )
+        await conn.execute(
+            sa.text(
+                "INSERT INTO lists"
+                " (uuid, name, display_name, workspace_id, settings, created_at, updated_at)"
+                " SELECT gen_random_uuid(), 'l', 'L', id, '{}'::jsonb, now(), now()"
+                "   FROM workspaces"
+            )
+        )
+        # One live, one soft-deleted, one already-`text` column that must not move.
+        await conn.execute(
+            sa.text(
+                "INSERT INTO columns"
+                " (uuid, name, display_name, type, position, config, list_id,"
+                "  deleted_at, created_at, updated_at)"
+                " SELECT gen_random_uuid(), v.n, v.n, v.t::column_type, 0,"
+                "        '{\"required\": true}'::jsonb, l.id, v.d, now(), now()"
+                "   FROM lists l, (VALUES"
+                "     ('notes', 'long_text', NULL::timestamptz),"
+                "     ('old', 'long_text', now()),"
+                "     ('title', 'text', NULL)"
+                "   ) AS v(n, t, d)"
+            )
+        )
+        await conn.execute(
+            sa.text(
+                "INSERT INTO list_items"
+                " (uuid, list_id, data, created_at, updated_at)"
+                " SELECT gen_random_uuid(), l.id,"
+                # ::text or asyncpg cannot infer the parameter's type in here.
+                "        jsonb_build_object(c.uuid::text, :body ::text), now(), now()"
+                "   FROM lists l JOIN columns c ON c.list_id = l.id"
+                "  WHERE c.name = 'notes'"
+            ),
+            {"body": body},
+        )
+    await engine.dispose()
+
+    await _upgrade_head()
+
+    engine = create_async_engine(migrated_url.render_as_string(hide_password=False))
+    async with engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                sa.text(
+                    "SELECT name, type::text AS type, config,"
+                    "       deleted_at IS NOT NULL AS deleted"
+                    "  FROM columns ORDER BY name"
+                )
+            )
+        ).all()
+        by_name = {r.name: r for r in rows}
+        cell = (
+            await conn.execute(
+                sa.text(
+                    "SELECT i.data ->> c.uuid::text FROM list_items i"
+                    "  JOIN columns c ON c.list_id = i.list_id AND c.name = 'notes'"
+                )
+            )
+        ).scalar()
+        labels = (
+            await conn.execute(
+                sa.text(
+                    "SELECT e.enumlabel FROM pg_enum e JOIN pg_type t"
+                    " ON t.oid = e.enumtypid WHERE t.typname = 'column_type'"
+                )
+            )
+        ).scalars().all()
+    await engine.dispose()
+
+    assert by_name["notes"].type == "text"
+    assert by_name["notes"].config["text_mode"] == "multiline"
+    # The rewrite adds a key; it does not replace the config.
+    assert by_name["notes"].config["required"] is True
+
+    assert by_name["old"].deleted
+    assert by_name["old"].type == "text"
+    assert by_name["old"].config["text_mode"] == "multiline"
+
+    # A column that was already `text` keeps its implicit single-line editor.
+    assert by_name["title"].type == "text"
+    assert "text_mode" not in by_name["title"].config
+
+    assert cell == body, "record cells must be untouched"
+    # Deliberately left on the enum: Postgres cannot drop a label, and find_drift
+    # ignores extras. See the migration's docstring.
+    assert "long_text" in labels
 
 
 async def test_upgrade_then_downgrade_is_clean(migrated_url):

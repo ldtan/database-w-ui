@@ -82,7 +82,16 @@ export function RecordViewDialog({
                   {label}
                 </span>
                 <span className="min-w-0 flex-1 break-words">
-                  {renderCell(column, item, listUuid, principalUuids, lookupUuids)}
+                  {/* "full": this is the one surface with room to show a
+                      multiline value as more than one line. */}
+                  {renderCell(
+                    column,
+                    item,
+                    listUuid,
+                    principalUuids,
+                    lookupUuids,
+                    "full",
+                  )}
                 </span>
               </div>
             ))}

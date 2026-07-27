@@ -136,8 +136,7 @@ function Callout({
  *  labels themselves come from the same list the "Add column" menu uses, so they
  *  can never drift from what the app actually offers. */
 const TYPE_HELP: Record<string, string> = {
-  text: "A short line of writing — a name, a title, a reference number.",
-  long_text: "Several lines of writing — notes, a description, an address.",
+  text: "Writing — a name, a title, a reference number. Set it to accept several lines instead of one when it holds notes, a description or an address; you can change that later without disturbing what is already stored.",
   number: "A number you can total or compare. You can set a smallest and largest allowed value, or require whole numbers only.",
   checkbox: "A simple yes/no, on/off tick — “Paid?”, “Active?”.",
   choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording.",
@@ -356,7 +355,7 @@ export function GuidePage() {
           <li>Click <Ui>Add column</Ui>.</li>
           <li>
             Give it a name (e.g. <em>Full name</em>) and pick a <Ui>Type</Ui> from
-            the menu (for a name, <Ui>Single line text</Ui>).
+            the menu (for a name, <Ui>Text</Ui>).
           </li>
           <li>
             Fill in any extra settings that appear for that type, then click{" "}
@@ -366,11 +365,11 @@ export function GuidePage() {
         <p>For our Contacts list, you might add:</p>
         <ul className="flex flex-col gap-1">
           <li>
-            <em>Full name</em> — <Ui>Single line text</Ui>, and tick <Ui>Required</Ui>{" "}
+            <em>Full name</em> — <Ui>Text</Ui>, and tick <Ui>Required</Ui>{" "}
             so no contact is nameless.
           </li>
           <li>
-            <em>Email</em> — <Ui>Single line text</Ui>, and tick <Ui>Unique</Ui> so
+            <em>Email</em> — <Ui>Text</Ui>, and tick <Ui>Unique</Ui> so
             the same address can’t be added twice.
           </li>
           <li>
@@ -581,8 +580,8 @@ export function GuidePage() {
           A formula refers to a column by its <strong>short name</strong> — the one
           shown in brackets beside it in the columns list, like{" "}
           <Code>unit_price</Code> — not by its pretty display name. Only three kinds
-          of column can be named: <strong>Number</strong>,{" "}
-          <strong>Single line text</strong>, and <strong>Long text</strong>. Dates,
+          of column can be named: <strong>Number</strong> and{" "}
+          <strong>Text</strong> (either input style). Dates,
           choices, tick boxes, people, and linked columns can’t be used in a
           formula yet, and neither can another calculated column.
         </p>

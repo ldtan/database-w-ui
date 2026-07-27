@@ -9,6 +9,7 @@ import { Checkbox } from "primereact/checkbox";
 import { Calendar } from "primereact/calendar";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { SelectButton } from "primereact/selectbutton";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
@@ -17,7 +18,19 @@ import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
-import type { Column, ColumnType, ListRead, Workspace } from "../../lib/types";
+import type {
+  Column,
+  ColumnType,
+  ListRead,
+  TextMode,
+  Workspace,
+} from "../../lib/types";
+
+// What used to be the choice between the `text` and `long_text` column types.
+const TEXT_MODE_OPTIONS: { label: string; value: TextMode }[] = [
+  { label: "Single line", value: "single" },
+  { label: "Multiple lines", value: "multiline" },
+];
 
 // The dynamic default/on-update token a type auto-fills with, and its human label.
 // Temporal columns stamp the current date/time; a user column stamps the actor.
@@ -84,9 +97,10 @@ export function ColumnDialog({
   >(null);
   const [multiple, setMultiple] = useState(false);
   const [formula, setFormula] = useState("");
+  const [textMode, setTextMode] = useState<TextMode>("single");
   // Default value — one piece of state per family of column type; only the one
   // matching `type` is read when the config is built.
-  const [defaultText, setDefaultText] = useState(""); // text / long_text / link
+  const [defaultText, setDefaultText] = useState(""); // text / link
   const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
   const [defaultChecked, setDefaultChecked] = useState(false);
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
@@ -131,6 +145,7 @@ export function ColumnDialog({
       setTargetFilterColumnUuid(null);
       setMultiple(false);
       setFormula("");
+      setTextMode("single");
       resetDefaults();
       return;
     }
@@ -157,6 +172,8 @@ export function ColumnDialog({
     );
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
+    // Unset is single line — the shape every text column had before text_mode.
+    setTextMode(config.text_mode === "multiline" ? "multiline" : "single");
 
     // Seed the default/on-update controls from the stored config.
     resetDefaults();
@@ -272,8 +289,7 @@ export function ColumnDialog({
   const referenceableNames = (ownColumns.data ?? [])
     .filter(
       (c) =>
-        (c.type === "number" || c.type === "text" || c.type === "long_text") &&
-        c.uuid !== column?.uuid,
+        (c.type === "number" || c.type === "text") && c.uuid !== column?.uuid,
     )
     .map((c) => c.name);
 
@@ -337,8 +353,12 @@ export function ColumnDialog({
             required,
             unique: multiValued ? false : unique,
           };
-      if (type === "text" || type === "long_text") {
+      if (type === "text") {
         config.max_length = maxLength;
+        // Always sent, for the same reason as `unique`: the PATCH merges, so an
+        // omitted key would keep a stored "multiline" and make the switch back
+        // to a single line impossible.
+        config.text_mode = textMode;
       }
       if (type === "number") {
         config.min = min;
@@ -365,7 +385,7 @@ export function ColumnDialog({
       // effect: a config PATCH merges, so an omitted key would keep the old default.
       if (!isCalculated && type !== "lookup" && type !== "group") {
         let defaultValue: unknown = null;
-        if (type === "text" || type === "long_text" || type === "link")
+        if (type === "text" || type === "link")
           defaultValue = defaultText.trim() || null;
         else if (type === "number") defaultValue = defaultNumber;
         else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
@@ -475,17 +495,37 @@ export function ColumnDialog({
           )}
         </div>
 
-        {(type === "text" || type === "long_text") && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="col-maxlen">Max length (optional)</label>
-            <InputNumber
-              inputId="col-maxlen"
-              value={maxLength}
-              onValueChange={(e) => setMaxLength(e.value ?? null)}
-              min={1}
-              useGrouping={false}
-            />
-          </div>
+        {type === "text" && (
+          <>
+            <div className="flex flex-col gap-2">
+              <label htmlFor="col-textmode">Input</label>
+              <SelectButton
+                id="col-textmode"
+                value={textMode}
+                options={TEXT_MODE_OPTIONS}
+                onChange={(e) => e.value && setTextMode(e.value as TextMode)}
+                allowEmpty={false}
+              />
+              {/* Deliberately not disabled while editing, unlike the type above:
+                  both modes store the same string, so switching is a config
+                  change and existing records are already in the right shape. */}
+              <small style={{ color: "var(--text-muted)" }}>
+                Only how the field is filled in. Both store plain text, so this can
+                be changed later without touching existing records.
+              </small>
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <label htmlFor="col-maxlen">Max length (optional)</label>
+              <InputNumber
+                inputId="col-maxlen"
+                value={maxLength}
+                onValueChange={(e) => setMaxLength(e.value ?? null)}
+                min={1}
+                useGrouping={false}
+              />
+            </div>
+          </>
         )}
 
         {type === "number" && (
@@ -749,15 +789,29 @@ export function ColumnDialog({
             {type !== "checkbox" && (
               <label htmlFor="col-default">Default value</label>
             )}
-            {(type === "text" || type === "long_text" || type === "link") && (
-              <InputText
+            {/* The default is edited the way the cell itself will be, so a
+                multiline column's default can actually contain line breaks. */}
+            {type === "text" && textMode === "multiline" ? (
+              <InputTextarea
                 id="col-default"
                 value={defaultText}
                 onChange={(e) => setDefaultText(e.target.value)}
-                placeholder={
-                  type === "link" ? "https://example.com" : "Used when left blank"
-                }
+                rows={3}
+                placeholder="Used when left blank"
               />
+            ) : (
+              (type === "text" || type === "link") && (
+                <InputText
+                  id="col-default"
+                  value={defaultText}
+                  onChange={(e) => setDefaultText(e.target.value)}
+                  placeholder={
+                    type === "link"
+                      ? "https://example.com"
+                      : "Used when left blank"
+                  }
+                />
+              )
             )}
             {type === "number" && (
               <InputNumber
