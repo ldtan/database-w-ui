@@ -75,7 +75,9 @@ export function NameFields({
         />
         <small
           id={`${idPrefix}-name-help`}
-          style={{ color: invalid ? "var(--red-500)" : "var(--text-muted)" }}
+          // --danger, not PrimeReact's --red-500: that one is a frozen light-mode
+          // value from the base theme and does not lighten on a dark surface.
+          style={{ color: invalid ? "var(--danger)" : "var(--text-muted)" }}
         >
           {invalid
             ? "Start with a lowercase letter; then lowercase letters, digits and underscores only."

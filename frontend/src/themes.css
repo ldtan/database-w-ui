@@ -138,11 +138,35 @@
      danger button — this one has to clear contrast against --surface, so it goes
      darker in light mode and lighter in dark. */
   --danger: #dc2626;
+  /* Status hues for Message and Toast. These are deliberately *not* part of a
+     palette: a warning is amber in every theme, or it stops reading as a warning.
+     Only the mode moves them, for the same contrast reason as --danger.
+
+     The base theme fills those components with translucent pastels
+     (rgba(219,234,254,0.7)), which composite against a dark surface into muddy
+     near-black. Mixing the hue *into* --surface instead keeps the fill a fixed
+     distance from whatever it sits on, in either mode. */
+  --info: #2563eb;
+  --success: #15803d;
+  --warn: #b45309;
+  --info-tint: color-mix(in srgb, var(--info) 12%, var(--surface));
+  --success-tint: color-mix(in srgb, var(--success) 12%, var(--surface));
+  --warn-tint: color-mix(in srgb, var(--warn) 12%, var(--surface));
+  --danger-tint: color-mix(in srgb, var(--danger) 12%, var(--surface));
 }
 [data-mode="dark"] {
   --brand-hover: color-mix(in srgb, var(--brand), white 16%);
   --brand-tint: color-mix(in srgb, var(--brand) 28%, var(--surface));
   --danger: #f87171;
+  --info: #60a5fa;
+  --success: #4ade80;
+  --warn: #fbbf24;
+  /* A heavier mix in dark, matching --brand-tint: the same 12% that reads as a
+     tint on white is invisible on a dark surface. */
+  --info-tint: color-mix(in srgb, var(--info) 22%, var(--surface));
+  --success-tint: color-mix(in srgb, var(--success) 22%, var(--surface));
+  --warn-tint: color-mix(in srgb, var(--warn) 22%, var(--surface));
+  --danger-tint: color-mix(in srgb, var(--danger) 22%, var(--surface));
 }
 [data-mode="light"] {
   color-scheme: light;
@@ -636,9 +660,188 @@ a {
 .p-inputgroup-addon {
   color: var(--text-muted);
 }
+/* The rule above only recolours the addon's text; the base theme still supplies
+   its light grey fill and border (#f3f4f6 / #d1d5db), so it needs both here. */
+.p-inputgroup-addon {
+  background: var(--surface-2);
+  border-color: var(--border);
+}
 .text-faint {
   color: var(--text-faint);
 }
 .text-danger {
   color: var(--danger);
+}
+
+/* ============================================================
+   Tabs
+
+   The list settings dialog is the only TabView in the app, and without these it
+   was a themed dark frame wrapping a solid white tab strip: the base theme paints
+   the nav, every link and the panels #ffffff and highlights the active tab in its
+   own cyan, none of which move with the palette.
+   ============================================================ */
+.p-tabview .p-tabview-nav,
+.p-tabview .p-tabview-panels,
+.p-tabview .p-tabview-nav li .p-tabview-nav-link {
+  background: var(--surface);
+}
+.p-tabview .p-tabview-nav {
+  border-color: var(--border);
+}
+.p-tabview .p-tabview-panels {
+  color: var(--text);
+}
+.p-tabview .p-tabview-nav li .p-tabview-nav-link {
+  color: var(--text-muted);
+  border-color: transparent transparent var(--border) transparent;
+}
+.p-tabview .p-tabview-nav li:not(.p-highlight):not(.p-disabled):hover .p-tabview-nav-link {
+  background: var(--hover);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.p-tabview .p-tabview-nav li.p-highlight .p-tabview-nav-link {
+  background: var(--surface);
+  border-color: var(--brand);
+  color: var(--brand);
+}
+.p-tabview .p-tabview-nav li .p-tabview-nav-link:not(.p-disabled):focus-visible {
+  box-shadow: inset 0 0 0 0.2rem var(--focus-ring);
+}
+/* Only present once the tabs overflow and have to be scrolled. */
+.p-tabview .p-tabview-nav-btn.p-link {
+  background: var(--surface);
+  color: var(--brand);
+}
+.p-tabview .p-tabview-nav-btn.p-link:focus-visible {
+  box-shadow: inset 0 0 0 0.2rem var(--focus-ring);
+}
+
+/* ============================================================
+   Sidebar (the mobile nav drawer)
+
+   Its contents were already themed, so on a dark palette this was near-white
+   text on the base theme's hardcoded #ffffff panel — invisible rather than
+   merely wrong.
+   ============================================================ */
+.p-sidebar {
+  background: var(--surface);
+  color: var(--text);
+}
+.p-sidebar .p-sidebar-header .p-sidebar-close,
+.p-sidebar .p-sidebar-header .p-sidebar-icon {
+  color: var(--text-muted);
+}
+.p-sidebar .p-sidebar-header .p-sidebar-close:enabled:hover,
+.p-sidebar .p-sidebar-header .p-sidebar-icon:enabled:hover {
+  color: var(--text);
+  background: var(--hover);
+}
+.p-sidebar .p-sidebar-header .p-sidebar-close:focus-visible,
+.p-sidebar .p-sidebar-header .p-sidebar-icon:focus-visible {
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+
+/* ============================================================
+   Message / Toast
+
+   One block for both: they are the same four severities with different class
+   names. The severity hue carries the left border and the icon; the body text is
+   plain --text, which reads better than the base theme's coloured-text-on-pastel
+   and does not have to clear contrast against its own tint.
+   ============================================================ */
+.p-message.p-message-info,
+.p-toast .p-toast-message.p-toast-message-info {
+  background: var(--info-tint);
+  border-color: var(--info);
+  color: var(--text);
+}
+.p-message.p-message-info .p-message-icon,
+.p-toast .p-toast-message.p-toast-message-info .p-toast-message-icon {
+  color: var(--info);
+}
+.p-message.p-message-success,
+.p-toast .p-toast-message.p-toast-message-success {
+  background: var(--success-tint);
+  border-color: var(--success);
+  color: var(--text);
+}
+.p-message.p-message-success .p-message-icon,
+.p-toast .p-toast-message.p-toast-message-success .p-toast-message-icon {
+  color: var(--success);
+}
+.p-message.p-message-warn,
+.p-toast .p-toast-message.p-toast-message-warn {
+  background: var(--warn-tint);
+  border-color: var(--warn);
+  color: var(--text);
+}
+.p-message.p-message-warn .p-message-icon,
+.p-toast .p-toast-message.p-toast-message-warn .p-toast-message-icon {
+  color: var(--warn);
+}
+.p-message.p-message-error,
+.p-toast .p-toast-message.p-toast-message-error {
+  background: var(--danger-tint);
+  border-color: var(--danger);
+  color: var(--text);
+}
+.p-message.p-message-error .p-message-icon,
+.p-toast .p-toast-message.p-toast-message-error .p-toast-icon-close,
+.p-toast .p-toast-message.p-toast-message-error .p-toast-message-icon {
+  color: var(--danger);
+}
+/* Close buttons: the base theme tints them with the severity colour and hovers
+   them white, both of which fight a dark surface. */
+.p-message .p-message-close,
+.p-toast .p-toast-message .p-toast-icon-close {
+  color: var(--text-muted);
+}
+.p-message .p-message-close:hover,
+.p-toast .p-toast-message .p-toast-icon-close:hover {
+  background: color-mix(in srgb, var(--text) 12%, transparent);
+  color: var(--text);
+}
+.p-message .p-message-close:focus-visible,
+.p-toast .p-toast-message .p-toast-icon-close:focus-visible {
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+
+/* ============================================================
+   Divider / Password panel / Tooltip
+   ============================================================ */
+/* The label chip that punches through the rule; opaque white by default, so on a
+   dark dialog it was a bright gap in the middle of the line. */
+.p-divider .p-divider-content {
+  background-color: var(--surface);
+  color: var(--text-muted);
+}
+
+.p-password-panel {
+  background: var(--surface);
+  color: var(--text);
+  border: var(--border-width) solid var(--border);
+}
+.p-password-panel .p-password-meter {
+  background: var(--surface-2);
+}
+
+/* A tooltip is meant to invert against the page, so it reads the two tokens
+   backwards on purpose: dark-on-light in light mode, light-on-dark in dark. */
+.p-tooltip .p-tooltip-text {
+  background: var(--text);
+  color: var(--surface);
+}
+.p-tooltip.p-tooltip-right .p-tooltip-arrow {
+  border-right-color: var(--text);
+}
+.p-tooltip.p-tooltip-left .p-tooltip-arrow {
+  border-left-color: var(--text);
+}
+.p-tooltip.p-tooltip-top .p-tooltip-arrow {
+  border-top-color: var(--text);
+}
+.p-tooltip.p-tooltip-bottom .p-tooltip-arrow {
+  border-bottom-color: var(--text);
 }
