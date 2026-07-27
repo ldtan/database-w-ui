@@ -26,10 +26,12 @@ import type {
   Workspace,
 } from "../../lib/types";
 
-// What used to be the choice between the `text` and `long_text` column types.
+// The first two are what used to be the `text` and `long_text` column types.
+// "Rich text" is the one that changes what is stored — HTML, not plain text.
 const TEXT_MODE_OPTIONS: { label: string; value: TextMode }[] = [
   { label: "Single line", value: "single" },
   { label: "Multiple lines", value: "multiline" },
+  { label: "Rich text", value: "rich" },
 ];
 
 // The dynamic default/on-update token a type auto-fills with, and its human label.
@@ -173,7 +175,11 @@ export function ColumnDialog({
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
     // Unset is single line — the shape every text column had before text_mode.
-    setTextMode(config.text_mode === "multiline" ? "multiline" : "single");
+    setTextMode(
+      config.text_mode === "multiline" || config.text_mode === "rich"
+        ? config.text_mode
+        : "single",
+    );
 
     // Seed the default/on-update controls from the stored config.
     resetDefaults();
@@ -507,11 +513,12 @@ export function ColumnDialog({
                 allowEmpty={false}
               />
               {/* Deliberately not disabled while editing, unlike the type above:
-                  both modes store the same string, so switching is a config
-                  change and existing records are already in the right shape. */}
+                  every mode stores a string, so switching is a config change and
+                  existing records are already in the right shape. */}
               <small style={{ color: "var(--text-muted)" }}>
-                Only how the field is filled in. Both store plain text, so this can
-                be changed later without touching existing records.
+                {textMode === "rich"
+                  ? "A small editor with bold, italic, lists, quotes and links. Existing plain text is kept, and switching back to plain shows the words without their formatting."
+                  : "How the field is filled in. Both store plain text, so this can be changed later without touching existing records."}
               </small>
             </div>
 
@@ -790,8 +797,11 @@ export function ColumnDialog({
               <label htmlFor="col-default">Default value</label>
             )}
             {/* The default is edited the way the cell itself will be, so a
-                multiline column's default can actually contain line breaks. */}
-            {type === "text" && textMode === "multiline" ? (
+                multiline column's default can actually contain line breaks. A
+                rich column gets the plain box too rather than a second editor:
+                a default is a starting sentence, not a formatted document, and
+                it is sanitised on write like anything else. */}
+            {type === "text" && textMode !== "single" ? (
               <InputTextarea
                 id="col-default"
                 value={defaultText}

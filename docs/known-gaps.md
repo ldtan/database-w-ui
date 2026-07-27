@@ -202,6 +202,28 @@ Two consequences worth knowing before extending it:
   is ever encountered anyway (a race, a hand-edited config), the picker, the record dialog
   and the write validation all treat the column as a plain lookup rather than erroring.
 
+## 8. Rich text is HTML in a cell, and some things treat it as text
+
+A `text` column in `rich` mode stores HTML. Sanitising is on the **write** path
+(`ListItemService._validate_data` -> `columns/richtext.py`), so it covers direct API
+writes and CSV import as well as the editor, and rendering it back is safe because of
+that and only because of that. Two places still see the markup:
+
+- **Export writes the raw HTML.** `_csv_cell` has no text-type special case, so a CSV of a
+  rich column contains `<p>` tags, and re-importing that file round-trips them back through
+  the sanitiser unchanged. That is at least lossless; it is just not pretty in a spreadsheet.
+- **Search matches tag names.** `?q=` is `data->>key ILIKE`, so searching for `strong` finds
+  every bold cell. Filters and sorts on a rich column compare markup for the same reason.
+
+Neither is a correctness bug and both are cheap to live with. The fix for both is the same
+one: store a `to_text` projection alongside the HTML, which is a schema change and was not
+worth it for a first cut. `min_length`/`max_length` already measure the visible text, not
+the markup, so limits are not affected.
+
+The allowlist in `richtext.ALLOWED_TAGS` and the toolbar in `RecordFields.RICH_TOOLBAR` are
+two halves of one decision and must be changed together: a toolbar button whose tag the
+sanitiser drops looks like it works and then silently loses the formatting on save.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

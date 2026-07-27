@@ -14,6 +14,7 @@
 import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
 import { Dropdown } from "primereact/dropdown";
+import { Editor } from "primereact/editor";
 import { InputNumber } from "primereact/inputnumber";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
@@ -22,6 +23,49 @@ import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
 import { nestedDescendants, type ResolvedField } from "./recordValues";
+
+/**
+ * The rich text toolbar, spelled out rather than left to Quill's default.
+ *
+ * Quill's default offers colours, fonts, sizes, images and embeds. Every one of
+ * those is either a tag the sanitiser drops on the way in — so the button would
+ * appear to work and then silently lose the formatting — or, for images, a way
+ * to paste a megabyte of base64 into a JSONB cell. This is exactly the set that
+ * survives ALLOWED_TAGS in columns/richtext.py, and the two must be kept in step.
+ */
+const RICH_TOOLBAR = (
+  <>
+    {/* Grouped so that on a narrow dialog the toolbar wraps between groups
+        rather than leaving one button stranded on a line of its own. */}
+    <span className="ql-formats">
+      <select className="ql-header" defaultValue="">
+        <option value="1" />
+        <option value="2" />
+        <option value="3" />
+        <option value="" />
+      </select>
+    </span>
+    <span className="ql-formats">
+      <button aria-label="Bold" className="ql-bold" />
+      <button aria-label="Italic" className="ql-italic" />
+      <button aria-label="Underline" className="ql-underline" />
+      <button aria-label="Strikethrough" className="ql-strike" />
+    </span>
+    <span className="ql-formats">
+      <button aria-label="Bulleted list" className="ql-list" value="bullet" />
+      <button aria-label="Numbered list" className="ql-list" value="ordered" />
+      <button aria-label="Quote" className="ql-blockquote" />
+      {/* ql-code (inline `<code>`), not ql-code-block: a Quill code block is a
+          pair of nested divs carrying their meaning in class names, and the
+          sanitiser drops both — that button would lose its formatting on save. */}
+      <button aria-label="Code" className="ql-code" />
+    </span>
+    <span className="ql-formats">
+      <button aria-label="Link" className="ql-link" />
+      <button aria-label="Remove formatting" className="ql-clean" />
+    </span>
+  </>
+);
 
 export function RecordField({
   listUuid,
@@ -44,11 +88,27 @@ export function RecordField({
 }) {
   const id = `field-${column.uuid}`;
   switch (column.type) {
-    // A text column is one line or several depending on its config, not on its
-    // type — the two used to be `text` and `long_text`. Anything but "multiline",
-    // including unset, is a single line.
-    case "text":
-      if (column.config.text_mode !== "multiline") break;
+    // A text column's editor comes from its config, not its type — "single" and
+    // "multiline" used to be the `text` and `long_text` types. Anything
+    // unrecognised, including unset, is a single line.
+    case "text": {
+      const mode = column.config.text_mode;
+      if (mode === "rich") {
+        return (
+          <Editor
+            id={id}
+            value={(value as string) ?? ""}
+            // `htmlValue` is the markup; `textValue` is the same content
+            // flattened. The column stores HTML, so it is the former that is
+            // kept — see columns/richtext.py, which cleans it on arrival.
+            onTextChange={(e) => onChange(e.htmlValue ?? "")}
+            headerTemplate={RICH_TOOLBAR}
+            style={{ height: 200 }}
+            readOnly={disabled}
+          />
+        );
+      }
+      if (mode !== "multiline") break;
       return (
         <InputTextarea
           id={id}
@@ -58,6 +118,7 @@ export function RecordField({
           disabled={disabled}
         />
       );
+    }
     case "number":
       return (
         <InputNumber

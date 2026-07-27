@@ -1,3 +1,4 @@
+import { stripHtml } from "../../lib/display";
 import { linkLabel, safeHref } from "../../lib/links";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
@@ -82,15 +83,31 @@ export function renderCell(
   if (isTemporal(column.type)) {
     return displayTemporal(column.type, value);
   }
-  // A multiline column's line breaks are content, and collapsing them was the
-  // one thing `long_text` never got right. Honoured only where there is room:
-  // in the grid the value keeps its single line.
-  if (
-    variant === "full" &&
-    column.type === "text" &&
-    column.config.text_mode === "multiline"
-  ) {
-    return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
+  if (column.type === "text") {
+    const mode = column.config.text_mode;
+    if (mode === "rich") {
+      // Rendered as markup only where there is room for it. Safe because the
+      // backend sanitises every write (columns/richtext.py) — this is why that
+      // sits on the write path and not in the editor: a value could equally
+      // have arrived by API or CSV import, and it lands here just the same.
+      if (variant === "full") {
+        return (
+          <span
+            className="rich-text-cell"
+            dangerouslySetInnerHTML={{ __html: String(value) }}
+          />
+        );
+      }
+      // In a row, the formatting is noise and the headings would set the row
+      // height. The words are what identifies the record.
+      return stripHtml(String(value));
+    }
+    // A multiline column's line breaks are content, and collapsing them was the
+    // one thing `long_text` never got right. Honoured only where there is room:
+    // in the grid the value keeps its single line.
+    if (variant === "full" && mode === "multiline") {
+      return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
+    }
   }
   return String(value);
 }

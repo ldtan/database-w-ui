@@ -642,3 +642,182 @@ a {
 .text-danger {
   color: var(--danger);
 }
+
+/* ============================================================
+   Rich text editor (Quill)
+
+   Targeted at Quill's own classes, not PrimeReact's. The base theme styles
+   `.p-editor-container .p-editor-toolbar`, but PrimeReact 10's Editor renders
+   no p-editor-* class at all -- its `classes` map is `{ toolbar: "", content: "" }`
+   -- so those rules match nothing and every colour here comes from
+   quill.snow.css instead.
+
+   Every selector is prefixed with `:root` to out-specify that stylesheet rather
+   than merely follow it. Source order is not enough and nor is a cascade layer:
+   the dev server pre-bundles quill and injects its CSS a second time, outside
+   any layer and after this file (see the note in index.css). One extra class of
+   specificity is what actually holds in both dev and a production build.
+   ============================================================ */
+:root .ql-toolbar.ql-snow {
+  background: var(--surface-2);
+  border-color: var(--border);
+  border-top-left-radius: var(--radius);
+  border-top-right-radius: var(--radius);
+}
+:root .ql-container.ql-snow {
+  border-color: var(--border);
+  border-bottom-left-radius: var(--radius);
+  border-bottom-right-radius: var(--radius);
+  font-family: inherit;
+  font-size: inherit;
+}
+:root .ql-snow .ql-editor {
+  background: var(--surface);
+  color: var(--text);
+}
+/* The placeholder is rgba(0,0,0,0.6) by default: invisible on a dark surface. */
+:root .ql-snow .ql-editor.ql-blank::before {
+  color: var(--text-faint);
+}
+
+/* Toolbar icons are SVG, so their colour is stroke/fill rather than `color`.
+   Recolouring only the text leaves a row of grey icons on the themed bar. */
+:root .ql-snow .ql-stroke,
+:root .ql-snow .ql-stroke-miter {
+  stroke: var(--text-muted);
+}
+:root .ql-snow .ql-fill,
+:root .ql-snow .ql-stroke.ql-fill {
+  fill: var(--text-muted);
+}
+:root .ql-snow .ql-picker {
+  color: var(--text-muted);
+}
+:root .ql-snow.ql-toolbar button:hover,
+:root .ql-snow .ql-toolbar button:hover,
+:root .ql-snow.ql-toolbar button:focus,
+:root .ql-snow .ql-toolbar button:focus,
+:root .ql-snow.ql-toolbar .ql-picker-label:hover,
+:root .ql-snow .ql-toolbar .ql-picker-label:hover {
+  color: var(--text);
+}
+:root .ql-snow.ql-toolbar button:hover .ql-stroke,
+:root .ql-snow .ql-toolbar button:hover .ql-stroke,
+:root .ql-snow.ql-toolbar button:focus .ql-stroke,
+:root .ql-snow .ql-toolbar button:focus .ql-stroke,
+:root .ql-snow.ql-toolbar .ql-picker-label:hover .ql-stroke,
+:root .ql-snow .ql-toolbar .ql-picker-label:hover .ql-stroke {
+  stroke: var(--text);
+}
+:root .ql-snow.ql-toolbar button:hover .ql-fill,
+:root .ql-snow .ql-toolbar button:hover .ql-fill,
+:root .ql-snow.ql-toolbar button:focus .ql-fill,
+:root .ql-snow .ql-toolbar button:focus .ql-fill {
+  fill: var(--text);
+}
+/* Active formatting, in the palette's brand rather than Quill's fixed blue. */
+:root .ql-snow.ql-toolbar button.ql-active,
+:root .ql-snow .ql-toolbar button.ql-active,
+:root .ql-snow.ql-toolbar .ql-picker-label.ql-active,
+:root .ql-snow .ql-toolbar .ql-picker-label.ql-active,
+:root .ql-snow.ql-toolbar .ql-picker-item.ql-selected,
+:root .ql-snow .ql-toolbar .ql-picker-item.ql-selected,
+:root .ql-snow.ql-toolbar .ql-picker-item:hover,
+:root .ql-snow .ql-toolbar .ql-picker-item:hover {
+  color: var(--brand);
+}
+:root .ql-snow.ql-toolbar button.ql-active .ql-stroke,
+:root .ql-snow .ql-toolbar button.ql-active .ql-stroke,
+:root .ql-snow.ql-toolbar .ql-picker-label.ql-active .ql-stroke,
+:root .ql-snow .ql-toolbar .ql-picker-label.ql-active .ql-stroke,
+:root .ql-snow.ql-toolbar .ql-picker-item.ql-selected .ql-stroke,
+:root .ql-snow .ql-toolbar .ql-picker-item.ql-selected .ql-stroke {
+  stroke: var(--brand);
+}
+:root .ql-snow.ql-toolbar button.ql-active .ql-fill,
+:root .ql-snow .ql-toolbar button.ql-active .ql-fill,
+:root .ql-snow.ql-toolbar button.ql-active .ql-stroke.ql-fill,
+:root .ql-snow .ql-toolbar button.ql-active .ql-stroke.ql-fill {
+  fill: var(--brand);
+}
+
+/* The heading dropdown: a floating panel, white by default. Its collapsed
+   label also goes #ccc while expanded, which vanishes on a light surface. */
+:root .ql-snow .ql-picker-options {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+:root .ql-snow .ql-picker.ql-expanded .ql-picker-label {
+  color: var(--text);
+  border-color: var(--border);
+}
+:root .ql-snow .ql-picker.ql-expanded .ql-picker-label .ql-stroke {
+  stroke: var(--text);
+}
+:root .ql-toolbar.ql-snow .ql-picker.ql-expanded .ql-picker-options {
+  border-color: var(--border);
+}
+:root .ql-snow .ql-picker-options .ql-picker-item {
+  color: var(--text);
+}
+
+/* The link popup, and the box you type the URL into. */
+:root .ql-snow .ql-tooltip {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  box-shadow: 0 2px 12px rgb(0 0 0 / 0.2);
+}
+:root .ql-snow .ql-tooltip input[type="text"] {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  border-radius: var(--radius);
+}
+:root .ql-snow .ql-tooltip a {
+  color: var(--brand);
+}
+
+/* Content inside the editor: Quill fixes these too. */
+:root .ql-snow a,
+:root .ql-snow .ql-editor a {
+  color: var(--brand);
+}
+:root .ql-snow .ql-editor blockquote {
+  border-left-color: var(--border);
+  color: var(--text-muted);
+}
+:root .ql-snow .ql-editor code,
+:root .ql-snow .ql-editor .ql-code-block-container {
+  background-color: var(--surface-2);
+  color: var(--text);
+}
+
+.rich-text-cell > :first-child {
+  margin-top: 0;
+}
+.rich-text-cell > :last-child {
+  margin-bottom: 0;
+}
+/* Quill wraps both kinds of list in <ol> and records which one on each item, so
+   outside its editor a bullet list would come out numbered. The marker is put
+   back per item, from the attribute the sanitiser deliberately keeps. */
+.rich-text-cell li {
+  list-style-type: decimal;
+}
+.rich-text-cell li[data-list="bullet"] {
+  list-style-type: disc;
+}
+.rich-text-cell blockquote {
+  margin-left: 0;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--border);
+  color: var(--text-muted);
+}
+.rich-text-cell pre {
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.75rem;
+  overflow-x: auto;
+}

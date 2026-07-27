@@ -207,7 +207,7 @@ Common `config` keys (all optional unless noted):
 
 | `type`        | Stored value in `data`                     | Type-specific `config` |
 |---------------|--------------------------------------------|------------------------|
-| `text`        | `string`                                   | `text_mode?` (`single`/`multiline`), `min_length?`, `max_length?`, `pattern?` |
+| `text`        | `string` (HTML when `text_mode` is `rich`) | `text_mode?` (`single`/`multiline`/`rich`), `min_length?`, `max_length?`, `pattern?` |
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?` |

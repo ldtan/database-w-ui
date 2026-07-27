@@ -3,6 +3,16 @@
 @layer theme, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
+/* PrimeReact's Editor wraps Quill and ships none of its layout, so without this
+   the toolbar is a column of unstyled buttons.
+
+   Left unlayered on purpose. A cascade layer would be the tidier way to let
+   themes.css win, and it does work in a production build — but the dev server
+   pre-bundles quill and injects this stylesheet a *second* time, outside the
+   layer, where it beats the layered copy and every override. So the recolouring
+   in themes.css out-specifies these rules instead of out-ordering them; see the
+   `:root`-prefixed Quill block there. */
+@import "quill/dist/quill.snow.css";
 
 body {
   margin: 0;

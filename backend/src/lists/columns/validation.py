@@ -22,7 +22,8 @@ _TEMPORAL = {
 }
 _NUMBER_FORMATS = {"plain", "currency", "percent"}
 # How a text column is edited. Unset means "single"; see ColumnConfig.text_mode.
-TEXT_MODES = ("single", "multiline")
+# "rich" stores HTML rather than plain text — see columns/richtext.py.
+TEXT_MODES = ("single", "multiline", "rich")
 
 # A link cell is rendered as an anchor, so its scheme is a security boundary,
 # not a preference: `javascript:`/`data:` URLs would be stored XSS. Columns may
@@ -199,13 +200,22 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
     if column_type == ColumnType.text:
         if not isinstance(value, str):
             _expect(name, "a string")
+        # A rich cell holds HTML, so it is measured and matched on what the
+        # writer can actually see. Counting the markup would make a 200-character
+        # limit depend on how much formatting they used, and a `pattern` written
+        # for prose would be tested against tags. Imported here: richtext pulls
+        # SAFE_LINK_SCHEMES from this module.
+        from .richtext import is_rich, to_text
+
+        rich = is_rich(config)
+        measured = to_text(value) if rich else value
         lo, hi = config.get("min_length"), config.get("max_length")
-        if lo is not None and len(value) < lo:
+        if lo is not None and len(measured) < lo:
             raise ValidationError(f"Column '{name}' must be at least {lo} character(s)")
-        if hi is not None and len(value) > hi:
+        if hi is not None and len(measured) > hi:
             raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
         pattern = config.get("pattern")
-        if pattern is not None and re.fullmatch(pattern, value) is None:
+        if pattern is not None and re.fullmatch(pattern, measured) is None:
             raise ValidationError(f"Column '{name}' does not match the required pattern")
 
     elif column_type == ColumnType.number:

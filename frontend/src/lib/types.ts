@@ -67,8 +67,10 @@ export type PermissionAction = Schemas["Action"];
 
 // ---- The config blobs: shapes the backend validates but does not publish ----
 
-/** How a text column is edited. Unset means "single" — see TextMode below. */
-export type TextMode = "single" | "multiline";
+/** How a text column is edited. Unset means "single". "rich" is the one that
+ *  changes what is *stored*: HTML rather than plain text (sanitised on write by
+ *  the backend — see columns/richtext.py). */
+export type TextMode = "single" | "multiline" | "rich";
 
 export interface ColumnConfig {
   required?: boolean;

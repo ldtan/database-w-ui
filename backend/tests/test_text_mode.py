@@ -25,7 +25,7 @@ async def _add_text_column(client, list_uuid: str, **config) -> str:
     return resp.json()["uuid"]
 
 
-@pytest.mark.parametrize("mode", ["single", "multiline"])
+@pytest.mark.parametrize("mode", ["single", "multiline", "rich"])
 async def test_accepts_each_mode(client, list_uuid, mode):
     col = await _add_text_column(client, list_uuid, text_mode=mode)
     resp = await client.get(f"/api/lists/{list_uuid}/columns/")
@@ -48,7 +48,7 @@ async def test_rejects_an_unknown_mode(client, list_uuid):
             "name": "notes",
             "display_name": "Notes",
             "type": "text",
-            "config": {"text_mode": "rich"},  # not offered until rich text ships
+            "config": {"text_mode": "markdown"},
         },
     )
     assert resp.status_code == 400, resp.text
