@@ -2,8 +2,11 @@ import enum
 
 
 class ColumnType(str, enum.Enum):
+    # There is no separate `long_text`: one line versus several is how a text
+    # column is *edited*, not what it stores, so it lives in config as
+    # `text_mode` (see ColumnConfig). The old member is still a label on the
+    # Postgres `column_type` enum — see the merge_long_text_into_text migration.
     text = "text"
-    long_text = "long_text"
     number = "number"
     checkbox = "checkbox"
     choice = "choice"

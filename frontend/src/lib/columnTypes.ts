@@ -2,8 +2,9 @@ import type { ColumnType } from "./types";
 
 // Types offered in the "add column" UI.
 export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
-  { label: "Single line text", value: "text" },
-  { label: "Long text", value: "long_text" },
+  // One entry, not two: whether text is one line or several is `config.text_mode`,
+  // set in the column dialog, so it is not a separate type to choose between.
+  { label: "Text", value: "text" },
   { label: "Number", value: "number" },
   { label: "Checkbox", value: "checkbox" },
   { label: "Choice", value: "choice" },

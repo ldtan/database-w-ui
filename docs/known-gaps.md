@@ -119,7 +119,7 @@ reflected on the next read, no backfill — at these costs, all currently accept
   for one. That keeps a file this app writes importing cleanly back into it, since the column
   is read-only on write. Exporting the *computed value* would be a nice enhancement, but then a
   re-import has to know to ignore it.
-- **No calc-on-calc.** A formula may only reference `number`, `text` and `long_text` columns,
+- **No calc-on-calc.** A formula may only reference `number` and `text` columns,
   so it cannot reference another calculated column (that would need cycle detection and
   recursive evaluation). Caught at config time: the referenced column is not one of those types.
   Choice and temporal columns are also excluded for now — they store ids/ISO strings whose text

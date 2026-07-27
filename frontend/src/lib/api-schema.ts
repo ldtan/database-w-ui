@@ -955,6 +955,8 @@ export interface components {
              * @default false
              */
             read_only: boolean;
+            /** Text Mode */
+            text_mode?: string | null;
             /** Min Length */
             min_length?: number | null;
             /** Max Length */
@@ -1033,7 +1035,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "long_text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
+        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */

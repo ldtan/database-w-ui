@@ -22,7 +22,13 @@ class ColumnConfig(BaseModel):
     unique: bool = False  # enforced: no two records may share the value
     placeholder: Optional[str] = None  # UI hint, not enforced
     read_only: bool = False  # UI hint, not enforced
-    # text / long_text
+    # text
+    # How the cell is edited: "single" (one line) or "multiline" (a box). Not a
+    # storage difference — both hold a plain string, and every filter, sort,
+    # search, import and export treats them alike — so it is config rather than
+    # two column types, which also makes it changeable after creation, as `type`
+    # is not. Unset means "single".
+    text_mode: Optional[str] = None
     min_length: Optional[int] = None
     max_length: Optional[int] = None
     pattern: Optional[str] = None  # regex; value must fully match

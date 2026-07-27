@@ -44,7 +44,11 @@ export function RecordField({
 }) {
   const id = `field-${column.uuid}`;
   switch (column.type) {
-    case "long_text":
+    // A text column is one line or several depending on its config, not on its
+    // type — the two used to be `text` and `long_text`. Anything but "multiline",
+    // including unset, is a single line.
+    case "text":
+      if (column.config.text_mode !== "multiline") break;
       return (
         <InputTextarea
           id={id}
@@ -173,16 +177,17 @@ export function RecordField({
           onChange={onChange}
         />
       );
-    default:
-      return (
-        <InputText
-          id={id}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-          disabled={disabled}
-        />
-      );
   }
+  // Everything that is a plain one-line box: a single-line text column, and any
+  // type with no editor of its own.
+  return (
+    <InputText
+      id={id}
+      value={(value as string) ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+    />
+  );
 }
 
 /**
