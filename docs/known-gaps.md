@@ -98,6 +98,16 @@ way — the moment it grows an `eval` or a real namespace, a list editor (an ord
 an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is joined with
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
 
+Reach is not the only thing a formula has to be bounded on. Because it runs once per record
+on every read, what it may *spend* is bounded too: `_MAX_SOURCE` (length), `_MAX_DEPTH`
+(nesting — length alone is not a bound on depth, since a unary minus costs one character a
+level and a few hundred of them overflow the stack) and `_MAX_TEXT` (the size of any text it
+produces — `REPLACE` grows a string by a factor set by a literal, and nesting composes those
+factors while the source only grows linearly). The first two are refused at config time; the
+third blanks the cell, since it depends on the row. Keep all three: without them a formula
+that passes every other check is a way to spend the whole server, which is the same problem
+as running code, arrived at from the other side.
+
 The compute-on-read choice buys correctness for free — editing a dependency or the formula is
 reflected on the next read, no backfill — at these costs, all currently accepted:
 
@@ -113,7 +123,10 @@ reflected on the next read, no backfill — at these costs, all currently accept
   so it cannot reference another calculated column (that would need cycle detection and
   recursive evaluation). Caught at config time: the referenced column is not one of those types.
   Choice and temporal columns are also excluded for now — they store ids/ISO strings whose text
-  form would surprise.
+  form would surprise. What a name refers to is decided by *where it sits*, not how it is
+  spelled — `column_refs` reports every value-position name, including the four that collide
+  with function names (`min`, `max`, `round`, `abs`, all valid slugs). Reporting those as
+  functions is what used to let a formula over one skip these checks entirely.
 - **References are by column *name*, and names are editable.** Rename a column a formula reads
   and the formula silently stops finding it — a missing operand reads as blank (see below), so
   the calculated cells quietly go empty rather than erroring. There is no reverse index from

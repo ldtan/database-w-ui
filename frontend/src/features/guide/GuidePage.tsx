@@ -692,13 +692,24 @@ export function GuidePage() {
               Exports leave it out, and a value for it in an imported file is
               ignored, so a file this app writes always imports cleanly back in.
             </li>
+            <li>
+              It has to stay a sensible size. A formula can be up to 1,000
+              characters long and around 32 layers deep — brackets inside
+              brackets, or functions wrapped around functions. Past either, it’s
+              refused when you save, with a message saying which. You are
+              unlikely to meet these by hand: the worked examples above are two or
+              three layers deep.
+            </li>
           </ul>
         </Callout>
         <Callout tone="tip" title="A blank cell means “not yet”">
           If any column the formula names is empty on that record, the result is
           blank (—) rather than zero — an unfinished row should look unfinished.
           Dividing by zero comes out blank the same way, so one odd record never
-          spoils the rest of the list.
+          spoils the rest of the list. So does a result that would run to tens of
+          thousands of characters: a formula fills a cell in a table, and{" "}
+          <Code>REPLACE</Code> in particular can grow text faster than you’d
+          expect.
         </Callout>
         <Callout tone="warn" title="Renaming breaks a formula quietly">
           Formulas find columns by their short name. If you rename a column a

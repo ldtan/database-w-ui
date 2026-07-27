@@ -7,8 +7,11 @@ already a valid Python identifier), and the value is computed at read time.
 Safety is the whole point, so this does NOT use ``eval``. It parses the formula
 to a Python AST once, refuses every node type it does not explicitly allow, and
 then walks that tree itself. The only names it will resolve are the column values
-handed to it; there is no path to a builtin, an attribute, or a subscript. A
-malicious or mistaken formula can at worst return a wrong number or nothing.
+handed to it; there is no path to a builtin, an attribute, or a subscript. What a
+formula may *spend* is bounded too — its length, how deeply it nests, and how much
+text it may produce — because this runs once per record on every read, so an
+unbounded one is a way to spend the whole server. A malicious or mistaken formula
+can at worst return a wrong number or nothing.
 
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
 **and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
@@ -60,6 +63,17 @@ _CMPOPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
 # A formula longer than this is almost certainly a mistake or an attempt to make
 # parsing expensive; either way it is not something a person typed on purpose.
 _MAX_SOURCE = 1000
+# Length is the wrong bound on its own: nesting is what costs, and a unary minus
+# costs one character a level, so `----...-1` fits hundreds of levels inside the
+# character budget and walking it overflows the stack. Depth is bounded directly.
+# Nobody hand-writes a formula nested 32 deep.
+_MAX_DEPTH = 32
+_TOO_DEEP = f"A formula may not nest more than {_MAX_DEPTH} levels deep"
+# The ceiling on any text a formula produces. REPLACE can grow a string by a factor
+# set by a literal, and nesting composes those factors while the source only grows
+# linearly — so without this, a short formula allocates gigabytes, once per record,
+# on every read. A calculated cell is a grid cell; nothing legitimate is this long.
+_MAX_TEXT = 10_000
 
 
 class Formula:
@@ -88,38 +102,52 @@ def parse(source: object) -> Formula:
         tree = ast.parse(source, mode="eval")
     except SyntaxError as exc:
         raise ValidationError(f"Formula is not a valid expression: {exc.msg}") from exc
+    except RecursionError as exc:
+        # The other half of the depth bound: nesting deep enough to overflow the
+        # stack inside ast.parse itself, before `_check` ever gets to count it.
+        raise ValidationError(_TOO_DEEP) from exc
 
     refs: set[str] = set()
-    _check(tree, refs)
+    _check(tree, refs, 0)
     return Formula(source, tree, frozenset(refs))
 
 
-def _check(node: ast.AST, refs: set[str]) -> None:
-    """Reject any node the language does not allow; collect column references."""
+def _check(node: ast.AST, refs: set[str], depth: int) -> None:
+    """Reject any node the language does not allow; collect column references.
+
+    ``depth`` is how many levels down this node sits. The walk is top-down, so a
+    formula nested past the limit is refused after `_MAX_DEPTH` frames rather than
+    when the stack runs out — and since `_eval` walks the same tree, bounding it
+    here is what makes evaluating a stored formula safe.
+    """
+    if depth > _MAX_DEPTH:
+        raise ValidationError(_TOO_DEEP)
+    depth += 1
+
     if isinstance(node, ast.Expression):
-        _check(node.body, refs)
+        _check(node.body, refs, depth)
 
     elif isinstance(node, ast.BinOp):
         if not isinstance(node.op, _BINOPS):
             raise ValidationError("Only + - * / are allowed between values")
-        _check(node.left, refs)
-        _check(node.right, refs)
+        _check(node.left, refs, depth)
+        _check(node.right, refs, depth)
 
     elif isinstance(node, ast.UnaryOp):
         if not isinstance(node.op, _UNARYOPS):
             raise ValidationError("Unsupported unary operator in formula")
-        _check(node.operand, refs)
+        _check(node.operand, refs, depth)
 
     elif isinstance(node, ast.BoolOp):  # and / or
         for value in node.values:
-            _check(value, refs)
+            _check(value, refs, depth)
 
     elif isinstance(node, ast.Compare):
         if not all(isinstance(op, _CMPOPS) for op in node.ops):
             raise ValidationError("Unsupported comparison in formula")
-        _check(node.left, refs)
+        _check(node.left, refs, depth)
         for comparator in node.comparators:
-            _check(comparator, refs)
+            _check(comparator, refs, depth)
 
     elif isinstance(node, ast.Call):
         if node.keywords or not isinstance(node.func, ast.Name):
@@ -137,7 +165,7 @@ def _check(node: ast.AST, refs: set[str]) -> None:
             want = f"{low}" if low == high else f"{low}+" if high is None else f"{low}-{high}"
             raise ValidationError(f"Function '{name}' takes {want} argument(s), got {n}")
         for arg in node.args:
-            _check(arg, refs)
+            _check(arg, refs, depth)
 
     elif isinstance(node, ast.Name):
         # A bare name is a reference to another column. Function names are handled
@@ -157,11 +185,17 @@ def _check(node: ast.AST, refs: set[str]) -> None:
         )
 
 
-# Names that a formula references but that are also functions are functions, not
-# columns — so the caller checks column existence against this set removed.
 def column_refs(formula: Formula) -> frozenset[str]:
-    """The referenced names that are columns (function names removed)."""
-    return frozenset(formula.refs - set(_FUNCTIONS))
+    """The column names this formula reads.
+
+    Every name in ``refs`` is already a column: `_check` collects names in value
+    position only and never descends into a call's *function* name, so a function
+    never lands there in the first place. Subtracting the function names here — as
+    this used to — removed nothing but genuine references to columns whose slug
+    happens to collide (`min`, `max`, `round`, `abs` are all valid slugs), leaving
+    them unvalidated at write time while `evaluate` resolved them at read time.
+    """
+    return formula.refs
 
 
 def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, None]:
@@ -173,7 +207,7 @@ def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, N
     """
     try:
         result = _eval(formula.tree.body, values)
-    except (ZeroDivisionError, ValueError, TypeError, OverflowError):
+    except (ZeroDivisionError, ValueError, TypeError, OverflowError, MemoryError):
         return None
     if result is None:
         return None
@@ -285,8 +319,16 @@ def _eval(node: ast.AST, values: dict[str, object]):
 
         # String functions. Numeric arguments are coerced to their text form, so
         # UPPER(price) or CONCAT("Qty ", qty) work as a spreadsheet user expects.
+        # The two that can grow their input measure the result *before* building
+        # it — measuring after is too late, the allocation is the damage — and
+        # blank the cell when it would be oversized, the same "no value" every
+        # other unanswerable formula gives. Capping each call also caps a nested
+        # chain of them, since every level is bounded on its own.
         if name == "CONCAT":
-            return "".join(_to_text(a) for a in args)
+            parts = [_to_text(a) for a in args]
+            if sum(len(p) for p in parts) > _MAX_TEXT:
+                return None
+            return "".join(parts)
         if name == "UPPER":
             return _to_text(args[0]).upper()
         if name == "LOWER":
@@ -296,7 +338,13 @@ def _eval(node: ast.AST, values: dict[str, object]):
         if name == "LEN":
             return len(_to_text(args[0]))
         if name == "REPLACE":
-            return _to_text(args[0]).replace(_to_text(args[1]), _to_text(args[2]))
+            text, old, new = (_to_text(a) for a in args)
+            # `str.count` already answers this for an empty `old`, which inserts
+            # between every character and at both ends: "abc".count("") is 4, and
+            # "abc".replace("", "X") is indeed 3 + 4 characters long.
+            if len(text) + text.count(old) * (len(new) - len(old)) > _MAX_TEXT:
+                return None
+            return text.replace(old, new)
         # LEFT/RIGHT: the first n characters, or the last n. A non-positive n is
         # the empty string (and n=0 must not fall through to Python's s[-0:] = s).
         text = _to_text(args[0])
