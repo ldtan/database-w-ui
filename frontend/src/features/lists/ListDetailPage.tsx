@@ -31,7 +31,7 @@ import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
-import { buildRecordData, resolveFields } from "../records/recordValues";
+import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { sortRows } from "../records/sortRows";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -53,6 +53,13 @@ type SortOrder = 1 | 0 | -1 | null | undefined;
 // scanner does. (`qrFill`, which is small and pure, stays in the main bundle.)
 const QrScanDialog = lazy(() =>
   import("../records/QrScanDialog").then((m) => ({ default: m.QrScanDialog })),
+);
+// Lazy for the same reason: it renders the scanner, so importing it eagerly would
+// drag the decoder back into the main bundle by the back door.
+const QrSubmitSession = lazy(() =>
+  import("../records/QrSubmitSession").then((m) => ({
+    default: m.QrSubmitSession,
+  })),
 );
 
 /**
@@ -98,6 +105,11 @@ export function ListDetailPage() {
   const [qrMode, setQrMode] = useState<"fill" | "submit" | null>(null);
   const [qrBusy, setQrBusy] = useState(false);
   const [qrError, setQrError] = useState<string | null>(null);
+  // What a submitting session sets on every scan. Held here rather than inside the
+  // session so that closing the scanner and opening it again keeps the event you
+  // are taking attendance for. Deliberately not persisted any further than that:
+  // it is the answer to "what is happening right now", not a setting.
+  const [qrPresets, setQrPresets] = useState<Record<string, unknown>>({});
 
   const [activeViewUuid, setActiveViewUuid] = useState<string | null>(null);
   const [sortField, setSortField] = useState<string | undefined>(undefined);
@@ -319,33 +331,17 @@ export function ListDetailPage() {
     [cols, createForm],
   );
 
-  const qrSubmit = useMutation({
-    mutationFn: (values: Record<string, unknown>) =>
-      api.post<ListItem>(`/lists/${listUuid}/items/`, {
-        data: buildRecordData(createFields, values, false),
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
-      toast.success("Record added", "Submitted from a QR code");
-    },
-    // Deliberately no onError: the scan handler turns a rejection into a note on
-    // the form it then opens, rather than a toast over a lost scan.
-  });
-
   function openQr(mode: "fill" | "submit") {
     setQrError(null);
     setQrMode(mode);
   }
 
   /**
-   * A scanned code, from text to a record.
+   * A scanned code, into the Add-record form.
    *
-   * "Submit" posts whatever the code said, invalid values and all — **the server
-   * is the only thing that decides what is valid**, and it says so far better than
-   * a second copy of its rules in the browser could (see `qrFill.ts`). A rejection
-   * is not a dead end: the values land in the form with the server's message above
-   * them, so the scan is fixed rather than lost. "Fill" simply stops at that form
-   * every time.
+   * This is the "fill" flow only — one code, checked by a person before it is
+   * saved. Submitting outright is a session rather than a scan (presets, a queue,
+   * a tally), and lives in `QrSubmitSession`.
    */
   async function handleQrScan(text: string) {
     setQrBusy(true);
@@ -357,29 +353,11 @@ export function ListDetailPage() {
         setQrError("This QR code has no fields for this list.");
         return;
       }
-      const notes = fill.issues.map(
-        (issue) => `${issue.key}: ${issue.message}`,
-      );
-
-      if (qrMode === "submit") {
-        try {
-          await qrSubmit.mutateAsync(fill.values);
-          setQrMode(null);
-          return;
-        } catch (err) {
-          notes.unshift(
-            err instanceof ApiError
-              ? err.message
-              : "The server rejected the record.",
-          );
-        }
-      }
-
       setRecordDialog({
         open: true,
         item: null,
         prefill: fill.values,
-        notes,
+        notes: fill.issues.map((issue) => `${issue.key}: ${issue.message}`),
       });
       setQrMode(null);
     } catch (err) {
@@ -801,19 +779,23 @@ export function ListDetailPage() {
         onHide={() => setRecordDialog({ open: false, item: null })}
       />
       <Suspense fallback={null}>
-        {qrMode && (
+        {qrMode === "fill" && (
           <QrScanDialog
-            header={
-              qrMode === "fill" ? "Fill using QR code" : "Submit using QR code"
-            }
-            hint={
-              qrMode === "fill"
-                ? "The code's values fill the Add record form, where you can check them before adding the record."
-                : "The record is added as soon as the code is read. If the server rejects any of it, the form opens with the values and the reason."
-            }
+            header="Fill using QR code"
+            hint="The code's values fill the Add record form, where you can check them before adding the record."
             busy={qrBusy}
             error={qrError}
             onScan={handleQrScan}
+            onHide={() => setQrMode(null)}
+          />
+        )}
+        {qrMode === "submit" && (
+          <QrSubmitSession
+            listUuid={listUuid}
+            columns={cols}
+            fields={createFields}
+            presets={qrPresets}
+            onPresetsChange={setQrPresets}
             onHide={() => setQrMode(null)}
           />
         )}

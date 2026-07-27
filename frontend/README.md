@@ -102,10 +102,50 @@ person (a column uuid works as a key too, for a code a machine generated):
 { "full_name": "Ana Cruz", "age": 30, "status": "Active", "owner": "admin" }
 ```
 
-- **Fill** opens the Add-record form with those values in it, for the user to check.
-- **Submit** posts the record immediately, *invalid values and all*. A rejection is not a
-  dead end: the values land in the form with the server's own message above them, so the
-  scan gets fixed rather than discarded.
+- **Fill** reads one code and opens the Add-record form with those values in it, for the
+  user to check.
+- **Submit** opens a *scanning session*: see below.
+
+### The submitting session
+
+Submitting exists for attendance — a queue of people, each holding a badge — and that shape
+drives everything about it (`QrSubmitSession.tsx`).
+
+A badge's code says *who* someone is. It cannot say *which event they are attending*: the
+badge was printed before the event existed and will be used at the next one too. So a
+session asks first for the values that hold for every scan, using the same fields the
+Add-record form would show, and then scans. Each code supplies only what is particular to
+it, over the top of those presets.
+
+**A code outranks a preset.** Where both have a value for a field, the scanned one wins —
+presets are what to assume in the absence of an answer, and a code carrying one has
+answered. This falls out of the merge order rather than being enforced anywhere, because
+`fillFromQr` already drops the keys a code left blank: a code cannot erase a preset by
+carrying `""`. A code that sets a *parent* lookup clears any preset chosen under the old
+parent, exactly as editing that parent in the form would.
+
+**The scanner stays open**, and a rejected scan does not close it. The one-at-a-time flow
+can afford to drop you into the record form to fix a rejection by hand; a queue cannot,
+because there are people waiting behind the bad code. The server's message appears under
+the preview and in the session's log, the camera stays live, and the fix is to scan again.
+A running tally and the last few scans are the feedback — **not** a toast per record, which
+at a scan every few seconds would be a wall of them over the camera.
+
+**The same code is ignored for five seconds.** A camera reports a code ten times a second
+for as long as it stays in frame, so without this one badge held up would submit a dozen
+records; the first sighting counts and the rest of the visit is dropped. The window
+expires rather than latching, because the same person scanning in again later is a real
+second record.
+
+A rejected scan is suppressed by that window like any other, and **the one-shot re-arm on
+error must not be extended to continuous mode**: the code that failed is still in front of
+the camera, so forgetting it would resubmit it ten times a second for as long as it stayed
+there. Waiting the window out costs nothing, either — a code rejected for what it contains
+will be rejected again on sight.
+
+Presets live on `ListDetailPage`, not in the session, so closing the scanner and reopening
+it keeps the event you are taking attendance for. They are not persisted further: this is
+the answer to "what is happening right now", not a setting.
 
 **`qrFill.ts` does not validate, deliberately.** The backend validates every value on write
 (`src/lists/columns/validation.py`) and is the only thing that does — restating "what a
@@ -140,8 +180,14 @@ code's text, handed to `qrFill`.
 
 `QrScanDialog` is **lazy-loaded** (`React.lazy` + `Suspense` in `ListDetailPage`): the
 decoder is ~110 kB gzipped, a quarter of the whole bundle, and most sessions never open
-the scanner. Import it that way, not directly. `qrFill` is small and pure, and stays in
-the main bundle.
+the scanner. Import it that way, not directly — and note that `QrSubmitSession` renders it,
+so that must be lazy too or the decoder returns to the main bundle by the back door.
+`qrFill` is small and pure, and stays in the main bundle.
+
+The record inputs themselves are in `RecordFields.tsx` — `RecordField` (one editor, chosen
+by column type) and `RecordFields` (all of a form's fields, labelled, clearing nested
+lookups when their parent changes). They live apart from `RecordFormDialog` because two
+surfaces now edit a record's fields: the Add/Edit dialog and a session's presets.
 
 ## Layout on small screens
 

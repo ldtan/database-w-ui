@@ -736,8 +736,8 @@ export function GuidePage() {
           </li>
           <li>
             Choose <Ui>Fill using QR code</Ui> to put the scanned values into the form
-            so you can check them first, or <Ui>Submit using QR code</Ui> to save the
-            record straight away.
+            so you can check them first, or <Ui>Submit using QR code</Ui> to save
+            records as they are scanned.
           </li>
           <li>
             Point your camera at the code. No camera? Click <Ui>Scan an image</Ui> and
@@ -751,9 +751,50 @@ export function GuidePage() {
             politely refused.
           </li>
           <li>
-            <Ui>Submit using QR code</Ui> saves even if a value is wrong; if the app
-            rejects it, nothing is lost — the values reappear in the form with the
-            reason shown, so you can fix and resave.
+            <Ui>Fill using QR code</Ui> reads one code and stops at the form.
+          </li>
+        </ul>
+
+        <h3 className="font-semibold pt-1">
+          Scanning a queue — attendance and the like
+        </h3>
+        <p>
+          If everyone has a badge with their own QR code, <Ui>Submit using QR code</Ui>
+          is built to work through them one after another.
+        </p>
+        <ol className="flex flex-col gap-2">
+          <li>
+            First you’re asked for the values that are the same for everybody — the
+            event, the session, the date. Fill in those and leave the rest blank; each
+            badge fills the rest. Then click <Ui>Start scanning</Ui>.
+          </li>
+          <li>
+            Scan each person’s code in turn. A record is saved as each one is read, and
+            the scanner stays open — you don’t reopen it between people. A running
+            count and the last few scans are shown under the camera.
+          </li>
+          <li>
+            Click <Ui>Done</Ui> when the queue is finished.
+          </li>
+        </ol>
+        <ul className="flex flex-col gap-1">
+          <li>
+            Holding one badge in front of the camera saves <em>one</em> record, not a
+            stream of them — the same code is ignored for a few seconds after it’s
+            read. Scanning the same person again later does save a second record.
+          </li>
+          <li>
+            If a badge carries a field you also set at the start, the badge wins.
+          </li>
+          <li>
+            A code the app rejects doesn’t stop the queue: the reason is shown under
+            the camera and in the list of recent scans, and the next person can scan
+            straight away. Rescanning the same code won’t help — it’ll be refused for
+            the same reason — so add that one record by hand afterwards.
+          </li>
+          <li>
+            <Ui>Change values</Ui> goes back to the shared values without losing your
+            count — useful when the session changes but the queue doesn’t.
           </li>
         </ul>
       </Section>
