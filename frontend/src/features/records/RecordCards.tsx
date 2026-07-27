@@ -168,6 +168,10 @@ export function RecordCards({
                 </label>
                 <RowActions
                   size="small"
+                  // Same split as the grid: view and edit inline, share and delete
+                  // behind the overflow. The two layouts must not disagree about
+                  // which actions a record has, or where.
+                  maxVisible={2}
                   actions={[
                     {
                       key: "view",

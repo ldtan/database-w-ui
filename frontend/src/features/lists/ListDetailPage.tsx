@@ -719,12 +719,16 @@ export function ListDetailPage() {
           ))}
           <DataColumn
             header=""
-            style={{ width: "9rem" }}
+            style={{ width: "7rem" }}
             // RowActions stops click propagation itself, so an action never also
             // toggles the row's selection.
             body={(row: ListItem) => (
               <RowActions
                 size="small"
+                // Reading and editing a record are what a row is for; sharing and
+                // deleting it are occasional, so they fold into the overflow rather
+                // than widening every row of the grid.
+                maxVisible={2}
                 actions={[
                   {
                     key: "view",

@@ -23,7 +23,8 @@ interface Props {
   /**
    * How many actions show as icon buttons before the rest collapse into a "⋮"
    * overflow menu. Defaults to 3 — enough that a typical row (share/edit/delete)
-   * never overflows, while a busier one (the lists page passes 2) stays tidy.
+   * never overflows. Rows with a fourth action, or a lot of them, pass 2 and keep
+   * only what the row is *for* inline: the lists page and both record layouts do.
    */
   maxVisible?: number;
   /** Button size, matched to the surface — records render theirs `small`. */
