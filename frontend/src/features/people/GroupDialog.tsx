@@ -7,6 +7,7 @@ import { MultiSelect } from "primereact/multiselect";
 import { Button } from "primereact/button";
 
 import { api, ApiError } from "../../lib/api";
+import { Field } from "../../components/Field";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup } from "../../lib/types";
 
@@ -83,35 +84,41 @@ export function GroupDialog({ visible, onHide, group }: Props) {
       visible={visible}
       onHide={onHide}
       style={{ width: 460 }}
+      footer={
+        <>
+          <Button label="Cancel" text onClick={onHide} />
+          <Button
+            label={editing ? "Save" : "Create group"}
+            icon={editing ? "pi pi-check" : "pi pi-plus"}
+            onClick={() => save.mutate()}
+            loading={save.isPending}
+            disabled={!name.trim()}
+          />
+        </>
+      }
     >
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-1">
-          <label htmlFor="g-name" className="text-sm font-medium">
-            Name
-          </label>
+      <div className="flex flex-col gap-4">
+        <Field label="Name" htmlFor="g-name">
           <InputText
             id="g-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="g-desc" className="text-sm font-medium">
-            Description{" "}
-            <span style={{ color: "var(--text-muted)" }}>(optional)</span>
-          </label>
+        </Field>
+        <Field label="Description" htmlFor="g-desc" optional>
           <InputTextarea
             id="g-desc"
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={2}
           />
-        </div>
-        <div className="flex flex-col gap-1">
-          <label htmlFor="g-members" className="text-sm font-medium">
-            Members
-          </label>
+        </Field>
+        <Field
+          label="Members"
+          htmlFor="g-members"
+          hint="Members inherit every permission granted to this group."
+        >
           <MultiSelect
             inputId="g-members"
             value={members}
@@ -120,21 +127,9 @@ export function GroupDialog({ visible, onHide, group }: Props) {
             placeholder="Add members…"
             display="chip"
             filter
+            className="w-full"
           />
-          <small style={{ color: "var(--text-muted)" }}>
-            Members inherit every permission granted to this group.
-          </small>
-        </div>
-
-        <div className="flex justify-end gap-2">
-          <Button label="Cancel" text onClick={onHide} />
-          <Button
-            label={editing ? "Save" : "Create"}
-            onClick={() => save.mutate()}
-            loading={save.isPending}
-            disabled={!name.trim()}
-          />
-        </div>
+        </Field>
       </div>
     </AppDialog>
   );

@@ -479,6 +479,35 @@ a {
 .p-button:focus {
   box-shadow: 0 0 0 0.2rem var(--focus-ring);
 }
+/* A disabled button should look unavailable, not half-rendered. The base theme
+   drops a filled button to 60% opacity, which on a brand fill reads as "still
+   loading" — and a form's primary action is disabled most of the time it is on
+   screen, so that was the first impression of nearly every dialog.
+   `:not(.p-button-loading)` because PrimeReact disables a button while it is
+   busy too, and a spinner on a grey slab reads as an error. */
+.p-button:disabled:not(.p-button-loading),
+.p-button.p-disabled:not(.p-button-loading) {
+  opacity: 1;
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+.p-button.p-button-text:disabled:not(.p-button-loading),
+.p-button.p-button-outlined:disabled:not(.p-button-loading) {
+  background: transparent;
+  color: var(--text-faint);
+}
+/* A text button has no border to grey out. Without this the rule above draws one
+   around every unavailable icon button — the reorder chevrons at the ends of a
+   list, most visibly. */
+.p-button.p-button-text:disabled:not(.p-button-loading),
+.p-button.p-button-link:disabled:not(.p-button-loading) {
+  border-color: transparent;
+}
+.p-button.p-button-outlined:disabled:not(.p-button-loading) {
+  border-color: var(--border);
+}
 /* Text / link / outlined buttons render the brand as foreground, not fill. */
 .p-button.p-button-text,
 .p-button.p-button-link {
@@ -568,6 +597,21 @@ a {
 .p-dropdown .p-dropdown-trigger,
 .p-multiselect .p-multiselect-trigger {
   color: var(--text-muted);
+}
+
+/* The calendar's trigger. As a solid brand block beside its own input it was the
+   loudest thing in the Share dialog — a button to *open a picker* outranking the
+   button that grants the access. It is an addon on the field, not an action. */
+.p-calendar .p-datepicker-trigger.p-button {
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-left: none;
+  color: var(--text-muted);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.p-calendar .p-datepicker-trigger.p-button:enabled:hover {
+  background: var(--hover);
+  color: var(--brand);
 }
 
 /* AutoComplete (the principal typeahead) — the base theme hardcodes its colors,
@@ -694,6 +738,18 @@ a {
   background: var(--hover);
   color: var(--text);
 }
+/* A disabled segmented control still says which segment is current, but quietly —
+   a brand fill on something you cannot change reads as an active control. */
+.p-selectbutton .p-button.p-disabled {
+  background: var(--surface-2);
+  border-color: var(--border);
+  color: var(--text-faint);
+}
+.p-selectbutton .p-button.p-highlight.p-disabled {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 600;
+}
 
 /* ============================================================
    Dialog / OverlayPanel / ConfirmDialog
@@ -715,19 +771,36 @@ a {
   background: color-mix(in srgb, var(--bg) 55%, transparent);
   backdrop-filter: blur(3px);
 }
+/* Three bands with rules between them: what this is, what you are changing, and
+   what you can do about it. The footer is a real `.p-dialog-footer` — outside
+   the scrolling content — so a long form's buttons stay put instead of being a
+   scroll away at the end of thirty fields. */
 .p-dialog .p-dialog-header {
   border-top-left-radius: var(--radius-lg);
   border-top-right-radius: var(--radius-lg);
-  padding: 1.15rem 1.35rem 0.85rem;
+  border-bottom: var(--border-width) solid var(--border);
+  padding: 1rem 1.35rem;
 }
-/* Most dialogs here put their own buttons at the end of the *content* rather
-   than in a footer, so the bottom padding has to be real. */
 .p-dialog .p-dialog-content {
-  padding: 0 1.35rem 1.35rem;
+  padding: 1.25rem 1.35rem;
 }
 .p-dialog .p-dialog-footer {
   border-bottom-left-radius: var(--radius-lg);
   border-bottom-right-radius: var(--radius-lg);
+  border-top: var(--border-width) solid var(--border);
+  padding: 0.85rem 1.35rem;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+/* A footer that also has something to say on the left — a delete, a count. */
+.p-dialog .p-dialog-footer.is-split {
+  justify-content: space-between;
+}
+.p-dialog .p-dialog-footer .p-button {
+  margin: 0;
 }
 .p-dialog .p-dialog-header .p-dialog-title {
   font-family: var(--font-family-heading);
@@ -1114,6 +1187,22 @@ a {
 }
 .p-tabview .p-tabview-nav {
   border-color: var(--border);
+}
+/* Inside a dialog the tabs *are* that dialog's navigation, so the strip runs the
+   full width under the header rule and the panel supplies the body padding. The
+   dialog's own content padding is turned off for this (see ListSettingsDialog).
+   Floating in the middle of the body, they read as a widget someone dropped in. */
+.p-dialog .p-tabview .p-tabview-nav {
+  padding: 0 1.35rem;
+}
+.p-dialog .p-tabview .p-tabview-panels {
+  padding: 1.25rem 1.35rem;
+}
+.p-tabview .p-tabview-nav li .p-tabview-nav-link {
+  padding: 0.85rem 0.9rem;
+  font-size: 0.9rem;
+  font-weight: 550;
+  margin: 0 0.35rem 0 0;
 }
 .p-tabview .p-tabview-panels {
   color: var(--text);
@@ -1595,6 +1684,172 @@ a {
   font-size: 0.7rem;
   font-weight: 700;
   line-height: 1;
+}
+
+/* ------------------------------------------------------------
+   Forms
+
+   The shape of a labelled control, a group of them, and the hint under one.
+   Before these, thirty fields in a dialog were thirty identical rows of
+   `text-sm font-medium` — a section heading weighed the same as a field label,
+   which is why the dialogs read as a wall rather than as a form.
+   ------------------------------------------------------------ */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+.field-label,
+.check-field-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 550;
+  color: var(--text);
+}
+.check-field-label {
+  cursor: pointer;
+}
+/* "Optional" as a quiet flag on the label rather than as placeholder text,
+   which is gone the moment anybody types into the field. */
+.field-optional {
+  font-size: 0.7rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.field-hint {
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+.field-hint code {
+  padding: 0.05rem 0.25rem;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text);
+  font-size: 0.95em;
+}
+.field-error {
+  font-size: 0.78rem;
+  color: var(--danger);
+}
+/* Short pairs that are read together — Min and Max, a name and its slug. They
+   stack rather than halve on a dialog too narrow to hold both. */
+.field-row {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 9rem), 1fr));
+}
+.check-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+}
+.check-field .p-checkbox {
+  margin-top: 0.1rem;
+  flex-shrink: 0;
+}
+
+/* A titled group. The rule above it is what turns a list of fields into two or
+   three things to decide, which is how many decisions most of these dialogs
+   actually contain. */
+.form-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding-top: 1.1rem;
+  border-top: var(--border-width) solid var(--border);
+}
+/* The first section follows the dialog's own header rule; a second line
+   directly under it is a border for the sake of one. */
+.form-section:first-child {
+  padding-top: 0;
+  border-top: none;
+}
+.form-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.form-section-title {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* A panel *inside* a dialog: the "add someone" form above the list of people it
+   adds to. It has to read as one step, not as four more loose controls. */
+.inset-panel {
+  padding: 0.85rem;
+  border-radius: var(--radius);
+  border: var(--border-width) solid var(--border);
+  background: var(--surface-2);
+}
+
+/* A read-only record: label above value, hairline between fields. Rows of
+   `label 38% | value` with nothing between them made a twelve-field record one
+   grey block. */
+.detail-list {
+  display: flex;
+  flex-direction: column;
+}
+.detail-row {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.6rem 0;
+  border-bottom: var(--border-width) solid var(--border);
+}
+.detail-row:last-child {
+  border-bottom: none;
+}
+.detail-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.detail-value {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* A grant's two controls — what they may do, and until when. Side by side when
+   the dialog is wide enough to hold both, stacked when it is not. */
+.grant-controls {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+.grant-controls .p-multiselect,
+.grant-controls .p-calendar,
+.grant-controls .p-calendar .p-inputtext {
+  width: 100%;
+  min-width: 0;
+}
+
+/* A list of rows inside a dialog — grants, deleted records, form fields. */
+.row-list {
+  display: flex;
+  flex-direction: column;
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.row-list > * + * {
+  border-top: var(--border-width) solid var(--border);
+}
+.row-list-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
 }
 
 /* The sign-in screen. The gradient is the same one the dashboard's greeting

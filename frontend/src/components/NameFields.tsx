@@ -2,6 +2,7 @@ import { useState } from "react";
 import { InputText } from "primereact/inputtext";
 
 import { isValidName, slugify } from "../lib/slug";
+import { Field } from "./Field";
 
 export interface NamePair {
   displayName: string;
@@ -47,8 +48,7 @@ export function NameFields({
 
   return (
     <>
-      <div className="flex flex-col gap-2">
-        <label htmlFor={`${idPrefix}-display-name`}>Name</label>
+      <Field label="Name" htmlFor={`${idPrefix}-display-name`}>
         <InputText
           id={`${idPrefix}-display-name`}
           value={value.displayName}
@@ -60,9 +60,21 @@ export function NameFields({
           }
           autoFocus={autoFocus}
         />
-      </div>
-      <div className="flex flex-col gap-2">
-        <label htmlFor={`${idPrefix}-name`}>API name</label>
+      </Field>
+      <Field
+        label="API name"
+        htmlFor={`${idPrefix}-name`}
+        hint={
+          invalid
+            ? undefined
+            : "The code-facing name. Changing it breaks anything that refers to this one by name."
+        }
+        error={
+          invalid
+            ? "Start with a lowercase letter; then lowercase letters, digits and underscores only."
+            : undefined
+        }
+      >
         <InputText
           id={`${idPrefix}-name`}
           value={value.name}
@@ -71,19 +83,8 @@ export function NameFields({
             onChange({ displayName: value.displayName, name: e.target.value });
           }}
           invalid={invalid}
-          aria-describedby={`${idPrefix}-name-help`}
         />
-        <small
-          id={`${idPrefix}-name-help`}
-          // --danger, not PrimeReact's --red-500: that one is a frozen light-mode
-          // value from the base theme and does not lighten on a dark surface.
-          style={{ color: invalid ? "var(--danger)" : "var(--text-muted)" }}
-        >
-          {invalid
-            ? "Start with a lowercase letter; then lowercase letters, digits and underscores only."
-            : "The code-facing name. Changing it breaks anything that refers to this one by name."}
-        </small>
-      </div>
+      </Field>
     </>
   );
 }

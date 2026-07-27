@@ -120,26 +120,27 @@ export function ListSettingsDialog({
       header={`${listName} settings`}
       visible={visible}
       onHide={onHide}
-      style={{ width: 680 }}
+      style={{ width: 720 }}
+      // The tab strip sits flush against the header rule rather than floating
+      // in the body's padding, which is what made it read as a widget dropped
+      // into the dialog instead of as the dialog's own navigation.
+      contentStyle={{ padding: 0 }}
+      footer={<Button label="Done" text onClick={onHide} />}
     >
       <TabView activeIndex={tab} onTabChange={(e) => setTab(e.index)}>
         {tabs.map((t) => (
           <TabPanel key={t.key} header={t.header}>
-            <div className="pt-2">{t.body}</div>
+            {!canConfigure && !canShare && (
+              <Message
+                className="mb-3"
+                severity="info"
+                text="You can view this list's settings but not change them."
+              />
+            )}
+            {t.body}
           </TabPanel>
         ))}
       </TabView>
-
-      {!canConfigure && !canShare && (
-        <Message
-          severity="info"
-          text="You can view this list's settings but not change them."
-        />
-      )}
-
-      <div className="flex justify-end pt-2">
-        <Button label="Done" text onClick={onHide} />
-      </div>
     </AppDialog>
   );
 }

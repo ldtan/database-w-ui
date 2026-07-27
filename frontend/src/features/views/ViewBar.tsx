@@ -8,6 +8,7 @@ import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { Field } from "../../components/Field";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
@@ -207,27 +208,37 @@ export function ViewBar({
         header="New view"
         visible={creating}
         onHide={() => setCreating(false)}
-        style={{ width: 360 }}
+        style={{ width: 420 }}
+        footer={
+          <>
+            <Button label="Cancel" text onClick={() => setCreating(false)} />
+            <Button
+              label="Create view"
+              icon="pi pi-plus"
+              onClick={() => create.mutate()}
+              loading={create.isPending}
+              disabled={!newName.trim()}
+            />
+          </>
+        }
       >
         <div className="flex flex-col gap-4">
           {create.error instanceof ApiError && (
             <Message severity="error" text={create.error.message} />
           )}
-          <InputText
-            placeholder="View name"
-            value={newName}
-            onChange={(e) => setNewName(e.target.value)}
-            autoFocus
-          />
-          <div className="flex justify-end gap-2">
-            <Button label="Cancel" text onClick={() => setCreating(false)} />
-            <Button
-              label="Create"
-              onClick={() => create.mutate()}
-              loading={create.isPending}
-              disabled={!newName.trim()}
+          <Field
+            label="View name"
+            htmlFor="new-view-name"
+            hint="It starts from the sort, grouping and columns showing right now."
+          >
+            <InputText
+              id="new-view-name"
+              placeholder="Active only"
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              autoFocus
             />
-          </div>
+          </Field>
         </div>
       </AppDialog>
     </div>

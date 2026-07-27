@@ -94,7 +94,19 @@ export function RecordFormDialog({
       header={item ? "Edit record" : "Add record"}
       visible={visible}
       onHide={onHide}
-      style={{ width: 460 }}
+      style={{ width: 480 }}
+      footer={
+        <>
+          <Button label="Cancel" text onClick={onHide} />
+          <Button
+            label={item ? "Save" : "Add record"}
+            icon={item ? "pi pi-check" : "pi pi-plus"}
+            onClick={() => persist.mutate()}
+            loading={persist.isPending}
+            disabled={fields.length === 0}
+          />
+        </>
+      }
     >
       <div className="flex flex-col gap-4">
         {persist.error instanceof ApiError && (
@@ -115,7 +127,9 @@ export function RecordFormDialog({
             }
           />
         )}
-        {fields.length === 0 && <p>Add a column first.</p>}
+        {fields.length === 0 && (
+          <p className="field-hint">Add a column first.</p>
+        )}
         <RecordFields
           listUuid={listUuid}
           fields={fields}
@@ -123,15 +137,6 @@ export function RecordFormDialog({
           values={values}
           onChange={setValues}
         />
-        <div className="flex justify-end gap-2">
-          <Button label="Cancel" text onClick={onHide} />
-          <Button
-            label={item ? "Save" : "Add"}
-            onClick={() => persist.mutate()}
-            loading={persist.isPending}
-            disabled={fields.length === 0}
-          />
-        </div>
       </div>
     </AppDialog>
   );

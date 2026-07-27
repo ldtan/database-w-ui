@@ -4,6 +4,11 @@ import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 
 import { AppDialog } from "./AppDialog";
+import { Field } from "./Field";
+
+// The footer's submit button lives outside the <form>, so the two are tied
+// together by id rather than by nesting.
+const FORM_ID = "create-name-form";
 
 interface Props {
   visible: boolean;
@@ -61,13 +66,25 @@ export function CreateNameDialog({
       visible={visible}
       onHide={onHide}
       style={{ width: 420 }}
+      footer={
+        <>
+          <Button label="Cancel" text type="button" onClick={onHide} />
+          {/* In the dialog's footer, which is outside the <form> element — so it
+              says which form it submits rather than relying on being inside one. */}
+          <Button
+            type="submit"
+            form={FORM_ID}
+            label={submitLabel}
+            icon="pi pi-plus"
+            loading={loading}
+            disabled={!name.trim()}
+          />
+        </>
+      }
     >
-      <form onSubmit={submit} className="flex flex-col gap-4">
+      <form id={FORM_ID} onSubmit={submit} className="flex flex-col gap-4">
         {error && <Message severity="error" text={error} />}
-        <div className="flex flex-col gap-2">
-          <label htmlFor="create-name" className="text-sm font-medium">
-            {label}
-          </label>
+        <Field label={label} htmlFor="create-name" hint={hint}>
           <InputText
             id="create-name"
             value={name}
@@ -75,22 +92,7 @@ export function CreateNameDialog({
             onChange={(e) => setName(e.target.value)}
             autoFocus
           />
-          {hint && (
-            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-              {hint}
-            </span>
-          )}
-        </div>
-        <div className="flex justify-end gap-2">
-          <Button label="Cancel" text type="button" onClick={onHide} />
-          <Button
-            type="submit"
-            label={submitLabel}
-            icon="pi pi-plus"
-            loading={loading}
-            disabled={!name.trim()}
-          />
-        </div>
+        </Field>
       </form>
     </AppDialog>
   );

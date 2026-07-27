@@ -182,6 +182,12 @@ export function FilterConditionsEditor({
         );
       })}
 
+      {conditions.length === 0 && (
+        <p className="field-hint">
+          No conditions — every record is shown. Add one to narrow it down.
+        </p>
+      )}
+
       <div>
         <Button
           label="Add condition"

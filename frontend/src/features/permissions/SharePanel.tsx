@@ -4,10 +4,11 @@ import { Dropdown } from "primereact/dropdown";
 import { MultiSelect } from "primereact/multiselect";
 import { Button } from "primereact/button";
 import { Calendar } from "primereact/calendar";
-import { Checkbox } from "primereact/checkbox";
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { CheckboxField, Field, FormSection } from "../../components/Field";
+import { SkeletonRows } from "../../components/Skeleton";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import { actionsFor, presetsFor } from "../../lib/permissions";
@@ -173,163 +174,190 @@ export function SharePanel({
   }
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
       {inherit && (
-        <div className="flex items-start gap-2">
-          <Checkbox
-            inputId="unique-perms"
-            checked={!inherit.value}
-            disabled={inherit.busy}
-            onChange={(e) => inherit.onChange(!e.checked)}
-          />
-          <label htmlFor="unique-perms" className="text-sm">
-            <span className="font-medium">Unique permissions</span>
-            <br />
-            <span style={{ color: "var(--text-muted)" }}>
-              Ignore access inherited from the parent; use only the grants below.
-            </span>
-          </label>
-        </div>
+        <CheckboxField
+          inputId="unique-perms"
+          checked={!inherit.value}
+          disabled={inherit.busy}
+          onChange={(next) => inherit.onChange(!next)}
+          label="Unique permissions"
+          hint="Ignore access inherited from the parent; use only the grants below."
+        />
       )}
 
-      {/* Add a person or group */}
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">Add people or groups</span>
-        <Dropdown
-          value={principal}
-          options={principalGroups}
-          optionGroupLabel="label"
-          optionGroupChildren="items"
-          onChange={(e) => setPrincipal(e.value)}
-          placeholder="Select a user or group…"
-          filter
-          // Drive the server-side query; the options are already narrowed, so
-          // don't also filter them locally.
-          filterMatchMode="contains"
-          onFilter={(e) => setSearch(e.filter)}
-          resetFilterOnHide
-          emptyFilterMessage="No matching users or groups"
-          className="w-full"
-        />
-        <div className="flex flex-wrap items-center gap-2">
-          {presetsFor(resourceType).map((preset) => (
-            <Button
-              key={preset.label}
-              label={preset.label}
-              size="small"
-              outlined
-              onClick={() => setActions(preset.actions)}
+      {/* Adding someone is one step with several parts, so it sits in a panel of
+          its own. Loose on the dialog, its picker, its four presets, its action
+          list, its expiry and its Add button read as six unrelated controls
+          between the checkbox above and the list below. */}
+      <FormSection title="Add people or groups">
+        <div className="inset-panel flex flex-col gap-3">
+          <Dropdown
+            value={principal}
+            options={principalGroups}
+            optionGroupLabel="label"
+            optionGroupChildren="items"
+            onChange={(e) => setPrincipal(e.value)}
+            placeholder="Select a user or group…"
+            filter
+            // Drive the server-side query; the options are already narrowed, so
+            // don't also filter them locally.
+            filterMatchMode="contains"
+            onFilter={(e) => setSearch(e.filter)}
+            resetFilterOnHide
+            emptyFilterMessage="No matching users or groups"
+            className="w-full"
+          />
+
+          <Field label="Can">
+            {/* The presets are the answer almost every time, so they lead and the
+                action list is the way to depart from one — quiet, small buttons
+                rather than four outlined blocks competing with Add. */}
+            <div className="flex flex-wrap items-center gap-1">
+              {presetsFor(resourceType).map((preset) => {
+                const chosen =
+                  preset.actions.length === actions.length &&
+                  preset.actions.every((a) => actions.includes(a));
+                return (
+                  <Button
+                    key={preset.label}
+                    label={preset.label}
+                    size="small"
+                    text
+                    className={chosen ? "is-on" : undefined}
+                    onClick={() => setActions(preset.actions)}
+                  />
+                );
+              })}
+            </div>
+            <MultiSelect
+              value={actions}
+              options={actionOptions(resourceType)}
+              onChange={(e) => setActions(e.value)}
+              placeholder="Actions"
+              display="chip"
+              className="w-full"
             />
-          ))}
-          <MultiSelect
-            value={actions}
-            options={actionOptions(resourceType)}
-            onChange={(e) => setActions(e.value)}
-            placeholder="Actions"
-            display="chip"
-            className="flex-1"
-            style={{ minWidth: 220 }}
-          />
-          <Calendar
-            value={expiresAt}
-            onChange={(e) => setExpiresAt((e.value as Date) ?? null)}
-            minDate={new Date()}
-            showButtonBar
-            showIcon
-            showTime
-            hourFormat="24"
-            dateFormat="yy-mm-dd"
-            placeholder="Expires (optional)"
-            className="w-64"
-          />
+          </Field>
+
+          <Field label="Access expires" optional>
+            <Calendar
+              value={expiresAt}
+              onChange={(e) => setExpiresAt((e.value as Date) ?? null)}
+              minDate={new Date()}
+              showButtonBar
+              showIcon
+              showTime
+              hourFormat="24"
+              dateFormat="yy-mm-dd"
+              placeholder="Never"
+              className="w-full"
+            />
+          </Field>
+
           <Button
             label="Add"
             icon="pi pi-plus"
+            className="self-end"
             onClick={onAdd}
             loading={upsert.isPending}
             disabled={!principal || actions.length === 0}
           />
         </div>
-      </div>
+      </FormSection>
 
       {/* Existing access */}
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">People with access</span>
-        {grants.isLoading && <p>Loading…</p>}
+      <FormSection title="People with access">
+        {grants.isLoading && <SkeletonRows count={2} />}
         {grants.data?.length === 0 && (
           <Message
             severity="info"
             text="No direct grants yet. The owner always has full access."
           />
         )}
-        {grants.data?.map((grant) => {
-          const isUser = !!grant.user_uuid;
-          const name = isUser ? grant.user_username : grant.group_name;
-          const kind = isUser ? "user" : "group";
-          const uuid = (grant.user_uuid ?? grant.group_uuid)!;
-          const expiry = expiryLabel(grant.expires_at);
-          return (
-            <div key={grant.uuid} className="flex flex-col gap-1">
-              <div className="flex items-center gap-2">
-                <i className={isUser ? "pi pi-user" : "pi pi-users"} />
-                <span className="flex-1 truncate">{name}</span>
-                <MultiSelect
-                  value={grant.actions}
-                  options={actionOptions(resourceType)}
-                  // Editing actions must resend the grant's expiry, or the backend's
-                  // verbatim write would clear it.
-                  onChange={(e) =>
-                    upsert.mutate({
-                      kind,
-                      uuid,
-                      actions: e.value,
-                      expiresAt: grant.expires_at ?? null,
-                    })
-                  }
-                  display="chip"
-                  style={{ maxWidth: 300 }}
-                />
-                <Button
-                  icon="pi pi-trash"
-                  text
-                  severity="danger"
-                  aria-label={`Remove ${name}`}
-                  onClick={() => remove.mutate(grant.uuid)}
-                />
-              </div>
-              {/* Expiry: set/extend/clear (the button bar's Clear removes it), plus a
-                  status once one is set. */}
-              <div className="flex items-center gap-2 pl-6 text-sm">
-                <span style={{ color: "var(--text-muted)" }}>Access expires:</span>
-                <Calendar
-                  value={grant.expires_at ? new Date(grant.expires_at) : null}
-                  onChange={(e) =>
-                    upsert.mutate({
-                      kind,
-                      uuid,
-                      actions: grant.actions,
-                      expiresAt: e.value ? (e.value as Date).toISOString() : null,
-                    })
-                  }
-                  minDate={new Date()}
-                  showButtonBar
-                  showTime
-                  hourFormat="24"
-                  dateFormat="yy-mm-dd"
-                  placeholder="Never"
-                  className="w-64"
-                />
-                {expiry &&
-                  (expiry.expired ? (
-                    <span className="text-danger font-medium">{expiry.text}</span>
-                  ) : (
-                    <span style={{ color: "var(--text-muted)" }}>{expiry.text}</span>
-                  ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+        {grants.data && grants.data.length > 0 && (
+          <div className="row-list">
+            {grants.data.map((grant) => {
+              const isUser = !!grant.user_uuid;
+              const name = isUser ? grant.user_username : grant.group_name;
+              const kind = isUser ? "user" : "group";
+              const uuid = (grant.user_uuid ?? grant.group_uuid)!;
+              const expiry = expiryLabel(grant.expires_at);
+              return (
+                <div key={grant.uuid} className="row-list-item flex-col !items-stretch gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="entity-icon is-muted" style={{ width: "1.75rem", height: "1.75rem", fontSize: "0.8rem" }} aria-hidden>
+                      <i className={isUser ? "pi pi-user" : "pi pi-users"} />
+                    </span>
+                    <span className="flex-1 truncate font-medium">{name}</span>
+                    {expiry && (
+                      <span
+                        className={`badge${expiry.expired ? "" : ""}`}
+                        style={
+                          expiry.expired
+                            ? { color: "var(--danger)" }
+                            : undefined
+                        }
+                      >
+                        {expiry.text}
+                      </span>
+                    )}
+                    <Button
+                      icon="pi pi-trash"
+                      text
+                      rounded
+                      severity="danger"
+                      aria-label={`Remove ${name}`}
+                      onClick={() => remove.mutate(grant.uuid)}
+                    />
+                  </div>
+                  {/* What they may do, and until when — the two things a grant
+                      says, on one line under the name it belongs to. */}
+                  <div className="grant-controls">
+                    <MultiSelect
+                      value={grant.actions}
+                      options={actionOptions(resourceType)}
+                      // Editing actions must resend the grant's expiry, or the
+                      // backend's verbatim write would clear it.
+                      onChange={(e) =>
+                        upsert.mutate({
+                          kind,
+                          uuid,
+                          actions: e.value,
+                          expiresAt: grant.expires_at ?? null,
+                        })
+                      }
+                      display="chip"
+                      placeholder="No actions"
+                    />
+                    {/* Expiry: set, extend or clear it (the button bar's Clear
+                        removes it). */}
+                    <Calendar
+                      value={grant.expires_at ? new Date(grant.expires_at) : null}
+                      onChange={(e) =>
+                        upsert.mutate({
+                          kind,
+                          uuid,
+                          actions: grant.actions,
+                          expiresAt: e.value
+                            ? (e.value as Date).toISOString()
+                            : null,
+                        })
+                      }
+                      minDate={new Date()}
+                      showButtonBar
+                      showTime
+                      hourFormat="24"
+                      dateFormat="yy-mm-dd"
+                      placeholder="Never expires"
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </FormSection>
     </div>
   );
 }

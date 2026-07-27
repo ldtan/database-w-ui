@@ -6,7 +6,7 @@ import { Checkbox } from "primereact/checkbox";
 import { SelectButton } from "primereact/selectbutton";
 import { Dropdown } from "primereact/dropdown";
 import { InputNumber } from "primereact/inputnumber";
-import { Divider } from "primereact/divider";
+import { TabPanel, TabView } from "primereact/tabview";
 import {
   FileUpload,
   type FileUploadHandlerEvent,
@@ -14,6 +14,7 @@ import {
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { Field, FieldRow, FormSection } from "../../components/Field";
 import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
 import { downloadBlob, downloadFile } from "../../lib/download";
@@ -64,6 +65,8 @@ export function ImportExportDialog({
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
+  // 0 = Export, 1 = Import. Only ever 0 when the caller may not import.
+  const [tab, setTab] = useState(0);
   const [format, setFormat] = useState<Format>("csv");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -181,126 +184,159 @@ export function ImportExportDialog({
     }
   }
 
+  // Getting data out and putting data in are two jobs, and only one of them is
+  // ever the one you opened this for. Stacked, the export half's four sections
+  // stood between you and the file picker; as tabs each is a screen with one
+  // thing on it, and the footer can carry that screen's action.
+  const exporting = tab === 0 || !canImport;
+
   return (
     <AppDialog
       header="Import / Export"
       visible={visible}
       onHide={onHide}
-      style={{ width: 520 }}
-    >
-      <div className="flex flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <span className="font-semibold">Format</span>
-          <SelectButton
-            value={format}
-            onChange={(e) => e.value && setFormat(e.value)}
-            options={[
-              { label: "CSV", value: "csv" },
-              { label: "JSON", value: "json" },
-            ]}
-          />
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <span className="font-semibold">Columns</span>
-          <p className="text-sm text-muted m-0">
-            Headers use the column name. {chosen.length}/{columns.length} selected.
-          </p>
-          <div className="flex flex-col gap-1 max-h-48 overflow-auto">
-            {columns.map((col) => (
-              <div key={col.uuid} className="flex items-center gap-2">
-                <Checkbox
-                  inputId={`io-${col.uuid}`}
-                  checked={selected.has(col.uuid)}
-                  onChange={(e) => toggle(col.uuid, !!e.checked)}
-                />
-                <label htmlFor={`io-${col.uuid}`} className="flex-1">
-                  {col.display_name}{" "}
-                  <span className="text-muted">({col.name})</span>
-                </label>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <span className="font-semibold">Export options</span>
-          <div className="flex items-center gap-2 flex-wrap">
-            <label htmlFor="io-limit" className="text-sm">
-              Limit
-            </label>
-            <InputNumber
-              inputId="io-limit"
-              value={limit}
-              onValueChange={(e) => setLimit(e.value ?? null)}
-              min={1}
-              useGrouping={false}
-              placeholder="All"
-              style={{ width: 90 }}
-            />
-            <label htmlFor="io-sort" className="text-sm ml-2">
-              Sort
-            </label>
-            <Dropdown
-              inputId="io-sort"
-              value={sortColumn}
-              options={columns.map((c) => ({
-                label: c.display_name,
-                value: c.uuid,
-              }))}
-              onChange={(e) => setSortColumn(e.value)}
-              placeholder="Record ID"
-              showClear
-              style={{ width: 160 }}
-            />
-            <SelectButton
-              value={sortDir}
-              onChange={(e) => e.value && setSortDir(e.value)}
-              options={[
-                { label: "Asc", value: "asc" },
-                { label: "Desc", value: "desc" },
-              ]}
-              disabled={!sortColumn}
-            />
-          </div>
-          <span className="text-sm text-muted">Filters (optional)</span>
-          <FilterConditionsEditor
-            listUuid={listUuid}
-            columns={columns}
-            conjunction={conjunction}
-            onConjunctionChange={setConjunction}
-            conditions={conditions}
-            onConditionsChange={setConditions}
-          />
-        </div>
-
-        {exportError && <Message severity="error" text={exportError} />}
-        <div className="flex gap-2">
-          <Button
-            label="Export records"
-            icon="pi pi-download"
-            onClick={handleExport}
-            loading={busy}
-            disabled={chosen.length === 0}
-          />
-          <Button
-            label="Download template"
-            icon="pi pi-file"
-            outlined
-            onClick={handleTemplate}
-            disabled={chosen.length === 0}
-          />
-        </div>
-
-        {canImport && (
+      style={{ width: 560 }}
+      contentStyle={{ padding: 0 }}
+      footer={
+        exporting ? (
           <>
-            <Divider />
+            <Button
+              label="Download template"
+              icon="pi pi-file"
+              text
+              onClick={handleTemplate}
+              disabled={chosen.length === 0}
+            />
+            <Button
+              label="Export records"
+              icon="pi pi-download"
+              onClick={handleExport}
+              loading={busy}
+              disabled={chosen.length === 0}
+            />
+          </>
+        ) : (
+          <Button label="Close" text onClick={onHide} />
+        )
+      }
+    >
+      <TabView activeIndex={tab} onTabChange={(e) => setTab(e.index)}>
+        <TabPanel header="Export">
+          <div className="flex flex-col gap-5">
+            {exportError && <Message severity="error" text={exportError} />}
 
-            <div className="flex flex-col gap-2">
-              <span className="font-semibold">Import records</span>
-              <p className="text-sm text-muted m-0">
+            <FormSection title="Format">
+              <SelectButton
+                value={format}
+                onChange={(e) => e.value && setFormat(e.value)}
+                options={[
+                  { label: "CSV", value: "csv" },
+                  { label: "JSON", value: "json" },
+                ]}
+              />
+            </FormSection>
+
+            <FormSection
+              title="Columns"
+              description={`Headers use the column name. ${chosen.length} of ${columns.length} selected.`}
+            >
+              <div className="flex items-center gap-1 -mt-1">
+                <Button
+                  label="All"
+                  text
+                  size="small"
+                  onClick={() =>
+                    columns.forEach((c) => toggle(c.uuid, true))
+                  }
+                />
+                <Button
+                  label="None"
+                  text
+                  size="small"
+                  onClick={() =>
+                    columns.forEach((c) => toggle(c.uuid, false))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-1 max-h-48 overflow-auto">
+                {columns.map((col) => (
+                  <div key={col.uuid} className="flex items-center gap-2">
+                    <Checkbox
+                      inputId={`io-${col.uuid}`}
+                      checked={selected.has(col.uuid)}
+                      onChange={(e) => toggle(col.uuid, !!e.checked)}
+                    />
+                    <label
+                      htmlFor={`io-${col.uuid}`}
+                      className="flex-1 cursor-pointer text-sm"
+                    >
+                      {col.display_name}{" "}
+                      <span className="text-muted">({col.name})</span>
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </FormSection>
+
+            <FormSection title="Which records">
+              <FieldRow>
+                <Field label="Limit" htmlFor="io-limit" optional>
+                  <InputNumber
+                    inputId="io-limit"
+                    value={limit}
+                    onValueChange={(e) => setLimit(e.value ?? null)}
+                    min={1}
+                    useGrouping={false}
+                    placeholder="All"
+                  />
+                </Field>
+                <Field label="Sort by" htmlFor="io-sort" optional>
+                  <Dropdown
+                    inputId="io-sort"
+                    value={sortColumn}
+                    options={columns.map((c) => ({
+                      label: c.display_name,
+                      value: c.uuid,
+                    }))}
+                    onChange={(e) => setSortColumn(e.value)}
+                    placeholder="Record ID"
+                    showClear
+                    className="w-full"
+                  />
+                </Field>
+                <Field label="Direction">
+                  <SelectButton
+                    value={sortDir}
+                    onChange={(e) => e.value && setSortDir(e.value)}
+                    options={[
+                      { label: "Asc", value: "asc" },
+                      { label: "Desc", value: "desc" },
+                    ]}
+                    disabled={!sortColumn}
+                  />
+                </Field>
+              </FieldRow>
+              <Field label="Filters" optional>
+                <FilterConditionsEditor
+                  listUuid={listUuid}
+                  columns={columns}
+                  conjunction={conjunction}
+                  onConjunctionChange={setConjunction}
+                  conditions={conditions}
+                  onConditionsChange={setConditions}
+                />
+              </Field>
+            </FormSection>
+          </div>
+        </TabPanel>
+
+        {canImport ? (
+          <TabPanel header="Import">
+            <div className="flex flex-col gap-4">
+              <p className="field-hint">
                 Upload a .csv or .json file whose headers/keys are column names.
                 Unknown columns are ignored; each row is validated on the server.
+                Not sure of the shape? Download the template from the Export tab.
               </p>
               <FileUpload
                 mode="basic"
@@ -315,7 +351,9 @@ export function ImportExportDialog({
                 <Message
                   severity={result.errors.length === 0 ? "success" : "warn"}
                   text={`Imported ${result.created} record(s)${
-                    result.errors.length ? `, ${result.errors.length} skipped` : ""
+                    result.errors.length
+                      ? `, ${result.errors.length} skipped`
+                      : ""
                   }.`}
                 />
               )}
@@ -330,9 +368,9 @@ export function ImportExportDialog({
                 </ul>
               )}
             </div>
-          </>
-        )}
-      </div>
+          </TabPanel>
+        ) : null}
+      </TabView>
     </AppDialog>
   );
 }

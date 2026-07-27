@@ -14,6 +14,13 @@ const BREAKPOINTS = { "960px": "80vw", "640px": "95vw" };
  * The px width still governs on a desktop, which is what it was chosen for.
  *
  * Import this instead of primereact/dialog. It takes the same props.
+ *
+ * **Put the buttons in `footer`, not at the end of the children.** The content is
+ * a scrollport (below), so an action row inside it scrolls away — which on the
+ * column dialog meant Save sat under thirty fields and you had to go looking for
+ * it. `footer` renders outside that scrollport and is styled as a real bar with
+ * a rule above it; `themes.css` right-aligns it, so the footer is usually just
+ * `<><Button text .../><Button .../></>`.
  */
 export function AppDialog({ breakpoints, contentStyle, ...props }: DialogProps) {
   return (

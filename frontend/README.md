@@ -233,6 +233,34 @@ Below `SMALL_SCREEN`:
   applies the breakpoints and caps the body height so its buttons stay reachable —
   import it, not `primereact/dialog`.
 
+## Dialogs and forms
+
+A dialog is three bands with rules between them: a header saying what it is, a
+scrolling body, and a **footer** carrying the buttons. Pass those buttons as
+`footer`, never as the last row of the children — the body is a scrollport, so an
+action row inside it scrolls away, which is how the column dialog ended up with
+Save underneath thirty fields.
+
+Inside the body, forms are built from `components/Field.tsx`:
+
+| Component | What it is |
+|-----------|------------|
+| `Field` | one labelled control, with an optional hint under it and an "Optional" flag on the label |
+| `FieldRow` | two or three short fields side by side, stacking when they don't fit |
+| `CheckboxField` | a checkbox whose label is part of its hit area, with a hint |
+| `FormSection` | a titled group, separated by a hairline |
+
+The point of `FormSection` is hierarchy: before it, a section heading and a field
+label were both `text-sm font-medium`, so a dialog of thirty fields had thirty
+identically-weighted rows and no shape to skim. A dialog should read as two or
+three things to decide.
+
+Two dialogs are **tabbed** rather than stacked, for the same reason: list settings
+(columns / permissions / views / forms) and import-export. Getting data out and
+putting data in are different jobs, and only one of them is ever why you opened
+the dialog. A tabbed dialog passes `contentStyle={{ padding: 0 }}` so the tab
+strip runs the full width under the header rule.
+
 Above it the grid still has to survive a narrow window: its table carries a minimum
 width of ~8rem per column so it *scrolls* rather than crushing them. That scrolling
 is `.p-datatable > .p-datatable-wrapper` in `themes.css` — PrimeReact ships no

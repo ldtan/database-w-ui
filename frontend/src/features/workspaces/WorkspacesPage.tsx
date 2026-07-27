@@ -386,6 +386,18 @@ export function WorkspacesPage() {
         visible={!!renaming}
         onHide={() => setRenaming(null)}
         style={{ width: 420 }}
+        footer={
+          <>
+            <Button label="Cancel" text onClick={() => setRenaming(null)} />
+            <Button
+              label="Save"
+              icon="pi pi-check"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
+            />
+          </>
+        }
       >
         <div className="flex flex-col gap-4">
           {rename.error instanceof ApiError && (
@@ -399,15 +411,6 @@ export function WorkspacesPage() {
             linked={false}
             autoFocus
           />
-          <div className="flex justify-end gap-2">
-            <Button label="Cancel" text onClick={() => setRenaming(null)} />
-            <Button
-              label="Save"
-              onClick={() => rename.mutate()}
-              loading={rename.isPending}
-              disabled={!names.displayName.trim() || !isValidName(names.name)}
-            />
-          </div>
         </div>
       </AppDialog>
 
