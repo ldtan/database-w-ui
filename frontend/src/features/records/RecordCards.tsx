@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import { Checkbox } from "primereact/checkbox";
 import { Paginator } from "primereact/paginator";
 
+import { EmptyState } from "../../components/EmptyState";
 import { RowActions } from "../../components/RowActions";
+import { SkeletonRows } from "../../components/Skeleton";
 
 import type { Column, ListItem, PermissionAction } from "../../lib/types";
 import type { PrincipalType } from "../principals/PrincipalControls";
@@ -97,8 +99,16 @@ export function RecordCards({
     );
   }
 
-  if (loading) return <p>Loading…</p>;
-  if (items.length === 0) return <p>No records yet.</p>;
+  if (loading) return <SkeletonRows count={3} />;
+  if (items.length === 0) {
+    return (
+      <EmptyState
+        icon="pi pi-inbox"
+        title="No records yet"
+        text="Records you add appear here, one card each."
+      />
+    );
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -114,25 +124,31 @@ export function RecordCards({
         return (
           <div key={item.uuid} className="flex flex-col gap-2">
             {startsGroup && groupColumn && (
-              <div className="font-semibold pt-1">
-                {groupColumn.display_name}:{" "}
-                {renderCell(
-                  groupColumn,
-                  item,
-                  listUuid,
-                  principalUuids,
-                  lookupUuids,
-                )}
+              <div className="flex items-center gap-2 pt-1">
+                <span className="nav-section" style={{ padding: 0 }}>
+                  {groupColumn.display_name}
+                </span>
+                <span className="font-semibold">
+                  {renderCell(
+                    groupColumn,
+                    item,
+                    listUuid,
+                    principalUuids,
+                    lookupUuids,
+                  )}
+                </span>
               </div>
             )}
             <div
-              className="rounded border p-3 flex flex-col gap-2"
+              className="surface-card p-3 flex flex-col gap-2"
               style={{
-                borderColor: "var(--border)",
                 // --hover, not PrimeReact's --surface-hover: that one is fixed at
                 // #f6f9fc by the base theme and never moves with the mode, which
                 // painted a selected card near-white on a dark palette.
                 background: selected.has(item.uuid) ? "var(--hover)" : undefined,
+                borderColor: selected.has(item.uuid)
+                  ? "var(--brand)"
+                  : undefined,
               }}
             >
               {columns.map((col) => (
@@ -156,7 +172,7 @@ export function RecordCards({
               ))}
 
               <div
-                className="flex items-center gap-1 pt-2 border-t"
+                className="flex items-center gap-2 pt-2 border-t"
                 style={{ borderColor: "var(--border)" }}
               >
                 <Checkbox
@@ -164,7 +180,11 @@ export function RecordCards({
                   checked={selected.has(item.uuid)}
                   onChange={(e) => toggle(item, !!e.checked)}
                 />
-                <label htmlFor={`sel-${item.uuid}`} className="text-sm mr-auto">
+                <label
+                  htmlFor={`sel-${item.uuid}`}
+                  className="text-sm mr-auto cursor-pointer"
+                  style={{ color: "var(--text-muted)" }}
+                >
                   Select
                 </label>
                 <RowActions

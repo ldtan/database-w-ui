@@ -201,23 +201,9 @@ export function QrSubmitSession({
         header="Values for every scan"
         visible
         onHide={onHide}
-        style={{ width: 460 }}
-      >
-        <div className="flex flex-col gap-4">
-          <p className="m-0 text-sm" style={{ color: "var(--text-muted)" }}>
-            Set what every record in this batch shares — the event, say. Leave the
-            rest blank: each QR code fills those, and overrides anything set here
-            that it also carries.
-          </p>
-          {fields.length === 0 && <p>Add a column first.</p>}
-          <RecordFields
-            listUuid={listUuid}
-            fields={fields}
-            columns={columns}
-            values={presets}
-            onChange={onPresetsChange}
-          />
-          <div className="flex justify-end gap-2">
+        style={{ width: 480 }}
+        footer={
+          <>
             <Button label="Cancel" text onClick={onHide} />
             <Button
               label="Start scanning"
@@ -225,7 +211,25 @@ export function QrSubmitSession({
               onClick={() => setScanning(true)}
               disabled={fields.length === 0}
             />
-          </div>
+          </>
+        }
+      >
+        <div className="flex flex-col gap-4">
+          <p className="field-hint">
+            Set what every record in this batch shares — the event, say. Leave the
+            rest blank: each QR code fills those, and overrides anything set here
+            that it also carries.
+          </p>
+          {fields.length === 0 && (
+            <p className="field-hint">Add a column first.</p>
+          )}
+          <RecordFields
+            listUuid={listUuid}
+            fields={fields}
+            columns={columns}
+            values={presets}
+            onChange={onPresetsChange}
+          />
         </div>
       </AppDialog>
     );

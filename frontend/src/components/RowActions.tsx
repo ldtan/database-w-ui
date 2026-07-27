@@ -56,7 +56,7 @@ export function RowActions({ actions, maxVisible = 3, size }: Props) {
   const overflow = overflows ? shown.slice(maxVisible) : [];
 
   return (
-    <div className="flex items-center gap-1">
+    <div className="row-actions flex items-center gap-1">
       {inline.map((a) => (
         <Button
           key={a.key}

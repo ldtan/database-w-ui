@@ -1,10 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card } from "primereact/card";
-import { InputText } from "primereact/inputtext";
-import { IconField } from "primereact/iconfield";
-import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 import { Paginator } from "primereact/paginator";
@@ -12,9 +8,13 @@ import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { CreateNameDialog } from "../../components/CreateNameDialog";
+import { EmptyState } from "../../components/EmptyState";
 import { NameFields } from "../../components/NameFields";
+import { PageHeader } from "../../components/PageHeader";
 import { RowActions } from "../../components/RowActions";
+import { SearchInput } from "../../components/SearchInput";
+import { SkeletonCards } from "../../components/Skeleton";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
 import { useDebounced } from "../../lib/useDebounced";
@@ -26,7 +26,7 @@ import { DeletedWorkspacesDialog } from "./DeletedWorkspacesDialog";
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits — a client-side filter over one fetched page would
 // report "no match" for anything past the limit.
-const ROWS = 10;
+const ROWS = 12;
 
 /**
  * The Workspaces page: your workspaces, plus the lists shared with you directly.
@@ -92,7 +92,7 @@ export function WorkspacesPage() {
   const shownShared = shared.data?.items ?? [];
   const sharedTotal = shared.data?.total ?? 0;
 
-  const [displayName, setDisplayName] = useState("");
+  const [creating, setCreating] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const create = useMutation({
     mutationFn: (name: string) =>
@@ -101,7 +101,7 @@ export function WorkspacesPage() {
         display_name: name,
       }),
     onSuccess: (ws) => {
-      setDisplayName("");
+      setCreating(false);
       invalidate();
       toast.success("Workspace created", ws.display_name);
     },
@@ -136,10 +136,6 @@ export function WorkspacesPage() {
       ),
   });
 
-  function onCreate(event: FormEvent) {
-    event.preventDefault();
-    if (displayName.trim()) create.mutate(displayName.trim());
-  }
   function confirmDelete(ws: Workspace) {
     confirmDialog({
       message: `Delete workspace "${ws.display_name}" and all its lists?`,
@@ -150,66 +146,98 @@ export function WorkspacesPage() {
   }
 
   return (
-    <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
+    <div className="flex flex-col gap-5" style={{ maxWidth: 1100 }}>
       <ConfirmDialog />
-      <Breadcrumbs items={[{ label: "Workspaces" }]} />
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">Workspaces</h1>
-        <Button
-          label="Deleted"
-          icon="pi pi-trash"
-          text
-          onClick={() => setShowDeleted(true)}
+      <PageHeader
+        crumbs={[{ label: "Workspaces" }]}
+        title="Workspaces"
+        subtitle="A workspace holds a set of lists — and decides who can reach them."
+        actions={
+          <>
+            <Button
+              label="Deleted"
+              icon="pi pi-trash"
+              text
+              onClick={() => setShowDeleted(true)}
+            />
+            <Button
+              label="New workspace"
+              icon="pi pi-plus"
+              onClick={() => setCreating(true)}
+            />
+          </>
+        }
+      />
+
+      <SearchInput
+        value={wsSearch}
+        onChange={setWsSearch}
+        placeholder="Search workspaces…"
+      />
+
+      {workspaces.isLoading ? (
+        <SkeletonCards count={6} />
+      ) : shownWorkspaces.length === 0 ? (
+        <EmptyState
+          icon={wsSearch ? "pi pi-search" : "pi pi-th-large"}
+          title={wsSearch ? "No matches" : "No workspaces yet"}
+          text={
+            wsSearch
+              ? `Nothing here is called “${wsSearch}”.`
+              : "A workspace is a folder for your lists. Create one to start putting records somewhere."
+          }
+          action={
+            wsSearch ? (
+              <Button
+                label="Clear search"
+                icon="pi pi-times"
+                text
+                onClick={() => setWsSearch("")}
+              />
+            ) : (
+              <Button
+                label="New workspace"
+                icon="pi pi-plus"
+                onClick={() => setCreating(true)}
+              />
+            )
+          }
         />
-      </div>
-
-      <form onSubmit={onCreate} className="flex gap-2">
-        <InputText
-          placeholder="New workspace name"
-          value={displayName}
-          onChange={(e) => setDisplayName(e.target.value)}
-          className="flex-1"
-        />
-        <Button type="submit" label="Create" icon="pi pi-plus" loading={create.isPending} />
-      </form>
-      {create.error instanceof ApiError && (
-        <Message severity="error" text={create.error.message} />
-      )}
-
-      <IconField iconPosition="left">
-        <InputIcon className="pi pi-search" />
-        <InputText
-          value={wsSearch}
-          onChange={(e) => setWsSearch(e.target.value)}
-          placeholder="Search workspaces…"
-          className="w-full"
-        />
-      </IconField>
-
-      {workspaces.isLoading && <p>Loading…</p>}
-      {!workspaces.isLoading && shownWorkspaces.length === 0 && (
-        <p>{wsSearch ? "No workspaces match that search." : "No workspaces yet."}</p>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {shownWorkspaces.map((ws) => (
-          <Card key={ws.uuid} className="link-card">
-            <div className="flex items-center justify-between">
+      ) : (
+        <div className="card-grid">
+          {shownWorkspaces.map((ws) => (
+            <div
+              key={ws.uuid}
+              className="surface-card link-card p-3 flex items-start justify-between gap-2"
+            >
               <Link
                 to={`/workspaces/${ws.uuid}`}
-                className="no-underline link-card-target"
+                className="no-underline link-card-target flex items-start gap-3 min-w-0"
               >
-                <div className="font-medium">{ws.display_name}</div>
-                <div className="text-sm text-muted">
-                  {ws.is_system
-                    ? "Lists other people have transferred to you"
-                    : ws.name}
-                </div>
+                <span
+                  className={`entity-icon${ws.is_system ? " is-muted" : ""}`}
+                  aria-hidden
+                >
+                  <i
+                    className={ws.is_system ? "pi pi-inbox" : "pi pi-th-large"}
+                  />
+                </span>
+                <span className="flex flex-col min-w-0">
+                  <span className="font-medium truncate">
+                    {ws.display_name}
+                  </span>
+                  <span className="text-sm text-muted truncate">
+                    {ws.is_system
+                      ? "Lists transferred to you"
+                      : ws.name}
+                  </span>
+                </span>
               </Link>
               {/* The Incoming inbox is immutable — no rename/delete/share; the
                   recipient acts on the lists inside it, not on the box. */}
               <div className="link-card-above">
                 <RowActions
+                  maxVisible={1}
                   actions={[
                     {
                       key: "share",
@@ -243,16 +271,18 @@ export function WorkspacesPage() {
                 />
               </div>
             </div>
-          </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {wsTotal > 0 && (
+      {/* Only once there is more than one page of them: a pager under four cards
+          is a control that can do nothing. */}
+      {wsTotal > wsRows && (
         <Paginator
           first={wsFirst}
           rows={wsRows}
           totalRecords={wsTotal}
-          rowsPerPageOptions={[10, 25, 50, 100]}
+          rowsPerPageOptions={[12, 24, 48, 96]}
           onPageChange={(e) => {
             setWsFirst(e.first);
             setWsRows(e.rows);
@@ -263,48 +293,61 @@ export function WorkspacesPage() {
       )}
 
       {(sharedTotal > 0 || sharedSearch) && (
-        <section className="flex flex-col gap-2 mt-2">
-          <h2 className="text-lg font-medium">Shared with me</h2>
-          <IconField iconPosition="left">
-            <InputIcon className="pi pi-search" />
-            <InputText
-              value={sharedSearch}
-              onChange={(e) => setSharedSearch(e.target.value)}
-              placeholder="Search shared lists…"
-              className="w-full"
-            />
-          </IconField>
+        <section className="flex flex-col gap-3 mt-2">
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold">Shared with me</h2>
+              <span className="badge">{sharedTotal}</span>
+            </div>
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Lists someone gave you directly, without the workspace around them.
+            </p>
+          </div>
+          <SearchInput
+            value={sharedSearch}
+            onChange={setSharedSearch}
+            placeholder="Search shared lists…"
+          />
           {!shared.isLoading && shownShared.length === 0 && (
             <Message severity="info" text="No shared lists match that search." />
           )}
-          {shownShared.map((list) => (
-            <Card key={list.uuid} className="link-card">
-              <Link
-                to={`/lists/${list.uuid}`}
-                className="no-underline link-card-target"
-              >
-                <div className="font-medium">{list.display_name}</div>
-                {/* Same-named lists are common here, so disambiguate by owner and —
-                    only when the caller can see it — the workspace. The backend
-                    sends workspace_display_name only for a viewable workspace, so
-                    this never names one the caller was denied; otherwise it falls
-                    back to the list's own slug. */}
-                <div className="text-sm text-muted">
-                  {list.owner_username
-                    ? `owned by ${list.owner_username}`
-                    : list.name}
-                  {list.workspace_display_name &&
-                    ` · in ${list.workspace_display_name}`}
-                </div>
-              </Link>
-            </Card>
-          ))}
-          {sharedTotal > 0 && (
+          <div className="card-grid">
+            {shownShared.map((list) => (
+              <div key={list.uuid} className="surface-card link-card p-3">
+                <Link
+                  to={`/lists/${list.uuid}`}
+                  className="no-underline link-card-target flex items-start gap-3 min-w-0"
+                >
+                  <span className="entity-icon" aria-hidden>
+                    <i className="pi pi-table" />
+                  </span>
+                  <span className="flex flex-col min-w-0">
+                    <span className="font-medium truncate">
+                      {list.display_name}
+                    </span>
+                    {/* Same-named lists are common here, so disambiguate by owner
+                        and — only when the caller can see it — the workspace. The
+                        backend sends workspace_display_name only for a viewable
+                        workspace, so this never names one the caller was denied;
+                        otherwise it falls back to the list's own slug. */}
+                    <span className="text-sm text-muted truncate">
+                      {list.owner_username
+                        ? `owned by ${list.owner_username}`
+                        : list.name}
+                      {list.workspace_display_name &&
+                        ` · in ${list.workspace_display_name}`}
+                    </span>
+                  </span>
+                </Link>
+              </div>
+            ))}
+          </div>
+          {sharedTotal > sharedRows && (
             <Paginator
               first={sharedFirst}
               rows={sharedRows}
               totalRecords={sharedTotal}
-              rowsPerPageOptions={[10, 25, 50, 100]}
+              rowsPerPageOptions={[12, 24, 48, 96]}
               onPageChange={(e) => {
                 setSharedFirst(e.first);
                 setSharedRows(e.rows);
@@ -315,6 +358,18 @@ export function WorkspacesPage() {
           )}
         </section>
       )}
+
+      <CreateNameDialog
+        visible={creating}
+        onHide={() => setCreating(false)}
+        header="New workspace"
+        label="Workspace name"
+        placeholder="Marketing"
+        hint="You can rename it later; its short name is derived from this."
+        loading={create.isPending}
+        error={create.error instanceof ApiError ? create.error.message : null}
+        onSubmit={(name) => create.mutate(name)}
+      />
 
       {sharing && (
         <ShareDialog
@@ -330,7 +385,19 @@ export function WorkspacesPage() {
         header="Rename workspace"
         visible={!!renaming}
         onHide={() => setRenaming(null)}
-        style={{ width: 380 }}
+        style={{ width: 420 }}
+        footer={
+          <>
+            <Button label="Cancel" text onClick={() => setRenaming(null)} />
+            <Button
+              label="Save"
+              icon="pi pi-check"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
+            />
+          </>
+        }
       >
         <div className="flex flex-col gap-4">
           {rename.error instanceof ApiError && (
@@ -344,15 +411,6 @@ export function WorkspacesPage() {
             linked={false}
             autoFocus
           />
-          <div className="flex justify-end gap-2">
-            <Button label="Cancel" text onClick={() => setRenaming(null)} />
-            <Button
-              label="Save"
-              onClick={() => rename.mutate()}
-              loading={rename.isPending}
-              disabled={!names.displayName.trim() || !isValidName(names.name)}
-            />
-          </div>
         </div>
       </AppDialog>
 

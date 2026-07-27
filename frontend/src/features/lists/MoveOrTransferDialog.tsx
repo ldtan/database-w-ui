@@ -6,6 +6,7 @@ import { Button } from "primereact/button";
 
 import { AppDialog } from "../../components/AppDialog";
 import { api, ApiError } from "../../lib/api";
+import { Field } from "../../components/Field";
 import { useCurrentUser } from "../../lib/auth";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
@@ -133,6 +134,32 @@ export function MoveOrTransferDialog({
       visible={active}
       onHide={close}
       style={{ width: 460 }}
+      // One footer for both modes rather than one inside each: the buttons are
+      // the same act at the same place, and only their label and what they are
+      // waiting for changes with the mode.
+      footer={
+        <>
+          <Button label="Cancel" text onClick={close} />
+          {mode === "move" ? (
+            <Button
+              label="Move list"
+              icon="pi pi-arrow-right"
+              onClick={() => move.mutate()}
+              loading={move.isPending}
+              disabled={!targetWorkspace}
+            />
+          ) : (
+            <Button
+              label="Transfer list"
+              icon="pi pi-send"
+              severity="warning"
+              onClick={() => transfer.mutate()}
+              loading={transfer.isPending}
+              disabled={!targetUser}
+            />
+          )}
+        </>
+      }
     >
       <div className="flex flex-col gap-4">
         {canTransfer && (
@@ -147,11 +174,10 @@ export function MoveOrTransferDialog({
         )}
 
         {mode === "move" ? (
-          <div className="flex flex-col gap-2">
-            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Move this list to another workspace you can configure. It keeps its
-              sharing and everyone who already has access.
-            </span>
+          <Field
+            label="Destination workspace"
+            hint="It keeps its sharing and everyone who already has access."
+          >
             <Dropdown
               value={targetWorkspace}
               options={workspaceOptions}
@@ -163,23 +189,12 @@ export function MoveOrTransferDialog({
               emptyMessage="No other workspaces you can move this into"
               className="w-full"
             />
-            <div className="flex justify-end gap-2">
-              <Button label="Cancel" text onClick={close} />
-              <Button
-                label="Move"
-                onClick={() => move.mutate()}
-                loading={move.isPending}
-                disabled={!targetWorkspace}
-              />
-            </div>
-          </div>
+          </Field>
         ) : (
-          <div className="flex flex-col gap-2">
-            <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Hand this list to another user. It moves into their Incoming workspace
-              and becomes theirs — you lose access, but everyone you shared it with
-              keeps theirs.
-            </span>
+          <Field
+            label="New owner"
+            hint="It moves into their Incoming workspace and becomes theirs — you lose access, but everyone you shared it with keeps theirs."
+          >
             <Dropdown
               value={targetUser}
               options={userOptions}
@@ -193,17 +208,7 @@ export function MoveOrTransferDialog({
               emptyFilterMessage="No matching users"
               className="w-full"
             />
-            <div className="flex justify-end gap-2">
-              <Button label="Cancel" text onClick={close} />
-              <Button
-                label="Transfer"
-                severity="warning"
-                onClick={() => transfer.mutate()}
-                loading={transfer.isPending}
-                disabled={!targetUser}
-              />
-            </div>
-          </div>
+          </Field>
         )}
       </div>
     </AppDialog>

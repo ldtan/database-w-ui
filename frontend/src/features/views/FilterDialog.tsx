@@ -64,7 +64,23 @@ export function FilterDialog({
   });
 
   return (
-    <AppDialog header="Filter" visible={visible} onHide={onHide} style={{ width: 560 }}>
+    <AppDialog
+      header="Filter records"
+      visible={visible}
+      onHide={onHide}
+      style={{ width: 620 }}
+      footer={
+        <>
+          <Button label="Cancel" text onClick={onHide} />
+          <Button
+            label="Apply"
+            icon="pi pi-check"
+            onClick={() => apply.mutate()}
+            loading={apply.isPending}
+          />
+        </>
+      }
+    >
       <div className="flex flex-col gap-3">
         {apply.error instanceof ApiError && (
           <Message severity="error" text={apply.error.message} />
@@ -78,15 +94,6 @@ export function FilterDialog({
           conditions={conditions}
           onConditionsChange={setConditions}
         />
-
-        <div className="flex justify-end gap-2">
-          <Button label="Cancel" text onClick={onHide} />
-          <Button
-            label="Apply"
-            onClick={() => apply.mutate()}
-            loading={apply.isPending}
-          />
-        </div>
       </div>
     </AppDialog>
   );

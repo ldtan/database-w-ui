@@ -67,40 +67,41 @@ export function RecordViewDialog({
       header="View record"
       visible={visible && !!item}
       onHide={onHide}
-      style={{ width: 460 }}
-    >
-      <div className="flex flex-col gap-4">
-        {fields.length === 0 && <p>This form has no fields to show.</p>}
-        <div className="flex flex-col gap-2">
-          {item &&
-            fields.map(({ column, label }) => (
-              <div key={column.uuid} className="flex gap-2 items-baseline">
-                <span
-                  className="text-sm shrink-0"
-                  style={{ color: "var(--text-muted)", width: "38%" }}
-                >
-                  {label}
-                </span>
-                <span className="min-w-0 flex-1 break-words">
-                  {/* "full": this is the one surface with room to show a
-                      multiline value as more than one line. */}
-                  {renderCell(
-                    column,
-                    item,
-                    listUuid,
-                    principalUuids,
-                    lookupUuids,
-                    "full",
-                  )}
-                </span>
-              </div>
-            ))}
-        </div>
-        <div className="flex justify-end gap-2">
+      style={{ width: 480 }}
+      footer={
+        <>
           <Button label="Close" text onClick={onHide} />
-          {canEdit && <Button label="Edit" icon="pi pi-pencil" onClick={onEdit} />}
-        </div>
-      </div>
+          {canEdit && (
+            <Button label="Edit" icon="pi pi-pencil" onClick={onEdit} />
+          )}
+        </>
+      }
+    >
+      {fields.length === 0 && (
+        <p className="field-hint">This form has no fields to show.</p>
+      )}
+      {/* A definition list rather than a stack of rows: hairlines between the
+          fields are what let the eye find a label without reading every one. */}
+      <dl className="detail-list">
+        {item &&
+          fields.map(({ column, label }) => (
+            <div key={column.uuid} className="detail-row">
+              <dt className="detail-label">{label}</dt>
+              <dd className="detail-value">
+                {/* "full": this is the one surface with room to show a
+                    multiline value as more than one line. */}
+                {renderCell(
+                  column,
+                  item,
+                  listUuid,
+                  principalUuids,
+                  lookupUuids,
+                  "full",
+                )}
+              </dd>
+            </div>
+          ))}
+      </dl>
     </AppDialog>
   );
 }

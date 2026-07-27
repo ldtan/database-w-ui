@@ -165,16 +165,14 @@ export function GuidePage() {
       </header>
 
       {/* Contents */}
-      <nav
-        className="rounded p-4"
-        style={{
-          background: "var(--surface)",
-          border: "var(--border-width) solid var(--border)",
-        }}
-        aria-label="Guide contents"
-      >
+      <nav className="surface-card p-4" aria-label="Guide contents">
         <div className="font-semibold mb-2">On this page</div>
-        <ol className="flex flex-col gap-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        {/* Twenty-three entries in one column is most of a screen before the
+            guide has started. Two columns on anything but a phone. */}
+        <ol
+          className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1"
+          style={{ listStyle: "none", padding: 0, margin: 0 }}
+        >
           {SECTIONS.map((s, i) => (
             <li key={s.id}>
               <a
@@ -258,29 +256,42 @@ export function GuidePage() {
       </Section>
 
       <Section id="getting-around" title="Getting around">
-        <p>Once you’re in, the bar across the top is your map:</p>
+        <p>
+          Once you’re in, the strip down the left-hand side is your map. It stays
+          there while you work, so you can always see everything you have:
+        </p>
         <ul className="flex flex-col gap-2">
           <li>
-            The name on the left (<Ui>Database w/ UI</Ui>) always takes you back to
+            The name at the top (<Ui>Database w/ UI</Ui>) always takes you back to
             your <Link to="/" style={{ color: "var(--brand)" }}>home dashboard</Link>.
           </li>
           <li>
-            <Ui>Workspaces</Ui> lists your folders, <Ui>People</Ui> shows accounts and
-            groups, and <Ui>Guide</Ui> brings you here.
+            Then four places to go: <Ui>Home</Ui>, <Ui>Workspaces</Ui> (all your
+            folders), <Ui>People</Ui> (accounts and groups), and <Ui>Guide</Ui>,
+            which brings you here.
           </li>
           <li>
-            The circle at the far right is <strong>your account</strong> — it shows
-            your initials. Click it to see who you are signed in as, and to reach{" "}
-            <Ui>Profile</Ui> (your own details) or <Ui>Log out</Ui>.
+            Under <strong>Workspaces</strong>, each of your workspaces is listed by
+            name. Click the small arrow beside one to open it up and see the lists
+            inside, then click a list to go straight to it — no need to go through
+            the workspace first. Clicking the <em>name</em> opens the workspace
+            itself.
           </li>
           <li>
-            The two small icons in the same bar switch the look between light and dark
-            and between colour themes — see{" "}
+            <strong>Shared with me</strong>, at the bottom of that tree, holds lists
+            other people have given you directly. They live in someone else’s
+            workspace, so this is the only place they appear.
+          </li>
+          <li>
+            At the very bottom is <strong>your account</strong> — a circle with your
+            initials, and your name beside it. Click it to reach <Ui>Profile</Ui>{" "}
+            (your own details) or <Ui>Log out</Ui>. The two small icons next to it
+            switch between light and dark and between colour themes — see{" "}
             <a href="#appearance" style={{ color: "var(--brand)" }}>Appearance</a>.
           </li>
           <li>
-            The trail of links under the title (the <em>breadcrumbs</em>) shows where
-            you are and lets you step back up.
+            The trail of links above each page’s title (the <em>breadcrumbs</em>)
+            shows where you are and lets you step back up.
           </li>
         </ul>
         <p>
@@ -290,11 +301,12 @@ export function GuidePage() {
           shared lists, so you can jump straight back into what you were doing.
           Underneath, <Ui>Explore</Ui> links to the main corners of the app.
         </p>
-        <Callout tone="tip" title="On a phone?">
-          On a small screen the top links fold into a menu — tap the ☰ button on the
-          right to open a drawer with your workspaces, their lists, and everything
-          else. Your account is at the top of that drawer, with <Ui>Log out</Ui> just
-          beneath it, so there is no separate circle to look for.
+        <Callout tone="tip" title="On a phone or a narrow window?">
+          There isn’t room for the strip beside the page, so it folds away behind
+          the ☰ button at the top left. Tap it and the same map slides out — your
+          workspaces, their lists, and everywhere else — with your account and{" "}
+          <Ui>Log out</Ui> at the top of it. The circle at the top right of the bar
+          does the same job as the one at the bottom of the strip.
         </Callout>
       </Section>
 
@@ -305,17 +317,17 @@ export function GuidePage() {
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            Go to <Ui>Workspaces</Ui> (from the top bar, or the card on your home
-            page).
+            Go to <Ui>Workspaces</Ui> (from the strip on the left, or the card on
+            your home page).
           </li>
           <li>
-            In the <Ui>New workspace name</Ui> box, type a name — say{" "}
-            <em>Sales</em>.
+            Click <Ui>New workspace</Ui> at the top right.
           </li>
           <li>
-            Click <Ui>Create</Ui>. Your new workspace appears in the list below.
+            Type a name — say <em>Sales</em> — and click <Ui>Create</Ui>. Your new
+            workspace appears as a card below.
           </li>
-          <li>Click its name to open it.</li>
+          <li>Click the card to open it.</li>
         </ol>
         <Callout tone="tip" title="Two names, one thing">
           Each workspace (and list) has an everyday <Ui>Name</Ui> and a shorter{" "}
@@ -331,10 +343,10 @@ export function GuidePage() {
         <ol className="flex flex-col gap-2">
           <li>Open your <em>Sales</em> workspace.</li>
           <li>
-            In the <Ui>New list name</Ui> box, type <em>Contacts</em> and click{" "}
+            Click <Ui>New list</Ui>, type <em>Contacts</em>, and click{" "}
             <Ui>Create</Ui>.
           </li>
-          <li>Click the list’s name to open it.</li>
+          <li>Click the list’s card to open it.</li>
         </ol>
         <p>
           A brand-new list has no records and none of your own columns yet — so the
@@ -809,13 +821,15 @@ export function GuidePage() {
             rows that match. It searches the whole list, not just the page you’re on.
           </li>
           <li>
-            <strong>Sort</strong> — pick a column in <Ui>Sort by…</Ui> and use the
-            arrow to flip between A→Z and Z→A. (On a wide screen you can also click a
-            column heading.)
+            <strong>Sort</strong> — click <Ui>Sort</Ui>, pick a column, and choose{" "}
+            <Ui>Ascending</Ui> (A→Z) or <Ui>Descending</Ui> (Z→A). The button then
+            shows what you sorted by. (On a wide screen you can also click a column
+            heading.)
           </li>
           <li>
-            <strong>Group</strong> — choose a column in <Ui>Group by…</Ui> to bunch
-            rows with the same value together (all <em>Customers</em> together, say).
+            <strong>Group</strong> — click <Ui>Group</Ui> and choose a column to
+            bunch rows with the same value together (all <em>Customers</em>{" "}
+            together, say).
           </li>
           <li>
             <strong>Filter</strong> — click <Ui>Filter</Ui> to show only rows that
@@ -860,12 +874,15 @@ export function GuidePage() {
             To switch views, use the <Ui>View</Ui> dropdown at the top of the list.
           </li>
           <li>
-            To make one, click <Ui>New view</Ui>, type a <Ui>View name</Ui>, and click{" "}
-            <Ui>Create</Ui>.
+            To make one, click the <Ui>+</Ui> beside that dropdown, type a{" "}
+            <Ui>View name</Ui>, and click <Ui>Create view</Ui>. It starts from
+            whatever you are looking at right now.
           </li>
           <li>
-            Set up the sort, filter, grouping, and columns you want, then click{" "}
-            <Ui>Save view</Ui> to store them into the current view.
+            Set up the sort, filter, grouping, and columns you want. A{" "}
+            <Ui>Save view</Ui> button appears on the bar as soon as anything
+            differs from what the view has stored — click it to keep the new
+            arrangement. If you don’t see it, there is nothing to save.
           </li>
         </ol>
         <ul className="flex flex-col gap-1">
@@ -919,8 +936,8 @@ export function GuidePage() {
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            Open sharing for the item (the <Ui>Share</Ui> button on a workspace or
-            list row; inside <Ui>Settings</Ui> → <Ui>Permissions</Ui> for a list).
+            Open sharing for the item — the share icon on a workspace or list card,
+            or <Ui>Settings</Ui> → <Ui>Permissions</Ui> once the list is open.
           </li>
           <li>
             Under <Ui>Add people or groups</Ui>, type a name to find the person or
@@ -1093,9 +1110,10 @@ export function GuidePage() {
             Everyone has a <Link to="/profile" style={{ color: "var(--brand)" }}>
               Profile
             </Link>{" "}
-            page for their own name and details, reached from the account circle at
-            the top right. Filling it in is optional and doesn’t affect signing in.
-            The name you put there is what your initials in that circle come from.
+            page for their own name and details, reached from your account at the
+            bottom of the strip on the left. Filling it in is optional and doesn’t
+            affect signing in. The name you put there is what your initials in that
+            circle come from.
           </li>
         </ul>
         <Callout tone="tip" title="Changing your password">
@@ -1107,8 +1125,9 @@ export function GuidePage() {
 
       <Section id="import-export" title="Import and export">
         <p>
-          You don’t have to type everything. Open a list and click{" "}
-          <Ui>Import / Export</Ui>.
+          You don’t have to type everything. Open a list, click the <Ui>⋯</Ui>{" "}
+          button beside <Ui>Settings</Ui>, and choose <Ui>Import / Export</Ui>. It
+          has a tab for each direction.
         </p>
         <p>
           <strong>To take data out:</strong>
@@ -1151,16 +1170,16 @@ export function GuidePage() {
         </p>
         <ul className="flex flex-col gap-2">
           <li>
-            <strong>A record.</strong> Open the list and click{" "}
-            <Ui>Deleted records</Ui>.
+            <strong>A record.</strong> Open the list, click the <Ui>⋯</Ui> button
+            beside <Ui>Settings</Ui>, and choose <Ui>Deleted records</Ui>.
           </li>
           <li>
             <strong>A list.</strong> Open the workspace it was in and click{" "}
-            <Ui>Deleted lists</Ui>.
+            <Ui>Deleted</Ui>.
           </li>
           <li>
             <strong>A workspace.</strong> Go to <Ui>Workspaces</Ui> and click{" "}
-            <Ui>Deleted workspaces</Ui>.
+            <Ui>Deleted</Ui>.
           </li>
         </ul>
         <p>
@@ -1193,10 +1212,12 @@ export function GuidePage() {
 
       <Section id="appearance" title="Appearance and themes">
         <p>
-          The two small icons near the top right change how the app looks. One flips
-          between <strong>light</strong> and <strong>dark</strong>; the other picks a
-          colour theme (there are several, from a clean modern look to a bold
-          high-contrast one). Pick whatever is easiest on your eyes.
+          The two small icons beside your name, at the bottom of the strip on the
+          left, change how the app looks. One flips between <strong>light</strong>{" "}
+          and <strong>dark</strong>; the other picks a colour theme (there are
+          several, from a clean modern look to a bold high-contrast one). Pick
+          whatever is easiest on your eyes. On a narrow window they sit at the top
+          right instead.
         </p>
         <p>
           Your choice is saved to your account, not to the browser, so signing in on

@@ -27,6 +27,12 @@ interface Props {
  *  One component, rendered both on the toolbar (where you change these while
  *  watching the grid react) and in List settings → Views (where they sit with the
  *  rest of the list's configuration). Two copies of this markup would drift.
+ *
+ *  On the toolbar every one of these is a *button*, and each says whether it is
+ *  currently doing anything — "Filter" against "Filter 2", "Group" against
+ *  "Grouped by Status". A row of dropdowns sitting at their placeholder text
+ *  takes three times the width to say nothing, and cannot tell you at a glance
+ *  why the grid is showing what it is showing.
  */
 export function ViewControls({
   columns,
@@ -41,20 +47,22 @@ export function ViewControls({
   stacked = false,
 }: Props) {
   const columnsPanel = useRef<OverlayPanel>(null);
+  const groupPanel = useRef<OverlayPanel>(null);
   const visibleCount = columns.filter(
     (c) => !hiddenColumns.includes(c.uuid),
   ).length;
   const empty = columns.length === 0;
+  const groupColumn = columns.find((c) => c.uuid === groupBy) ?? null;
 
   const columnList = (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1" style={{ minWidth: "15rem" }}>
       {columns.map((col, i) => (
-        <div key={col.uuid} className="flex items-center gap-2">
+        <div key={col.uuid} className="flex items-center gap-1">
           <Button
             icon="pi pi-chevron-up"
             text
             size="small"
-            aria-label="Move up"
+            aria-label={`Move ${col.display_name} up`}
             disabled={i === 0}
             onClick={() => onMoveColumn(i, -1)}
           />
@@ -62,7 +70,7 @@ export function ViewControls({
             icon="pi pi-chevron-down"
             text
             size="small"
-            aria-label="Move down"
+            aria-label={`Move ${col.display_name} down`}
             disabled={i === columns.length - 1}
             onClick={() => onMoveColumn(i, 1)}
           />
@@ -73,7 +81,7 @@ export function ViewControls({
           />
           <label
             htmlFor={`vis-${stacked ? "tab-" : ""}${col.uuid}`}
-            className="flex-1"
+            className="flex-1 truncate cursor-pointer text-sm"
           >
             {col.display_name}
           </label>
@@ -82,38 +90,36 @@ export function ViewControls({
     </div>
   );
 
-  const filterButton = canFilter ? (
-    <Button
-      label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
-      icon="pi pi-filter"
-      text={!stacked}
-      outlined={stacked}
-      size={stacked ? "small" : undefined}
-      onClick={onOpenFilter}
-      disabled={empty}
-    />
-  ) : null;
-
-  const groupDropdown = (
-    <Dropdown
-      value={groupBy}
-      options={columns.map((c) => ({ label: c.display_name, value: c.uuid }))}
-      onChange={(e) => onGroupBy(e.value)}
-      placeholder="Group by…"
-      showClear
-      disabled={empty}
-      className="w-48"
-    />
-  );
+  const groupOptions = columns.map((c) => ({
+    label: c.display_name,
+    value: c.uuid,
+  }));
 
   // Stacked: the settings tab, where an overlay panel inside a dialog is awkward,
-  // so the column list is simply shown.
+  // so the column list and the grouping are simply shown.
   if (stacked) {
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
-          {filterButton}
-          {groupDropdown}
+          {canFilter && (
+            <Button
+              label={filterCount > 0 ? `Filter (${filterCount})` : "Filter"}
+              icon="pi pi-filter"
+              outlined
+              size="small"
+              onClick={onOpenFilter}
+              disabled={empty}
+            />
+          )}
+          <Dropdown
+            value={groupBy}
+            options={groupOptions}
+            onChange={(e) => onGroupBy(e.value)}
+            placeholder="Group by…"
+            showClear
+            disabled={empty}
+            className="w-48"
+          />
         </div>
         <div className="flex flex-col gap-1">
           <span className="text-sm font-medium">
@@ -127,20 +133,77 @@ export function ViewControls({
 
   return (
     <>
-      {filterButton}
-      {groupDropdown}
+      {canFilter && (
+        <Button
+          label="Filter"
+          icon="pi pi-filter"
+          text
+          className={filterCount > 0 ? "is-on" : undefined}
+          badge={filterCount > 0 ? String(filterCount) : undefined}
+          onClick={onOpenFilter}
+          disabled={empty}
+        />
+      )}
+
       <Button
-        label={
-          hiddenColumns.length > 0
-            ? `Columns (${visibleCount}/${columns.length})`
-            : "Columns"
-        }
+        label={groupColumn ? `Grouped by ${groupColumn.display_name}` : "Group"}
+        icon="pi pi-list"
+        text
+        className={groupColumn ? "is-on" : undefined}
+        onClick={(e) => groupPanel.current?.toggle(e)}
+        disabled={empty}
+      />
+      <OverlayPanel ref={groupPanel}>
+        <div className="flex flex-col gap-2" style={{ minWidth: "15rem" }}>
+          <span className="text-sm font-medium">Group records by</span>
+          <Dropdown
+            value={groupBy}
+            options={groupOptions}
+            onChange={(e) => onGroupBy(e.value)}
+            placeholder="No grouping"
+            showClear
+            className="w-full"
+          />
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Grouping orders the records by that column, so it takes over from
+            the sort.
+          </span>
+        </div>
+      </OverlayPanel>
+
+      <Button
+        label="Columns"
         icon="pi pi-eye"
         text
+        className={hiddenColumns.length > 0 ? "is-on" : undefined}
+        badge={
+          hiddenColumns.length > 0
+            ? `${visibleCount}/${columns.length}`
+            : undefined
+        }
         onClick={(e) => columnsPanel.current?.toggle(e)}
         disabled={empty}
       />
-      <OverlayPanel ref={columnsPanel}>{columnList}</OverlayPanel>
+      <OverlayPanel ref={columnsPanel}>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-sm font-medium">Columns</span>
+            {hiddenColumns.length > 0 && (
+              <Button
+                label="Show all"
+                text
+                size="small"
+                onClick={() =>
+                  hiddenColumns
+                    .slice()
+                    .forEach((uuid) => onToggleColumn(uuid, true))
+                }
+              />
+            )}
+          </div>
+          {columnList}
+        </div>
+      </OverlayPanel>
     </>
   );
 }

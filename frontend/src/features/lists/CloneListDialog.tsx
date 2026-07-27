@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { Button } from "primereact/button";
-import { Checkbox } from "primereact/checkbox";
+import { CheckboxField } from "../../components/Field";
 
 import { AppDialog } from "../../components/AppDialog";
 import { api, ApiError } from "../../lib/api";
@@ -55,23 +55,8 @@ export function CloneListDialog({ list, onHide, onDone }: Props) {
       visible={active}
       onHide={close}
       style={{ width: 420 }}
-    >
-      <div className="flex flex-col gap-4">
-        <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Make a copy in this workspace. Its columns, views and forms are copied;
-          sharing is not, so the copy starts private.
-        </span>
-        <div className="flex items-center gap-2">
-          <Checkbox
-            inputId="clone-with-records"
-            checked={withRecords}
-            onChange={(e) => setWithRecords(!!e.checked)}
-          />
-          <label htmlFor="clone-with-records" className="cursor-pointer">
-            Also copy the records
-          </label>
-        </div>
-        <div className="flex justify-end gap-2">
+      footer={
+        <>
           <Button label="Cancel" text onClick={close} />
           <Button
             label="Duplicate"
@@ -79,7 +64,20 @@ export function CloneListDialog({ list, onHide, onDone }: Props) {
             onClick={() => clone.mutate()}
             loading={clone.isPending}
           />
-        </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <p className="field-hint">
+          Make a copy in this workspace. Its columns, views and forms are copied;
+          sharing is not, so the copy starts private.
+        </p>
+        <CheckboxField
+          inputId="clone-with-records"
+          checked={withRecords}
+          onChange={setWithRecords}
+          label="Also copy the records"
+        />
       </div>
     </AppDialog>
   );

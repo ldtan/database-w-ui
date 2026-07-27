@@ -1,74 +1,80 @@
 import { useEffect, useState } from "react";
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { Button } from "primereact/button";
 
-import { SMALL_SCREEN, useMediaQuery } from "../lib/useMediaQuery";
+import { DESKTOP_SCREEN, useMediaQuery } from "../lib/useMediaQuery";
 import { AccountMenu } from "./AccountMenu";
+import { AppSidebar } from "./AppSidebar";
 import { NavDrawer } from "./NavDrawer";
 import { ThemeSwitcher } from "./ThemeSwitcher";
 
+/**
+ * The shell: a navigation rail on the left, and the page beside it.
+ *
+ * Which of the two navigations is mounted is a question about *width*, and a
+ * different one from "does a data grid fit" (`SMALL_SCREEN`, 640px) — a tablet
+ * is wide enough for a table and not for a table plus a 16rem rail. So the rail
+ * has its own breakpoint at 1024px, and below it the same tree lives in a
+ * drawer behind the header's burger.
+ *
+ * The header only exists below that breakpoint: on a desktop the rail already
+ * carries the wordmark, the account and the theme controls, and a bar repeating
+ * them would be a strip of chrome saying nothing.
+ */
 export function AppLayout() {
-  // The same 640px the records switch to cards at — one breakpoint, so the app
-  // does not develop two ideas of what a small screen is.
-  const small = useMediaQuery(SMALL_SCREEN);
+  const wide = useMediaQuery(DESKTOP_SCREEN);
   const [navOpen, setNavOpen] = useState(false);
+  const { pathname } = useLocation();
 
   // Widening past the breakpoint unmounts the drawer but would leave it *open* —
   // so narrowing back (a rotation, a resized window) flung it across the page
   // again with nobody touching the burger.
   useEffect(() => {
-    if (!small) setNavOpen(false);
-  }, [small]);
+    if (wide) setNavOpen(false);
+  }, [wide]);
 
   return (
-    <div className="min-h-screen">
-      <header className="app-header flex items-center justify-between px-4 py-3">
-        <Link to="/" className="text-lg font-semibold no-underline">
-          Database w/ UI
-        </Link>
-        <div className="flex items-center gap-1 sm:gap-2">
-          {/* The theme controls stay out of the drawer on every screen: they are two
-              icons wide, and a light/dark toggle you have to open a panel for is a
-              toggle you stop using. The account avatar does not — on a phone the
-              drawer already carries the account band, and a second way to reach it
-              would cost a third of the header to say the same thing twice. */}
-          <ThemeSwitcher />
-          {small ? (
-            <Button
-              icon="pi pi-bars"
-              text
-              rounded
-              aria-label="Menu"
-              aria-expanded={navOpen}
-              onClick={() => setNavOpen(true)}
-            />
-          ) : (
-            <>
-              <Link to="/workspaces" className="no-underline">
-                <Button label="Workspaces" icon="pi pi-th-large" text />
+    <div className="app-shell">
+      {wide && <AppSidebar />}
+
+      <div className="app-content">
+        {!wide && (
+          <header className="app-header flex items-center justify-between gap-2 px-3 py-2">
+            <div className="flex items-center gap-1">
+              <Button
+                icon="pi pi-bars"
+                text
+                rounded
+                aria-label="Menu"
+                aria-expanded={navOpen}
+                onClick={() => setNavOpen(true)}
+              />
+              <Link to="/" className="app-brand">
+                <span className="app-brand-mark" aria-hidden>
+                  <i className="pi pi-database" />
+                </span>
+                <span className="truncate">Database w/ UI</span>
               </Link>
-              <Link to="/guide" className="no-underline">
-                <Button label="Guide" icon="pi pi-book" text />
-              </Link>
-              <Link to="/people" className="no-underline">
-                <Button label="People" icon="pi pi-users" text />
-              </Link>
+            </div>
+            <div className="flex items-center gap-1">
+              <ThemeSwitcher />
               <AccountMenu />
-            </>
-          )}
-        </div>
-      </header>
+            </div>
+          </header>
+        )}
 
-      {/* Mounted only on a small screen: it carries the workspace/list tree, and
-          fetching that on a desktop — where the same navigation is a click away in
-          the page itself — would be work for nobody. */}
-      {small && (
-        <NavDrawer visible={navOpen} onHide={() => setNavOpen(false)} />
-      )}
+        {/* Mounted only when there is no rail: it carries the same tree, and
+            fetching that twice over would be work for nobody. */}
+        {!wide && (
+          <NavDrawer visible={navOpen} onHide={() => setNavOpen(false)} />
+        )}
 
-      <main className="p-3 sm:p-4">
-        <Outlet />
-      </main>
+        {/* Keyed on the path so each page fades in on its own rather than the
+            new one inheriting the old one's finished animation. */}
+        <main key={pathname} className="page-enter p-4 sm:p-6">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }

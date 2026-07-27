@@ -17,6 +17,11 @@
 body {
   margin: 0;
   font-family: var(--font-family, system-ui, sans-serif);
+  /* Text rendered at the weights this UI uses (550/650 rather than 400/700) is
+     noticeably heavier without this on macOS. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
   /* A phone screen is narrower than several things on this page (a grid of twenty
      columns, most obviously). Each of those scrolls inside its own box; the page
      itself must never slide sideways under the header. */
@@ -25,6 +30,28 @@ body {
 
 a {
   color: inherit;
+}
+
+/* Headings ship with a browser margin that fights every `gap`-based layout in
+   the app, and the app has no un-gapped layouts. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin: 0;
+}
+
+/* A focus ring for the things the component library does not already ring:
+   links, and the handful of bare <button>s the app builds itself. Deliberately
+   *not* a bare `:focus-visible` — PrimeReact draws its own ring as a box-shadow,
+   and a blanket rule put a second outline around every focused input on top of
+   it. The app's own controls are listed in themes.css beside their styles. */
+a:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 /* A destructive action collapsed into RowActions' overflow menu keeps the red cue

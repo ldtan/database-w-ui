@@ -1,12 +1,11 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DataTable, type DataTableSortEvent } from "primereact/datatable";
 import { Column as DataColumn } from "primereact/column";
 import { Button } from "primereact/button";
+import { Menu } from "primereact/menu";
 import { SplitButton } from "primereact/splitbutton";
-import { Dropdown } from "primereact/dropdown";
-import { InputText } from "primereact/inputtext";
 import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
@@ -15,8 +14,11 @@ import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
 import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
-import { Breadcrumbs, type Crumb } from "../../components/Breadcrumbs";
+import type { Crumb } from "../../components/Breadcrumbs";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/PageHeader";
 import { RowActions } from "../../components/RowActions";
+import { SearchInput } from "../../components/SearchInput";
 import type {
   Column,
   Form,
@@ -38,6 +40,7 @@ import { sortRows } from "../records/sortRows";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { collectLookupUuids } from "../lookups/LookupControls";
 import { collectPrincipalUuids } from "../principals/PrincipalControls";
+import { SortControl } from "../views/SortControl";
 import { ViewBar } from "../views/ViewBar";
 import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
@@ -378,6 +381,8 @@ export function ListDetailPage() {
     }
   }
 
+  const moreMenu = useRef<Menu>(null);
+
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
   const groupColumn = groupBy
@@ -401,6 +406,28 @@ export function ListDetailPage() {
     hidden_columns: hiddenColumns,
     column_order: columnOrder,
   };
+
+  /**
+   * Has the page drifted from what the active view has stored?
+   *
+   * Both sides go through the same defaults before they are compared, because a
+   * view saved before `group_by` existed has no key for it while the page always
+   * has `null` — and an absent field and a field set to its default are the same
+   * arrangement. Filters are left out on purpose: the filter dialog writes them
+   * straight to the view, so `currentConfig` carries the view's own object and
+   * the two can never differ.
+   */
+  function fingerprint(config: ViewConfig | null | undefined): string {
+    return JSON.stringify({
+      sorts: config?.sorts ?? [],
+      page_size: config?.page_size ?? 25,
+      group_by: config?.group_by ?? null,
+      hidden_columns: config?.hidden_columns ?? [],
+      column_order: config?.column_order ?? [],
+    });
+  }
+  const viewDirty =
+    !!activeView && fingerprint(currentConfig) !== fingerprint(activeView.config);
 
   function toggleColumn(uuid: string, visible: boolean) {
     setHiddenColumns((prev) =>
@@ -476,66 +503,98 @@ export function ListDetailPage() {
     <div className="flex flex-col gap-4">
       <ConfirmDialog />
 
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Breadcrumbs items={crumbs} />
-        <div className="flex flex-wrap gap-2">
-          {/* Columns, permissions and forms all configure the *list*, so they live
-              together behind one button; the toolbar is then about the data. */}
-          <Button
-            label="Settings"
-            icon="pi pi-cog"
-            outlined
-            onClick={() => setShowSettings(true)}
-            disabled={!list.data}
-          />
-          <Button
-            label="Import / Export"
-            icon="pi pi-file-import"
-            outlined
-            onClick={() => setShowTransfer(true)}
-            disabled={cols.length === 0}
-          />
-          {/* The bin is a recovery surface gated on list-level delete (a deleted
-              record has no per-item permission to check). */}
-          {listActions.has("delete") && (
+      <PageHeader
+        crumbs={crumbs}
+        title={list.data?.display_name ?? "List"}
+        subtitle={
+          cols.length === 0
+            ? undefined
+            : `${items.data?.length ?? 0} record${
+                items.data?.length === 1 ? "" : "s"
+              } · ${cols.length} column${cols.length === 1 ? "" : "s"}`
+        }
+        actions={
+          <>
+            {/* Columns, permissions and forms all configure the *list*, so they
+                live together behind one button; the toolbar is then about the
+                data. */}
             <Button
-              label="Deleted records"
-              icon="pi pi-trash"
+              label="Settings"
+              icon="pi pi-cog"
               outlined
-              onClick={() => setShowDeleted(true)}
-              disabled={cols.length === 0}
+              onClick={() => setShowSettings(true)}
+              disabled={!list.data}
             />
-          )}
-          {/* The button still adds a record; the dropdown is the same act with a QR
-              code doing the typing. */}
-          {listActions.has("create") && (
-            <SplitButton
-              label="Add record"
-              icon="pi pi-plus"
-              onClick={() => setRecordDialog({ open: true, item: null })}
-              disabled={cols.length === 0}
+            {/* Import/export and the bin are occasional and belong to the list
+                rather than to what you are looking at, so they fold into an
+                overflow rather than standing as two more outlined buttons the
+                width of their labels. It sits between the secondary controls
+                and the primary one, which stays last. */}
+            <Button
+              icon="pi pi-ellipsis-h"
+              text
+              rounded
+              aria-label="More list actions"
+              aria-haspopup
+              onClick={(e) => moreMenu.current?.toggle(e)}
+            />
+            <Menu
+              popup
+              ref={moreMenu}
               model={[
                 {
-                  label: "Fill using QR code",
-                  icon: "pi pi-qrcode",
-                  command: () => openQr("fill"),
+                  label: "Import / Export",
+                  icon: "pi pi-file-import",
+                  disabled: cols.length === 0,
+                  command: () => setShowTransfer(true),
                 },
-                {
-                  label: "Submit using QR code",
-                  icon: "pi pi-qrcode",
-                  command: () => openQr("submit"),
-                },
+                // The bin is a recovery surface gated on list-level delete (a
+                // deleted record has no per-item permission to check).
+                ...(listActions.has("delete")
+                  ? [
+                      {
+                        label: "Deleted records",
+                        icon: "pi pi-trash",
+                        disabled: cols.length === 0,
+                        command: () => setShowDeleted(true),
+                      },
+                    ]
+                  : []),
               ]}
             />
-          )}
-        </div>
-      </div>
+            {/* The button still adds a record; the dropdown is the same act with
+                a QR code doing the typing. */}
+            {listActions.has("create") && (
+              <SplitButton
+                label="Add record"
+                icon="pi pi-plus"
+                onClick={() => setRecordDialog({ open: true, item: null })}
+                disabled={cols.length === 0}
+                model={[
+                  {
+                    label: "Fill using QR code",
+                    icon: "pi pi-qrcode",
+                    command: () => openQr("fill"),
+                  },
+                  {
+                    label: "Submit using QR code",
+                    icon: "pi pi-qrcode",
+                    command: () => openQr("submit"),
+                  },
+                ]}
+              />
+            )}
+          </>
+        }
+      />
 
-      {/* Sort and search are about the *records*, so the toolbar stands whether or
-          not the list has views: a list whose views were all deleted still has its
-          records, and used to lose the search box — and, briefly, the sort control —
-          along with them. Only the view-shaped controls come and go. */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* One bar, and everything on it changes what you are looking at rather
+          than what the list *is*. Sort and search are about the records, so it
+          stands whether or not the list has views: a list whose views were all
+          deleted still has its records, and used to lose the search box — and,
+          briefly, the sort control — along with them. Only the view-shaped
+          controls come and go. */}
+      <div className="toolbar">
         {views.data && views.data.length > 0 && (
           <>
             <ViewBar
@@ -544,56 +603,44 @@ export function ListDetailPage() {
               activeUuid={activeViewUuid}
               onSelect={setActiveViewUuid}
               currentConfig={currentConfig}
+              dirty={viewDirty}
             />
+            <span className="toolbar-divider" aria-hidden />
             <ViewControls {...viewControls} />
           </>
         )}
 
         {/* Sorting otherwise lives in the grid's column headers, which a card
-              list does not have — so on a phone there was no way to sort at all.
-              Here it drives the same sortField/sortOrder the headers do, so the
-              two agree and a header click moves this dropdown. Grouping pins the
-              order to the group column, which is why it disables. */}
-        <Dropdown
-          value={sortField ?? null}
-          options={orderedCols.map((c) => ({
-            label: c.display_name,
-            value: `data.${c.uuid}`,
-          }))}
-          onChange={(e) => {
-            setSortField(e.value ?? undefined);
-            if (e.value && !sortOrder) setSortOrder(1);
+            list does not have — so on a phone there was no way to sort at all.
+            It drives the same sortField/sortOrder the headers do, so the two
+            agree and a header click moves this control. Grouping pins the order
+            to the group column, which is why it disables. */}
+        <SortControl
+          columns={orderedCols}
+          sortField={sortField}
+          sortOrder={sortOrder}
+          onChange={(field, order) => {
+            setSortField(field);
+            setSortOrder(order);
           }}
-          placeholder="Sort by…"
-          showClear
           disabled={cols.length === 0 || !!groupColumn}
-          className="w-40"
-        />
-        <Button
-          icon={
-            sortOrder === -1 ? "pi pi-sort-amount-down" : "pi pi-sort-amount-up"
+          disabledReason={
+            groupColumn
+              ? `Records are ordered by ${groupColumn.display_name} while grouped`
+              : undefined
           }
-          text
-          aria-label={sortOrder === -1 ? "Sort ascending" : "Sort descending"}
-          tooltip={sortOrder === -1 ? "Descending" : "Ascending"}
-          disabled={!sortField || !!groupColumn}
-          onClick={() => setSortOrder(sortOrder === -1 ? 1 : -1)}
         />
 
-        {/* pl-8 by hand: the icon is positioned over the input, and the theme's
-              reset does not give p-input-icon-left the padding to clear it.
-              Once the row wraps, search takes the whole of its own line rather
-              than sitting at 16rem next to nothing. */}
-        <span className="p-input-icon-left w-full sm:w-auto sm:ml-auto">
-          <i className="pi pi-search pl-3" />
-          <InputText
+        {/* Last on the bar and pushed to its end, so on a narrow window it wraps
+            onto a line of its own rather than squeezing everything else. */}
+        <div className="w-full sm:w-64 sm:ml-auto">
+          <SearchInput
             value={search}
-            onChange={(e) => setSearch(e.target.value)}
+            onChange={setSearch}
             placeholder="Search records…"
             disabled={cols.length === 0}
-            className="w-full sm:w-64 pl-9"
           />
-        </span>
+        </div>
       </div>
 
       {cols.length === 0 && !columns.isLoading && (
@@ -605,35 +652,6 @@ export function ListDetailPage() {
               : "This list has no columns yet."
           }
         />
-      )}
-
-      {selection.length > 0 && (
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted">
-            {selection.length} selected
-          </span>
-          {deletableSelection.length > 0 && (
-            <Button
-              label={
-                deletableSelection.length === selection.length
-                  ? "Delete selected"
-                  : `Delete ${deletableSelection.length} of ${selection.length}`
-              }
-              icon="pi pi-trash"
-              severity="danger"
-              outlined
-              size="small"
-              onClick={confirmBulkDelete}
-              loading={bulkDelete.isPending}
-            />
-          )}
-          <Button
-            label="Clear"
-            text
-            size="small"
-            onClick={() => setSelection([])}
-          />
-        </div>
       )}
 
       {small ? (
@@ -663,14 +681,22 @@ export function ListDetailPage() {
           value={items.data ?? []}
           loading={columns.isLoading || items.isLoading}
           dataKey="uuid"
-          // The table's wrapper already scrolls; left alone the table would instead
-          // squash itself to whatever width it is given, so a dozen columns become a
-          // dozen slivers. A floor of ~10rem a column makes it overflow — and
-          // therefore scroll — rather than crush. Below 640px it is not a table at
-          // all (see RecordCards); this is what carries a tablet, where a table still
-          // makes sense but the columns may not fit. On a desktop the floor is under
-          // the viewport, so nothing changes.
-          tableStyle={{ minWidth: `${visibleCols.length * 10 + 12}rem` }}
+          // Bounds the wrapper's height so the header can stick to the top of it
+          // and the paginator stays on screen — see `.data-grid` in themes.css.
+          className="data-grid"
+          // The table's wrapper scrolls (see `.p-datatable > .p-datatable-wrapper`);
+          // left alone the table would instead squash itself to whatever width it is
+          // given, so a dozen columns become a dozen slivers. A floor per column
+          // makes it overflow — and therefore scroll — rather than crush. Below
+          // 640px it is not a table at all (see RecordCards); this is what carries a
+          // tablet, where a table still makes sense but the columns may not fit.
+          //
+          // 8rem a column, not 10: the desktop sidebar takes 17rem off the page, and
+          // at the old floor a perfectly ordinary six-column list overflowed by an
+          // inch — enough to push the row actions off the edge, not enough for
+          // anyone to notice the grid had become scrollable. The 11rem is the two
+          // columns that are not data: the selection box and the actions.
+          tableStyle={{ minWidth: `${visibleCols.length * 8 + 11}rem` }}
           selectionMode="multiple"
           selection={selection}
           onSelectionChange={(e) => setSelection(e.value)}
@@ -690,7 +716,31 @@ export function ListDetailPage() {
           rowGroupMode={groupColumn ? "subheader" : undefined}
           groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
           rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
-          emptyMessage="No records yet."
+          emptyMessage={
+            <EmptyState
+              icon={q.trim() ? "pi pi-search" : "pi pi-inbox"}
+              title={q.trim() ? "No matching records" : "No records yet"}
+              text={
+                q.trim()
+                  ? `Nothing in this list matches “${q.trim()}”.`
+                  : filterCount > 0
+                    ? "This view's filter is hiding everything in the list."
+                    : listActions.has("create")
+                      ? "Add your first record with the button above."
+                      : undefined
+              }
+              action={
+                q.trim() ? (
+                  <Button
+                    label="Clear search"
+                    icon="pi pi-times"
+                    text
+                    onClick={() => setSearch("")}
+                  />
+                ) : undefined
+              }
+            />
+          }
         >
           <DataColumn
             selectionMode="multiple"
@@ -764,6 +814,39 @@ export function ListDetailPage() {
             )}
           />
         </DataTable>
+      )}
+
+      {/* After the records rather than before them, and stuck to the bottom of
+          the viewport: a selection made at the top of a long grid used to put
+          its Delete button a whole screen away from the rows it applied to. */}
+      {selection.length > 0 && (
+        <div className="selection-bar">
+          <span className="text-sm font-medium">
+            {selection.length} selected
+          </span>
+          <span className="toolbar-divider" aria-hidden />
+          {deletableSelection.length > 0 && (
+            <Button
+              label={
+                deletableSelection.length === selection.length
+                  ? "Delete selected"
+                  : `Delete ${deletableSelection.length} of ${selection.length}`
+              }
+              icon="pi pi-trash"
+              severity="danger"
+              text
+              size="small"
+              onClick={confirmBulkDelete}
+              loading={bulkDelete.isPending}
+            />
+          )}
+          <Button
+            label="Clear"
+            text
+            size="small"
+            onClick={() => setSelection([])}
+          />
+        </div>
       )}
 
       {list.data && (

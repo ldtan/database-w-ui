@@ -5,7 +5,6 @@ import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { InputNumber } from "primereact/inputnumber";
 import { Dropdown } from "primereact/dropdown";
-import { Checkbox } from "primereact/checkbox";
 import { Calendar } from "primereact/calendar";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
@@ -13,6 +12,12 @@ import { SelectButton } from "primereact/selectbutton";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import {
+  CheckboxField,
+  Field,
+  FieldRow,
+  FormSection,
+} from "../../components/Field";
 import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
@@ -458,493 +463,27 @@ export function ColumnDialog({
     });
   }
 
+  // Which type-specific configuration this column has, if any — the difference
+  // between an "Options" section and no section at all rather than an empty
+  // heading over nothing.
+  const hasOptions =
+    isCalculated ||
+    ["text", "number", "choice", "link", "user", "group", "lookup"].includes(
+      type,
+    );
+
   return (
     <AppDialog
       header={editing ? `Edit “${column.display_name}”` : "Add column"}
       visible={visible}
       onHide={onHide}
-      style={{ width: 420 }}
-    >
-      <div className="flex flex-col gap-4">
-        {save.error instanceof ApiError && (
-          <Message severity="error" text={save.error.message} />
-        )}
-        <NameFields
-          key={`${column?.uuid ?? "new"}:${visible}`}
-          idPrefix="col"
-          value={{ displayName, name }}
-          onChange={(next) => {
-            setDisplayName(next.displayName);
-            setName(next.name);
-          }}
-          linked={!editing}
-          autoFocus
-        />
-        <div className="flex flex-col gap-2">
-          <label htmlFor="col-type">Type</label>
-          <Dropdown
-            inputId="col-type"
-            value={type}
-            options={COLUMN_TYPE_OPTIONS}
-            onChange={(e) => {
-              setType(e.value as ColumnType);
-              // The default/on-update controls are type-specific.
-              resetDefaults();
-            }}
-            disabled={editing}
-          />
-          {editing && (
-            <small style={{ color: "var(--text-muted)" }}>
-              A column's type cannot change: existing records already hold values in
-              its shape.
-            </small>
-          )}
-        </div>
-
-        {type === "text" && (
-          <>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="col-textmode">Input</label>
-              <SelectButton
-                id="col-textmode"
-                value={textMode}
-                options={TEXT_MODE_OPTIONS}
-                onChange={(e) => e.value && setTextMode(e.value as TextMode)}
-                allowEmpty={false}
-              />
-              {/* Deliberately not disabled while editing, unlike the type above:
-                  every mode stores a string, so switching is a config change and
-                  existing records are already in the right shape. */}
-              <small style={{ color: "var(--text-muted)" }}>
-                {textMode === "rich"
-                  ? "A small editor with bold, italic, lists, quotes and links. Existing plain text is kept, and switching back to plain shows the words without their formatting."
-                  : "How the field is filled in. Both store plain text, so this can be changed later without touching existing records."}
-              </small>
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <label htmlFor="col-maxlen">Max length (optional)</label>
-              <InputNumber
-                inputId="col-maxlen"
-                value={maxLength}
-                onValueChange={(e) => setMaxLength(e.value ?? null)}
-                min={1}
-                useGrouping={false}
-              />
-            </div>
-          </>
-        )}
-
-        {type === "number" && (
-          <>
-            <div className="flex gap-3">
-              <div className="flex flex-col gap-2 flex-1">
-                <label htmlFor="col-min">Min</label>
-                <InputNumber
-                  inputId="col-min"
-                  value={min}
-                  onValueChange={(e) => setMin(e.value ?? null)}
-                  useGrouping={false}
-                />
-              </div>
-              <div className="flex flex-col gap-2 flex-1">
-                <label htmlFor="col-max">Max</label>
-                <InputNumber
-                  inputId="col-max"
-                  value={max}
-                  onValueChange={(e) => setMax(e.value ?? null)}
-                  useGrouping={false}
-                />
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Checkbox
-                inputId="col-int"
-                checked={integerOnly}
-                onChange={(e) => setIntegerOnly(!!e.checked)}
-              />
-              <label htmlFor="col-int">Integers only</label>
-            </div>
-          </>
-        )}
-
-        {type === "choice" && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="col-choices">Choices (separated by ";")</label>
-            <InputText
-              id="col-choices"
-              value={choices}
-              onChange={(e) => setChoices(e.target.value)}
-              placeholder="Todo;Doing;Done"
-            />
-            {editing && (
-              <small style={{ color: "var(--text-muted)" }}>
-                Renaming an option keeps records pointing at it; removing one leaves
-                records holding a value the column no longer offers.
-              </small>
-            )}
-          </div>
-        )}
-
-        {type === "link" && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="col-linktext">Link text (optional)</label>
-            <InputText
-              id="col-linktext"
-              value={linkText}
-              onChange={(e) => setLinkText(e.target.value)}
-              placeholder="Shown instead of the URL"
-            />
-          </div>
-        )}
-
-        {(type === "user" || type === "group") && (
-          <div className="flex items-center gap-2">
-            <Checkbox
-              inputId="col-multi-principal"
-              checked={multiple}
-              onChange={(e) => setMultiple(!!e.checked)}
-            />
-            <label htmlFor="col-multi-principal">
-              Allow selecting multiple {type === "user" ? "users" : "groups"}
-            </label>
-          </div>
-        )}
-
-        {type === "lookup" && (
-          <>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="col-target-ws">Workspace</label>
-              <Dropdown
-                inputId="col-target-ws"
-                value={targetWorkspace}
-                options={[
-                  ...(myWorkspaces.data ?? []).map((w) => ({
-                    label: w.display_name,
-                    value: w.uuid,
-                  })),
-                  { label: "Shared with me", value: SHARED },
-                ]}
-                onChange={(e) => {
-                  setTargetWorkspace(e.value);
-                  // The list, its display column and any nesting all belong to
-                  // the workspace being left; clear them so nothing dangles.
-                  setTargetListUuid(null);
-                  setDisplayColumnUuid(null);
-                  setParentColumnUuid(null);
-                  setTargetFilterColumnUuid(null);
-                }}
-                placeholder={
-                  myWorkspaces.isLoading ? "Loading…" : "Select a workspace…"
-                }
-                filter
-              />
-              <small style={{ color: "var(--text-muted)" }}>
-                Point at a list in any of your workspaces, or one shared with you.
-              </small>
-            </div>
-            <div className="flex flex-col gap-2">
-              <label htmlFor="col-target">Target list</label>
-              <Dropdown
-                inputId="col-target"
-                value={targetListUuid}
-                options={listOptions}
-                onChange={(e) => {
-                  setTargetListUuid(e.value);
-                  setDisplayColumnUuid(null); // columns differ per target list
-                  // A nesting pairing is specific to the old target list.
-                  setParentColumnUuid(null);
-                  setTargetFilterColumnUuid(null);
-                }}
-                placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
-                filter
-              />
-            </div>
-            {targetListUuid && targetSchemaHidden && (
-              <small style={{ color: "var(--text-muted)" }}>
-                This list is shared with you as a lookup target only, so its
-                columns aren&apos;t yours to browse. Rows will be labelled by the
-                list&apos;s own default column.
-              </small>
-            )}
-            {targetListUuid && !targetSchemaHidden && (
-              <div className="flex flex-col gap-2">
-                <label htmlFor="col-display">Column to show</label>
-                <Dropdown
-                  inputId="col-display"
-                  value={displayColumnUuid}
-                  options={(targetColumns.data ?? []).map((c) => ({
-                    label: c.display_name,
-                    value: c.uuid,
-                  }))}
-                  onChange={(e) => setDisplayColumnUuid(e.value)}
-                  placeholder={
-                    targetColumns.isLoading ? "Loading…" : "Primary column"
-                  }
-                  showClear
-                  filter
-                />
-              </div>
-            )}
-            {targetListUuid && (parentOptions.length > 0 || parentColumnUuid) && (
-              <div className="flex flex-col gap-2">
-                <label htmlFor="col-nest-parent">Nest under (optional)</label>
-                <Dropdown
-                  inputId="col-nest-parent"
-                  value={parentColumnUuid}
-                  options={parentOptions.map((c) => ({
-                    label: c.display_name,
-                    value: c.uuid,
-                  }))}
-                  onChange={(e) => {
-                    const next = (e.value as string) ?? null;
-                    setParentColumnUuid(next);
-                    // The match column depends on the parent; re-derive it, and
-                    // save a click when only one column qualifies.
-                    const candidates = next
-                      ? targetLookups.filter((t) => {
-                          const parent = parentOptions.find(
-                            (c) => c.uuid === next,
-                          );
-                          return (
-                            t.config.target_list_uuid ===
-                            parent?.config.target_list_uuid
-                          );
-                        })
-                      : [];
-                    setTargetFilterColumnUuid(
-                      candidates.length === 1 ? candidates[0].uuid : null,
-                    );
-                  }}
-                  placeholder="Not nested"
-                  showClear
-                />
-                <small style={{ color: "var(--text-muted)" }}>
-                  What's selected there decides which rows this column offers —
-                  pick a country first, get only its cities.
-                </small>
-                {parentColumnUuid && (
-                  <>
-                    <label htmlFor="col-nest-match">Match on</label>
-                    <Dropdown
-                      inputId="col-nest-match"
-                      value={targetFilterColumnUuid}
-                      options={matchOptions.map((c) => ({
-                        label: c.display_name,
-                        value: c.uuid,
-                      }))}
-                      onChange={(e) =>
-                        setTargetFilterColumnUuid((e.value as string) ?? null)
-                      }
-                      placeholder="Select a column…"
-                    />
-                    <small style={{ color: "var(--text-muted)" }}>
-                      The target list's column that links each row to a{" "}
-                      {parentColumn?.display_name ?? "parent"} selection.
-                    </small>
-                  </>
-                )}
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <Checkbox
-                inputId="col-multiple"
-                checked={multiple}
-                onChange={(e) => setMultiple(!!e.checked)}
-              />
-              <label htmlFor="col-multiple">Allow linking multiple rows</label>
-            </div>
-          </>
-        )}
-
-        {isCalculated && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="col-formula">Formula</label>
-            <InputTextarea
-              id="col-formula"
-              value={formula}
-              onChange={(e) => setFormula(e.target.value)}
-              rows={2}
-              placeholder="qty * price"
-              style={{ fontFamily: "monospace" }}
-            />
-            <small style={{ color: "var(--text-muted)" }}>
-              Computed from other columns each time a record is read; it has no
-              stored value of its own. Numbers: <code>+ - * /</code>, parentheses,{" "}
-              <code>MIN</code>, <code>MAX</code>, <code>ROUND</code>,{" "}
-              <code>ABS</code>. Text: <code>CONCAT</code>, <code>UPPER</code>,{" "}
-              <code>LOWER</code>, <code>TRIM</code>, <code>LEN</code>,{" "}
-              <code>LEFT</code>, <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
-              <code>IF(cond, a, b)</code>.
-              {referenceableNames.length > 0 ? (
-                <>
-                  {" "}
-                  Columns you can reference: {referenceableNames.join(", ")}.
-                </>
-              ) : (
-                <>
-                  {" "}
-                  Add a number or text column first — a formula references those.
-                </>
-              )}
-            </small>
-          </div>
-        )}
-
-        {showDefault && (
-          <div className="flex flex-col gap-2">
-            {type !== "checkbox" && (
-              <label htmlFor="col-default">Default value</label>
-            )}
-            {/* The default is edited the way the cell itself will be, so a
-                multiline column's default can actually contain line breaks. A
-                rich column gets the plain box too rather than a second editor:
-                a default is a starting sentence, not a formatted document, and
-                it is sanitised on write like anything else. */}
-            {type === "text" && textMode !== "single" ? (
-              <InputTextarea
-                id="col-default"
-                value={defaultText}
-                onChange={(e) => setDefaultText(e.target.value)}
-                rows={3}
-                placeholder="Used when left blank"
-              />
-            ) : (
-              (type === "text" || type === "link") && (
-                <InputText
-                  id="col-default"
-                  value={defaultText}
-                  onChange={(e) => setDefaultText(e.target.value)}
-                  placeholder={
-                    type === "link"
-                      ? "https://example.com"
-                      : "Used when left blank"
-                  }
-                />
-              )
-            )}
-            {type === "number" && (
-              <InputNumber
-                inputId="col-default"
-                value={defaultNumber}
-                onValueChange={(e) => setDefaultNumber(e.value ?? null)}
-                useGrouping={false}
-              />
-            )}
-            {type === "checkbox" && (
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  inputId="col-default"
-                  checked={defaultChecked}
-                  onChange={(e) => setDefaultChecked(!!e.checked)}
-                />
-                <label htmlFor="col-default">New records start checked</label>
-              </div>
-            )}
-            {type === "choice" && (
-              <Dropdown
-                inputId="col-default"
-                value={defaultChoice}
-                options={choiceLabels.map((l) => ({ label: l, value: l }))}
-                onChange={(e) => setDefaultChoice(e.value ?? null)}
-                placeholder="No default"
-                showClear
-              />
-            )}
-            {isTemporal(type) && (
-              <>
-                <Dropdown
-                  inputId="col-default"
-                  value={defaultTemporal}
-                  options={[
-                    { label: "No default", value: "" },
-                    {
-                      label: dynamicLabel(type),
-                      value: dynamicToken(type) as string,
-                    },
-                    { label: "Specific value…", value: SPECIFIC },
-                  ]}
-                  onChange={(e) => setDefaultTemporal(e.value)}
-                />
-                {defaultTemporal === SPECIFIC && (
-                  <Calendar
-                    value={defaultDate}
-                    onChange={(e) => setDefaultDate((e.value as Date) ?? null)}
-                    dateFormat="yy-mm-dd"
-                    timeOnly={type === "time"}
-                    showTime={type === "datetime"}
-                    showButtonBar={type === "date"}
-                  />
-                )}
-              </>
-            )}
-            {type === "user" && (
-              <Dropdown
-                inputId="col-default"
-                value={defaultUser}
-                options={[
-                  { label: "No default", value: "" },
-                  { label: "Current user", value: "current_user" },
-                ]}
-                onChange={(e) => setDefaultUser(e.value)}
-              />
-            )}
-          </div>
-        )}
-
-        {supportsOnUpdate && (
-          <div className="flex flex-col gap-2">
-            <label htmlFor="col-onupdate">On update</label>
-            <Dropdown
-              inputId="col-onupdate"
-              value={onUpdate}
-              options={[
-                { label: "Off", value: "" },
-                { label: dynamicLabel(type), value: dynamicToken(type) as string },
-              ]}
-              onChange={(e) => setOnUpdate(e.value)}
-            />
-            <small style={{ color: "var(--text-muted)" }}>
-              Filled in automatically when a record is created and re-stamped on
-              every edit; it isn't set by hand.
-            </small>
-          </div>
-        )}
-
-        {!isCalculated && (
-          <div className="flex items-center gap-2">
-            <Checkbox
-              inputId="col-required"
-              checked={required}
-              onChange={(e) => setRequired(!!e.checked)}
-            />
-            <label htmlFor="col-required">Required</label>
-          </div>
-        )}
-
-        {!isCalculated && !multiValued && (
-          <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <Checkbox
-                inputId="col-unique"
-                checked={unique}
-                onChange={(e) => setUnique(!!e.checked)}
-              />
-              <label htmlFor="col-unique">Unique</label>
-            </div>
-            {editing && !column.config.unique && unique && (
-              <small style={{ color: "var(--text-muted)" }}>
-                Existing duplicates are left alone — this is checked when a record is
-                saved, so they surface the next time one of them is edited.
-              </small>
-            )}
-          </div>
-        )}
-
-        <div className="flex justify-end gap-2">
+      style={{ width: 540 }}
+      footer={
+        <>
           <Button label="Cancel" text onClick={onHide} />
           <Button
-            label={editing ? "Save" : "Add"}
+            label={editing ? "Save" : "Add column"}
+            icon={editing ? "pi pi-check" : "pi pi-plus"}
             onClick={onSave}
             loading={save.isPending}
             disabled={
@@ -956,7 +495,499 @@ export function ColumnDialog({
               (isCalculated && !formula.trim())
             }
           />
-        </div>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-5">
+        {save.error instanceof ApiError && (
+          <Message severity="error" text={save.error.message} />
+        )}
+
+        <FormSection title="Basics">
+          <NameFields
+            key={`${column?.uuid ?? "new"}:${visible}`}
+            idPrefix="col"
+            value={{ displayName, name }}
+            onChange={(next) => {
+              setDisplayName(next.displayName);
+              setName(next.name);
+            }}
+            linked={!editing}
+            autoFocus
+          />
+          <Field
+            label="Type"
+            htmlFor="col-type"
+            hint={
+              editing
+                ? "A column's type cannot change: existing records already hold values in its shape."
+                : undefined
+            }
+          >
+            <Dropdown
+              inputId="col-type"
+              value={type}
+              options={COLUMN_TYPE_OPTIONS}
+              onChange={(e) => {
+                setType(e.value as ColumnType);
+                // The default/on-update controls are type-specific.
+                resetDefaults();
+              }}
+              disabled={editing}
+              className="w-full"
+            />
+          </Field>
+        </FormSection>
+
+        {hasOptions && (
+          <FormSection title="Options">
+            {type === "text" && (
+              <>
+                <Field
+                  label="Input"
+                  htmlFor="col-textmode"
+                  // Deliberately not disabled while editing, unlike the type
+                  // above: every mode stores a string, so switching is a config
+                  // change and existing records are already in the right shape.
+                  hint={
+                    textMode === "rich"
+                      ? "A small editor with bold, italic, lists, quotes and links. Existing plain text is kept, and switching back to plain shows the words without their formatting."
+                      : "How the field is filled in. Both store plain text, so this can be changed later without touching existing records."
+                  }
+                >
+                  <SelectButton
+                    id="col-textmode"
+                    value={textMode}
+                    options={TEXT_MODE_OPTIONS}
+                    onChange={(e) => e.value && setTextMode(e.value as TextMode)}
+                    allowEmpty={false}
+                  />
+                </Field>
+                <Field label="Max length" htmlFor="col-maxlen" optional>
+                  <InputNumber
+                    inputId="col-maxlen"
+                    value={maxLength}
+                    onValueChange={(e) => setMaxLength(e.value ?? null)}
+                    min={1}
+                    useGrouping={false}
+                  />
+                </Field>
+              </>
+            )}
+
+            {type === "number" && (
+              <>
+                <FieldRow>
+                  <Field label="Min" htmlFor="col-min" optional>
+                    <InputNumber
+                      inputId="col-min"
+                      value={min}
+                      onValueChange={(e) => setMin(e.value ?? null)}
+                      useGrouping={false}
+                    />
+                  </Field>
+                  <Field label="Max" htmlFor="col-max" optional>
+                    <InputNumber
+                      inputId="col-max"
+                      value={max}
+                      onValueChange={(e) => setMax(e.value ?? null)}
+                      useGrouping={false}
+                    />
+                  </Field>
+                </FieldRow>
+                <CheckboxField
+                  inputId="col-int"
+                  checked={integerOnly}
+                  onChange={setIntegerOnly}
+                  label="Integers only"
+                />
+              </>
+            )}
+
+            {type === "choice" && (
+              <Field
+                label="Choices"
+                htmlFor="col-choices"
+                hint={
+                  editing
+                    ? 'Separated by ";". Renaming an option keeps records pointing at it; removing one leaves records holding a value the column no longer offers.'
+                    : 'Separated by ";".'
+                }
+              >
+                <InputText
+                  id="col-choices"
+                  value={choices}
+                  onChange={(e) => setChoices(e.target.value)}
+                  placeholder="Todo;Doing;Done"
+                />
+              </Field>
+            )}
+
+            {type === "link" && (
+              <Field label="Link text" htmlFor="col-linktext" optional>
+                <InputText
+                  id="col-linktext"
+                  value={linkText}
+                  onChange={(e) => setLinkText(e.target.value)}
+                  placeholder="Shown instead of the URL"
+                />
+              </Field>
+            )}
+
+            {(type === "user" || type === "group") && (
+              <CheckboxField
+                inputId="col-multi-principal"
+                checked={multiple}
+                onChange={setMultiple}
+                label={`Allow selecting multiple ${
+                  type === "user" ? "users" : "groups"
+                }`}
+              />
+            )}
+
+            {type === "lookup" && (
+              <>
+                <Field
+                  label="Workspace"
+                  htmlFor="col-target-ws"
+                  hint="Point at a list in any of your workspaces, or one shared with you."
+                >
+                  <Dropdown
+                    inputId="col-target-ws"
+                    value={targetWorkspace}
+                    options={[
+                      ...(myWorkspaces.data ?? []).map((w) => ({
+                        label: w.display_name,
+                        value: w.uuid,
+                      })),
+                      { label: "Shared with me", value: SHARED },
+                    ]}
+                    onChange={(e) => {
+                      setTargetWorkspace(e.value);
+                      // The list, its display column and any nesting all belong
+                      // to the workspace being left; clear them so nothing dangles.
+                      setTargetListUuid(null);
+                      setDisplayColumnUuid(null);
+                      setParentColumnUuid(null);
+                      setTargetFilterColumnUuid(null);
+                    }}
+                    placeholder={
+                      myWorkspaces.isLoading ? "Loading…" : "Select a workspace…"
+                    }
+                    filter
+                    className="w-full"
+                  />
+                </Field>
+                <Field
+                  label="Target list"
+                  htmlFor="col-target"
+                  hint={
+                    targetListUuid && targetSchemaHidden
+                      ? "This list is shared with you as a lookup target only, so its columns aren’t yours to browse. Rows will be labelled by the list’s own default column."
+                      : undefined
+                  }
+                >
+                  <Dropdown
+                    inputId="col-target"
+                    value={targetListUuid}
+                    options={listOptions}
+                    onChange={(e) => {
+                      setTargetListUuid(e.value);
+                      setDisplayColumnUuid(null); // columns differ per target list
+                      // A nesting pairing is specific to the old target list.
+                      setParentColumnUuid(null);
+                      setTargetFilterColumnUuid(null);
+                    }}
+                    placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
+                    filter
+                    className="w-full"
+                  />
+                </Field>
+                {targetListUuid && !targetSchemaHidden && (
+                  <Field label="Column to show" htmlFor="col-display">
+                    <Dropdown
+                      inputId="col-display"
+                      value={displayColumnUuid}
+                      options={(targetColumns.data ?? []).map((c) => ({
+                        label: c.display_name,
+                        value: c.uuid,
+                      }))}
+                      onChange={(e) => setDisplayColumnUuid(e.value)}
+                      placeholder={
+                        targetColumns.isLoading ? "Loading…" : "Primary column"
+                      }
+                      showClear
+                      filter
+                      className="w-full"
+                    />
+                  </Field>
+                )}
+                {targetListUuid &&
+                  (parentOptions.length > 0 || parentColumnUuid) && (
+                    <>
+                      <Field
+                        label="Nest under"
+                        htmlFor="col-nest-parent"
+                        optional
+                        hint="What's selected there decides which rows this column offers — pick a country first, get only its cities."
+                      >
+                        <Dropdown
+                          inputId="col-nest-parent"
+                          value={parentColumnUuid}
+                          options={parentOptions.map((c) => ({
+                            label: c.display_name,
+                            value: c.uuid,
+                          }))}
+                          onChange={(e) => {
+                            const next = (e.value as string) ?? null;
+                            setParentColumnUuid(next);
+                            // The match column depends on the parent; re-derive
+                            // it, and save a click when only one column qualifies.
+                            const candidates = next
+                              ? targetLookups.filter((t) => {
+                                  const parent = parentOptions.find(
+                                    (c) => c.uuid === next,
+                                  );
+                                  return (
+                                    t.config.target_list_uuid ===
+                                    parent?.config.target_list_uuid
+                                  );
+                                })
+                              : [];
+                            setTargetFilterColumnUuid(
+                              candidates.length === 1
+                                ? candidates[0].uuid
+                                : null,
+                            );
+                          }}
+                          placeholder="Not nested"
+                          showClear
+                          className="w-full"
+                        />
+                      </Field>
+                      {parentColumnUuid && (
+                        <Field
+                          label="Match on"
+                          htmlFor="col-nest-match"
+                          hint={`The target list's column that links each row to a ${
+                            parentColumn?.display_name ?? "parent"
+                          } selection.`}
+                        >
+                          <Dropdown
+                            inputId="col-nest-match"
+                            value={targetFilterColumnUuid}
+                            options={matchOptions.map((c) => ({
+                              label: c.display_name,
+                              value: c.uuid,
+                            }))}
+                            onChange={(e) =>
+                              setTargetFilterColumnUuid(
+                                (e.value as string) ?? null,
+                              )
+                            }
+                            placeholder="Select a column…"
+                            className="w-full"
+                          />
+                        </Field>
+                      )}
+                    </>
+                  )}
+                <CheckboxField
+                  inputId="col-multiple"
+                  checked={multiple}
+                  onChange={setMultiple}
+                  label="Allow linking multiple rows"
+                />
+              </>
+            )}
+
+            {isCalculated && (
+              <Field
+                label="Formula"
+                htmlFor="col-formula"
+                hint={
+                  <>
+                    Computed from other columns each time a record is read; it
+                    has no stored value of its own. Numbers: <code>+ - * /</code>
+                    , parentheses, <code>MIN</code>, <code>MAX</code>,{" "}
+                    <code>ROUND</code>, <code>ABS</code>. Text:{" "}
+                    <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
+                    <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
+                    <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
+                    <code>IF(cond, a, b)</code>.
+                    {referenceableNames.length > 0
+                      ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
+                      : " Add a number or text column first — a formula references those."}
+                  </>
+                }
+              >
+                <InputTextarea
+                  id="col-formula"
+                  value={formula}
+                  onChange={(e) => setFormula(e.target.value)}
+                  rows={2}
+                  placeholder="qty * price"
+                  style={{ fontFamily: "monospace" }}
+                />
+              </Field>
+            )}
+          </FormSection>
+        )}
+
+        {(showDefault || supportsOnUpdate) && (
+          <FormSection
+            title="Filling in"
+            description="What a new record starts with, and what the app keeps up to date on its own."
+          >
+            {showDefault && type === "checkbox" && (
+              <CheckboxField
+                inputId="col-default"
+                checked={defaultChecked}
+                onChange={setDefaultChecked}
+                label="New records start checked"
+              />
+            )}
+            {showDefault && type !== "checkbox" && (
+              <Field label="Default value" htmlFor="col-default" optional>
+                {/* The default is edited the way the cell itself will be, so a
+                    multiline column's default can actually contain line breaks.
+                    A rich column gets the plain box too rather than a second
+                    editor: a default is a starting sentence, not a formatted
+                    document, and it is sanitised on write like anything else. */}
+                {type === "text" && textMode !== "single" ? (
+                  <InputTextarea
+                    id="col-default"
+                    value={defaultText}
+                    onChange={(e) => setDefaultText(e.target.value)}
+                    rows={3}
+                    placeholder="Used when left blank"
+                  />
+                ) : (
+                  (type === "text" || type === "link") && (
+                    <InputText
+                      id="col-default"
+                      value={defaultText}
+                      onChange={(e) => setDefaultText(e.target.value)}
+                      placeholder={
+                        type === "link"
+                          ? "https://example.com"
+                          : "Used when left blank"
+                      }
+                    />
+                  )
+                )}
+                {type === "number" && (
+                  <InputNumber
+                    inputId="col-default"
+                    value={defaultNumber}
+                    onValueChange={(e) => setDefaultNumber(e.value ?? null)}
+                    useGrouping={false}
+                  />
+                )}
+                {type === "choice" && (
+                  <Dropdown
+                    inputId="col-default"
+                    value={defaultChoice}
+                    options={choiceLabels.map((l) => ({ label: l, value: l }))}
+                    onChange={(e) => setDefaultChoice(e.value ?? null)}
+                    placeholder="No default"
+                    showClear
+                    className="w-full"
+                  />
+                )}
+                {isTemporal(type) && (
+                  <div className="flex flex-col gap-2">
+                    <Dropdown
+                      inputId="col-default"
+                      value={defaultTemporal}
+                      options={[
+                        { label: "No default", value: "" },
+                        {
+                          label: dynamicLabel(type),
+                          value: dynamicToken(type) as string,
+                        },
+                        { label: "Specific value…", value: SPECIFIC },
+                      ]}
+                      onChange={(e) => setDefaultTemporal(e.value)}
+                      className="w-full"
+                    />
+                    {defaultTemporal === SPECIFIC && (
+                      <Calendar
+                        value={defaultDate}
+                        onChange={(e) =>
+                          setDefaultDate((e.value as Date) ?? null)
+                        }
+                        dateFormat="yy-mm-dd"
+                        timeOnly={type === "time"}
+                        showTime={type === "datetime"}
+                        showButtonBar={type === "date"}
+                      />
+                    )}
+                  </div>
+                )}
+                {type === "user" && (
+                  <Dropdown
+                    inputId="col-default"
+                    value={defaultUser}
+                    options={[
+                      { label: "No default", value: "" },
+                      { label: "Current user", value: "current_user" },
+                    ]}
+                    onChange={(e) => setDefaultUser(e.value)}
+                    className="w-full"
+                  />
+                )}
+              </Field>
+            )}
+
+            {supportsOnUpdate && (
+              <Field
+                label="On update"
+                htmlFor="col-onupdate"
+                hint="Filled in automatically when a record is created and re-stamped on every edit; it isn't set by hand."
+              >
+                <Dropdown
+                  inputId="col-onupdate"
+                  value={onUpdate}
+                  options={[
+                    { label: "Off", value: "" },
+                    {
+                      label: dynamicLabel(type),
+                      value: dynamicToken(type) as string,
+                    },
+                  ]}
+                  onChange={(e) => setOnUpdate(e.value)}
+                  className="w-full"
+                />
+              </Field>
+            )}
+          </FormSection>
+        )}
+
+        {!isCalculated && (
+          <FormSection title="Validation">
+            <CheckboxField
+              inputId="col-required"
+              checked={required}
+              onChange={setRequired}
+              label="Required"
+              hint="A record cannot be saved with this one left blank."
+            />
+            {!multiValued && (
+              <CheckboxField
+                inputId="col-unique"
+                checked={unique}
+                onChange={setUnique}
+                label="Unique"
+                hint={
+                  editing && !column.config.unique && unique
+                    ? "Existing duplicates are left alone — this is checked when a record is saved, so they surface the next time one of them is edited."
+                    : "No two records may hold the same value."
+                }
+              />
+            )}
+          </FormSection>
+        )}
       </div>
     </AppDialog>
   );

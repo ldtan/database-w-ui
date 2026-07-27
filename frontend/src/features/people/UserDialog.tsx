@@ -153,6 +153,18 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
       visible={visible}
       onHide={onHide}
       style={{ width: 520 }}
+      footer={
+        <>
+          <Button label="Cancel" text onClick={onHide} />
+          <Button
+            label={editing ? "Save" : "Create user"}
+            icon={editing ? "pi pi-check" : "pi pi-plus"}
+            onClick={() => save.mutate()}
+            loading={save.isPending}
+            disabled={!canSave}
+          />
+        </>
+      }
     >
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
@@ -329,15 +341,6 @@ export function UserDialog({ visible, onHide, user, person, isSelf }: Props) {
           </div>
         )}
 
-        <div className="flex justify-end gap-2">
-          <Button label="Cancel" text onClick={onHide} />
-          <Button
-            label={editing ? "Save" : "Create"}
-            onClick={() => save.mutate()}
-            loading={save.isPending}
-            disabled={!canSave}
-          />
-        </div>
       </div>
     </AppDialog>
   );

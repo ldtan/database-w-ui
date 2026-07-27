@@ -19,7 +19,19 @@ import { UserAvatar } from "./UserAvatar";
  * The identity block at the top is the drawer's, deliberately: the same three lines
  * in the same order, so the two surfaces do not describe the same person differently.
  */
-export function AccountMenu() {
+interface Props {
+  /**
+   * `avatar` — the circle alone, for the header, where the row it sits in is
+   * icon buttons and a name would set the header's width from the length of
+   * whoever signed in.
+   *
+   * `row` — the circle with the name beside it, for the foot of the sidebar,
+   * which has a column of its own to fill and no other place saying who you are.
+   */
+  variant?: "avatar" | "row";
+}
+
+export function AccountMenu({ variant = "avatar" }: Props) {
   const { logout } = useAuth();
   const me = useCurrentUser();
   const person = useMyPerson();
@@ -33,17 +45,47 @@ export function AccountMenu() {
 
   return (
     <>
-      <Button
-        text
-        rounded
-        aria-label="Account"
-        aria-haspopup
-        aria-controls={menuId}
-        style={{ padding: "0.25rem" }}
-        onClick={(e) => menuRef.current?.toggle(e)}
-      >
-        <UserAvatar person={person.data} username={username} size="2.25rem" />
-      </Button>
+      {variant === "row" ? (
+        <button
+          type="button"
+          className="account-row"
+          aria-label="Account"
+          aria-haspopup
+          aria-controls={menuId}
+          onClick={(e) => menuRef.current?.toggle(e)}
+        >
+          <UserAvatar person={person.data} username={username} size="2rem" />
+          <span className="flex flex-col min-w-0 text-left">
+            <span className="truncate text-sm font-semibold">
+              {name || username}
+            </span>
+            {name && (
+              <span
+                className="truncate"
+                style={{ fontSize: "0.72rem", color: "var(--text-muted)" }}
+              >
+                {username}
+              </span>
+            )}
+          </span>
+          <i
+            className="pi pi-angle-up ml-auto"
+            style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}
+          />
+        </button>
+      ) : (
+        <Button
+          text
+          rounded
+          aria-label="Account"
+          aria-haspopup
+          aria-controls={menuId}
+          style={{ padding: "0.25rem" }}
+          onClick={(e) => menuRef.current?.toggle(e)}
+        >
+          <UserAvatar person={person.data} username={username} size="2.25rem" />
+        </Button>
+      )}
       <Menu
         popup
         ref={menuRef}

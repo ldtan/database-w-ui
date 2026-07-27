@@ -271,10 +271,14 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
         </div>
         </div>
 
+        {/* "Save layout", not "Save" — the dialog's own footer is a few pixels
+            below this one, and two buttons that both say Save do not obviously
+            mean "keep this form's fields" and "close the settings". */}
         <div className="flex justify-end gap-2">
           {canEdit && (
             <Button
-              label="Save"
+              label="Save layout"
+              icon="pi pi-check"
               onClick={() => save.mutate()}
               loading={save.isPending}
               disabled={rows.length === 0}
@@ -287,7 +291,19 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
         header={activeForm ? `Rename “${activeForm.display_name}”` : ""}
         visible={renaming}
         onHide={() => setRenaming(false)}
-        style={{ width: 380 }}
+        style={{ width: 420 }}
+        footer={
+          <>
+            <Button label="Cancel" text onClick={() => setRenaming(false)} />
+            <Button
+              label="Save"
+              icon="pi pi-check"
+              onClick={() => rename.mutate()}
+              loading={rename.isPending}
+              disabled={!names.displayName.trim() || !isValidName(names.name)}
+            />
+          </>
+        }
       >
         <div className="flex flex-col gap-4">
           {rename.error instanceof ApiError && (
@@ -301,15 +317,6 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
             linked={false}
             autoFocus
           />
-          <div className="flex justify-end gap-2">
-            <Button label="Cancel" text onClick={() => setRenaming(false)} />
-            <Button
-              label="Save"
-              onClick={() => rename.mutate()}
-              loading={rename.isPending}
-              disabled={!names.displayName.trim() || !isValidName(names.name)}
-            />
-          </div>
         </div>
       </AppDialog>
 
