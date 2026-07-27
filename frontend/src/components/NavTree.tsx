@@ -188,7 +188,7 @@ export function NavTree({ enabled, onNavigate }: Props) {
         />
       </div>
 
-      <div className="flex flex-col gap-0.5">
+      <div className="flex flex-col gap-0.5" data-tour="nav-workspaces">
         <span className="nav-section mb-1">Workspaces</span>
         {workspaces.isLoading && <NavSkeleton />}
         {workspaces.data?.length === 0 && (

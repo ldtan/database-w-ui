@@ -1,8 +1,10 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
+import { Button } from "primereact/button";
 
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
+import { useOnboarding } from "../onboarding/OnboardingProvider";
 
 /**
  * A plain-language, start-to-finish guide to the app, written for people with no
@@ -151,21 +153,37 @@ const TYPE_HELP: Record<string, string> = {
 };
 
 export function GuidePage() {
+  const { startTour } = useOnboarding();
+
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 820 }}>
       <Breadcrumbs items={[{ label: "Guide" }]} />
 
-      <header className="flex flex-col gap-2">
+      <header className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold">How to use this app</h1>
         <p style={{ color: "var(--text-muted)" }}>
           A friendly, step-by-step guide — from your very first workspace to
           sharing, filtering, and formulas. No technical background needed. If you
           can use a spreadsheet, you can use this.
         </p>
+        {/* For the people who would rather be shown than read. The tour is the
+            first quarter of this page, pointed at the real controls. */}
+        <div>
+          <Button
+            label="Show me around instead"
+            icon="pi pi-compass"
+            outlined
+            onClick={() => startTour("basics")}
+          />
+        </div>
       </header>
 
       {/* Contents */}
-      <nav className="surface-card p-4" aria-label="Guide contents">
+      <nav
+        className="surface-card p-4"
+        aria-label="Guide contents"
+        data-tour="guide-contents"
+      >
         <div className="font-semibold mb-2">On this page</div>
         {/* Twenty-three entries in one column is most of a screen before the
             guide has started. Two columns on anything but a phone. */}
@@ -293,7 +311,20 @@ export function GuidePage() {
             The trail of links above each page’s title (the <em>breadcrumbs</em>)
             shows where you are and lets you step back up.
           </li>
+          <li>
+            The round <Ui>?</Ui> button in the bottom right corner is on every
+            page. It holds two or three tips for whatever you are looking at, a
+            link back to this guide, and the <strong>tours</strong> — see below.
+          </li>
         </ul>
+        <Callout tone="tip" title="Rather be shown than read?">
+          A tour dims the page and points at one thing at a time, in the app
+          itself. <Ui>Show me around</Ui> is the general one — the rail, your
+          workspaces, and where to make your first list — and there are two more
+          that appear only where they apply: one on a workspace page, one on a
+          list. All three live behind the <Ui>?</Ui> button, and you can leave any
+          of them part-way with <Ui>Esc</Ui> and pick it up again later.
+        </Callout>
         <p>
           Your <Link to="/" style={{ color: "var(--brand)" }}>home page</Link> is a
           dashboard: how many workspaces you have and how many lists other people

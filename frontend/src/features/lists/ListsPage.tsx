@@ -168,6 +168,7 @@ export function ListsPage() {
           <>
             {workspaceActions.has("delete") && (
               <Button
+                data-tour="deleted-lists"
                 label="Deleted"
                 icon="pi pi-trash"
                 text
@@ -176,6 +177,7 @@ export function ListsPage() {
             )}
             {canCreate && (
               <Button
+                data-tour="new-list"
                 label="New list"
                 icon="pi pi-plus"
                 onClick={() => setCreating(true)}
@@ -223,9 +225,12 @@ export function ListsPage() {
         />
       ) : (
         <div className="card-grid">
-          {shownLists.map((list) => (
+          {/* The tour points at one card rather than the grid: a spotlight the
+              size of the whole page lights nothing in particular. */}
+          {shownLists.map((list, i) => (
             <div
               key={list.uuid}
+              data-tour={i === 0 ? "list-card" : undefined}
               className="surface-card link-card p-3 flex items-start justify-between gap-2"
             >
               <Link
