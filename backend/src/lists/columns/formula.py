@@ -15,9 +15,13 @@ can at worst return a wrong number or nothing.
 
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
 **and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
-and the functions ``min``, ``max``, ``round``, ``abs``, ``IF(cond, then, else)``,
+and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``IF(cond, then, else)``,
 and the string functions ``CONCAT``, ``UPPER``, ``LOWER``, ``TRIM``, ``LEN``,
 ``LEFT``, ``RIGHT`` and ``REPLACE``.
+
+Every function name is ALL CAPS, and a column name is a slug that must start with
+a lowercase letter — so the two namespaces cannot overlap and no formula is ever
+ambiguous about which one a name means.
 
 Arithmetic (``+ - * /``) is numeric only — joining text is ``CONCAT``, so a
 string can never slip into ``*`` and become a silent repetition. A value can be a
@@ -34,17 +38,17 @@ from typing import Optional, Union
 from src.core.exceptions import ValidationError
 
 # Functions whose arguments and result are numbers.
-_NUMERIC_FUNCTIONS = {"min", "max", "round", "abs"}
+_NUMERIC_FUNCTIONS = {"MIN", "MAX", "ROUND", "ABS"}
 # Functions that operate on text. Numeric arguments are coerced to their text
 # form (``CONCAT("$", price)``), and LEN's result is a number.
 _STRING_FUNCTIONS = {"CONCAT", "UPPER", "LOWER", "TRIM", "LEN", "LEFT", "RIGHT", "REPLACE"}
 
 # Function name -> (min_args, max_args). ``None`` means unbounded.
 _FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
-    "min": (1, None),
-    "max": (1, None),
-    "round": (1, 2),
-    "abs": (1, 1),
+    "MIN": (1, None),
+    "MAX": (1, None),
+    "ROUND": (1, 2),
+    "ABS": (1, 1),
     "IF": (3, 3),
     "CONCAT": (2, None),
     "UPPER": (1, 1),
@@ -190,10 +194,9 @@ def column_refs(formula: Formula) -> frozenset[str]:
 
     Every name in ``refs`` is already a column: `_check` collects names in value
     position only and never descends into a call's *function* name, so a function
-    never lands there in the first place. Subtracting the function names here — as
-    this used to — removed nothing but genuine references to columns whose slug
-    happens to collide (`min`, `max`, `round`, `abs` are all valid slugs), leaving
-    them unvalidated at write time while `evaluate` resolved them at read time.
+    never lands there in the first place. Position is what decides this, not
+    spelling — the ALL-CAPS function names cannot collide with a lowercase column
+    slug, but filtering by name would still be the wrong tool for the job.
     """
     return formula.refs
 
@@ -307,13 +310,13 @@ def _eval(node: ast.AST, values: dict[str, object]):
             # than comparing strings, which min/max would otherwise do.
             if not all(_is_num(a) for a in args):
                 return None
-            if name == "min":
+            if name == "MIN":
                 return min(args)
-            if name == "max":
+            if name == "MAX":
                 return max(args)
-            if name == "abs":
+            if name == "ABS":
                 return abs(args[0])
-            # round(x) or round(x, ndigits)
+            # ROUND(x) or ROUND(x, ndigits)
             ndigits = int(args[1]) if len(args) > 1 else None
             return round(args[0], ndigits)
 

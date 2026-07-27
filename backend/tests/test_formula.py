@@ -22,12 +22,12 @@ def test_arithmetic_and_precedence():
 
 
 def test_functions():
-    assert calc("round(a * b, 2)", a=3, b=1.005) == 3.02 or calc(
-        "round(a, 1)", a=2.25
+    assert calc("ROUND(a * b, 2)", a=3, b=1.005) == 3.02 or calc(
+        "ROUND(a, 1)", a=2.25
     ) in (2.2, 2.3)  # banker's rounding is fine; just exercise the path
-    assert calc("min(a, b, c)", a=3, b=1, c=2) == 1
-    assert calc("max(a, b)", a=3, b=9) == 9
-    assert calc("abs(a - b)", a=2, b=5) == 3
+    assert calc("MIN(a, b, c)", a=3, b=1, c=2) == 1
+    assert calc("MAX(a, b)", a=3, b=9) == 9
+    assert calc("ABS(a - b)", a=2, b=5) == 3
 
 
 def test_if_and_comparisons():
@@ -57,20 +57,29 @@ def test_a_bare_comparison_reads_as_one_or_zero():
 
 
 def test_column_refs_excludes_function_names():
-    f = parse("round(min(qty, cap) * price, 2)")
+    f = parse("ROUND(MIN(qty, cap) * price, 2)")
     assert column_refs(f) == frozenset({"qty", "cap", "price"})
 
 
-def test_a_column_named_like_a_function_is_still_a_column_reference():
-    # What a name *is* comes from where it sits, not how it is spelled: `min` and
-    # `abs` here are values, not calls. Reporting them as functions hid them from
-    # the write-time checks (does the column exist? is it a referenceable type? is
-    # it another calculated column?) while `evaluate` resolved them anyway.
+def test_what_a_name_means_comes_from_its_position_not_its_spelling():
+    # Function names are ALL CAPS and column slugs are lowercase, so these can no
+    # longer collide — but refs are still collected by position, not by filtering
+    # out anything spelled like a function. Filtering hid genuine columns from the
+    # write-time checks (does it exist? is it a referenceable type?) while
+    # `evaluate` resolved them anyway, so the distinction is worth pinning.
     f = parse("max * 2 + abs")
     assert column_refs(f) == frozenset({"max", "abs"})
     assert evaluate(f, {"max": 10, "abs": 5}) == 25
     # And a name in call position is still not a column.
-    assert column_refs(parse("min(a, b)")) == frozenset({"a", "b"})
+    assert column_refs(parse("MIN(a, b)")) == frozenset({"a", "b"})
+
+
+def test_the_lowercase_spelling_of_a_function_is_not_a_function():
+    # `min(a, b)` is a call whose *function* name is a lowercase slug, and no such
+    # function exists. It is refused outright rather than quietly read as a column.
+    for source in ("min(a, b)", "round(a, 2)", "abs(a)", "max(a, b)"):
+        with pytest.raises(ValidationError):
+            parse(source)
 
 
 def test_string_functions():
@@ -124,7 +133,7 @@ def test_a_quoted_string_literal_is_allowed():
         "[a for a in b]",  # no comprehensions
         "True",  # no boolean literals
         "IF(a, b)",  # IF needs exactly three arguments
-        "round(a, b, c)",  # round takes at most two
+        "ROUND(a, b, c)",  # ROUND takes at most two
         "",  # empty
         "   ",  # blank
         "a +",  # syntax error
