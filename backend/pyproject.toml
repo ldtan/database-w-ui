@@ -11,6 +11,7 @@ dependencies = [
     "python-jose[cryptography]>=3.0.0",
     "argon2-cffi>=25.1.0",
     "alembic>=1.18.5",
+    "nh3>=0.3.6",
 ]
 
 [dependency-groups]

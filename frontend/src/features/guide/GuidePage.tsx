@@ -136,7 +136,7 @@ function Callout({
  *  labels themselves come from the same list the "Add column" menu uses, so they
  *  can never drift from what the app actually offers. */
 const TYPE_HELP: Record<string, string> = {
-  text: "Writing — a name, a title, a reference number. Set it to accept several lines instead of one when it holds notes, a description or an address; you can change that later without disturbing what is already stored.",
+  text: "Writing — a name, a title, a reference number. Choose how it is filled in: one line, several lines for notes or an address, or rich text, which gives you bold, italic, lists, quotes and links. You can change that later without disturbing what is already stored.",
   number: "A number you can total or compare. You can set a smallest and largest allowed value, or require whole numbers only.",
   checkbox: "A simple yes/no, on/off tick — “Paid?”, “Active?”.",
   choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording.",

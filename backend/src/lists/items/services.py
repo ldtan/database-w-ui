@@ -24,6 +24,7 @@ from ..columns.enums import (
 )
 from ..columns.formula import column_refs, evaluate, parse
 from ..columns.models import Column
+from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
 from ..refs import get_by_ref
@@ -694,6 +695,18 @@ class ListItemService:
             if value is None:
                 result[key] = None
                 continue
+            # A rich text cell is stored as HTML and later rendered as HTML, so
+            # it is cleaned here rather than in the editor: this is the one point
+            # every write goes through — the API, a form, and a CSV import — and
+            # a check only the editor performs is one an API client skips. Before
+            # validation, so the length limit measures what is actually stored.
+            if column.type == ColumnType.text and is_rich(column.config or {}):
+                value = sanitize(value)
+                if not value.strip():
+                    # Nothing survived (a cell that was only markup). Same
+                    # meaning as arriving blank, decided a few lines above.
+                    result[key] = None
+                    continue
             # Validation may normalize (a user column accepts a username and
             # stores the uuid), so the checked value is what gets written.
             #

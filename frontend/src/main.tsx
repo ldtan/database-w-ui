@@ -7,6 +7,9 @@ import { PrimeReactProvider } from "primereact/api";
 import "primereact/resources/themes/lara-light-cyan/theme.css";
 import "primereact/resources/primereact.min.css";
 import "primeicons/primeicons.css";
+// Quill's own stylesheet is imported from index.css into a cascade layer, not
+// here: unlayered themes.css must win over it, and import order alone did not
+// settle that reliably.
 import "./index.css";
 // Imported last so the theming overrides win over the base PrimeReact theme.
 import "./themes.css";
