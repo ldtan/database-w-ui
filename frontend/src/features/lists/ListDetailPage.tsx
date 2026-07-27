@@ -609,7 +609,7 @@ export function ListDetailPage() {
 
       {selection.length > 0 && (
         <div className="flex items-center gap-2">
-          <span className="text-sm text-gray-600">
+          <span className="text-sm text-muted">
             {selection.length} selected
           </span>
           {deletableSelection.length > 0 && (

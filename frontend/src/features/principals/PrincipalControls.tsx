@@ -143,7 +143,7 @@ export function PrincipalCell({
     : value
       ? [String(value)]
       : [];
-  if (uuids.length === 0) return <span className="text-gray-300">—</span>;
+  if (uuids.length === 0) return <span className="text-faint">—</span>;
   return <span>{uuids.map((u) => nameFor(kind, labels, u)).join(", ")}</span>;
 }
 

@@ -321,7 +321,7 @@ export function SharePanel({
                 />
                 {expiry &&
                   (expiry.expired ? (
-                    <span className="text-red-600 font-medium">{expiry.text}</span>
+                    <span className="text-danger font-medium">{expiry.text}</span>
                   ) : (
                     <span style={{ color: "var(--text-muted)" }}>{expiry.text}</span>
                   ))}

@@ -214,7 +214,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
             scrolls sideways within the dialog. */}
         <div className="overflow-x-auto">
         <div className="flex flex-col gap-1" style={{ minWidth: 460 }}>
-          <div className="flex items-center gap-2 text-sm text-gray-500 px-1">
+          <div className="flex items-center gap-2 text-sm text-muted px-1">
             <span style={{ width: 64 }}>Order</span>
             <span className="flex-1">Field</span>
             <span style={{ width: 70 }}>Shown</span>

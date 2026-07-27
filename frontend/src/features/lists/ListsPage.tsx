@@ -215,63 +215,68 @@ export function ListsPage() {
 
       <div className="flex flex-col gap-2">
         {shownLists.map((list) => (
-          <Card key={list.uuid}>
+          <Card key={list.uuid} className="link-card">
             <div className="flex items-center justify-between">
-              <Link to={`/lists/${list.uuid}`} className="no-underline">
+              <Link
+                to={`/lists/${list.uuid}`}
+                className="no-underline link-card-target"
+              >
                 <div className="font-medium">{list.display_name}</div>
-                <div className="text-sm text-gray-500">{list.name}</div>
+                <div className="text-sm text-muted">{list.name}</div>
               </Link>
               {/* Share and Edit stay as buttons; the rest fold into an overflow
                   menu so a busy list row never crowds. */}
-              <RowActions
-                maxVisible={2}
-                actions={[
-                  {
-                    key: "share",
-                    icon: "pi pi-share-alt",
-                    label: "Share list",
-                    visible: can(list.uuid, "share"),
-                    onClick: () => setSharingUuid(list.uuid),
-                  },
-                  {
-                    key: "edit",
-                    icon: "pi pi-pencil",
-                    label: "Rename list",
-                    visible: can(list.uuid, "configure"),
-                    onClick: () => {
-                      setRenaming(list);
-                      setNames({
-                        displayName: list.display_name,
-                        name: list.name,
-                      });
+              <div className="link-card-above">
+                <RowActions
+                  maxVisible={2}
+                  actions={[
+                    {
+                      key: "share",
+                      icon: "pi pi-share-alt",
+                      label: "Share list",
+                      visible: can(list.uuid, "share"),
+                      onClick: () => setSharingUuid(list.uuid),
                     },
-                  },
-                  {
-                    key: "move",
-                    icon: "pi pi-send",
-                    label: "Move or transfer list",
-                    visible: can(list.uuid, "configure"),
-                    onClick: () => setMoving(list),
-                  },
-                  {
-                    // Cloning writes a new list into *this* workspace, so it is gated
-                    // on the workspace's `configure`, not the source list's.
-                    key: "duplicate",
-                    icon: "pi pi-copy",
-                    label: "Duplicate list",
-                    visible: workspaceActions.has("configure"),
-                    onClick: () => setCloning(list),
-                  },
-                  {
-                    key: "delete",
-                    icon: "pi pi-trash",
-                    label: "Delete list",
-                    severity: "danger",
-                    visible: can(list.uuid, "delete"),
-                    onClick: () => confirmDelete(list),
-                  },
-                ]}
-              />
+                    {
+                      key: "edit",
+                      icon: "pi pi-pencil",
+                      label: "Rename list",
+                      visible: can(list.uuid, "configure"),
+                      onClick: () => {
+                        setRenaming(list);
+                        setNames({
+                          displayName: list.display_name,
+                          name: list.name,
+                        });
+                      },
+                    },
+                    {
+                      key: "move",
+                      icon: "pi pi-send",
+                      label: "Move or transfer list",
+                      visible: can(list.uuid, "configure"),
+                      onClick: () => setMoving(list),
+                    },
+                    {
+                      // Cloning writes a new list into *this* workspace, so it is
+                      // gated on the workspace's `configure`, not the source list's.
+                      key: "duplicate",
+                      icon: "pi pi-copy",
+                      label: "Duplicate list",
+                      visible: workspaceActions.has("configure"),
+                      onClick: () => setCloning(list),
+                    },
+                    {
+                      key: "delete",
+                      icon: "pi pi-trash",
+                      label: "Delete list",
+                      severity: "danger",
+                      visible: can(list.uuid, "delete"),
+                      onClick: () => confirmDelete(list),
+                    },
+                  ]}
+                />
+              </div>
             </div>
           </Card>
         ))}
