@@ -854,8 +854,10 @@ class ListService:
     def _provision_defaults(db: AsyncSession, lst: List) -> None:
         """Seed a new list with default audit columns, a grid view and forms.
 
-        Forms start with an empty ``fields`` list, which the convention treats as
-        "all columns" until the user customizes the layout.
+        Three forms: ``create`` and ``update`` for writing a record, and ``view`` for
+        reading one. An empty ``fields`` list is the convention for "all columns", so
+        the view form shows everything until someone customizes the layout; the two
+        input forms instead name the audit columns to keep them off the form.
         """
 
         default_columns = []
@@ -914,7 +916,7 @@ class ListService:
         default_fields_config = [
             {
                 "order": i,
-                "enable": False,
+                "enabled": False,
                 "included": False,
                 "column_uuid": str(col.uuid),
                 "label_override": None,
@@ -939,6 +941,21 @@ class ListService:
                 type=FormType.update,
                 is_default=True,
                 config={"fields": default_fields_config},
+            )
+        )
+        # The view form starts empty rather than with ``default_fields_config``:
+        # create/update hide the audit columns because nobody types them, but "created
+        # by" and "updated at" are exactly the detail a display-only form exists to
+        # show. Empty means "all columns", which also picks up calculated ones without
+        # having to name them.
+        db.add(
+            Form(
+                list_id=lst.id,
+                name="view",
+                display_name="View",
+                type=FormType.view,
+                is_default=True,
+                config={"fields": []},
             )
         )
 

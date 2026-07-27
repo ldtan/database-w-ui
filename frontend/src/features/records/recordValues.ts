@@ -20,17 +20,34 @@ export interface ResolvedField {
 /**
  * Apply the form's config: only included fields, in order, with enabled and
  * label overrides. An empty/absent config means "all columns in schema order".
+ *
+ * `includeCalculated` is what separates a display surface from an input one. A
+ * calculated column is computed on read and rejected on write, so it can never be
+ * an input — but it is exactly what a view form exists to show, and the value is
+ * already sitting in the record the backend handed over.
+ *
+ * **A column the config has never heard of is newer than the config, not excluded
+ * by it**, so it is appended in schema order rather than dropped. The distinction
+ * is safe to draw because `FormsEditor` always writes back *every* column: one you
+ * deliberately hid is in the config as `included: false`, and only a column added
+ * since the last save is absent altogether. Reading absence as exclusion is what
+ * made the Add/Edit dialog on a freshly provisioned list say "Add a column first"
+ * no matter how many columns you added — its seeded config names the audit columns
+ * and nothing else, so every real column fell through the gap until someone opened
+ * the form editor and saved. This is the same rule a view's `column_order` follows
+ * (data-model §7), for the same reason.
  */
 export function resolveFields(
   columns: Column[],
   form: Form | null,
+  { includeCalculated = false }: { includeCalculated?: boolean } = {},
 ): ResolvedField[] {
-  // A calculated column is computed on read and rejected on write, so it is never
-  // an input on a record form.
-  const editable = columns.filter((c) => c.type !== "calculated");
+  const eligible = includeCalculated
+    ? columns
+    : columns.filter((c) => c.type !== "calculated");
   if (form && form.config.fields && form.config.fields.length > 0) {
-    const byUuid = new Map(editable.map((c) => [c.uuid, c]));
-    return form.config.fields
+    const byUuid = new Map(eligible.map((c) => [c.uuid, c]));
+    const configured = form.config.fields
       .filter((f) => f.included)
       .slice()
       .sort((a, b) => a.order - b.order)
@@ -45,8 +62,15 @@ export function resolveFields(
         };
       })
       .filter((x): x is ResolvedField => x !== null);
+    // Every uuid the config mentions, included or not — an excluded column is
+    // spoken for and must not come back through the door below.
+    const known = new Set(form.config.fields.map((f) => f.column_uuid));
+    const appended = eligible
+      .filter((c) => !known.has(c.uuid))
+      .map((c) => ({ column: c, enabled: true, label: c.display_name }));
+    return [...configured, ...appended];
   }
-  return editable.map((c) => ({ column: c, enabled: true, label: c.display_name }));
+  return eligible.map((c) => ({ column: c, enabled: true, label: c.display_name }));
 }
 
 export function serialize(column: Column, value: unknown): unknown {

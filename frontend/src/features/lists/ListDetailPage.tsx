@@ -29,6 +29,7 @@ import type {
 import { ListSettingsDialog } from "./ListSettingsDialog";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
+import { RecordViewDialog } from "../records/RecordViewDialog";
 import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
 import { resolveFields } from "../records/recordValues";
@@ -100,6 +101,8 @@ export function ListDetailPage() {
     prefill?: Record<string, unknown> | null;
     notes?: string[];
   }>({ open: false, item: null });
+  // The record the read-only detail dialog is showing, if any.
+  const [viewItem, setViewItem] = useState<ListItem | null>(null);
   const [selection, setSelection] = useState<ListItem[]>([]);
   // Which QR flow is running, if any: fill the form, or submit it outright.
   const [qrMode, setQrMode] = useState<"fill" | "submit" | null>(null);
@@ -320,6 +323,12 @@ export function ListDetailPage() {
     formList.find(
       (f) => f.type === (recordDialog.item ? "update" : "create"),
     ) ?? null;
+
+  // Reading one record uses the "view" form. Its absence hides the action rather
+  // than falling back to "show every column": GET /forms/ already filters by the
+  // caller's `view` on each form, so a view form un-shared from someone must not
+  // reappear as an unconfigured one — that would route around the grant.
+  const viewForm = formList.find((f) => f.type === "view") ?? null;
 
   // A QR code always creates, so it is always the "create" form it fills — which
   // is what decides the fields it may write, and their names. Resolving them here
@@ -644,6 +653,7 @@ export function ListDetailPage() {
           pageSize={pageSize}
           onPageSize={setPageSize}
           can={canItem}
+          onView={viewForm ? (item) => setViewItem(item) : undefined}
           onEdit={(item) => setRecordDialog({ open: true, item })}
           onShare={(item) => setSharingItemUuid(item.uuid)}
           onDelete={confirmDeleteItem}
@@ -709,13 +719,24 @@ export function ListDetailPage() {
           ))}
           <DataColumn
             header=""
-            style={{ width: "9rem" }}
+            style={{ width: "7rem" }}
             // RowActions stops click propagation itself, so an action never also
             // toggles the row's selection.
             body={(row: ListItem) => (
               <RowActions
                 size="small"
+                // Reading and editing a record are what a row is for; sharing and
+                // deleting it are occasional, so they fold into the overflow rather
+                // than widening every row of the grid.
+                maxVisible={2}
                 actions={[
+                  {
+                    key: "view",
+                    icon: "pi pi-eye",
+                    label: "View record",
+                    visible: viewForm !== null,
+                    onClick: () => setViewItem(row),
+                  },
                   {
                     key: "edit",
                     icon: "pi pi-pencil",
@@ -768,6 +789,21 @@ export function ListDetailPage() {
           onHide={() => setShowSettings(false)}
         />
       )}
+      <RecordViewDialog
+        listUuid={listUuid}
+        columns={cols}
+        form={viewForm}
+        item={viewItem}
+        principalUuids={principalUuids}
+        lookupUuids={lookupUuids}
+        canEdit={!!viewItem && canItem(viewItem.uuid, "edit")}
+        onEdit={() => {
+          setRecordDialog({ open: true, item: viewItem });
+          setViewItem(null);
+        }}
+        visible={viewItem !== null}
+        onHide={() => setViewItem(null)}
+      />
       <RecordFormDialog
         listUuid={listUuid}
         columns={cols}

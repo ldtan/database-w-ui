@@ -1260,7 +1260,7 @@ export interface components {
          * FormType
          * @enum {string}
          */
-        FormType: "create" | "update" | "custom";
+        FormType: "create" | "update" | "view" | "custom";
         /** FormUpdate */
         FormUpdate: {
             /** Name */
