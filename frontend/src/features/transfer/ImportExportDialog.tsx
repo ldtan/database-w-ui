@@ -203,7 +203,7 @@ export function ImportExportDialog({
 
         <div className="flex flex-col gap-2">
           <span className="font-semibold">Columns</span>
-          <p className="text-sm text-gray-500 m-0">
+          <p className="text-sm text-muted m-0">
             Headers use the column name. {chosen.length}/{columns.length} selected.
           </p>
           <div className="flex flex-col gap-1 max-h-48 overflow-auto">
@@ -216,7 +216,7 @@ export function ImportExportDialog({
                 />
                 <label htmlFor={`io-${col.uuid}`} className="flex-1">
                   {col.display_name}{" "}
-                  <span className="text-gray-400">({col.name})</span>
+                  <span className="text-muted">({col.name})</span>
                 </label>
               </div>
             ))}
@@ -263,7 +263,7 @@ export function ImportExportDialog({
               disabled={!sortColumn}
             />
           </div>
-          <span className="text-sm text-gray-500">Filters (optional)</span>
+          <span className="text-sm text-muted">Filters (optional)</span>
           <FilterConditionsEditor
             listUuid={listUuid}
             columns={columns}
@@ -298,7 +298,7 @@ export function ImportExportDialog({
 
             <div className="flex flex-col gap-2">
               <span className="font-semibold">Import records</span>
-              <p className="text-sm text-gray-500 m-0">
+              <p className="text-sm text-muted m-0">
                 Upload a .csv or .json file whose headers/keys are column names.
                 Unknown columns are ignored; each row is validated on the server.
               </p>
@@ -320,7 +320,7 @@ export function ImportExportDialog({
                 />
               )}
               {result && result.errors.length > 0 && (
-                <ul className="text-sm text-red-600 m-0 pl-4 max-h-40 overflow-auto">
+                <ul className="text-sm text-danger m-0 pl-4 max-h-40 overflow-auto">
                   {result.errors.map((e, i) => (
                     <li key={i}>
                       {e.row ? `Row ${e.row}: ` : ""}

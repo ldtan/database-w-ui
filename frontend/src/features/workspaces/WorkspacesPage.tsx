@@ -193,11 +193,14 @@ export function WorkspacesPage() {
 
       <div className="flex flex-col gap-2">
         {shownWorkspaces.map((ws) => (
-          <Card key={ws.uuid}>
+          <Card key={ws.uuid} className="link-card">
             <div className="flex items-center justify-between">
-              <Link to={`/workspaces/${ws.uuid}`} className="no-underline">
+              <Link
+                to={`/workspaces/${ws.uuid}`}
+                className="no-underline link-card-target"
+              >
                 <div className="font-medium">{ws.display_name}</div>
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-muted">
                   {ws.is_system
                     ? "Lists other people have transferred to you"
                     : ws.name}
@@ -205,35 +208,40 @@ export function WorkspacesPage() {
               </Link>
               {/* The Incoming inbox is immutable — no rename/delete/share; the
                   recipient acts on the lists inside it, not on the box. */}
-              <RowActions
-                actions={[
-                  {
-                    key: "share",
-                    icon: "pi pi-share-alt",
-                    label: "Share workspace",
-                    visible: !ws.is_system && can(ws.uuid, "share"),
-                    onClick: () => setSharing(ws),
-                  },
-                  {
-                    key: "edit",
-                    icon: "pi pi-pencil",
-                    label: "Rename workspace",
-                    visible: !ws.is_system && can(ws.uuid, "configure"),
-                    onClick: () => {
-                      setRenaming(ws);
-                      setNames({ displayName: ws.display_name, name: ws.name });
+              <div className="link-card-above">
+                <RowActions
+                  actions={[
+                    {
+                      key: "share",
+                      icon: "pi pi-share-alt",
+                      label: "Share workspace",
+                      visible: !ws.is_system && can(ws.uuid, "share"),
+                      onClick: () => setSharing(ws),
                     },
-                  },
-                  {
-                    key: "delete",
-                    icon: "pi pi-trash",
-                    label: "Delete workspace",
-                    severity: "danger",
-                    visible: !ws.is_system && can(ws.uuid, "delete"),
-                    onClick: () => confirmDelete(ws),
-                  },
-                ]}
-              />
+                    {
+                      key: "edit",
+                      icon: "pi pi-pencil",
+                      label: "Rename workspace",
+                      visible: !ws.is_system && can(ws.uuid, "configure"),
+                      onClick: () => {
+                        setRenaming(ws);
+                        setNames({
+                          displayName: ws.display_name,
+                          name: ws.name,
+                        });
+                      },
+                    },
+                    {
+                      key: "delete",
+                      icon: "pi pi-trash",
+                      label: "Delete workspace",
+                      severity: "danger",
+                      visible: !ws.is_system && can(ws.uuid, "delete"),
+                      onClick: () => confirmDelete(ws),
+                    },
+                  ]}
+                />
+              </div>
             </div>
           </Card>
         ))}
@@ -270,15 +278,18 @@ export function WorkspacesPage() {
             <Message severity="info" text="No shared lists match that search." />
           )}
           {shownShared.map((list) => (
-            <Card key={list.uuid}>
-              <Link to={`/lists/${list.uuid}`} className="no-underline">
+            <Card key={list.uuid} className="link-card">
+              <Link
+                to={`/lists/${list.uuid}`}
+                className="no-underline link-card-target"
+              >
                 <div className="font-medium">{list.display_name}</div>
                 {/* Same-named lists are common here, so disambiguate by owner and —
                     only when the caller can see it — the workspace. The backend
                     sends workspace_display_name only for a viewable workspace, so
                     this never names one the caller was denied; otherwise it falls
                     back to the list's own slug. */}
-                <div className="text-sm text-gray-500">
+                <div className="text-sm text-muted">
                   {list.owner_username
                     ? `owned by ${list.owner_username}`
                     : list.name}

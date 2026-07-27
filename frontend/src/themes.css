@@ -129,10 +129,20 @@
   --brand-tint: color-mix(in srgb, var(--brand) 14%, var(--surface));
   --focus-ring: color-mix(in srgb, var(--brand) 30%, transparent);
   --surface-2: color-mix(in srgb, var(--surface) 93%, var(--text));
+  /* A step below --text-muted, for the em-dash standing in for an empty cell: it
+     should read as absence rather than as content. Mixed toward the surface so it
+     stays faint in either mode, instead of a fixed grey that goes invisible on
+     white and glares on black. */
+  --text-faint: color-mix(in srgb, var(--text-muted) 55%, var(--surface));
+  /* Danger as *text on a surface*, which is not the same red as the fill on a
+     danger button — this one has to clear contrast against --surface, so it goes
+     darker in light mode and lighter in dark. */
+  --danger: #dc2626;
 }
 [data-mode="dark"] {
   --brand-hover: color-mix(in srgb, var(--brand), white 16%);
   --brand-tint: color-mix(in srgb, var(--brand) 28%, var(--surface));
+  --danger: #f87171;
 }
 [data-mode="light"] {
   color-scheme: light;
@@ -476,6 +486,42 @@ a {
   color: var(--text);
 }
 
+/* A card that *is* a link — the workspace and list rows. Only the title used to be
+   clickable, which left most of the card as dead space. The anchor inside stretches
+   an invisible overlay across the whole card, so a click anywhere navigates while
+   the element stays a real <a>: keyboard focus, middle-click and "open in new tab"
+   all still work. Row actions sit above the overlay and keep their own clicks. */
+.link-card {
+  position: relative;
+  cursor: pointer;
+}
+.link-card:hover {
+  background: var(--hover);
+  border-color: var(--brand);
+}
+/* Ring the whole card when the link itself is focused — but not when a row action
+   is, since those already draw their own focus ring. */
+.link-card:has(.link-card-target:focus-visible) {
+  border-color: var(--brand);
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+.link-card .link-card-target::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+/* Text inside the card reads as text, not as a blue link — the card's hover and
+   cursor already say it is clickable. Without this the title takes the anchor
+   colour, which in dark mode sits far too close to the surface to read. */
+.link-card .link-card-target {
+  color: var(--text);
+}
+/* Anything that must stay clickable has to sit above the overlay. */
+.link-card .link-card-above {
+  position: relative;
+  z-index: 1;
+}
+
 /* ============================================================
    Calendar / date picker
    Selectors mirror the base theme's so ours win on source order — see the note
@@ -583,8 +629,16 @@ a {
   background: var(--hover);
 }
 
-/* Subtle text helpers used around the app */
+/* Subtle text helpers used around the app. These exist because Tailwind's palette
+   is fixed: a `text-gray-500` that reads fine on a white surface all but vanishes
+   on a dark one, so anything below full-strength body text goes through a token. */
 .text-muted,
 .p-inputgroup-addon {
   color: var(--text-muted);
+}
+.text-faint {
+  color: var(--text-faint);
+}
+.text-danger {
+  color: var(--danger);
 }

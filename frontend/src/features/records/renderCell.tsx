@@ -45,7 +45,7 @@ export function renderCell(
     );
   }
   if (value === null || value === undefined || value === "") {
-    return <span className="text-gray-300">—</span>;
+    return <span className="text-faint">—</span>;
   }
   if (column.type === "checkbox") {
     return value ? "✓" : "✗";
