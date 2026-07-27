@@ -26,6 +26,16 @@ interface Props {
   // Sharing a view is configuring it, not using it, so the toolbar leaves it out
   // and List settings → Views offers it. Same bar, one button apart.
   showShare?: boolean;
+  /**
+   * Whether the page's live state has drifted from what this view has stored.
+   *
+   * "Save view" used to sit on the toolbar at all times, which made it read as
+   * one of the things you *do* to a list rather than as an offer to keep the
+   * arrangement you have just made — and gave no way to tell, without opening
+   * the confirm dialog, whether there was anything to save. Undefined means the
+   * caller does not track it, and the button behaves as it always did.
+   */
+  dirty?: boolean;
 }
 
 /**
@@ -46,6 +56,7 @@ export function ViewBar({
   onSelect,
   currentConfig,
   showShare = false,
+  dirty,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -130,22 +141,29 @@ export function ViewBar({
   });
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-wrap items-center gap-1">
       <Dropdown
         value={activeUuid}
         options={views.map((v) => ({ label: v.display_name, value: v.uuid }))}
         onChange={(e) => onSelect(e.value as string)}
         placeholder="View"
-        className="w-40 sm:w-56"
+        aria-label="View"
+        className="w-36 sm:w-48"
       />
-      {canSave && (
+      {/* Only once there is something to save, when the caller tracks that. It
+          is then an outlined button rather than a text one: it is the odd
+          control on the bar that changes what *other people* will see. */}
+      {canSave && dirty !== false && (
         <Button
           label="Save view"
           icon="pi pi-save"
-          text
+          outlined={dirty === true}
+          text={dirty === undefined}
+          size="small"
           onClick={confirmSave}
           loading={save.isPending}
-          tooltip="Save the current sort and page size to this view"
+          tooltip="Save the current sort, grouping and columns to this view"
+          tooltipOptions={{ position: "bottom" }}
         />
       )}
       {showShare && canShare && (
@@ -157,10 +175,15 @@ export function ViewBar({
         />
       )}
       {listActions.has("configure") && (
+        // Icon-only on the toolbar, where it is a rarity beside controls used
+        // constantly; the settings tab has the room to spell it out.
         <Button
-          label="New view"
           icon="pi pi-plus"
           text
+          label={showShare ? "New view" : undefined}
+          aria-label="New view"
+          tooltip={showShare ? undefined : "New view"}
+          tooltipOptions={{ position: "bottom" }}
           onClick={() => setCreating(true)}
         />
       )}

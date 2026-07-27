@@ -1,6 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Card } from "primereact/card";
 import { InputText } from "primereact/inputtext";
 import { Calendar } from "primereact/calendar";
 import { Button } from "primereact/button";
@@ -13,7 +12,8 @@ import { useMyPerson } from "../../lib/people";
 import { fmtDate, parseTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type { Person } from "../../lib/types";
-import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { PageHeader } from "../../components/PageHeader";
+import { UserAvatar } from "../../components/UserAvatar";
 
 /**
  * Your own account and profile.
@@ -111,29 +111,30 @@ export function ProfilePage() {
   const canSave = !!firstName.trim() && !!lastName.trim();
 
   return (
-    <div className="flex flex-col gap-4" style={{ maxWidth: 620 }}>
+    <div className="flex flex-col gap-5" style={{ maxWidth: 620 }}>
       <ConfirmDialog />
-      <Breadcrumbs items={[{ label: "Profile" }]} />
-      <h1 className="text-xl font-semibold">Profile</h1>
+      <PageHeader
+        crumbs={[{ label: "Profile" }]}
+        title="Profile"
+        subtitle="Your account, and the person record other people see you as."
+      />
 
-      <Card>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium">{me?.username ?? "…"}</div>
-            <div className="text-sm" style={{ color: "var(--text-muted)" }}>
-              {me?.email}
-            </div>
+      <div className="surface-card p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 min-w-0">
+          <UserAvatar
+            person={person.data}
+            username={me?.username ?? ""}
+            size="2.75rem"
+          />
+          <div className="min-w-0">
+            <div className="font-medium truncate">{me?.username ?? "…"}</div>
+            <div className="text-sm truncate text-muted">{me?.email}</div>
           </div>
-          {me?.is_superuser && (
-            <span className="text-sm font-medium" style={{ color: "var(--brand)" }}>
-              superuser
-            </span>
-          )}
         </div>
-      </Card>
+        {me?.is_superuser && <span className="badge is-brand">superuser</span>}
+      </div>
 
-      <h2 className="text-lg font-medium">Personal details</h2>
-      {person.isLoading && <p>Loading…</p>}
+      <h2 className="text-lg font-semibold">Personal details</h2>
       {!person.isLoading && !person.data && (
         <Message
           severity="info"
@@ -141,7 +142,7 @@ export function ProfilePage() {
         />
       )}
 
-      <form onSubmit={onSubmit} className="flex flex-col gap-3">
+      <form onSubmit={onSubmit} className="surface-card p-4 flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <label htmlFor="name-prefix" className="text-sm font-medium">
             Prefix{" "}

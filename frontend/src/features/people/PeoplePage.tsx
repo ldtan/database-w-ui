@@ -1,9 +1,5 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card } from "primereact/card";
-import { InputText } from "primereact/inputtext";
-import { IconField } from "primereact/iconfield";
-import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 import { Paginator } from "primereact/paginator";
@@ -15,7 +11,12 @@ import { fullName } from "../../lib/people";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup, Person } from "../../lib/types";
-import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { EmptyState } from "../../components/EmptyState";
+import { PageHeader } from "../../components/PageHeader";
+import { RowActions } from "../../components/RowActions";
+import { SearchInput } from "../../components/SearchInput";
+import { SkeletonRows } from "../../components/Skeleton";
+import { UserAvatar } from "../../components/UserAvatar";
 import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
 
@@ -135,10 +136,13 @@ export function PeoplePage() {
   );
 
   return (
-    <div className="flex flex-col gap-6" style={{ maxWidth: 820 }}>
+    <div className="flex flex-col gap-6" style={{ maxWidth: 900 }}>
       <ConfirmDialog />
-      <Breadcrumbs items={[{ label: "People & Groups" }]} />
-      <h1 className="text-xl font-semibold">People &amp; Groups</h1>
+      <PageHeader
+        crumbs={[{ label: "People & Groups" }]}
+        title="People & Groups"
+        subtitle="Who exists, and which groups they are in. Access itself is granted per workspace, list or record."
+      />
 
       {!canAdminister && (
         <Message
@@ -150,7 +154,10 @@ export function PeoplePage() {
       {/* ---------------------------------------------------------- Users */}
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-medium">Users</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">Users</h2>
+            {userTotal > 0 && <span className="badge">{userTotal}</span>}
+          </div>
           {canAdminister && (
             <Button
               label="Add user"
@@ -160,77 +167,85 @@ export function PeoplePage() {
           )}
         </div>
 
-        <IconField iconPosition="left">
-          <InputIcon className="pi pi-search" />
-          <InputText
-            value={userSearch}
-            onChange={(e) => setUserSearch(e.target.value)}
-            placeholder={
-              canAdminister
-                ? "Search users by username, email, or person name…"
-                : "Search users by username or email…"
+        <SearchInput
+          value={userSearch}
+          onChange={setUserSearch}
+          placeholder={
+            canAdminister
+              ? "Search users by username, email, or person name…"
+              : "Search users by username or email…"
+          }
+        />
+
+        {users.isLoading ? (
+          <SkeletonRows count={3} />
+        ) : shownUsers.length === 0 ? (
+          <EmptyState
+            icon={userSearch ? "pi pi-search" : "pi pi-users"}
+            title={userSearch ? "No matches" : "No users yet"}
+            text={
+              userSearch
+                ? `No account matches “${userSearch}”.`
+                : undefined
             }
-            className="w-full"
+            action={
+              userSearch ? (
+                <Button
+                  label="Clear search"
+                  icon="pi pi-times"
+                  text
+                  onClick={() => setUserSearch("")}
+                />
+              ) : undefined
+            }
           />
-        </IconField>
-
-        {users.isLoading && <p>Loading…</p>}
-        {!users.isLoading && shownUsers.length === 0 && (
-          <Message
-            severity="info"
-            text={userSearch ? "No users match that search." : "No users yet."}
-          />
-        )}
-
-        <div className="flex flex-col gap-2">
-          {shownUsers.map((user) => {
-            const person = personByUser.get(user.uuid);
-            return (
-              <Card key={user.uuid}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <div className="font-medium">{user.username}</div>
-                    <div
-                      className="text-sm truncate"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {user.email}
-                      {person && ` · ${fullName(person)}`}
+        ) : (
+          <div className="flex flex-col gap-2">
+            {shownUsers.map((user) => {
+              const person = personByUser.get(user.uuid);
+              return (
+                <div
+                  key={user.uuid}
+                  className="surface-card p-3 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3 min-w-0">
+                    <UserAvatar
+                      person={person ?? null}
+                      username={user.username}
+                      size="2.25rem"
+                    />
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">
+                        {person ? fullName(person) : user.username}
+                      </div>
+                      <div className="text-sm truncate text-muted">
+                        {person ? `${user.username} · ` : ""}
+                        {user.email}
+                      </div>
                     </div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 shrink-0">
                     {user.is_superuser && (
-                      <span
-                        className="text-sm font-medium"
-                        style={{ color: "var(--brand)" }}
-                      >
-                        superuser
-                      </span>
+                      <span className="badge is-brand">superuser</span>
                     )}
-                    {!user.is_active && (
-                      <span
-                        className="text-sm"
-                        style={{ color: "var(--text-muted)" }}
-                      >
-                        inactive
-                      </span>
-                    )}
+                    {!user.is_active && <span className="badge">inactive</span>}
                     {canAdminister && (
                       <Button
                         icon="pi pi-pencil"
                         text
+                        rounded
                         aria-label={`Edit ${user.username}`}
                         onClick={() => setUserDialog({ open: true, user })}
                       />
                     )}
                   </div>
                 </div>
-              </Card>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
-        {userTotal > 0 && (
+        {userTotal > userRows && (
           <Paginator
             first={userFirst}
             rows={userRows}
@@ -249,7 +264,10 @@ export function PeoplePage() {
       {/* --------------------------------------------------------- Groups */}
       <section className="flex flex-col gap-3">
         <div className="flex items-center justify-between gap-2">
-          <h2 className="text-lg font-medium">Groups</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg font-semibold">Groups</h2>
+            {groupTotal > 0 && <span className="badge">{groupTotal}</span>}
+          </div>
           {canAdminister && (
             <Button
               label="New group"
@@ -259,70 +277,96 @@ export function PeoplePage() {
           )}
         </div>
 
-        <IconField iconPosition="left">
-          <InputIcon className="pi pi-search" />
-          <InputText
-            value={groupSearch}
-            onChange={(e) => setGroupSearch(e.target.value)}
-            placeholder="Search groups…"
-            className="w-full"
-          />
-        </IconField>
+        <SearchInput
+          value={groupSearch}
+          onChange={setGroupSearch}
+          placeholder="Search groups…"
+        />
 
-        {groups.isLoading && <p>Loading…</p>}
-        {!groups.isLoading && shownGroups.length === 0 && (
-          <Message
-            severity="info"
-            text={groupSearch ? "No groups match that search." : "No groups yet."}
+        {groups.isLoading ? (
+          <SkeletonRows count={2} />
+        ) : shownGroups.length === 0 ? (
+          <EmptyState
+            icon={groupSearch ? "pi pi-search" : "pi pi-sitemap"}
+            title={groupSearch ? "No matches" : "No groups yet"}
+            text={
+              groupSearch
+                ? `No group matches “${groupSearch}”.`
+                : "A group is a principal you can grant to once instead of naming everyone in it."
+            }
+            action={
+              groupSearch ? (
+                <Button
+                  label="Clear search"
+                  icon="pi pi-times"
+                  text
+                  onClick={() => setGroupSearch("")}
+                />
+              ) : canAdminister ? (
+                <Button
+                  label="New group"
+                  icon="pi pi-plus"
+                  onClick={() => setGroupDialog({ open: true, group: null })}
+                />
+              ) : undefined
+            }
           />
-        )}
-
-        <div className="flex flex-col gap-2">
-          {shownGroups.map((group) => (
-            <Card key={group.uuid}>
-              <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <div className="font-medium">{group.name}</div>
-                  {group.description && (
-                    <div
-                      className="text-sm truncate"
-                      style={{ color: "var(--text-muted)" }}
-                    >
-                      {group.description}
+        ) : (
+          <div className="flex flex-col gap-2">
+            {shownGroups.map((group) => (
+              <div key={group.uuid} className="surface-card p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <span className="entity-icon" aria-hidden>
+                      <i className="pi pi-sitemap" />
+                    </span>
+                    <div className="min-w-0">
+                      <div className="font-medium truncate">{group.name}</div>
+                      {group.description && (
+                        <div className="text-sm truncate text-muted">
+                          {group.description}
+                        </div>
+                      )}
                     </div>
+                  </div>
+                  <RowActions
+                    actions={[
+                      {
+                        key: "edit",
+                        icon: "pi pi-pencil",
+                        label: `Edit ${group.name}`,
+                        visible: canAdminister,
+                        onClick: () => setGroupDialog({ open: true, group }),
+                      },
+                      {
+                        key: "delete",
+                        icon: "pi pi-trash",
+                        label: `Delete ${group.name}`,
+                        severity: "danger",
+                        visible: canAdminister,
+                        onClick: () => confirmDeleteGroup(group),
+                      },
+                    ]}
+                  />
+                </div>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <span className="text-sm text-muted">Members:</span>
+                  {group.users.length === 0 ? (
+                    <span className="text-sm text-muted">none</span>
+                  ) : (
+                    group.users.map((u) => (
+                      <span key={u.uuid} className="badge">
+                        {usernameByUuid.get(u.uuid) ?? u.uuid}
+                      </span>
+                    ))
                   )}
                 </div>
-                {canAdminister && (
-                  <div className="flex gap-1">
-                    <Button
-                      icon="pi pi-pencil"
-                      text
-                      aria-label={`Edit ${group.name}`}
-                      onClick={() => setGroupDialog({ open: true, group })}
-                    />
-                    <Button
-                      icon="pi pi-trash"
-                      text
-                      severity="danger"
-                      aria-label={`Delete ${group.name}`}
-                      onClick={() => confirmDeleteGroup(group)}
-                    />
-                  </div>
-                )}
               </div>
-              <div className="mt-2 text-sm">
-                <span style={{ color: "var(--text-muted)" }}>Members: </span>
-                {group.users.length === 0
-                  ? "none"
-                  : group.users
-                      .map((u) => usernameByUuid.get(u.uuid) ?? u.uuid)
-                      .join(", ")}
-              </div>
-            </Card>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
-        {groupTotal > 0 && (
+        {groupTotal > groupRows && (
           <Paginator
             first={groupFirst}
             rows={groupRows}

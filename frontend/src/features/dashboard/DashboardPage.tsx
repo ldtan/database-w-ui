@@ -5,6 +5,9 @@ import { Button } from "primereact/button";
 
 import { api } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
+import { EmptyState } from "../../components/EmptyState";
+import { SkeletonCards } from "../../components/Skeleton";
+import { fullName, useMyPerson } from "../../lib/people";
 import type { ListRead, Workspace } from "../../lib/types";
 
 /**
@@ -37,27 +40,22 @@ function StatTile({
   return (
     <Link
       to={to}
-      className="no-underline rounded p-4 flex items-center gap-3"
-      style={{
-        background: "var(--surface)",
-        border: "var(--border-width) solid var(--border)",
-      }}
+      className="surface-card is-interactive no-underline p-4 flex items-center gap-3"
+      style={{ color: "var(--text)" }}
     >
-      <span
-        className="flex items-center justify-center rounded shrink-0"
-        style={{
-          width: "2.75rem",
-          height: "2.75rem",
-          background: "var(--brand-tint)",
-          color: "var(--brand)",
-        }}
-        aria-hidden
-      >
-        <i className={icon} style={{ fontSize: "1.25rem" }} />
+      <span className="entity-icon" style={{ width: "2.75rem", height: "2.75rem" }} aria-hidden>
+        <i className={icon} style={{ fontSize: "1.15rem" }} />
       </span>
       <span className="flex flex-col">
-        <span className="text-2xl font-semibold" style={{ color: "var(--text)" }}>
-          {loading ? "…" : value}
+        <span className="text-2xl font-semibold leading-none">
+          {loading ? (
+            <span
+              className="skeleton inline-block"
+              style={{ width: "2ch", height: "1.5rem", verticalAlign: "middle" }}
+            />
+          ) : (
+            value
+          )}
         </span>
         <span className="text-sm" style={{ color: "var(--text-muted)" }}>
           {label}
@@ -82,18 +80,17 @@ function ActionCard({
   return (
     <Link
       to={to}
-      className="no-underline rounded p-4 flex flex-col gap-1"
-      style={{
-        background: "var(--surface)",
-        border: "var(--border-width) solid var(--border)",
-      }}
+      className="surface-card is-interactive no-underline p-4 flex items-start gap-3"
+      style={{ color: "var(--text)" }}
     >
-      <span className="flex items-center gap-2 font-medium" style={{ color: "var(--text)" }}>
-        <i className={icon} style={{ color: "var(--brand)" }} />
-        {title}
+      <span className="entity-icon" aria-hidden>
+        <i className={icon} />
       </span>
-      <span className="text-sm" style={{ color: "var(--text-muted)" }}>
-        {desc}
+      <span className="flex flex-col gap-0.5 min-w-0">
+        <span className="font-medium">{title}</span>
+        <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+          {desc}
+        </span>
       </span>
     </Link>
   );
@@ -102,30 +99,35 @@ function ActionCard({
 /** A compact row linking into a workspace or a shared list. */
 function LinkCard({
   to,
+  icon,
   title,
   sub,
 }: {
   to: string;
+  icon: string;
   title: string;
   sub?: string;
 }) {
   return (
     <Link
       to={to}
-      className="no-underline rounded px-3 py-2 flex flex-col"
-      style={{
-        background: "var(--surface)",
-        border: "var(--border-width) solid var(--border)",
-      }}
+      className="surface-card is-interactive no-underline p-3 flex items-center gap-3"
+      style={{ color: "var(--text)" }}
     >
-      <span className="font-medium truncate" style={{ color: "var(--text)" }}>
-        {title}
+      <span className="entity-icon" aria-hidden>
+        <i className={icon} />
       </span>
-      {sub && (
-        <span className="text-sm truncate" style={{ color: "var(--text-muted)" }}>
-          {sub}
-        </span>
-      )}
+      <span className="flex flex-col min-w-0">
+        <span className="font-medium truncate">{title}</span>
+        {sub && (
+          <span
+            className="text-sm truncate"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {sub}
+          </span>
+        )}
+      </span>
     </Link>
   );
 }
@@ -138,8 +140,8 @@ function SectionHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <h2 className="text-lg font-medium">{title}</h2>
+    <div className="flex items-center justify-between gap-2">
+      <h2 className="text-lg font-semibold">{title}</h2>
       {action}
     </div>
   );
@@ -147,6 +149,10 @@ function SectionHeader({
 
 export function DashboardPage() {
   const me = useCurrentUser();
+  const person = useMyPerson();
+  // The first name when there is a profile, the username when there is not —
+  // "Welcome, ana" is a greeting; "Welcome, a.cruz.2" is a login prompt.
+  const greeting = person.data?.first_name || me?.username;
 
   // A small page of each: the total (from the count header) drives the tiles, and
   // the first few items give a "jump back in" preview.
@@ -166,23 +172,23 @@ export function DashboardPage() {
   const sharedTotal = shared.data?.total ?? 0;
 
   return (
-    <div className="flex flex-col gap-6" style={{ maxWidth: 960 }}>
+    <div className="flex flex-col gap-6" style={{ maxWidth: 1100 }}>
       {/* Greeting */}
-      <section
-        className="rounded p-5 flex flex-col gap-3"
-        style={{
-          background: "var(--brand-tint)",
-          border: "var(--border-width) solid var(--border)",
-        }}
-      >
-        <div className="flex flex-col gap-1">
+      <section className="hero flex flex-col gap-4">
+        <div className="flex flex-col gap-1.5">
           <h1 className="text-2xl font-semibold">
-            Welcome{me?.username ? `, ${me.username}` : ""} 👋
+            Welcome{greeting ? `, ${greeting}` : ""} 👋
           </h1>
-          <p style={{ color: "var(--text-muted)" }}>
-            Build flexible databases without writing code — organise everything into
-            workspaces, fill lists with records, then filter, share, and export.
+          <p style={{ color: "var(--text-muted)", maxWidth: "44rem" }}>
+            Build flexible databases without writing code — organise everything
+            into workspaces, fill lists with records, then filter, share, and
+            export.
           </p>
+          {person.data && (
+            <p className="text-sm" style={{ color: "var(--text-muted)" }}>
+              Signed in as {fullName(person.data)}
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <Link to="/workspaces" className="no-underline">
@@ -207,7 +213,9 @@ export function DashboardPage() {
           to="/workspaces"
           icon="pi pi-share-alt"
           value={sharedTotal}
-          label={sharedTotal === 1 ? "list shared with you" : "lists shared with you"}
+          label={
+            sharedTotal === 1 ? "list shared with you" : "lists shared with you"
+          }
           loading={shared.isLoading}
         />
       </div>
@@ -220,7 +228,7 @@ export function DashboardPage() {
             workspaceTotal > PREVIEW ? (
               <Link
                 to="/workspaces"
-                className="no-underline text-sm"
+                className="no-underline text-sm font-medium"
                 style={{ color: "var(--brand)" }}
               >
                 See all →
@@ -229,36 +237,32 @@ export function DashboardPage() {
           }
         />
         {workspaces.isLoading ? (
-          <p style={{ color: "var(--text-muted)" }}>Loading…</p>
+          <SkeletonCards count={3} />
         ) : workspaceItems.length === 0 ? (
-          <div
-            className="rounded p-4 flex flex-col gap-2"
-            style={{
-              background: "var(--surface)",
-              border: "var(--border-width) solid var(--border)",
-            }}
-          >
-            <p style={{ color: "var(--text-muted)" }}>
-              You don’t have any workspaces yet. A workspace is a folder that holds
-              your lists — create your first one to get started.
-            </p>
-            <div className="flex flex-wrap gap-2">
-              <Link to="/workspaces" className="no-underline">
-                <Button label="Create a workspace" icon="pi pi-plus" />
-              </Link>
-              <Link to="/guide" className="no-underline">
-                <Button label="How this works" icon="pi pi-book" text />
-              </Link>
-            </div>
-          </div>
+          <EmptyState
+            icon="pi pi-th-large"
+            title="No workspaces yet"
+            text="A workspace is a folder that holds your lists — create your first one to get started."
+            action={
+              <div className="flex flex-wrap gap-2 justify-center">
+                <Link to="/workspaces" className="no-underline">
+                  <Button label="Create a workspace" icon="pi pi-plus" />
+                </Link>
+                <Link to="/guide" className="no-underline">
+                  <Button label="How this works" icon="pi pi-book" text />
+                </Link>
+              </div>
+            }
+          />
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="card-grid">
             {workspaceItems.map((ws) => (
               <LinkCard
                 key={ws.uuid}
                 to={`/workspaces/${ws.uuid}`}
+                icon={ws.is_system ? "pi pi-inbox" : "pi pi-th-large"}
                 title={ws.display_name}
-                sub={ws.name}
+                sub={ws.is_system ? "Lists transferred to you" : ws.name}
               />
             ))}
           </div>
@@ -274,7 +278,7 @@ export function DashboardPage() {
               sharedTotal > PREVIEW ? (
                 <Link
                   to="/workspaces"
-                  className="no-underline text-sm"
+                  className="no-underline text-sm font-medium"
                   style={{ color: "var(--brand)" }}
                 >
                   See all →
@@ -282,11 +286,12 @@ export function DashboardPage() {
               ) : undefined
             }
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <div className="card-grid">
             {sharedItems.map((list) => (
               <LinkCard
                 key={list.uuid}
                 to={`/lists/${list.uuid}`}
+                icon="pi pi-table"
                 title={list.display_name}
                 sub={
                   list.owner_username

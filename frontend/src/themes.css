@@ -16,33 +16,39 @@
    ============================================================ */
 :root,
 [data-theme="modern"] {
-  --radius: 6px;
+  --radius: 8px;
   --border-width: 1px;
   --brand: #4f46e5;
   --brand-contrast: #ffffff;
   --secondary: #06b6d4;
   --accent: #8b5cf6;
-  --bg: #f8fafc;
+  --bg: #f6f7fb;
   --surface: #ffffff;
   --text: #0f172a;
   --text-muted: #64748b;
-  --border: #e2e8f0;
+  --border: #e4e8f0;
   --hover: #f1f5f9;
+  /* The colour shadows are cast in, as HSL channels so they can be mixed at
+     several opacities. A shadow tinted toward the palette reads as depth; a flat
+     black one reads as dirt. */
+  --shadow-hsl: 222 47% 18%;
 }
 [data-theme="modern"][data-mode="dark"] {
   --brand: #6366f1;
   --brand-contrast: #ffffff;
   --secondary: #22d3ee;
   --accent: #a78bfa;
-  --bg: #0f172a;
-  --surface: #1e293b;
+  --bg: #0b1120;
+  --surface: #151d2e;
   --text: #f1f5f9;
   --text-muted: #94a3b8;
-  --border: #334155;
-  --hover: #263449;
+  --border: #29344a;
+  --hover: #1e2940;
+  --shadow-hsl: 222 60% 2%;
 }
 
 [data-theme="nordic"] {
+  --radius: 10px;
   --brand: #2d3a3a;
   --brand-contrast: #f9f6f0;
   --secondary: #786f68;
@@ -53,6 +59,7 @@
   --text-muted: #6b635c;
   --border: #e7e0d5;
   --hover: #f3eee5;
+  --shadow-hsl: 30 25% 20%;
 }
 [data-theme="nordic"][data-mode="dark"] {
   --brand: #a3b19b;
@@ -65,6 +72,7 @@
   --text-muted: #b8b0a6;
   --border: #2e2e2e;
   --hover: #262626;
+  --shadow-hsl: 30 20% 2%;
 }
 
 [data-theme="brutalist"] {
@@ -80,6 +88,7 @@
   --hover: #ececec;
   --radius: 0px;
   --border-width: 2px;
+  --shadow-hsl: 0 0% 0%;
 }
 [data-theme="brutalist"][data-mode="dark"] {
   --brand: #ff3377;
@@ -94,9 +103,11 @@
   --hover: #202026;
   --radius: 0px;
   --border-width: 2px;
+  --shadow-hsl: 0 0% 0%;
 }
 
 [data-theme="luxury"] {
+  --radius: 4px;
   --brand: #064e3b;
   --brand-contrast: #f9fafb;
   --secondary: #374151;
@@ -107,6 +118,7 @@
   --text-muted: #6b7280;
   --border: #e5e1d8;
   --hover: #f1efea;
+  --shadow-hsl: 40 30% 16%;
 }
 [data-theme="luxury"][data-mode="dark"] {
   --brand: #10b981;
@@ -119,6 +131,7 @@
   --text-muted: #a7c4b8;
   --border: #0b5a45;
   --hover: #0a3b2e;
+  --shadow-hsl: 165 60% 2%;
 }
 
 /* ============================================================
@@ -127,8 +140,46 @@
 :root {
   --brand-hover: color-mix(in srgb, var(--brand), black 14%);
   --brand-tint: color-mix(in srgb, var(--brand) 14%, var(--surface));
+  --brand-tint-strong: color-mix(in srgb, var(--brand) 24%, var(--surface));
   --focus-ring: color-mix(in srgb, var(--brand) 30%, transparent);
   --surface-2: color-mix(in srgb, var(--surface) 93%, var(--text));
+  /* A radius *scale*, derived from the palette's own --radius so a theme still
+     sets one number. Brutalist's 0 stays 0 through every step, which is the
+     point of it. */
+  --radius-sm: max(0px, calc(var(--radius) - 3px));
+  --radius-lg: calc(var(--radius) * 1.75);
+  --radius-pill: calc(var(--radius) * 999);
+
+  /* Elevation. Two shadows per step — a tight one for the object's edge, a wide
+     soft one for the light it blocks — which is what separates a surface that
+     sits above the page from one with a grey outline drawn round it. */
+  --shadow-xs: 0 1px 2px hsl(var(--shadow-hsl) / 0.05);
+  --shadow-sm:
+    0 1px 2px hsl(var(--shadow-hsl) / 0.06),
+    0 2px 8px -2px hsl(var(--shadow-hsl) / 0.08);
+  --shadow-md:
+    0 2px 4px hsl(var(--shadow-hsl) / 0.06),
+    0 8px 20px -6px hsl(var(--shadow-hsl) / 0.14);
+  --shadow-lg:
+    0 4px 8px hsl(var(--shadow-hsl) / 0.08),
+    0 24px 48px -12px hsl(var(--shadow-hsl) / 0.24);
+
+  /* Motion. One duration and one curve, so nothing in the app eases differently
+     from anything else. */
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur: 140ms;
+  --transition: var(--dur) var(--ease);
+
+  /* "Inter var" is not a web request: the base PrimeReact theme already ships
+     the variable font and declares its @font-face, so the file is in the bundle
+     whether or not anything uses it. Naming it here is what makes the app's own
+     text match the components' — and it is a better UI face than any of the
+     system stacks behind it, which stay as the fallback. */
+  --font-family:
+    "Inter var", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --font-family-heading: var(--font-family);
+  --heading-tracking: -0.011em;
   /* A step below --text-muted, for the em-dash standing in for an empty cell: it
      should read as absence rather than as content. Mixed toward the surface so it
      stays faint in either mode, instead of a fixed grey that goes invisible on
@@ -157,6 +208,20 @@
 [data-mode="dark"] {
   --brand-hover: color-mix(in srgb, var(--brand), white 16%);
   --brand-tint: color-mix(in srgb, var(--brand) 28%, var(--surface));
+  --brand-tint-strong: color-mix(in srgb, var(--brand) 42%, var(--surface));
+  /* Shadows have almost no contrast to work with on a dark surface, so they are
+     deepened rather than merely reused — otherwise every elevated thing looks
+     flat and the border is doing all the work again. */
+  --shadow-xs: 0 1px 2px hsl(var(--shadow-hsl) / 0.4);
+  --shadow-sm:
+    0 1px 2px hsl(var(--shadow-hsl) / 0.4),
+    0 2px 8px -2px hsl(var(--shadow-hsl) / 0.45);
+  --shadow-md:
+    0 2px 4px hsl(var(--shadow-hsl) / 0.4),
+    0 8px 20px -6px hsl(var(--shadow-hsl) / 0.55);
+  --shadow-lg:
+    0 4px 8px hsl(var(--shadow-hsl) / 0.45),
+    0 24px 48px -12px hsl(var(--shadow-hsl) / 0.7);
   --danger: #f87171;
   --info: #60a5fa;
   --success: #4ade80;
@@ -168,6 +233,21 @@
   --warn-tint: color-mix(in srgb, var(--warn) 22%, var(--surface));
   --danger-tint: color-mix(in srgb, var(--danger) 22%, var(--surface));
 }
+/* Brutalism does not do soft light. Its elevation is a hard offset block in the
+   border colour, and its type is a grotesque — both of which have to be stated
+   *after* the derived block above, because `[data-theme=…]` and `:root` carry the
+   same specificity and the later one wins. */
+[data-theme="brutalist"] {
+  --shadow-xs: 2px 2px 0 var(--border);
+  --shadow-sm: 3px 3px 0 var(--border);
+  --shadow-md: 5px 5px 0 var(--border);
+  --shadow-lg: 8px 8px 0 var(--border);
+  --font-family-heading:
+    ui-monospace, "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Menlo,
+    Consolas, monospace;
+  --heading-tracking: -0.02em;
+}
+
 [data-mode="light"] {
   color-scheme: light;
 }
@@ -182,16 +262,188 @@ body {
   background: var(--bg);
   color: var(--text);
 }
-.app-header {
-  background: var(--surface);
-  border-bottom: var(--border-width) solid var(--border);
-  color: var(--text);
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-family-heading);
+  letter-spacing: var(--heading-tracking);
 }
 a {
   color: var(--brand);
 }
+
+/* The shell: a rail on the left that stays put, and everything else beside it.
+   Below the desktop breakpoint the rail is not rendered at all and the drawer
+   carries the same tree — see AppLayout. */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: 17.25rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: var(--border-width) solid var(--border);
+  z-index: 10;
+}
+.app-content {
+  flex: 1;
+  /* Without this a wide grid inside a flex child refuses to shrink and pushes
+     the whole page sideways instead of scrolling inside its own box. */
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  /* Translucent so content scrolling under it reads as *under* it. The fallback
+     is the solid surface, for the browsers without backdrop-filter. */
+  background: var(--surface);
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  backdrop-filter: saturate(1.6) blur(10px);
+  border-bottom: var(--border-width) solid var(--border);
+  color: var(--text);
+}
 .app-header a {
   color: var(--text);
+}
+
+/* The wordmark, in both the header and the sidebar. */
+.app-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  font-family: var(--font-family-heading);
+  font-weight: 650;
+  letter-spacing: var(--heading-tracking);
+  color: var(--text);
+  text-decoration: none;
+}
+.app-brand-mark {
+  display: grid;
+  place-items: center;
+  width: 1.85rem;
+  height: 1.85rem;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  background: var(--brand);
+  color: var(--brand-contrast);
+  font-size: 0.9rem;
+  box-shadow: var(--shadow-xs);
+}
+
+/* A row in the sidebar or the drawer. One class for both so the two navigations
+   cannot drift into looking like different products. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding: 0.4rem 0.625rem;
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+.nav-item:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.nav-item > i {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  flex-shrink: 0;
+  transition: color var(--transition);
+}
+.nav-item.is-active {
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-weight: 600;
+}
+.nav-item.is-active > i {
+  color: var(--brand);
+}
+.nav-item:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+/* The account control at the foot of the sidebar. */
+.account-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius);
+  color: var(--text);
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.account-row:hover {
+  background: var(--hover);
+}
+.account-row:focus-visible,
+.nav-chevron:focus-visible,
+.search-clear:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+/* The footer is a fixed-width strip shared between a name and two icon buttons,
+   and PrimeReact's rounded buttons are 2.36rem square — nearly a third of it
+   spent on the theme controls, which is what was truncating "Ana Cruz". */
+.app-sidebar .p-button.p-button-icon-only.p-button-rounded {
+  width: 2rem;
+  height: 2rem;
+}
+
+/* The disclosure triangle beside a workspace. A bare button rather than a
+   PrimeReact one: at this size the component's padding is most of the row. */
+.nav-chevron {
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+.nav-chevron:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.nav-chevron i {
+  font-size: 0.7rem;
+}
+
+/* The label above a run of nav rows ("Workspaces", "Shared with me"). */
+.nav-section {
+  padding: 0 0.625rem;
+  font-size: 0.7rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
 }
 
 /* ============================================================
@@ -202,12 +454,27 @@ a {
   border: var(--border-width) solid var(--brand);
   color: var(--brand-contrast);
   border-radius: var(--radius);
+  font-weight: 550;
+  /* Buttons are deliberately flat: the focus ring is itself a box-shadow, and a
+     resting elevation turns every hover/focus combination into a fight over the
+     same property. Depth in this app belongs to surfaces — cards, dialogs, the
+     overlays — not to controls. */
+  transition:
+    background var(--transition),
+    border-color var(--transition),
+    color var(--transition),
+    transform var(--transition);
 }
 .p-button:enabled:hover,
 .p-button:not(button):not(a):not(.p-disabled):hover {
   background: var(--brand-hover);
   border-color: var(--brand-hover);
   color: var(--brand-contrast);
+}
+/* A press that moves. One pixel is enough to feel like a button and not enough
+   to shift what is beside it. */
+.p-button:enabled:active {
+  transform: translateY(1px);
 }
 .p-button:focus {
   box-shadow: 0 0 0 0.2rem var(--focus-ring);
@@ -245,6 +512,13 @@ a {
   background: transparent;
   color: #ef4444;
 }
+/* …and the *text* variant has no border at all. Without this it keeps the red
+   one `.p-button-danger` above set — which is later in the file, and so wins
+   over the generic `.p-button-text` rule — and every quiet Delete icon in the
+   app was drawn as a red box beside a borderless Edit. */
+.p-button.p-button-danger.p-button-text {
+  border-color: transparent;
+}
 .p-button.p-button-danger.p-button-text:enabled:hover,
 .p-button.p-button-danger.p-button-outlined:enabled:hover {
   background: color-mix(in srgb, #ef4444 12%, var(--surface));
@@ -268,6 +542,10 @@ a {
   color: var(--text);
   border: var(--border-width) solid var(--border);
   border-radius: var(--radius);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    background var(--transition);
 }
 .p-inputtext::placeholder {
   color: var(--text-muted);
@@ -319,6 +597,19 @@ a {
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.p-dropdown-panel .p-dropdown-items,
+.p-multiselect-panel .p-multiselect-items,
+.p-autocomplete-panel .p-autocomplete-items {
+  padding: 0.25rem;
+}
+.p-dropdown-panel .p-dropdown-items .p-dropdown-item,
+.p-multiselect-panel .p-multiselect-items .p-multiselect-item,
+.p-autocomplete-panel .p-autocomplete-items .p-autocomplete-item {
+  border-radius: var(--radius-sm);
 }
 .p-dropdown-panel .p-dropdown-items .p-dropdown-item,
 .p-multiselect-panel .p-multiselect-items .p-multiselect-item,
@@ -413,7 +704,35 @@ a {
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg);
+}
+/* The scrim. The base theme's is a flat rgba(0,0,0,0.4), which on a dark palette
+   is a dark sheet over a dark page — nothing recedes. Blurring it is what makes
+   the dialog read as the only thing in focus. */
+.p-component-overlay-enter,
+.p-dialog-mask.p-component-overlay {
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+  backdrop-filter: blur(3px);
+}
+.p-dialog .p-dialog-header {
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+  padding: 1.15rem 1.35rem 0.85rem;
+}
+/* Most dialogs here put their own buttons at the end of the *content* rather
+   than in a footer, so the bottom padding has to be real. */
+.p-dialog .p-dialog-content {
+  padding: 0 1.35rem 1.35rem;
+}
+.p-dialog .p-dialog-footer {
+  border-bottom-left-radius: var(--radius-lg);
+  border-bottom-right-radius: var(--radius-lg);
+}
+.p-dialog .p-dialog-header .p-dialog-title {
+  font-family: var(--font-family-heading);
+  font-size: 1.05rem;
+  letter-spacing: var(--heading-tracking);
 }
 .p-dialog .p-dialog-header,
 .p-dialog .p-dialog-footer {
@@ -437,6 +756,23 @@ a {
 /* ============================================================
    DataTable
    ============================================================ */
+/* The grid reads as one surface — a bordered, rounded card with the rows inside
+   it — rather than as bare rows floating on the page background. */
+.p-datatable {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+  box-shadow: var(--shadow-xs);
+}
+/* PrimeReact ships *no* overflow rule for this element, so a table wider than
+   its container simply overflowed the page — and `body { overflow-x: hidden }`
+   then clipped it, which on a tablet meant the last columns were unreachable
+   rather than merely off-screen. The minimum width ListDetailPage sets per
+   column only "scrolls rather than crushes" if something here actually scrolls. */
+.p-datatable > .p-datatable-wrapper {
+  overflow-x: auto;
+}
 .p-datatable .p-datatable-header,
 .p-datatable .p-datatable-footer {
   background: var(--surface-2);
@@ -445,8 +781,34 @@ a {
 }
 .p-datatable .p-datatable-thead > tr > th {
   background: var(--surface-2);
-  color: var(--text);
   border-color: var(--border);
+  /* The header stays put while the rows scroll under it: past the first screen
+     of a long list, a column's name is the only thing that says what a cell is.
+     It sticks against `.p-datatable-wrapper`, which is why only `.data-grid`
+     below — the one that bounds that wrapper's height — actually scrolls under
+     it. Elsewhere the rule is harmless and the header simply sits at the top. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.7rem 0.9rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.p-datatable .p-datatable-tbody > tr > td {
+  padding: 0.6rem 0.9rem;
+}
+/* The records grid is a pane with its own scroll rather than a table the page
+   grows to fit: the toolbar above it and the paginator below it stay on screen
+   while the rows move, so "next page" is never a scroll to the bottom away.
+   `max()` keeps it usable on a short window, where the subtraction would
+   otherwise leave a two-row grid. */
+.data-grid > .p-datatable-wrapper {
+  max-height: max(22rem, calc(100vh - 19rem));
+  overflow: auto;
 }
 .p-datatable .p-datatable-tbody > tr {
   background: var(--surface);
@@ -489,11 +851,37 @@ a {
   background: var(--surface);
   color: var(--text);
   border-color: var(--border);
+  border-radius: 0;
+  padding: 0.4rem 0.6rem;
+  gap: 0.15rem;
+}
+/* Standing on its own (the workspaces/lists pages, the card layout) it is a
+   surface in its own right; inside the grid it is that grid's footer. */
+.p-paginator:not(.p-paginator-bottom) {
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+}
+.p-datatable .p-paginator-bottom {
+  border-width: var(--border-width) 0 0 0;
+}
+.p-paginator .p-paginator-first,
+.p-paginator .p-paginator-prev,
+.p-paginator .p-paginator-next,
+.p-paginator .p-paginator-last,
+.p-paginator .p-paginator-pages .p-paginator-page {
+  border-radius: var(--radius-sm);
+  min-width: 2rem;
+  height: 2rem;
+  color: var(--text-muted);
 }
 .p-paginator .p-paginator-pages .p-paginator-page.p-highlight {
   background: var(--brand);
   border-color: var(--brand);
   color: var(--brand-contrast);
+}
+.p-paginator .p-paginator-current {
+  color: var(--text-muted);
+  font-size: 0.85rem;
 }
 
 /* ============================================================
@@ -503,11 +891,24 @@ a {
   background: var(--surface);
   color: var(--text);
   border: var(--border-width) solid var(--border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
 }
 .p-card .p-card-title,
 .p-card .p-card-subtitle {
   color: var(--text);
+}
+/* Lara pads a card body at 1.25rem and then adds another 1.25rem below it, which
+   on a row of one-line cards is more air than content. */
+.p-card .p-card-body {
+  padding: 0.9rem 1.05rem;
+}
+.p-card .p-card-content {
+  padding: 0;
 }
 
 /* A card that *is* a link — the workspace and list rows. Only the title used to be
@@ -518,10 +919,18 @@ a {
 .link-card {
   position: relative;
   cursor: pointer;
+  height: 100%;
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
 }
 .link-card:hover {
-  background: var(--hover);
   border-color: var(--brand);
+  box-shadow: var(--shadow-md);
+  /* A card that lifts toward the cursor. Paired with the shadow it says
+     "clickable" before the pointer has to change shape to. */
+  transform: translateY(-2px);
 }
 /* Ring the whole card when the link itself is focused — but not when a row action
    is, since those already draw their own focus ring. */
@@ -649,8 +1058,25 @@ a {
   color: var(--text);
   border-color: var(--border);
 }
+.p-menu.p-menu-overlay,
+.p-tieredmenu.p-tieredmenu-overlay,
+.p-overlaypanel,
+.p-confirm-popup {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.p-menu .p-menuitem-link {
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.7rem;
+}
+.p-menu.p-menu-overlay {
+  padding: 0.3rem;
+}
 .p-menuitem-link:not(.p-disabled):hover {
   background: var(--hover);
+}
+.p-menu .p-menu-separator {
+  border-color: var(--border);
 }
 
 /* Subtle text helpers used around the app. These exist because Tailwind's palette
@@ -728,6 +1154,13 @@ a {
 .p-sidebar {
   background: var(--surface);
   color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.p-sidebar .p-sidebar-header {
+  padding: 0.75rem 0.9rem 0;
+}
+.p-sidebar .p-sidebar-content {
+  padding: 0.75rem 0.9rem 1rem;
 }
 .p-sidebar .p-sidebar-header .p-sidebar-close,
 .p-sidebar .p-sidebar-header .p-sidebar-icon {
@@ -751,6 +1184,13 @@ a {
    plain --text, which reads better than the base theme's coloured-text-on-pastel
    and does not have to clear contrast against its own tint.
    ============================================================ */
+.p-message,
+.p-toast .p-toast-message {
+  border-radius: var(--radius-lg);
+}
+.p-toast .p-toast-message {
+  box-shadow: var(--shadow-lg);
+}
 .p-message.p-message-info,
 .p-toast .p-toast-message.p-toast-message-info {
   background: var(--info-tint);
@@ -1023,4 +1463,401 @@ a {
   border-radius: var(--radius);
   padding: 0.5rem 0.75rem;
   overflow-x: auto;
+}
+
+/* ============================================================
+   App patterns
+
+   The handful of shapes every page repeats. They live here rather than as
+   inline `style={{ background: "var(--surface)", border: … }}` objects — which
+   is what they were, copied into four files — so that "what a panel looks like"
+   is one decision and not a search-and-replace.
+   ============================================================ */
+
+/* A panel: the app's default piece of paper. */
+.surface-card {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+/* The same, but it goes somewhere. */
+.surface-card.is-interactive {
+  transition:
+    border-color var(--transition),
+    box-shadow var(--transition),
+    transform var(--transition);
+}
+.surface-card.is-interactive:hover {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+.surface-card.is-interactive:focus-visible,
+.surface-card.is-interactive:has(:focus-visible) {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 0.2rem var(--focus-ring);
+}
+
+/* A responsive run of cards. Pages used to be a single 720px column of
+   full-width rows, which on a wide screen was mostly empty page. */
+.card-grid {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 17rem), 1fr));
+}
+
+/* The bar over a data view: everything you do *to what you are looking at*,
+   gathered into one surface instead of loose in the page. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem;
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+}
+.toolbar-divider {
+  width: 1px;
+  align-self: stretch;
+  margin: 0.15rem 0.2rem;
+  background: var(--border);
+}
+/* Toolbar controls read as one family: same height, same weight, quiet until
+   they carry a setting. */
+.toolbar .p-button.p-button-text,
+.toolbar .p-button.p-button-outlined {
+  color: var(--text);
+  font-weight: 500;
+}
+.toolbar .p-button.p-button-text .p-button-icon,
+.toolbar .p-button.p-button-outlined .p-button-icon {
+  color: var(--text-muted);
+}
+/* A row's actions are secondary to the row. In the brand colour they were the
+   most saturated thing in a grid of a hundred rows, so they read as muted glyphs
+   and take the brand only under the cursor — the destructive one excepted, since
+   red there is a warning rather than decoration. */
+.row-actions .p-button.p-button-text:not(.p-button-danger) {
+  color: var(--text-muted);
+}
+.row-actions .p-button.p-button-text:not(.p-button-danger):enabled:hover {
+  color: var(--brand);
+}
+
+/* The badge a toolbar button carries when it is holding something — the number
+   of filter conditions, how many columns of how many are showing. */
+.p-button .p-badge {
+  background: var(--brand);
+  color: var(--brand-contrast);
+  font-weight: 700;
+}
+
+/* A control holding a non-default setting (a filter, a grouping, hidden
+   columns) says so without being read: it is the difference between "you can
+   filter" and "you are filtering", which a plain button cannot express. */
+.toolbar .p-button.is-on,
+.toolbar .p-button.is-on:enabled:hover {
+  background: var(--brand-tint);
+  color: var(--brand);
+  border-color: transparent;
+}
+.toolbar .p-button.is-on .p-button-icon {
+  color: var(--brand);
+}
+/* On a phone the toolbar's five labelled buttons wrap onto three lines before
+   the records begin. The icons carry them alone at that width — the label stays
+   in the DOM, so it is still what a screen reader announces, and the `is-on`
+   tint still says which of them are doing something. */
+@media (max-width: 640px) {
+  .toolbar .p-button .p-button-label {
+    display: none;
+  }
+  .toolbar .p-button .p-button-icon-left {
+    margin-right: 0;
+  }
+}
+
+.toolbar-count {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.1rem;
+  height: 1.1rem;
+  padding: 0 0.3rem;
+  margin-left: 0.35rem;
+  border-radius: var(--radius-pill);
+  background: var(--brand);
+  color: var(--brand-contrast);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* The sign-in screen. The gradient is the same one the dashboard's greeting
+   uses, at the scale of the whole window — so the first thing anyone sees of
+   the app is already in the palette they will be working in. */
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 1.5rem;
+  background:
+    radial-gradient(
+      70% 60% at 50% 0%,
+      color-mix(in srgb, var(--brand) 18%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      50% 50% at 100% 100%,
+      color-mix(in srgb, var(--accent) 14%, transparent),
+      transparent 70%
+    ),
+    var(--bg);
+}
+.login-card {
+  width: 100%;
+  max-width: 24rem;
+  padding: 2rem;
+  box-shadow: var(--shadow-lg);
+}
+
+/* The dashboard's greeting. A gradient rather than a flat tint: it is the only
+   band of colour in the app, and a rectangle of one tint reads as a warning
+   message rather than as a welcome. */
+.hero {
+  position: relative;
+  overflow: hidden;
+  padding: 1.5rem;
+  border-radius: var(--radius-lg);
+  border: var(--border-width) solid var(--border);
+  background:
+    radial-gradient(
+      120% 140% at 100% 0%,
+      color-mix(in srgb, var(--accent) 22%, transparent),
+      transparent 60%
+    ),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--brand) 16%, var(--surface)),
+      var(--surface) 70%
+    );
+}
+
+/* The tinted square that stands in for a thing that has no picture — a
+   workspace, a list, a group. It is what makes a run of cards scannable by
+   shape before it is read. */
+.entity-icon {
+  display: grid;
+  place-items: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex-shrink: 0;
+  border-radius: var(--radius);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-size: 0.95rem;
+}
+.entity-icon.is-muted {
+  background: var(--surface-2);
+  color: var(--text-muted);
+}
+
+/* The search box: an icon inside the field on the left, and a clear button on
+   the right once there is something to clear. */
+.search-input {
+  position: relative;
+  display: block;
+}
+.search-input > .pi-search {
+  position: absolute;
+  left: 0.7rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  pointer-events: none;
+}
+.search-input .p-inputtext {
+  width: 100%;
+  padding-left: 2.1rem;
+  padding-right: 2.1rem;
+}
+.search-clear {
+  position: absolute;
+  right: 0.3rem;
+  top: 50%;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
+  cursor: pointer;
+  transition:
+    background var(--transition),
+    color var(--transition);
+}
+.search-clear:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.search-clear i {
+  font-size: 0.75rem;
+}
+
+/* What the page says when there is nothing to show. A sentence in the void
+   ("No workspaces yet.") tells you the state; this tells you what to do next. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  background: var(--surface);
+  border: var(--border-width) dashed var(--border);
+  border-radius: var(--radius-lg);
+}
+.empty-state-icon {
+  display: grid;
+  place-items: center;
+  width: 3rem;
+  height: 3rem;
+  margin-bottom: 0.25rem;
+  border-radius: var(--radius-pill);
+  background: var(--brand-tint);
+  color: var(--brand);
+  font-size: 1.25rem;
+}
+.empty-state-title {
+  font-weight: 600;
+  font-size: 1rem;
+}
+.empty-state-text {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  max-width: 34rem;
+}
+
+/* Loading. A skeleton in the shape of the thing that is coming keeps the page
+   from jumping when it lands, which "Loading…" does not. */
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+.skeleton::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--text) 7%, transparent),
+    transparent
+  );
+  animation: skeleton-sweep 1.4s infinite;
+}
+@keyframes skeleton-sweep {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+/* The bar that appears when rows are selected. It follows the bottom of the
+   viewport because a selection made at the top of a long grid used to put its
+   Delete button a full screen away from the rows it applied to. */
+.selection-bar {
+  position: sticky;
+  bottom: 0.75rem;
+  z-index: 8;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  box-shadow: var(--shadow-lg);
+}
+
+/* A small status word beside a name — "superuser", "inactive", a column type. */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.badge.is-brand {
+  background: var(--brand-tint);
+  color: var(--brand);
+}
+
+/* Page content arrives rather than appearing. Short enough not to be a wait. */
+.page-enter {
+  animation: page-enter 220ms var(--ease) both;
+}
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Scrollbars, so the sidebar and the grid do not each grow a slab of default
+   Windows chrome in the middle of a themed panel. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text) 22%, transparent) transparent;
+}
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--radius-pill);
+  background-clip: content-box;
+  background-color: color-mix(in srgb, var(--text) 20%, transparent);
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--text) 35%, transparent);
+}
+
+/* Everything above that moves, doesn't — for anyone who has asked their system
+   not to. The colour changes stay; it is the travel that causes trouble. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .link-card:hover,
+  .surface-card.is-interactive:hover,
+  .p-button:enabled:active {
+    transform: none;
+  }
 }

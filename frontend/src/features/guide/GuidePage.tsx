@@ -165,16 +165,14 @@ export function GuidePage() {
       </header>
 
       {/* Contents */}
-      <nav
-        className="rounded p-4"
-        style={{
-          background: "var(--surface)",
-          border: "var(--border-width) solid var(--border)",
-        }}
-        aria-label="Guide contents"
-      >
+      <nav className="surface-card p-4" aria-label="Guide contents">
         <div className="font-semibold mb-2">On this page</div>
-        <ol className="flex flex-col gap-1" style={{ listStyle: "none", padding: 0, margin: 0 }}>
+        {/* Twenty-three entries in one column is most of a screen before the
+            guide has started. Two columns on anything but a phone. */}
+        <ol
+          className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1"
+          style={{ listStyle: "none", padding: 0, margin: 0 }}
+        >
           {SECTIONS.map((s, i) => (
             <li key={s.id}>
               <a

@@ -1,10 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Card } from "primereact/card";
-import { InputText } from "primereact/inputtext";
-import { IconField } from "primereact/iconfield";
-import { InputIcon } from "primereact/inputicon";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 import { Paginator } from "primereact/paginator";
@@ -12,9 +8,13 @@ import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { Breadcrumbs } from "../../components/Breadcrumbs";
+import { CreateNameDialog } from "../../components/CreateNameDialog";
+import { EmptyState } from "../../components/EmptyState";
 import { NameFields } from "../../components/NameFields";
+import { PageHeader } from "../../components/PageHeader";
 import { RowActions } from "../../components/RowActions";
+import { SearchInput } from "../../components/SearchInput";
+import { SkeletonCards } from "../../components/Skeleton";
 import { useCurrentUser } from "../../lib/auth";
 import type { ListRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
@@ -31,7 +31,7 @@ import { CloneListDialog } from "./CloneListDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits.
-const ROWS = 10;
+const ROWS = 12;
 
 /**
  * The lists of one workspace: create, rename, share, delete.
@@ -40,7 +40,7 @@ const ROWS = 10;
  * because a list can be shared on its own terms and a viewer of the workspace is
  * not necessarily allowed to rename its lists.
  *
- * The quick-create box takes only a label and derives the `name` slug from it. The
+ * The create dialog takes only a label and derives the `name` slug from it. The
  * rename dialog then shows both, since a name is what code and API paths use and a
  * bad one has to be fixable — see `NameFields`.
  */
@@ -83,7 +83,7 @@ export function ListsPage() {
     shownLists.map((list) => list.uuid),
   );
 
-  const [displayName, setDisplayName] = useState("");
+  const [creating, setCreating] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const create = useMutation({
     mutationFn: (name: string) =>
@@ -93,7 +93,7 @@ export function ListsPage() {
         workspace_uuid: workspaceUuid,
       }),
     onSuccess: (list) => {
-      setDisplayName("");
+      setCreating(false);
       invalidate();
       toast.success("List created", list.display_name);
     },
@@ -143,10 +143,6 @@ export function ListsPage() {
       ),
   });
 
-  function onCreate(event: FormEvent) {
-    event.preventDefault();
-    if (displayName.trim()) create.mutate(displayName.trim());
-  }
   function confirmDelete(list: ListRead) {
     confirmDialog({
       message: `Delete list "${list.display_name}" and its records?`,
@@ -156,79 +152,104 @@ export function ListsPage() {
     });
   }
 
+  const canCreate = workspaceActions.has("configure");
+
   return (
-    <div className="flex flex-col gap-4" style={{ maxWidth: 720 }}>
+    <div className="flex flex-col gap-5" style={{ maxWidth: 1100 }}>
       <ConfirmDialog />
-      <Breadcrumbs
-        items={[
+      <PageHeader
+        crumbs={[
           { label: "Workspaces", to: "/workspaces" },
           { label: workspace.data?.display_name ?? "Lists" },
         ]}
+        title={workspace.data?.display_name ?? "Lists"}
+        subtitle="Every list is a table of its own — its own columns, records and views."
+        actions={
+          <>
+            {workspaceActions.has("delete") && (
+              <Button
+                label="Deleted"
+                icon="pi pi-trash"
+                text
+                onClick={() => setShowDeleted(true)}
+              />
+            )}
+            {canCreate && (
+              <Button
+                label="New list"
+                icon="pi pi-plus"
+                onClick={() => setCreating(true)}
+              />
+            )}
+          </>
+        }
       />
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-xl font-semibold">
-          {workspace.data?.display_name ?? "Lists"}
-        </h1>
-        {workspaceActions.has("delete") && (
-          <Button
-            label="Deleted lists"
-            icon="pi pi-trash"
-            text
-            onClick={() => setShowDeleted(true)}
-          />
-        )}
-      </div>
 
-      {workspaceActions.has("configure") && (
-        <form onSubmit={onCreate} className="flex gap-2">
-          <InputText
-            placeholder="New list name"
-            value={displayName}
-            onChange={(e) => setDisplayName(e.target.value)}
-            className="flex-1"
-          />
-          <Button type="submit" label="Create" icon="pi pi-plus" loading={create.isPending} />
-        </form>
-      )}
-      {create.error instanceof ApiError && (
-        <Message severity="error" text={create.error.message} />
-      )}
+      <SearchInput
+        value={search}
+        onChange={setSearch}
+        placeholder="Search lists…"
+      />
 
-      <IconField iconPosition="left">
-        <InputIcon className="pi pi-search" />
-        <InputText
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search lists…"
-          className="w-full"
+      {lists.isLoading ? (
+        <SkeletonCards count={6} />
+      ) : shownLists.length === 0 ? (
+        <EmptyState
+          icon={search ? "pi pi-search" : "pi pi-table"}
+          title={search ? "No matches" : "No lists yet"}
+          text={
+            search
+              ? `Nothing in this workspace is called “${search}”.`
+              : canCreate
+                ? "A list is a table: you give it columns, then fill it with records."
+                : "Nothing has been added to this workspace yet."
+          }
+          action={
+            search ? (
+              <Button
+                label="Clear search"
+                icon="pi pi-times"
+                text
+                onClick={() => setSearch("")}
+              />
+            ) : canCreate ? (
+              <Button
+                label="New list"
+                icon="pi pi-plus"
+                onClick={() => setCreating(true)}
+              />
+            ) : undefined
+          }
         />
-      </IconField>
-
-      {lists.isLoading && <p>Loading…</p>}
-      {!lists.isLoading && shownLists.length === 0 && (
-        <p>
-          {search
-            ? "No lists match that search."
-            : "No lists in this workspace yet."}
-        </p>
-      )}
-
-      <div className="flex flex-col gap-2">
-        {shownLists.map((list) => (
-          <Card key={list.uuid} className="link-card">
-            <div className="flex items-center justify-between">
+      ) : (
+        <div className="card-grid">
+          {shownLists.map((list) => (
+            <div
+              key={list.uuid}
+              className="surface-card link-card p-3 flex items-start justify-between gap-2"
+            >
               <Link
                 to={`/lists/${list.uuid}`}
-                className="no-underline link-card-target"
+                className="no-underline link-card-target flex items-start gap-3 min-w-0"
               >
-                <div className="font-medium">{list.display_name}</div>
-                <div className="text-sm text-muted">{list.name}</div>
+                <span className="entity-icon" aria-hidden>
+                  <i className="pi pi-table" />
+                </span>
+                <span className="flex flex-col min-w-0">
+                  <span className="font-medium truncate">
+                    {list.display_name}
+                  </span>
+                  <span className="text-sm text-muted truncate">
+                    {list.name}
+                  </span>
+                </span>
               </Link>
-              {/* Share and Edit stay as buttons; the rest fold into an overflow
-                  menu so a busy list row never crowds. */}
+              {/* One action inline and the rest behind the overflow: a card is
+                  narrow, and five icon buttons would leave no room for the name
+                  they belong to. */}
               <div className="link-card-above">
                 <RowActions
-                  maxVisible={2}
+                  maxVisible={1}
                   actions={[
                     {
                       key: "share",
@@ -263,7 +284,7 @@ export function ListsPage() {
                       key: "duplicate",
                       icon: "pi pi-copy",
                       label: "Duplicate list",
-                      visible: workspaceActions.has("configure"),
+                      visible: canCreate,
                       onClick: () => setCloning(list),
                     },
                     {
@@ -278,16 +299,16 @@ export function ListsPage() {
                 />
               </div>
             </div>
-          </Card>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
 
-      {listTotal > 0 && (
+      {listTotal > rows && (
         <Paginator
           first={first}
           rows={rows}
           totalRecords={listTotal}
-          rowsPerPageOptions={[10, 25, 50, 100]}
+          rowsPerPageOptions={[12, 24, 48, 96]}
           onPageChange={(e) => {
             setFirst(e.first);
             setRows(e.rows);
@@ -296,6 +317,18 @@ export function ListsPage() {
           currentPageReportTemplate="{first}–{last} of {totalRecords}"
         />
       )}
+
+      <CreateNameDialog
+        visible={creating}
+        onHide={() => setCreating(false)}
+        header="New list"
+        label="List name"
+        placeholder="Contacts"
+        hint="Add its columns once it exists — under Settings on the list itself."
+        loading={create.isPending}
+        error={create.error instanceof ApiError ? create.error.message : null}
+        onSubmit={(name) => create.mutate(name)}
+      />
 
       {sharing && (
         <ShareDialog
@@ -317,7 +350,7 @@ export function ListsPage() {
         header="Rename list"
         visible={!!renaming}
         onHide={() => setRenaming(null)}
-        style={{ width: 380 }}
+        style={{ width: 420 }}
       >
         <div className="flex flex-col gap-4">
           {rename.error instanceof ApiError && (

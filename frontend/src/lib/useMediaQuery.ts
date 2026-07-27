@@ -5,6 +5,12 @@ import { useCallback, useMemo, useSyncExternalStore } from "react";
  *  so a layout cannot half-change. */
 export const SMALL_SCREEN = "(max-width: 640px)";
 
+/** The width at which the navigation stops being a drawer you open and becomes a
+ *  rail that is simply there. Deliberately *not* SMALL_SCREEN: a tablet is wide
+ *  enough for a table but not for a table plus a 16rem sidebar, so the two
+ *  questions — "does a grid fit?" and "does a sidebar fit?" — get two numbers. */
+export const DESKTOP_SCREEN = "(min-width: 1024px)";
+
 /**
  * Subscribe to a media query, re-rendering when it starts or stops matching.
  *

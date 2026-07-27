@@ -65,9 +65,12 @@ src/
                   # themeSync (ties the theme to the account), query client, hand-written
                   # API types, and small shared helpers: links (safeHref), temporal, slug,
                   # people, useMediaQuery, useDebounced
-  components/     # app shell: AppLayout, NavDrawer (mobile nav), AccountMenu + UserAvatar
-                  # (the header's account control), AppDialog, NameFields, Breadcrumbs,
-                  # ThemeSwitcher
+  components/     # app shell: AppLayout, AppSidebar (desktop rail), NavDrawer (the same
+                  # navigation below 1024px), NavTree (what both of them render),
+                  # AccountMenu + UserAvatar (the account control), AppDialog,
+                  # NameFields, Breadcrumbs, ThemeSwitcher
+                  # page furniture: PageHeader, EmptyState, Skeleton, SearchInput,
+                  # CreateNameDialog, RowActions
   features/
     auth/         # login (the only unauthenticated page)
     workspaces/   # workspaces + the lists shared with you directly
@@ -189,29 +192,66 @@ by column type) and `RecordFields` (all of a form's fields, labelled, clearing n
 lookups when their parent changes). They live apart from `RecordFormDialog` because two
 surfaces now edit a record's fields: the Add/Edit dialog and a session's presets.
 
-## Layout on small screens
+## The shell
 
-The breakpoint is **640px**, in one place: `SMALL_SCREEN` in `lib/useMediaQuery.ts`.
-Below it:
+`AppLayout` is a navigation rail and the page beside it.
+
+On a desktop (`DESKTOP_SCREEN`, 1024px) the rail is `AppSidebar`: the wordmark, the
+tree, and — in its footer — the account and the theme controls. There is no header
+bar at that width, because a strip repeating what the rail already carries would be
+chrome saying nothing. Below it the rail is not rendered at all; a slim header
+appears with a burger, and `NavDrawer` carries the same tree.
+
+Both render **one** component, `components/NavTree.tsx` — the app's sections, your
+workspaces with their lists (fetched lazily, per expanded workspace), and the lists
+shared with you. Two copies would be two ideas of what the app contains, and they
+would drift the first time a section was added to one of them.
+
+## Two breakpoints, and what each decides
+
+They answer different questions, so they are different numbers — both in
+`lib/useMediaQuery.ts`:
+
+| Constant | Width | Question |
+|----------|-------|----------|
+| `SMALL_SCREEN` | ≤ 640px | Does a data grid fit? |
+| `DESKTOP_SCREEN` | ≥ 1024px | Does a permanent 17rem rail fit beside it? |
+
+A tablet answers yes to the first and no to the second, which is why one number
+could not serve both.
+
+Below `SMALL_SCREEN`:
 
 - **Records become cards** (`features/records/RecordCards.tsx`) instead of a `DataTable`.
   Twelve columns across a phone is twelve slivers; a card is one record, label beside
   value. It is a second *layout*, not a second implementation — both render values with
   `renderCell` and order them with `sortRows`, and they share selection, page size and
   row actions. A value or an order that differed between them is a bug.
-- **The header navigation becomes a drawer** (`components/NavDrawer.tsx`): your account
-  at the top — profile, then Log out — followed by workspaces, their lists (fetched
-  lazily, per expanded workspace), and the lists shared with you. The header's account
-  avatar (`components/AccountMenu.tsx`) is dropped below the breakpoint rather than
-  duplicated: the drawer already carries that band.
-- **Sorting moves to the toolbar.** Cards have no column header to click, so a "Sort by"
-  dropdown drives the same state the grid's headers do.
+- **The toolbar's buttons lose their labels** (CSS, in `themes.css`) and stand as
+  icons. The label stays in the DOM, so it is still what a screen reader announces.
 - **Dialogs go near-fullscreen.** Every dialog is `components/AppDialog.tsx`, which
   applies the breakpoints and caps the body height so its buttons stay reachable —
   import it, not `primereact/dialog`.
 
-Above the breakpoint the grid still has to survive a narrow window: its table carries a
-minimum width of ~10rem per column so it *scrolls* rather than crushing its columns.
+Above it the grid still has to survive a narrow window: its table carries a minimum
+width of ~8rem per column so it *scrolls* rather than crushing them. That scrolling
+is `.p-datatable > .p-datatable-wrapper` in `themes.css` — PrimeReact ships no
+overflow rule for that element, so before it was added the extra columns simply
+overflowed the page and `body { overflow-x: hidden }` clipped them away.
+
+## The records toolbar
+
+Everything that changes *what you are looking at* is on one bar; everything that
+changes *what the list is* is behind Settings or its overflow. The bar's controls are
+buttons rather than dropdowns sitting at their placeholder text, and each says whether
+it is currently doing anything — "Filter" against "Filter ②", "Group" against "Grouped
+by Status", "Sort" against "Score ↑". A control holding a non-default setting takes the
+`is-on` class, which tints it.
+
+**"Save view" appears only when there is something to save.** `ListDetailPage`
+fingerprints the page's live config against the active view's stored one (defaults
+applied to both sides, since a view saved before `group_by` existed has no key for it)
+and passes `dirty` to `ViewBar`.
 
 Run `npm run gen:api` to keep the TypeScript types in sync with the Python models
 instead of the hand-written `src/lib/types.ts`.
@@ -226,6 +266,21 @@ instead of the hand-written `src/lib/types.ts`.
 - Colors come from the theme, never from Tailwind: `themes.css` defines every palette
   against `data-theme` / `data-mode` on `<html>`, so reach for `var(--brand)`,
   `var(--text-muted)`, `var(--border)` — a `text-blue-500` will not follow the theme.
+- **So do depth, roundness, motion and type.** A palette sets `--radius` and
+  `--shadow-hsl`; the derived block builds `--radius-sm/-lg/-pill` and
+  `--shadow-xs/-sm/-md/-lg` from them, plus `--ease`, `--dur`, `--transition` and
+  `--font-family`. Themes that reject the defaults override the derived tokens
+  *after* that block — brutalist does, swapping soft light for a hard offset in the
+  border colour and setting a monospace heading face — because `[data-theme=…]` and
+  `:root` carry the same specificity and the later one wins.
+- **The shapes every page repeats are classes, not inline styles.** `.surface-card`,
+  `.card-grid`, `.toolbar`, `.empty-state`, `.skeleton`, `.badge`, `.entity-icon`,
+  `.selection-bar` and the `.nav-*` rows live in the "App patterns" block at the end
+  of `themes.css`. They were `style={{ background: "var(--surface)", border: … }}`
+  objects copied into four files; reach for the class so "what a panel looks like"
+  stays one decision.
+- The base PrimeReact theme already ships **Inter var** and its `@font-face`, so
+  `--font-family` names it at no download cost. Do not add a web font.
 - The theme is stored **against the account** (`users.settings`), so it follows the user
   between devices. `localStorage` is still written, but only as this device's cache: the
   inline script in `index.html` needs something synchronous to read before first paint,
