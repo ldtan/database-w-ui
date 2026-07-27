@@ -13,6 +13,14 @@
  *
  * The voice is the guide's: plain words, no jargon, and the on-screen labels
  * spelled exactly as they are on screen.
+ *
+ * **This file goes stale silently.** It quotes labels and points at elements
+ * that nothing type-checks, and a step whose element has gone degrades to a
+ * centred card rather than failing — so a UI change leaves it confidently wrong
+ * and CI green. Any change to the shell, to a page's controls, or to the steps
+ * of a flow means re-reading this and `guide/GuidePage.tsx` alongside it. The
+ * full contract is under "Gotchas for whoever edits this next" in
+ * `docs/known-gaps.md`.
  */
 
 export type TourId = "basics" | "workspace" | "list";

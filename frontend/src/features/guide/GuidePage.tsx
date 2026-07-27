@@ -13,6 +13,13 @@ import { useOnboarding } from "../onboarding/OnboardingProvider";
  *
  * The section ids below are the anchor targets of the contents list at the top.
  * Keep SECTIONS and the <Section> ids in step: the list is generated from it.
+ *
+ * It names controls in prose, and nothing checks that they still exist or are
+ * still called that — this page once spent a release describing a header that
+ * had become a sidebar. A UI change is not finished until this and
+ * `onboarding/tours.ts` have been re-read; see "Gotchas for whoever edits this
+ * next" in `docs/known-gaps.md`. `COLUMN_TYPE_OPTIONS` below is the pattern
+ * where it can be avoided: the type list is generated rather than retyped.
  */
 
 const SECTIONS: { id: string; title: string }[] = [

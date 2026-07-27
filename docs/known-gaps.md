@@ -654,3 +654,40 @@ surface that renders link cells needs the same call; a raw `href={value}` is sto
 
 **`POST /permissions/effective` is capped at 500 resources per call** (`max_length` on
 `EffectiveActionsQuery.resources`). A page showing more rows than that needs to chunk.
+
+**The onboarding tours and the guide describe the UI by name, and nothing tells them when
+it moves.** Three surfaces name real controls in prose — `features/onboarding/tours.ts`
+(the three guided tours and the per-page tips), `features/guide/GuidePage.tsx` (the written
+version), and the welcome dialog. None of them are typed against the components they
+describe, so a renamed button, a moved control or a reorganised page leaves them confidently
+wrong, which is worse than silent: the people reading them are the ones with no way to tell
+a stale instruction from their own mistake. It has happened once already — the guide spent a
+release describing a header that had become a sidebar.
+
+So **any change to the shell, a page's controls, or a flow's steps is not finished until
+those are re-read.** Concretely:
+
+- **A tour step points at `[data-tour="…"]`, not at a selector.** Deleting or moving the
+  element that carries the attribute does not break the build. The step degrades to a plain
+  centred card in the middle of the window — by design, so a missing element is never a
+  broken tour, but it means the failure is invisible to CI and to you. Grep `data-tour`
+  before removing a component. There are sixteen: the rail, its account band, the nav tree's
+  workspaces section, the mobile burger, the dashboard hero, the first workspace and list
+  card, New workspace, New list, Deleted, the list header's Settings, ⋯ and Add record, the
+  list toolbar, the guide's contents nav, and the help button itself.
+- **Step wording has to survive its element being absent**, since that is what a new account
+  with no workspaces already sees. Write the body so it reads as an explanation, not as a
+  caption for something under a spotlight.
+- **`width: "wide" | "narrow"` on a step is the 1024px rail/burger split** (`DESKTOP_SCREEN`).
+  Move something across that boundary and the step that names it needs the other variant, or
+  it will point at nothing on one of the two layouts.
+- **Renaming a visible label means editing prose in two files.** The tours and the guide both
+  quote labels verbatim (`Add record`, `Save view`, `Nest under`). `COLUMN_TYPE_OPTIONS` is
+  the one place this is already automatic — the guide's type list is generated from it — and
+  it is the pattern to reach for when a list of labels starts being duplicated.
+- **A genuinely new area of the app wants a tour of its own**, not a tenth step bolted onto
+  `basics`. `pageTourFor` matches on the route; adding an entry there and a `Tour` object is
+  the whole of it.
+
+Nothing here is enforceable by a test, which is why it is written down. Treat the guide and
+the tours as part of the UI's surface area rather than as documentation about it.
