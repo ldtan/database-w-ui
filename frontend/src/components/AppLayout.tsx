@@ -53,7 +53,7 @@ export function AppLayout() {
                 <span className="app-brand-mark" aria-hidden>
                   <i className="pi pi-database" />
                 </span>
-                <span className="truncate">Database</span>
+                <span className="truncate">Database w/ UI</span>
               </Link>
             </div>
             <div className="flex items-center gap-1">
