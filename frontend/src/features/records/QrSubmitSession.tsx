@@ -267,7 +267,9 @@ export function QrSubmitSession({
               <li key={i} className="flex items-baseline gap-2">
                 <i
                   className={entry.ok ? "pi pi-check" : "pi pi-times"}
-                  style={{ color: entry.ok ? "var(--green-500)" : "var(--red-500)" }}
+                  // The app's own tokens, not PrimeReact's --green-500/--red-500:
+                  // those are frozen light-mode values from the base theme.
+                  style={{ color: entry.ok ? "var(--success)" : "var(--danger)" }}
                 />
                 <span className="flex-1">
                   {entry.summary}

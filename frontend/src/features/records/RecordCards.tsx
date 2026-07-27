@@ -129,9 +129,10 @@ export function RecordCards({
               className="rounded border p-3 flex flex-col gap-2"
               style={{
                 borderColor: "var(--border)",
-                background: selected.has(item.uuid)
-                  ? "var(--surface-hover, transparent)"
-                  : undefined,
+                // --hover, not PrimeReact's --surface-hover: that one is fixed at
+                // #f6f9fc by the base theme and never moves with the mode, which
+                // painted a selected card near-white on a dark palette.
+                background: selected.has(item.uuid) ? "var(--hover)" : undefined,
               }}
             >
               {columns.map((col) => (

@@ -62,7 +62,10 @@ export function ThemeSwitcher() {
                         height: 16,
                         borderRadius: 4,
                         background: c,
-                        border: "1px solid rgba(0,0,0,0.15)",
+                        // A black hairline is meant to keep a pale swatch from
+                        // dissolving into the panel; on the dark panel it is the
+                        // swatch's own edge that vanishes, so use the border token.
+                        border: "1px solid var(--border)",
                       }}
                     />
                   ))}

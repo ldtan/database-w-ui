@@ -36,7 +36,9 @@ export function UserAvatar({ person, username, size = "2.75rem" }: Props) {
         width: size,
         height: size,
         background: "var(--brand)",
-        color: "#fff",
+        // Not #fff: --brand is a light green in the nordic and luxury dark
+        // palettes, where the readable initials are the dark --brand-contrast.
+        color: "var(--brand-contrast)",
       }}
       aria-hidden
     >
