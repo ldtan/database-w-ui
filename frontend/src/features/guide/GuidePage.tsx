@@ -594,19 +594,25 @@ export function GuidePage() {
           <Code>(qty * price) - discount</Code>. These work on numbers only — to
           join words together see <Code>CONCAT</Code> below.
         </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          Function names are always typed in <strong>CAPITALS</strong>, and column
+          names are always lower case — so you can tell at a glance which is which,
+          and a column called <Code>total</Code> never gets mistaken for anything
+          else.
+        </p>
         <ul className="flex flex-col gap-1">
           <li>
-            <Code>min(a, b, …)</Code> — the smallest of the values given.
+            <Code>MIN(a, b, …)</Code> — the smallest of the values given.
           </li>
           <li>
-            <Code>max(a, b, …)</Code> — the largest.
+            <Code>MAX(a, b, …)</Code> — the largest.
           </li>
           <li>
-            <Code>round(number)</Code> or <Code>round(number, places)</Code> —{" "}
-            <Code>round(total, 2)</Code> gives you pence or cents.
+            <Code>ROUND(number)</Code> or <Code>ROUND(number, places)</Code> —{" "}
+            <Code>ROUND(total, 2)</Code> gives you pence or cents.
           </li>
           <li>
-            <Code>abs(number)</Code> — the value without its minus sign.
+            <Code>ABS(number)</Code> — the value without its minus sign.
           </li>
         </ul>
 
@@ -661,7 +667,7 @@ export function GuidePage() {
         <h3 className="font-semibold pt-1">A few worked examples</h3>
         <ul className="flex flex-col gap-1">
           <li>
-            <Code>round(qty * unit_price, 2)</Code> — a line total, to two decimal
+            <Code>ROUND(qty * unit_price, 2)</Code> — a line total, to two decimal
             places.
           </li>
           <li>
@@ -673,7 +679,7 @@ export function GuidePage() {
             column.
           </li>
           <li>
-            <Code>max(0, total - paid)</Code> — what’s still owed, never negative.
+            <Code>MAX(0, total - paid)</Code> — what’s still owed, never negative.
           </li>
         </ul>
 

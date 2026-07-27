@@ -724,8 +724,8 @@ export function ColumnDialog({
             <small style={{ color: "var(--text-muted)" }}>
               Computed from other columns each time a record is read; it has no
               stored value of its own. Numbers: <code>+ - * /</code>, parentheses,{" "}
-              <code>min</code>, <code>max</code>, <code>round</code>,{" "}
-              <code>abs</code>. Text: <code>CONCAT</code>, <code>UPPER</code>,{" "}
+              <code>MIN</code>, <code>MAX</code>, <code>ROUND</code>,{" "}
+              <code>ABS</code>. Text: <code>CONCAT</code>, <code>UPPER</code>,{" "}
               <code>LOWER</code>, <code>TRIM</code>, <code>LEN</code>,{" "}
               <code>LEFT</code>, <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
               <code>IF(cond, a, b)</code>.
