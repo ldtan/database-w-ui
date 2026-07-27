@@ -145,6 +145,77 @@ async def test_a_calculated_column_cannot_reference_another(client, priced_list)
     assert "number or text" in resp.text.lower()
 
 
+async def test_a_calculated_column_named_like_a_function_cannot_be_referenced(
+    client, list_uuid
+):
+    # The same rule as above, for a column whose slug collides with a function
+    # name. These used to be reported as functions rather than columns, so nothing
+    # checked them: `max * 2` saved happily and then read whichever value the row
+    # order happened to produce.
+    await _add_number(client, list_uuid, "qty")
+    calc = await _add_calculated(client, list_uuid, "max", "qty * 2")
+    assert calc.status_code == 201, calc.text
+
+    resp = await _add_calculated(client, list_uuid, "double", "max * 2")
+    assert resp.status_code == 400, resp.text
+    assert "number or text" in resp.text.lower()
+
+
+async def test_a_number_column_named_like_a_function_still_works(client, list_uuid):
+    # The flip side: `max` is a perfectly good column name, and a formula over it
+    # must compute — the fix must not make these names unusable.
+    max_uuid = await _add_number(client, list_uuid, "max")
+    calc = await _add_calculated(client, list_uuid, "doubled", "max * 2")
+    assert calc.status_code == 201, calc.text
+    doubled = calc.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {max_uuid: 21}}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][doubled] == 42
+
+
+async def test_a_formula_nested_too_deeply_is_rejected(client, list_uuid):
+    # Inside the character limit, but deep enough that walking it used to overflow
+    # the stack — saving a 500, or worse, saving fine and then failing every read.
+    resp = await _add_calculated(client, list_uuid, "deep", "-" * 900 + "1")
+    assert resp.status_code == 400, resp.text
+    assert "nest" in resp.text.lower()
+
+
+def test_a_stored_formula_that_no_longer_parses_blanks_its_own_cell():
+    # Built directly rather than over the API, because the API now refuses this
+    # formula — the point is a column saved *before* the bounds tightened. Such a
+    # column must cost its own cell and nothing else: parsing it while shaping a
+    # read used to abort the whole list, so one stale column hid every record.
+    from uuid import uuid4
+
+    from src.lists.columns.enums import ColumnType
+    from src.lists.columns.models import Column
+    from src.lists.items.models import ListItem
+    from src.lists.items.services import ListItemService
+
+    qty, stale, live = str(uuid4()), str(uuid4()), str(uuid4())
+    columns = {
+        qty: Column(name="qty", type=ColumnType.number, config={}),
+        stale: Column(
+            name="stale",
+            type=ColumnType.calculated,
+            config={"formula": "-" * 900 + "1"},
+        ),
+        live: Column(
+            name="total", type=ColumnType.calculated, config={"formula": "qty * 2"}
+        ),
+    }
+    item = ListItem(data={qty: 21})
+
+    ListItemService._shape_for_read(columns, [item])
+
+    assert item.data[live] == 42  # the healthy sibling still computes
+    assert item.data.get(stale) is None  # and the stale one is simply blank
+
+
 async def test_an_injection_attempt_in_the_formula_is_rejected(client, list_uuid):
     resp = await _add_calculated(client, list_uuid, "evil", '__import__("os")')
     assert resp.status_code == 400, resp.text

@@ -61,6 +61,18 @@ def test_column_refs_excludes_function_names():
     assert column_refs(f) == frozenset({"qty", "cap", "price"})
 
 
+def test_a_column_named_like_a_function_is_still_a_column_reference():
+    # What a name *is* comes from where it sits, not how it is spelled: `min` and
+    # `abs` here are values, not calls. Reporting them as functions hid them from
+    # the write-time checks (does the column exist? is it a referenceable type? is
+    # it another calculated column?) while `evaluate` resolved them anyway.
+    f = parse("max * 2 + abs")
+    assert column_refs(f) == frozenset({"max", "abs"})
+    assert evaluate(f, {"max": 10, "abs": 5}) == 25
+    # And a name in call position is still not a column.
+    assert column_refs(parse("min(a, b)")) == frozenset({"a", "b"})
+
+
 def test_string_functions():
     assert calc("CONCAT(first, ' ', last)", first="John", last="Smith") == "John Smith"
     assert calc("UPPER(name)", name="abc") == "ABC"
@@ -126,3 +138,47 @@ def test_rejects_anything_outside_the_language(source):
 def test_a_formula_over_the_length_limit_is_rejected():
     with pytest.raises(ValidationError):
         parse("a" + " + a" * 500)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "-" * 500 + "1",  # a unary minus costs one character a level
+        "-" * 900 + "1",
+        "-" * 999 + "1",  # exactly at the length limit, so length alone lets it by
+        "not " * 200 + "a",
+    ],
+)
+def test_a_deeply_nested_formula_is_rejected_not_a_crash(source):
+    # Length is not a bound on depth: each of these is inside the character limit
+    # and every one of them used to overflow the stack — either here, or later in
+    # `evaluate`, which would take down every read of the list rather than one cell.
+    assert len(source) <= 1000
+    with pytest.raises(ValidationError):
+        parse(source)
+
+
+def test_nested_replace_cannot_grow_a_value_without_bound():
+    # Each level multiplies the result while costing a fixed slice of the source,
+    # so a short formula used to allocate megabytes — once per record, per read.
+    source = "'a'"
+    for _ in range(7):
+        source = f"REPLACE({source}, 'a', 'aaaaaaaaaa')"
+    assert len(source) < 200
+    assert calc(source) is None
+
+
+def test_an_oversized_text_result_is_blank_not_an_error():
+    # A cap on each call caps a chain of them, and an oversized result reads as no
+    # value — the same answer as any other formula that cannot produce one.
+    assert calc("REPLACE(name, 'x', 'yy')", name="x" * 9000) is None
+    assert calc("CONCAT(name, name)", name="x" * 9000) is None
+    # Comfortably-sized ones are untouched.
+    assert calc("REPLACE(name, 'x', 'yy')", name="x" * 10) == "y" * 20
+    assert len(calc("CONCAT(name, name)", name="x" * 4000)) == 8000
+
+
+def test_replace_measures_an_empty_search_string_correctly():
+    # "abc".replace("", ".") inserts between every character and at both ends, so
+    # the predicted size has to match: 3 + 4, not 3.
+    assert calc("REPLACE(name, '', '.')", name="abc") == ".a.b.c."

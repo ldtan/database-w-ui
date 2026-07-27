@@ -22,7 +22,7 @@ from ..columns.enums import (
     REFERENCE_TYPES,
     ColumnType,
 )
-from ..columns.formula import evaluate, parse
+from ..columns.formula import column_refs, evaluate, parse
 from ..columns.models import Column
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
@@ -164,11 +164,20 @@ class ListItemService:
         """
         # Parse each formula once for the whole batch, and map column name -> key so
         # a formula written in names can read the values stored under uuids.
-        computed = [
-            (key, column, parse(column.config["formula"]))
-            for key, column in columns.items()
-            if column.type in COMPUTED_TYPES and (column.config or {}).get("formula")
-        ]
+        # A stored formula that no longer parses is skipped rather than raised: the
+        # language's bounds can tighten (they have), and a column saved under the
+        # old ones must cost its own cell, not the whole read — the same rule
+        # `evaluate` follows for a row it cannot compute.
+        computed = []
+        for key, column in columns.items():
+            if column.type not in COMPUTED_TYPES or not (column.config or {}).get(
+                "formula"
+            ):
+                continue
+            try:
+                computed.append((key, column, parse(column.config["formula"])))
+            except ValidationError:
+                continue
         key_of_name = {column.name: key for key, column in columns.items()}
 
         for item in items:
@@ -180,7 +189,7 @@ class ListItemService:
             for key, _column, formula in computed:
                 inputs = {
                     name: shaped.get(key_of_name[name])
-                    for name in formula.refs
+                    for name in column_refs(formula)
                     if name in key_of_name
                 }
                 shaped[key] = evaluate(formula, inputs)
