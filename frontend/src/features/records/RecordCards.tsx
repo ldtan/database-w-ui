@@ -26,6 +26,9 @@ interface Props {
   pageSize: number;
   onPageSize: (rows: number) => void;
   can: (uuid: string, action: PermissionAction) => boolean;
+  /** Undefined when the list has no view form visible to this caller — the action
+   *  then drops out, exactly as it does in the grid. */
+  onView?: (item: ListItem) => void;
   onEdit: (item: ListItem) => void;
   onShare: (item: ListItem) => void;
   onDelete: (item: ListItem) => void;
@@ -61,6 +64,7 @@ export function RecordCards({
   pageSize,
   onPageSize,
   can,
+  onView,
   onEdit,
   onShare,
   onDelete,
@@ -165,6 +169,13 @@ export function RecordCards({
                 <RowActions
                   size="small"
                   actions={[
+                    {
+                      key: "view",
+                      icon: "pi pi-eye",
+                      label: "View record",
+                      visible: !!onView,
+                      onClick: () => onView?.(item),
+                    },
                     {
                       key: "edit",
                       icon: "pi pi-pencil",

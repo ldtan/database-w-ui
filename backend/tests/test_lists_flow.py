@@ -152,8 +152,34 @@ async def test_list_autoprovisions_view_and_forms(client, list_uuid):
     views = (await client.get(f"/api/lists/{list_uuid}/views/")).json()
     forms = (await client.get(f"/api/lists/{list_uuid}/forms/")).json()
     assert [v["name"] for v in views] == ["grid"]
-    assert sorted(f["name"] for f in forms) == ["create", "update"]
+    assert sorted(f["name"] for f in forms) == ["create", "update", "view"]
     assert all(f["is_default"] for f in forms)
+
+
+async def test_view_form_starts_showing_every_column(client, list_uuid):
+    """The display-only form seeds empty, which is the "all columns" convention.
+
+    Create and update instead name the audit columns to keep them *off* the form —
+    nobody types "created by", but it is exactly what someone opens a record to
+    read. An empty layout also picks up calculated columns, which no input form
+    may contain.
+    """
+    forms = (await client.get(f"/api/lists/{list_uuid}/forms/")).json()
+    view_form = next(f for f in forms if f["name"] == "view")
+    assert view_form["type"] == "view"
+    assert view_form["is_default"] is True
+    assert view_form["config"]["fields"] == []
+
+    for name in ("create", "update"):
+        form = next(f for f in forms if f["name"] == name)
+        assert form["type"] == name
+        # Audit columns are named-and-excluded, under the key FormConfig accepts:
+        # `extra="forbid"` means a misspelling here 422s the first PATCH back.
+        assert form["config"]["fields"]
+        assert all(
+            field["included"] is False and field["enabled"] is False
+            for field in form["config"]["fields"]
+        )
 
 
 async def test_list_scoped_to_workspace(client, workspace_uuid, list_uuid):

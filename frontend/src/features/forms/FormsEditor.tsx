@@ -87,6 +87,10 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
   );
   const canEdit = !!activeForm && canForm(activeForm.uuid, "configure");
   const canShare = !!activeForm && canForm(activeForm.uuid, "share");
+  // A view form displays a record, it does not collect one, so per-field
+  // "editable" has nothing to say — and a control that is saved but ignored is
+  // worse than no control. Shown, order and label still apply.
+  const showsEnabled = activeForm?.type !== "view";
 
   const setInherit = useMutation({
     mutationFn: (value: boolean) =>
@@ -214,7 +218,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
             <span style={{ width: 64 }}>Order</span>
             <span className="flex-1">Field</span>
             <span style={{ width: 70 }}>Shown</span>
-            <span style={{ width: 76 }}>Editable</span>
+            {showsEnabled && <span style={{ width: 76 }}>Editable</span>}
             <span style={{ width: 150 }}>Label</span>
           </div>
           {rows.map((row, i) => (
@@ -245,13 +249,15 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
                   onChange={(e) => update(i, { included: !!e.checked })}
                 />
               </span>
-              <span style={{ width: 76 }}>
-                <Checkbox
-                  checked={row.enabled}
-                  disabled={!canEdit || !row.included}
-                  onChange={(e) => update(i, { enabled: !!e.checked })}
-                />
-              </span>
+              {showsEnabled && (
+                <span style={{ width: 76 }}>
+                  <Checkbox
+                    checked={row.enabled}
+                    disabled={!canEdit || !row.included}
+                    onChange={(e) => update(i, { enabled: !!e.checked })}
+                  />
+                </span>
+              )}
               <InputText
                 value={row.label_override}
                 onChange={(e) => update(i, { label_override: e.target.value })}

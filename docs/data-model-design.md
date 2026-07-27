@@ -95,7 +95,7 @@ User
               └─ contains ─▶ List ──┬─▶ Column    (schema: the fields)
                                     ├─▶ ListItem  (records: JSONB keyed by column uuid)
                                     ├─▶ View      (saved sort/filter/group/paging)
-                                    └─▶ Form       (field layout for create/update)
+                                    └─▶ Form       (field layout for create/update/view)
 ```
 
 `Workspace` is the tenancy boundary: a user owns workspaces, and a list's ownership
@@ -149,7 +149,7 @@ Notes:
 - Uniqueness: partial unique indexes on `(owner_id, name)` for workspaces and
   `(workspace_id, name)` for lists, both `WHERE deleted_at IS NULL`.
 - **Auto-provisioning (implemented):** creating a list seeds a default `grid` view and
-  default `create`/`update` forms (§7, §8).
+  default `create`/`update`/`view` forms (§7, §8).
 - Lists are created with a `workspace_uuid` in the body and can be **moved** between
   workspaces via update (`PATCH` with `workspace_uuid`; requires `configure` on both the
   list and the target workspace). A list can also be **transferred to another user** via
@@ -304,10 +304,14 @@ Notes:
   pattern, and the startup drift guard (`src/infrastructure/schema_check.py`) for the
   backstop when you forget.
 
-A new type must be added to **every** frontend touchpoint or it half-works: `lib/columnTypes.ts`
-(`COLUMN_TYPE_OPTIONS`), `renderCell` in `ListDetailPage.tsx`, `RecordField` in
-`RecordFormDialog.tsx`, `FilterConditionsEditor.tsx`, and the export/import cell handling in
-`src/lists/transfer/services.py`.
+A new type must be added to **every** frontend touchpoint or it half-works:
+`lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `features/records/renderCell.tsx` (how a value
+*displays*), `RecordField` in `features/records/RecordFields.tsx` (how it is *edited*),
+`FilterConditionsEditor.tsx`, and the export/import cell handling in
+`src/lists/transfer/services.py`. Both record components were extracted out of
+`ListDetailPage.tsx`/`RecordFormDialog.tsx` precisely so that there is one of each: the grid,
+the phone cards, the bin and the view-form dialog all display through `renderCell`, and the
+add/edit dialog and the QR session both edit through `RecordField`.
 
 **Example — a "Status" choice column**
 
@@ -422,8 +426,8 @@ carry their own order independently, via `config.fields[].order` (see §8). This
 
 ## 8. `forms`
 
-Controls which fields appear when creating/updating a record, their order, and whether
-each is enabled. Field layout is JSONB (D5).
+Controls which fields appear when a record is created, updated or read, their order,
+and whether each is enabled. Field layout is JSONB (D5).
 
 | Field        | Type            | Notes |
 |--------------|-----------------|-------|
@@ -431,8 +435,8 @@ each is enabled. Field layout is JSONB (D5).
 | `list_id`    | FK → `lists.id` | Owner list. |
 | `name`       | `str(120)`      | Code-facing slug (D6). Unique **per list**. e.g. `quick_add`. |
 | `display_name` | `str(255)`    | UI label (D6). e.g. "Quick add". |
-| `type`       | `enum` `FormType` (`create`/`update`/`custom`) | Distinguishes the two defaults. |
-| `is_default` | `bool`          | The default create/update form for the list. |
+| `type`       | `enum` `FormType` (`create`/`update`/`view`/`custom`) | Distinguishes the three defaults. |
+| `is_default` | `bool`          | The default create/update/view form for the list. |
 | `config`     | `JSONB`         | See shape below. |
 
 `config` shape (fields reference `column_uuid`):
@@ -451,10 +455,28 @@ each is enabled. Field layout is JSONB (D5).
 - `enabled` — field is editable vs. read-only/disabled.
 - `order` — display order (array order can also carry this; keep `order` explicit to
   avoid ambiguity).
-- **Empty `fields` means "all columns"** — auto-provisioned default forms start with
-  `fields: []`, which consumers interpret as every column included in `position` order.
-  Once the layout is customized, columns absent from a non-empty `fields` list are treated
-  as not included.
+- **Empty `fields` means "all columns"** — a form with `fields: []` is interpreted as
+  every column included in `position` order. The auto-provisioned `view` form starts
+  this way; `create` and `update` instead start by naming the four audit columns as
+  `included: false`, since nobody types "created by".
+- **A column absent from a non-empty `fields` list is appended, not excluded.** It sits
+  after the configured fields, in `position` order — the same rule a view's
+  `column_order` follows (§7). Exclusion is `included: false`, which is what the form
+  editor writes: it saves back *every* column, so absence can only mean the column was
+  created after the last save. Treating absence as exclusion is exactly what used to
+  leave the Add/Edit dialog on a freshly provisioned list empty ("Add a column first"),
+  since its seeded config names the audit columns and nothing else.
+
+**`view` forms are display-only, and two rules follow from it.** A view form lays a
+record out for *reading* — it exists so a grid view can stay narrow (a dozen columns is
+a dozen slivers) while every field stays one click away. So it **may include
+`calculated` columns**, which `create`/`update` may not: a calculated value is computed
+on read (§5, known-gaps §5) and rejected on write, so it is never an input but is
+exactly what someone opens a record to see. And its fields' **`enabled` flag means
+nothing** — nothing on it is editable. `resolveFields`
+(`frontend/src/features/records/recordValues.ts`) takes an `includeCalculated` option
+for the first; `RecordViewDialog` ignores `enabled` for the second, and the form editor
+hides the checkbox rather than saving a setting no one reads.
 
 ---
 
