@@ -711,6 +711,66 @@ export interface paths {
         patch: operations["update_form_api_lists__list_uuid__forms__ref__patch"];
         trace?: never;
     };
+    "/api/lists/{list_uuid}/metrics/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Metrics */
+        get: operations["list_metrics_api_lists__list_uuid__metrics__get"];
+        put?: never;
+        /** Create Metric */
+        post: operations["create_metric_api_lists__list_uuid__metrics__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/metrics/values": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metric Values
+         * @description Every metric's value over the records this caller can see.
+         *
+         *     Takes the same `view_uuid` and `q` as the items endpoint, so the numbers
+         *     describe exactly what the grid is showing.
+         */
+        get: operations["metric_values_api_lists__list_uuid__metrics_values_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/metrics/{ref}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Metric */
+        get: operations["get_metric_api_lists__list_uuid__metrics__ref__get"];
+        put?: never;
+        post?: never;
+        /** Delete Metric */
+        delete: operations["delete_metric_api_lists__list_uuid__metrics__ref__delete"];
+        options?: never;
+        head?: never;
+        /** Update Metric */
+        patch: operations["update_metric_api_lists__list_uuid__metrics__ref__patch"];
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/export": {
         parameters: {
             query?: never;
@@ -1505,6 +1565,102 @@ export interface components {
              * @default false
              */
             deleted: boolean;
+        };
+        /**
+         * MetricConfig
+         * @description What a metric is and how its number should read.
+         *
+         *     Typed rather than a bare ``dict`` so the generated OpenAPI schema carries the
+         *     shape through to the frontend — `ColumnRead.config` is a `dict`, which is why
+         *     the frontend has to restate it by hand.
+         */
+        MetricConfig: {
+            /** Formula */
+            formula: string;
+            /** Precision */
+            precision?: number | null;
+            /** Prefix */
+            prefix?: string | null;
+            /** Suffix */
+            suffix?: string | null;
+        };
+        /** MetricCreate */
+        MetricCreate: {
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /**
+             * Position
+             * @default 0
+             */
+            position: number;
+            /** Description */
+            description?: string | null;
+            config: components["schemas"]["MetricConfig"];
+        };
+        /** MetricRead */
+        MetricRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Position */
+            position: number;
+            /** Description */
+            description?: string | null;
+            config: components["schemas"]["MetricConfig"];
+        };
+        /** MetricUpdate */
+        MetricUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Position */
+            position?: number | null;
+            /** Description */
+            description?: string | null;
+            config?: components["schemas"]["MetricConfig"] | null;
+        };
+        /**
+         * MetricValue
+         * @description One metric's answer over the records in scope.
+         *
+         *     ``value`` and ``error`` are alternatives: a formula that no longer matches the
+         *     list (a column it reads was renamed or removed) reports the reason rather than
+         *     a number, because a broken ``SUM`` rendering as ``0`` is worse than one that
+         *     says it is broken.
+         */
+        MetricValue: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Value */
+            value?: number | string | null;
+            /** Error */
+            error?: string | null;
+        };
+        /** MetricValues */
+        MetricValues: {
+            /** Row Count */
+            row_count: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+            /** Values */
+            values?: components["schemas"]["MetricValue"][];
         };
         /** PersonCreate */
         PersonCreate: {
@@ -3845,6 +4001,204 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["FormRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_metrics_api_lists__list_uuid__metrics__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_metric_api_lists__list_uuid__metrics__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    metric_values_api_lists__list_uuid__metrics_values_get: {
+        parameters: {
+            query?: {
+                view_uuid?: string | null;
+                q?: string | null;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricValues"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metric_api_lists__list_uuid__metrics__ref__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_metric_api_lists__list_uuid__metrics__ref__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_metric_api_lists__list_uuid__metrics__ref__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ref: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MetricUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricRead"];
                 };
             };
             /** @description Validation Error */

@@ -80,6 +80,7 @@ src/
                   # and the QR scanner (QrScanDialog + qrFill)
     views/        # the view bar, filter/group/column controls, filter conditions
     forms/        # per-list form layouts
+    metrics/    # the aggregate cards above the grid, and their settings panel
     permissions/  # Share dialog/panel and the effective-actions hooks
     people/       # accounts and groups (identity administration)
     profile/      # your own account and profile

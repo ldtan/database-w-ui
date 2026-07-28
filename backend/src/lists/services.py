@@ -25,11 +25,12 @@ from .forms.models import Form
 from .items.models import ListItem
 from .models import List
 from .schemas import ListCreate, ListRead, ListUpdate
+from .metrics.models import Metric
 from .views.models import View
 from .views.schemas import ViewConfig
 
 # Everything scoped under a list; soft-deleted together when the list goes.
-_LIST_CHILD_MODELS = (Column, ListItem, View, Form)
+_LIST_CHILD_MODELS = (Column, ListItem, View, Form, Metric)
 
 
 class ListService:
@@ -546,6 +547,28 @@ class ListService:
                 )
             )
 
+        source_metrics = (
+            await db.execute(
+                select(Metric)
+                .where(Metric.list_id == source.id, Metric.deleted_at.is_(None))
+                .order_by(Metric.position, Metric.id)
+            )
+        ).scalars().all()
+        for metric in source_metrics:
+            db.add(
+                Metric(
+                    list_id=clone.id,
+                    name=metric.name,
+                    display_name=metric.display_name,
+                    position=metric.position,
+                    description=metric.description,
+                    # No remap, unlike a view or a form: a metric formula names
+                    # its columns by *name*, and a clone keeps every name. The
+                    # rows still have to be copied, or the clone loses its cards.
+                    config=dict(metric.config or {}),
+                )
+            )
+
         if with_records:
             source_items = (
                 await db.execute(
@@ -600,8 +623,9 @@ class ListService:
     async def _cascade_descendants(
         cls, db: AsyncSession, list_ids: Sequence[int], when: datetime
     ) -> None:
-        """Soft-delete every child (columns, records, views, forms) of the given
-        lists in bulk. Does not touch the lists themselves and does not commit."""
+        """Soft-delete every child (columns, records, views, forms, metrics) of
+        the given lists in bulk. Does not touch the lists themselves and does not
+        commit."""
         if not list_ids:
             return
         for model in _LIST_CHILD_MODELS:
@@ -747,8 +771,9 @@ class ListService:
     async def restore(
         cls, db: AsyncSession, uuid: Union[str, UUID]
     ) -> Optional[List]:
-        """Bring a soft-deleted list back, along with the columns, records, views and
-        forms that went down with it. Returns None if it is not in the bin.
+        """Bring a soft-deleted list back, along with the columns, records, views,
+        forms and metrics that went down with it. Returns None if it is not in
+        the bin.
 
         Delete stamped the list and every descendant with one identical ``deleted_at``
         (see ``_cascade_descendants``); restore reverses exactly that set by matching

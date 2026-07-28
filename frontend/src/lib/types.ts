@@ -142,3 +142,13 @@ export type View = Omit<Response<Schemas["ViewRead"]>, "config"> & {
 export type Form = Omit<Response<Schemas["FormRead"]>, "config"> & {
   config: FormConfig;
 };
+
+/** Metrics need no refinement, unlike the three above: a metric's config is one
+ *  shape whatever the metric is, so the backend types it as a Pydantic model and
+ *  the generated types already say what it holds. */
+export type Metric = Response<Schemas["MetricRead"]>;
+export type MetricConfig = Response<Schemas["MetricConfig"]>;
+/** One card's answer. `value` and `error` are alternatives — a formula whose
+ *  column was renamed reports why rather than reading zero. */
+export type MetricValue = Response<Schemas["MetricValue"]>;
+export type MetricValues = Response<Schemas["MetricValues"]>;

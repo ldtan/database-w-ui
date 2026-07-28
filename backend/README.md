@@ -62,7 +62,8 @@ backend/
         ├── columns/         # Column + ColumnType enum
         ├── items/           # ListItem (record data + validation)
         ├── views/           # View
-        └── forms/           # Form + FormType enum
+        ├── forms/           # Form + FormType enum
+        └── metrics/       # Metric + the aggregate formula language
 ```
 
 Each resource follows the same four-file convention: `models.py`, `schemas.py`,
@@ -165,6 +166,7 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 | Records | `…/lists/{list_uuid}/items` CRUD |
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
+| Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=` (every metric's value over the records the caller can see through that view) |
 
 Creating a list requires a `workspace_uuid` (owned by the caller) in the body; the list
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a
@@ -173,7 +175,7 @@ ownership, so an unowned list (and all its children) returns `404`.
 
 ### Identifiers: `name` vs `display_name`
 
-Lists, columns, views, and forms each require **both**:
+Lists, columns, views, forms and metrics each require **both**:
 
 - `name` — code-facing slug, `^[a-z][a-z0-9_]*$`, unique per scope, editable.
 - `display_name` — free-text UI label.

@@ -30,6 +30,13 @@ number or text depending on the formula; the column has no fixed output type.
 Missing data propagates as "no value": if any referenced cell is empty, the
 result is ``None`` (the cell renders blank) rather than a silent zero or an empty
 string — an incomplete row should read as incomplete.
+
+This grammar is *row-scoped*: every name it resolves is one cell of one record.
+List **metrics** layer a second, aggregate-level grammar on top of it
+(``src/lists/metrics/aggregate.py``), where an aggregate's argument is one of
+these row expressions — so the names marked public below (``ROW_FUNCTIONS``, the
+three bounds, and the two ``*_row_expression`` seams) are that layer's interface
+and are not free to change shape.
 """
 import ast
 import math
@@ -44,7 +51,9 @@ _NUMERIC_FUNCTIONS = {"MIN", "MAX", "ROUND", "ABS"}
 _STRING_FUNCTIONS = {"CONCAT", "UPPER", "LOWER", "TRIM", "LEN", "LEFT", "RIGHT", "REPLACE"}
 
 # Function name -> (min_args, max_args). ``None`` means unbounded.
-_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
+# Public: the metric language needs to know which names are row functions so it
+# can tell them from its own aggregates.
+ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "MIN": (1, None),
     "MAX": (1, None),
     "ROUND": (1, 2),
@@ -66,13 +75,13 @@ _CMPOPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
 
 # A formula longer than this is almost certainly a mistake or an attempt to make
 # parsing expensive; either way it is not something a person typed on purpose.
-_MAX_SOURCE = 1000
+MAX_SOURCE = 1000
 # Length is the wrong bound on its own: nesting is what costs, and a unary minus
 # costs one character a level, so `----...-1` fits hundreds of levels inside the
 # character budget and walking it overflows the stack. Depth is bounded directly.
 # Nobody hand-writes a formula nested 32 deep.
-_MAX_DEPTH = 32
-_TOO_DEEP = f"A formula may not nest more than {_MAX_DEPTH} levels deep"
+MAX_DEPTH = 32
+TOO_DEEP = f"A formula may not nest more than {MAX_DEPTH} levels deep"
 # The ceiling on any text a formula produces. REPLACE can grow a string by a factor
 # set by a literal, and nesting composes those factors while the source only grows
 # linearly — so without this, a short formula allocates gigabytes, once per record,
@@ -99,8 +108,8 @@ def parse(source: object) -> Formula:
     """
     if not isinstance(source, str) or not source.strip():
         raise ValidationError("A calculated column requires a formula")
-    if len(source) > _MAX_SOURCE:
-        raise ValidationError(f"A formula may be at most {_MAX_SOURCE} characters")
+    if len(source) > MAX_SOURCE:
+        raise ValidationError(f"A formula may be at most {MAX_SOURCE} characters")
 
     try:
         tree = ast.parse(source, mode="eval")
@@ -109,7 +118,7 @@ def parse(source: object) -> Formula:
     except RecursionError as exc:
         # The other half of the depth bound: nesting deep enough to overflow the
         # stack inside ast.parse itself, before `_check` ever gets to count it.
-        raise ValidationError(_TOO_DEEP) from exc
+        raise ValidationError(TOO_DEEP) from exc
 
     refs: set[str] = set()
     _check(tree, refs, 0)
@@ -120,12 +129,12 @@ def _check(node: ast.AST, refs: set[str], depth: int) -> None:
     """Reject any node the language does not allow; collect column references.
 
     ``depth`` is how many levels down this node sits. The walk is top-down, so a
-    formula nested past the limit is refused after `_MAX_DEPTH` frames rather than
+    formula nested past the limit is refused after `MAX_DEPTH` frames rather than
     when the stack runs out — and since `_eval` walks the same tree, bounding it
     here is what makes evaluating a stored formula safe.
     """
-    if depth > _MAX_DEPTH:
-        raise ValidationError(_TOO_DEEP)
+    if depth > MAX_DEPTH:
+        raise ValidationError(TOO_DEEP)
     depth += 1
 
     if isinstance(node, ast.Expression):
@@ -157,9 +166,9 @@ def _check(node: ast.AST, refs: set[str], depth: int) -> None:
         if node.keywords or not isinstance(node.func, ast.Name):
             raise ValidationError("Formula functions take positional arguments only")
         name = node.func.id
-        spec = _FUNCTIONS.get(name)
+        spec = ROW_FUNCTIONS.get(name)
         if spec is None:
-            allowed = ", ".join(sorted(_FUNCTIONS))
+            allowed = ", ".join(sorted(ROW_FUNCTIONS))
             raise ValidationError(
                 f"Unknown function '{name}' in formula; allowed: {allowed}"
             )
@@ -201,6 +210,27 @@ def column_refs(formula: Formula) -> frozenset[str]:
     return formula.refs
 
 
+def check_row_expression(node: ast.AST, refs: set[str], depth: int) -> None:
+    """Validate one node as a row expression, collecting the columns it reads.
+
+    The seam the metric language builds on: an aggregate's argument is an
+    ordinary row expression, so it is checked by this walk rather than a second
+    copy of it. ``depth`` is threaded in from the *caller's* level so that
+    nesting is bounded once across both grammars — an aggregate nested 30 deep
+    does not get a fresh 32 levels for its argument.
+    """
+    _check(node, refs, depth)
+
+
+def eval_row_expression(node: ast.AST, values: dict[str, object]):
+    """Evaluate a validated row expression against one record's values.
+
+    Raises the same arithmetic errors ``evaluate`` catches, so a caller running
+    this once per record must catch them too (or let ``None`` stand for the row).
+    """
+    return _eval(node, values)
+
+
 def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, None]:
     """Compute the formula against a name->value map, or ``None``.
 
@@ -212,6 +242,16 @@ def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, N
         result = _eval(formula.tree.body, values)
     except (ZeroDivisionError, ValueError, TypeError, OverflowError, MemoryError):
         return None
+    return normalize_result(result)
+
+
+def normalize_result(result: object) -> Union[float, str, None]:
+    """A raw evaluation result as the one a caller may store or serialize.
+
+    The rule for what a formula is allowed to *return* lives here rather than in
+    each evaluator, so the metric language (which computes its result a
+    different way) answers in the same shapes this one does.
+    """
     if result is None:
         return None
     if isinstance(result, bool):
