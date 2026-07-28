@@ -38,6 +38,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "find", title: "Find records: search, sort, group, filter" },
   { id: "views", title: "Views: saved ways of looking" },
   { id: "forms", title: "Forms: shape the entry screen" },
+  { id: "metrics", title: "Metrics: totals, averages and counts" },
   { id: "sharing", title: "Sharing and permissions" },
   { id: "transfer", title: "Moving and giving a list away" },
   { id: "duplicate", title: "Duplicating a list" },
@@ -964,6 +965,83 @@ export function GuidePage() {
           hidden and not editable, since the app maintains them. Tick <Ui>Shown</Ui>{" "}
           if you want them visible while someone fills the form in.
         </p>
+      </Section>
+
+      <Section id="metrics" title="Metrics: totals, averages and counts">
+        <p>
+          A <strong>metric</strong> answers a question about the whole list rather
+          than about one record: <em>how many hours altogether?</em>,{" "}
+          <em>what does a job cost on average?</em>, <em>how many people are on
+          this?</em> Each one shows as a small card above the records.
+        </p>
+        <p>
+          Add one under <Ui>Settings</Ui> → <Ui>Metrics</Ui> →{" "}
+          <Ui>Add metric</Ui>. Give it a name, then write a formula in the{" "}
+          <Ui>Formula</Ui> box — the dialog lists the columns you can use.
+        </p>
+        <p>
+          The cards stay <strong>out of the way until you ask for them</strong>:
+          click <Ui>Metrics</Ui> on the toolbar above the records to show or hide
+          them. The number on that button is how many the list has, so you can tell
+          a hidden strip from a list with none. They start hidden every time you
+          open a list — working out a total means reading every record, so it is
+          not something the app does over your shoulder.
+        </p>
+
+        <h3 className="font-semibold pt-1">Writing the formula</h3>
+        <p>
+          Wrap the column you want in one of these, in <strong>CAPITALS</strong>:
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li><Code>SUM(hours)</Code> — everything added up.</li>
+          <li><Code>AVG(cost)</Code> — the average.</li>
+          <li>
+            <Code>COUNT()</Code> — how many records there are. Name a column —{" "}
+            <Code>COUNT(owner)</Code> — to count only the ones that have it filled
+            in.
+          </li>
+          <li><Code>MIN(price)</Code> / <Code>MAX(price)</Code> — the smallest and largest.</li>
+          <li><Code>MEDIAN(price)</Code> — the middle value.</li>
+          <li><Code>UNIQUE(owner)</Code> — how many different values appear.</li>
+          <li><Code>EMPTY(owner)</Code> — how many records are missing it.</li>
+        </ul>
+        <p>
+          You can do sums <em>inside</em> a total, which is usually what you want:{" "}
+          <Code>SUM(qty * price)</Code> multiplies each record first and adds the
+          results up — quite different from multiplying two totals together. And you
+          can do sums <em>with</em> totals: <Code>SUM(revenue) - SUM(cost)</Code>, or{" "}
+          <Code>ROUND(SUM(hours) / COUNT(), 2)</Code>.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          A column on its own isn’t enough — <Code>hours</Code> is a different number
+          on every record, so the box will ask you to say what to do with them all:{" "}
+          <Code>SUM(hours)</Code>. Number, text and calculated columns can be
+          measured; dates, choices and linked columns can’t yet.
+        </p>
+
+        <h3 className="font-semibold pt-1">What the number counts</h3>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <strong>Whatever is on screen.</strong> Switch to a view that filters the
+            list, or type in the search box, and the cards follow — so they always
+            describe the records you are actually looking at.
+          </li>
+          <li>
+            <strong>Only records you’re allowed to see.</strong> If a list is shared
+            with you but some records are not, your totals cover your records. Two
+            people can see different numbers on the same card, and both are right.
+          </li>
+          <li>
+            <strong>Empty cells are skipped, not counted as zero.</strong> An average
+            over three records where one is blank is the average of two — a missing
+            value shouldn’t drag an average down.
+          </li>
+        </ul>
+        <Callout tone="tip" title="If a card shows a warning">
+          A metric finds its columns by their short name. Rename a column it uses and
+          the card says which one it can no longer find, rather than quietly showing
+          zero. Edit the metric and fix the name.
+        </Callout>
       </Section>
 
       <Section id="sharing" title="Sharing and permissions">

@@ -95,7 +95,8 @@ User
               └─ contains ─▶ List ──┬─▶ Column    (schema: the fields)
                                     ├─▶ ListItem  (records: JSONB keyed by column uuid)
                                     ├─▶ View      (saved sort/filter/group/paging)
-                                    └─▶ Form       (field layout for create/update/view)
+                                    ├─▶ Form      (field layout for create/update/view)
+                                    └─▶ Metric   (a named aggregate over the records)
 ```
 
 `Workspace` is the tenancy boundary: a user owns workspaces, and a list's ownership
@@ -284,7 +285,7 @@ Notes:
   checked against the database. Three things about them are load-bearing:
   - **The label is the `username` / group name, never the connected person's real name.**
     `/auth/users` is readable by any authenticated user precisely so the Share dialog can
-    list principals — but **person records are private** (owner or superuser only, see §11
+    list principals — but **person records are private** (owner or superuser only, see §12
     and `src/people`). A cell rendering "Grace Hopper" would leak personal data to every
     viewer of the list. `PrincipalControls.tsx` and the export formatter both resolve to the
     username.
@@ -479,13 +480,79 @@ hides the checkbox rather than saving a setting no one reads.
 
 ---
 
-## 9. Future / deferred (documented, not built yet)
+## 9. `metrics`
+
+A named aggregate over a list's records — "Total hours" is `SUM(hours)`. A sibling of
+views and forms: list-scoped, named (D6), ordered, behaviour in a JSONB `config` (D5).
+
+| Field       | Type            | Notes |
+|-------------|-----------------|-------|
+| `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
+| `list_id`   | FK → `lists.id` | Owner list. |
+| `name`      | `str(120)`      | Code-facing slug (D6). Unique **per list**. e.g. `total_hours`. |
+| `display_name` | `str(255)`   | The card's label. e.g. "Total hours". |
+| `position`  | `int`           | Order in the metric strip. |
+| `description` | `text`        | Optional; shown as the card's tooltip. |
+| `config`    | `JSONB`         | `formula` (required), plus `precision?`, `prefix?`, `suffix?`. |
+
+**A metric stores the question, never the answer.** The value is computed per request
+and never persisted — the same compute-on-read bargain `calculated` columns make (§5),
+for the same reason: editing a record, a formula or a filter is reflected on the next
+read with nothing to backfill.
+
+**The formula language is the row language with one level on top**
+(`metrics/aggregate.py` over `columns/formula.py`):
+
+- **Outer level** — arithmetic over aggregate *results*: `SUM(revenue) - SUM(cost)`,
+  `ROUND(SUM(hours) / COUNT(), 2)`.
+- **Inner level** — an aggregate's argument is an ordinary row expression, checked and
+  evaluated by `columns/formula.py` itself. So `SUM(qty * price)` multiplies per record
+  and totals after, and every safety property of that module (no `eval`, no builtins,
+  bounded length/depth/text) holds here unchanged.
+
+Aggregates: `SUM`, `AVG`, `COUNT` (0 or 1 arg), `MIN`, `MAX`, `MEDIAN`, `UNIQUE`
+(distinct non-blank values), `EMPTY`. A **bare column name at the outer level is
+refused** — `hours` is one value per record and a metric is one value in total, so the
+only sensible reading is an aggregate somebody forgot to write. `MIN`/`MAX` sit in both
+tables and arity tells them apart: one argument is the aggregate, several is the row
+function picking between the values written there (nothing is lost, because a one-argument
+row `MIN` is its own argument).
+
+Notes:
+- **A metric may aggregate a `calculated` column**, which a calculated column may not
+  reference (§5, "no calc-on-calc"). A metric is a **leaf** — nothing derives from one —
+  so there is no cycle to detect.
+- **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
+  The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
+- **`GET /lists/{uuid}/metrics/values?view_uuid=&q=`** answers every metric in **one
+  scan**, so the cards always agree with each other. The scan is
+  `ListItemService.visible_stmt` — the same statement the grid reads — so it honours the
+  caller's permissions, the view's filters and the search, and the cards agree with what
+  is on screen. Two people with different grants correctly see different numbers.
+- **Bounded at `METRIC_ROW_LIMIT` (50,000) records**, past which the response sets
+  `truncated` and the card says so. See known-gaps.
+- **No `permissions_inherit`**, unlike views and forms: a metric carries no permissions
+  of its own. List `view` to read, list `configure` to write.
+- Metrics cascade-delete and restore with their list (`_LIST_CHILD_MODELS`), and a
+  **clone copies them without remapping** — a formula names its columns by *name*, and a
+  clone keeps every name.
+
+---
+
+## 10. Future / deferred (documented, not built yet)
 
 - **`list_item_links` junction table:** the D4 upgrade path — real FKs, referential
   integrity, cheap reverse lookups, clean many-to-many links. Adopt when soft references
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
-- **Computed / rollup columns:** derive values from lookups (count, sum of linked rows).
+- **Per-record rollup columns:** derive a value from the rows a *lookup* points at (count,
+  sum of linked rows). List-wide aggregates are now built as `metrics` (§9), but those
+  answer one number for the whole list; a rollup answers a different number per record and
+  still needs the reverse lookup that D4's soft references make expensive.
+- **Per-group metric subtotals:** a view's `group_by` is only a sort
+  (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
+  with nowhere to put a per-group number. Doing it properly means an aggregate row inside
+  the table.
 - **Further column types:** `email`, `attachment`, `rating`. (`link`, `user` and `group` are
   built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
@@ -497,18 +564,19 @@ hides the checkbox rather than saving a setting no one reads.
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
 See [Planned features](planned-features.md) for the larger asked-for capabilities that build
-on this model. List ownership transfer, cross-workspace moves, and list cloning are now
-**built**; column type conversion and column data migration remain, each with its
-load-bearing details and open decisions.
+on this model. List ownership transfer, cross-workspace moves, list cloning, nested and
+cross-workspace lookups, live records and list metrics are now **built**; column type
+conversion and column data migration remain, each with its load-bearing details and open
+decisions.
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
 view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
 single-record delete (§6), cascade soft delete for lists/workspaces with
-cross-list lookup-reference scrubbing (§10), and sharing / permissions (§11).
+cross-list lookup-reference scrubbing (§11), and sharing / permissions (§12).
 
 ---
 
-## 10. Integrity rules summary (app layer)
+## 11. Integrity rules summary (app layer)
 
 Because the DB does not enforce record-level constraints, the service layer MUST:
 
@@ -517,21 +585,22 @@ Because the DB does not enforce record-level constraints, the service layer MUST
 3. Validate `choice` values against the current option labels (exact match).
 4. Validate `lookup` uuids exist in the target list; clean up stale refs on delete.
 5. Validate `name` against the `NameSlug` pattern and scope all uniqueness checks —
-   list `name` per owner; column/view/form `name` per list — excluding soft-deleted rows.
+   list `name` per owner; column/view/form/metric `name` per list — excluding
+   soft-deleted rows.
 6. Filter `deleted_at IS NULL` on every read path.
 7. Cascade soft delete: deleting a list stamps `deleted_at` on its columns,
-   records, views, and forms; deleting a workspace cascades to its lists and all
+   records, views, forms and metrics; deleting a workspace cascades to its lists and all
    their descendants — all in one transaction (bulk `UPDATE`s, no per-row loop).
    Lookup columns on *surviving* lists that referenced the deleted rows have that
    key dropped from their records (a lookup targets one list, so deleting it makes
    every value in the column stale).
 8. Enforce permissions on every access path: reads are filtered to visible
-   resources and writes require the matching action (see §11). The workspace owner
+   resources and writes require the matching action (see §12). The workspace owner
    is an implicit superuser over their own data.
 
 ---
 
-## 11. Permissions / authorization
+## 12. Permissions / authorization
 
 Access is granted to **users or groups** and can reach down to individual records,
 forms, and views. See `src/permissions/`.

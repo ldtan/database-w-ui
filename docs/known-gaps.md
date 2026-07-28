@@ -99,14 +99,17 @@ an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
 
 Reach is not the only thing a formula has to be bounded on. Because it runs once per record
-on every read, what it may *spend* is bounded too: `_MAX_SOURCE` (length), `_MAX_DEPTH`
+on every read, what it may *spend* is bounded too: `MAX_SOURCE` (length), `MAX_DEPTH`
 (nesting — length alone is not a bound on depth, since a unary minus costs one character a
 level and a few hundred of them overflow the stack) and `_MAX_TEXT` (the size of any text it
 produces — `REPLACE` grows a string by a factor set by a literal, and nesting composes those
 factors while the source only grows linearly). The first two are refused at config time; the
 third blanks the cell, since it depends on the row. Keep all three: without them a formula
 that passes every other check is a way to spend the whole server, which is the same problem
-as running code, arrived at from the other side.
+as running code, arrived at from the other side. (Those three, `ROW_FUNCTIONS`, and the two
+`*_row_expression` seams are public because list **metrics** build a second grammar on
+this one — see §9 below. A metric walks this same tree once per record too, over more
+records than a grid page, so the bounds matter more there, not less.)
 
 The compute-on-read choice buys correctness for free — editing a dependency or the formula is
 reflected on the next read, no backfill — at these costs, all currently accepted:
@@ -223,6 +226,55 @@ the markup, so limits are not affected.
 The allowlist in `richtext.ALLOWED_TAGS` and the toolbar in `RecordFields.RICH_TOOLBAR` are
 two halves of one decision and must be changed together: a toolbar button whose tag the
 sanitiser drops looks like it works and then silently loses the formatting on save.
+
+---
+
+## 9. Metrics are recomputed per request, and bounded
+
+A metric (data-model §9) stores a formula, never a number: `GET
+/lists/{uuid}/metrics/values` scans the records in scope and answers every card in one
+pass. That buys the same thing compute-on-read buys a calculated column — a total is never
+stale, and nothing has to be backfilled when a record, a formula or a filter changes — at
+costs worth knowing about.
+
+- **The same card shows different numbers to different people, on purpose.** The scan runs
+  through `ListItemService.visible_stmt`, so it honours `item_view_filter`. A reader who
+  cannot see a record must not learn its value from a total, which means "Total hours" is
+  the total of *your* hours, not the list's. `row_count` in the response is the count after
+  permissions, filters and search, so it is the number to show if you want to explain a
+  figure — it will not match the list's record count and is not meant to.
+- **It is a scan, and it is capped at `METRIC_ROW_LIMIT` (50,000).** Past that the answers
+  describe the first 50,000 records and `truncated` is set; the card renders a note rather
+  than a number that quietly means something else. Refusing outright was the alternative and
+  leaves the reader nothing. The scan streams `data` alone (not ORM instances) in batches of
+  1,000 and skips the view's sort, which an aggregate has no use for.
+- **Nothing is cached, and the frontend re-asks on the live interval.** The values query
+  rides `useLiveList`, so a large list plus a short `VITE_LIVE_REFRESH_SECONDS` is where
+  this will first hurt. What keeps that in hand today is that **the strip is hidden until
+  the toolbar's Metrics button reveals it**, and `visible` gates the query rather than
+  just the markup — a list nobody is totalling costs nothing, and the interval only runs
+  for someone actually looking at a total. Keep those two facts attached: making the strip
+  default to shown, or rendering it hidden with the query still enabled, quietly turns
+  every open list into a repeating full scan. The fix when it does hurt is a SQL fast path
+  for the common shape — a
+  bare `AGG(stored_column)` compiles to one `SELECT SUM(CAST(data->>'uuid' AS numeric))` —
+  which is why the row limit exists in the meantime. It cannot be the *general* path:
+  formulas take arbitrary row expressions, and a `calculated` column has no stored value to
+  aggregate at all (the same wall as §5).
+- **A renamed column breaks its metric — but says so.** Formulas reference columns by name
+  and names are editable (§5), and there is still no reverse index. The difference is that a
+  metric checks its refs against the live columns before scanning and returns an `error`
+  for that card, because a broken `SUM` rendering `0` is the one wrong answer nobody would
+  catch. The break costs its own card, never the request.
+- **The values query key is nested under the items key** (`["items", listUuid,
+  "metrics", …]`), so every `invalidateQueries(["items", listUuid])` already in the app
+  refreshes the cards. Keep it that way: a sibling key would need a second invalidation
+  beside each of the existing ones, which is correct the day it is written and wrong six
+  call sites later.
+
+Two things a metric deliberately does **not** do: it has no `permissions_inherit` (unlike
+views and forms — it carries no permissions of its own, so list `view` reads and list
+`configure` writes), and it has no per-group subtotals (see data-model §10).
 
 ## Behavior that surprises people
 

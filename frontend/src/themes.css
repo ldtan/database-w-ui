@@ -1596,6 +1596,55 @@ a {
   box-shadow: 0 0 0 0.2rem var(--focus-ring);
 }
 
+/* The metric strip: a list's totals, above its records.
+
+   It wraps rather than scrolls, and each card is sized to its content with a
+   floor — a "Records: 3" card has no business being as wide as one holding a
+   currency total, and a row of equal columns would leave most of them empty. */
+.metric-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.metric-card {
+  background: var(--surface);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xs);
+  padding: 0.5rem 0.875rem;
+  min-width: 8rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.125rem;
+}
+.metric-card-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+/* The number is the point of the card, so it is the biggest thing on it.
+   Tabular figures because these sit in a row and are read by comparing them —
+   proportional digits make a column of numbers ripple. */
+.metric-card-value {
+  font-size: 1.25rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+/* A formula whose column was renamed. Deliberately as loud as the value it
+   replaces: the failure mode this guards against is a broken total quietly
+   reading zero, and a whisper would not fix that. */
+.metric-card-error {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  color: var(--warn);
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  max-width: 16rem;
+}
+
 /* A responsive run of cards. Pages used to be a single 720px column of
    full-width rows, which on a wide screen was mostly empty page. */
 .card-grid {

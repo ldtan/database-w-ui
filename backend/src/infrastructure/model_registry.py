@@ -19,6 +19,7 @@ import src.auth.users.models  # noqa: F401
 import src.lists.columns.models  # noqa: F401
 import src.lists.forms.models  # noqa: F401
 import src.lists.items.models  # noqa: F401
+import src.lists.metrics.models  # noqa: F401
 import src.lists.models  # noqa: F401
 import src.lists.views.models  # noqa: F401
 import src.people.models  # noqa: F401

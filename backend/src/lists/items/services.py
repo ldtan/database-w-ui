@@ -22,7 +22,7 @@ from ..columns.enums import (
     REFERENCE_TYPES,
     ColumnType,
 )
-from ..columns.formula import column_refs, evaluate, parse
+from ..columns.formula import Formula, column_refs, evaluate, parse
 from ..columns.models import Column
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
@@ -120,6 +120,59 @@ def coerce_shape(column: Column, value):
     return value
 
 
+def computed_columns(
+    columns: dict[str, Column],
+) -> tuple[list[tuple[str, Column, Formula]], dict[str, str]]:
+    """The calculated columns to inject, and the column name -> key map they need.
+
+    Parsed once for a whole batch rather than once per record, and paired with
+    the name map because a formula is written in column *names* while records are
+    keyed by uuid.
+
+    A stored formula that no longer parses is skipped rather than raised: the
+    language's bounds can tighten (they have), and a column saved under the old
+    ones must cost its own cell, not the whole read — the same rule `evaluate`
+    follows for a row it cannot compute.
+    """
+    computed: list[tuple[str, Column, Formula]] = []
+    for key, column in columns.items():
+        if column.type not in COMPUTED_TYPES or not (column.config or {}).get("formula"):
+            continue
+        try:
+            computed.append((key, column, parse(column.config["formula"])))
+        except ValidationError:
+            continue
+    return computed, {column.name: key for key, column in columns.items()}
+
+
+def shape_values(
+    columns: dict[str, Column],
+    computed: list[tuple[str, Column, Formula]],
+    key_of_name: dict[str, str],
+    data: dict,
+) -> dict:
+    """One record's stored `data` as a reader should see it.
+
+    Values are coerced to the shape their column currently declares (see
+    `coerce_shape`) and calculated columns get their value computed and injected
+    under their own key. Kept separate from `_shape_for_read` so a caller holding
+    plain dicts — a metric scan reads `data` alone rather than hydrating whole
+    records — shapes them exactly as the grid does.
+    """
+    shaped = {
+        key: coerce_shape(columns[key], value) if key in columns else value
+        for key, value in data.items()
+    }
+    for key, _column, formula in computed:
+        inputs = {
+            name: shaped.get(key_of_name[name])
+            for name in column_refs(formula)
+            if name in key_of_name
+        }
+        shaped[key] = evaluate(formula, inputs)
+    return shaped
+
+
 class ListItemService:
     @staticmethod
     def _select(list_id: int):
@@ -156,6 +209,8 @@ class ListItemService:
         Two things happen here: stored values are coerced to the shape their column
         currently declares (see `coerce_shape`), and calculated columns — which
         store nothing — have their value computed and injected under their own key.
+        Both are `shape_values`, which anything reading records shares so that a
+        record means the same thing wherever it is read from.
 
         `set_committed_value`, not a plain assignment: this is a *presentation* fix,
         and marking the instance dirty would have the next flush write the coercion
@@ -163,37 +218,10 @@ class ListItemService:
         database — turning every read into a silent migration, inside whatever
         transaction happened to be open.
         """
-        # Parse each formula once for the whole batch, and map column name -> key so
-        # a formula written in names can read the values stored under uuids.
-        # A stored formula that no longer parses is skipped rather than raised: the
-        # language's bounds can tighten (they have), and a column saved under the
-        # old ones must cost its own cell, not the whole read — the same rule
-        # `evaluate` follows for a row it cannot compute.
-        computed = []
-        for key, column in columns.items():
-            if column.type not in COMPUTED_TYPES or not (column.config or {}).get(
-                "formula"
-            ):
-                continue
-            try:
-                computed.append((key, column, parse(column.config["formula"])))
-            except ValidationError:
-                continue
-        key_of_name = {column.name: key for key, column in columns.items()}
-
+        computed, key_of_name = computed_columns(columns)
         for item in items:
             data = item.data or {}
-            shaped = {
-                key: coerce_shape(columns[key], value) if key in columns else value
-                for key, value in data.items()
-            }
-            for key, _column, formula in computed:
-                inputs = {
-                    name: shaped.get(key_of_name[name])
-                    for name in column_refs(formula)
-                    if name in key_of_name
-                }
-                shaped[key] = evaluate(formula, inputs)
+            shaped = shape_values(columns, computed, key_of_name, data)
             if shaped != data:
                 set_committed_value(item, "data", shaped)
 
@@ -312,19 +340,28 @@ class ListItemService:
         return stmt.where(sa.or_(*conditions))
 
     @classmethod
-    async def list(
+    async def visible_stmt(
         cls,
         db: AsyncSession,
         lst: List,
         user,
+        columns: dict[str, Column],
         view_uuid: Optional[Union[str, UUID]] = None,
-        skip: int = 0,
-        limit: int = 100,
         q: Optional[str] = None,
-    ) -> Sequence[ListItem]:
+    ) -> tuple[sa.Select, Optional[list], Optional[dict]]:
+        """The records this caller may see, through this view, matching this search.
+
+        Everything that decides *which* records a request is about, in one place:
+        the permission filter, the view's saved filters, and the search. Returns
+        the view's sorts and grouping alongside rather than applying them, because
+        a caller that only aggregates (see the metrics service) has no use for an
+        order and should not pay to impose one.
+
+        Both readers go through this so a metric can never disagree with the grid
+        it sits above about what is on screen.
+        """
         from src.permissions.services import PermissionService
 
-        columns = await cls._columns_by_key(db, lst.id)
         stmt = cls._select(lst.id).where(
             await PermissionService.item_view_filter(db, user, lst)
         )
@@ -341,6 +378,23 @@ class ListItemService:
                 sorts = config.get("sorts")
                 group_by = config.get("group_by")
 
+        return stmt, sorts, group_by
+
+    @classmethod
+    async def list(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        user,
+        view_uuid: Optional[Union[str, UUID]] = None,
+        skip: int = 0,
+        limit: int = 100,
+        q: Optional[str] = None,
+    ) -> Sequence[ListItem]:
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt, sorts, group_by = await cls.visible_stmt(
+            db, lst, user, columns, view_uuid, q
+        )
         stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
         items = (await db.execute(stmt)).scalars().all()
         cls._shape_for_read(columns, items)

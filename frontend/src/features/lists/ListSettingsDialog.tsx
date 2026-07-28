@@ -4,10 +4,11 @@ import { TabPanel, TabView } from "primereact/tabview";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
 
-import type { Column, Form, View, ViewConfig } from "../../lib/types";
+import type { Column, Form, Metric, View, ViewConfig } from "../../lib/types";
 import { ColumnsPanel } from "../columns/ColumnsPanel";
 import { FormsEditor } from "../forms/FormsEditor";
 import { SharePanel } from "../permissions/SharePanel";
+import { MetricsPanel } from "../metrics/MetricsPanel";
 import { ViewsPanel, type ViewControlsState } from "../views/ViewsPanel";
 
 interface Props {
@@ -17,6 +18,7 @@ interface Props {
   columns: Column[];
   forms: Form[];
   views: View[];
+  metrics: Metric[];
   activeViewUuid: string | null;
   onSelectView: (uuid: string | null) => void;
   // The sort/filter/columns showing right now — what a new view is created from.
@@ -44,6 +46,7 @@ export function ListSettingsDialog({
   columns,
   forms,
   views,
+  metrics,
   activeViewUuid,
   onSelectView,
   currentConfig,
@@ -110,6 +113,17 @@ export function ListSettingsDialog({
           columns={columns}
           forms={forms}
           active={visible}
+        />
+      ),
+    },
+    {
+      key: "metrics",
+      header: "Metrics",
+      body: (
+        <MetricsPanel
+          listUuid={listUuid}
+          metrics={metrics}
+          canConfigure={canConfigure}
         />
       ),
     },

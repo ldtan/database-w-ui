@@ -174,6 +174,7 @@ const list: Tour = {
       points: [
         "Columns — add Text, Number, Date, Choice, a link to another list, or a formula.",
         "Forms — choose which fields appear when someone adds a record, and in what order.",
+        "Metrics — a total, average or count across the whole list. Add them here; the Metrics button on the toolbar shows and hides them.",
         "Permissions — who can see this list, and what they may do to it.",
       ],
     },
@@ -192,6 +193,7 @@ const list: Tour = {
       points: [
         "None of it sticks on its own — save an arrangement into a view to keep it.",
         "A view remembers its filter, sort, grouping and columns, and the dropdown flips between them.",
+        "The Metrics button, on lists that have any, reveals totals over whatever is showing — so a filter changes them too.",
       ],
     },
     {

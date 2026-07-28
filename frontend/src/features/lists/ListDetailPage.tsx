@@ -29,6 +29,7 @@ import type {
   Workspace,
 } from "../../lib/types";
 import { ListSettingsDialog } from "./ListSettingsDialog";
+import { MetricBar, useMetrics } from "../metrics/MetricBar";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { RecordViewDialog } from "../records/RecordViewDialog";
@@ -126,6 +127,11 @@ export function ListDetailPage() {
   // Debounced so a query goes out per pause, not per keystroke.
   const q = useDebounced(search);
   const [groupBy, setGroupBy] = useState<string | null>(null);
+  // Starts hidden, and is page state like the rest of this bar rather than
+  // something saved: the app has no per-list UI preferences to hang it on, and
+  // reaching for localStorage or the view config for one boolean would be the
+  // first of those rather than a use of one.
+  const [showMetrics, setShowMetrics] = useState(false);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
@@ -164,6 +170,10 @@ export function ListDetailPage() {
     queryKey: ["forms", listUuid],
     queryFn: () => api.get<Form[]>(`/lists/${listUuid}/forms/`),
   });
+  // The definitions only. Their *values* are fetched by MetricBar, keyed on the
+  // view and search, because those are what the numbers are about.
+  const metrics = useMetrics(listUuid);
+  const metricList = metrics.data ?? [];
 
   // A list can be shared without its workspace, in which case this 403s and the
   // workspace simply drops out of the breadcrumb trail — there is nothing the
@@ -634,6 +644,23 @@ export function ListDetailPage() {
           }
         />
 
+        {/* Off until asked for. A total is an occasional question, not something
+            you need in front of you while reading rows — and revealing it is what
+            starts the scan behind it, so a list nobody is totalling pays nothing.
+            The badge says how many are waiting, since a hidden strip is otherwise
+            indistinguishable from a list with no metrics at all. */}
+        {metricList.length > 0 && (
+          <Button
+            label="Metrics"
+            icon="pi pi-chart-bar"
+            text
+            className={showMetrics ? "is-on" : undefined}
+            badge={showMetrics ? undefined : String(metricList.length)}
+            aria-pressed={showMetrics}
+            onClick={() => setShowMetrics((on) => !on)}
+          />
+        )}
+
         {/* Last on the bar and pushed to its end, so on a narrow window it wraps
             onto a line of its own rather than squeezing everything else. */}
         <div className="w-full sm:w-64 sm:ml-auto">
@@ -656,6 +683,17 @@ export function ListDetailPage() {
           }
         />
       )}
+
+      {/* Above the records, because a total is what the records add up to.
+          Hidden until the toolbar's Metrics button asks for it. */}
+      <MetricBar
+        listUuid={listUuid}
+        metrics={metricList}
+        viewUuid={activeViewUuid}
+        q={q}
+        visible={showMetrics}
+      />
+
 
       {small ? (
         <RecordCards
@@ -860,6 +898,7 @@ export function ListDetailPage() {
           columns={cols}
           forms={formList}
           views={views.data ?? []}
+          metrics={metricList}
           activeViewUuid={activeViewUuid}
           onSelectView={setActiveViewUuid}
           currentConfig={currentConfig}

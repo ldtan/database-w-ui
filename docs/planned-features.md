@@ -1,11 +1,11 @@
 # Planned features
 
-Five capabilities that have been asked for and are worth building next. Each section
-says what it is, what already exists to build on, the load-bearing implementation
-details, and the decisions still open. Nothing here is built yet unless a subsection
-says otherwise.
+Nine capabilities that have been asked for. Each section says what it is, what already
+exists to build on, the load-bearing implementation details, and the decisions still
+open. Most are now **implemented** — the heading says which; only §1 (column type
+conversion) and §2 (column data migration) remain unbuilt.
 
-These share two roots in the existing model, so read them once here rather than five times below:
+These share two roots in the existing model, so read them once here rather than nine times below:
 
 - **Records are JSONB keyed by column `uuid`** (data-model D2). A rename is free because the
   key never changes; a **type change, a data copy, or a clone is not free**, because it touches
@@ -410,6 +410,75 @@ seam. The shape:
 
 ---
 
+## 9. List metrics (totals, averages and counts over the records) — **implemented**
+
+**Shipped.** A list can now say something *about* its records rather than only showing
+them. A **metric** is a first-class per-list resource — a sibling of views and forms, in
+its own `metrics` table (data-model §9) — holding a name and a formula, rendered as a
+strip of cards above the grid. `SUM(hours)`, `COUNT()`, `AVG(cost)`,
+`SUM(revenue) - SUM(cost)`.
+
+**What already existed to build on, and what didn't.** `columns/formula.py` was a complete,
+audited expression language — no `eval`, an allow-list AST walker, bounded length/depth/text
+— but strictly *row*-scoped: its `MIN`/`MAX` are varargs over one record. So the aggregate
+language (`metrics/aggregate.py`) is **a second grammar layered on it, not a fork**: the
+outer level is arithmetic over aggregate results, and an aggregate's *argument* is an
+ordinary row expression checked and evaluated by `formula.py` itself. `SUM(qty * price)`
+therefore works for free, and every safety property of that module holds unchanged. Five
+names in it became public to carry the seam (`ROW_FUNCTIONS`, the three bounds, and two
+`*_row_expression` wrappers).
+
+**The two rules that make the levels unambiguous.** A bare column name at the outer level is
+a parse error — `hours` is one value per record, a metric is one value in total, so the
+only sensible reading is a missing aggregate. And `MIN`/`MAX`, which exist in both tables,
+are told apart by arity: one argument is the aggregate, several is the row function picking
+between the values written there. Nothing is lost, because a one-argument row `MIN` is its
+own argument.
+
+**Evaluation is a Python scan, deliberately.** `GET /lists/{uuid}/metrics/values` answers
+every card in **one pass** — so the cards always agree with each other — over
+`ListItemService.visible_stmt`, which was extracted out of `ListItemService.list` so the
+cards and the grid cannot disagree about which records are on screen. It cannot be SQL
+`SUM`: formulas take arbitrary row expressions, and a `calculated` column has no stored
+value to aggregate. That last point is also the feature's nicest property — **a metric may
+aggregate a calculated column**, which a calculated column may not reference, because a
+metric is a *leaf*: nothing derives from one, so there is no cycle to detect.
+
+**Load-bearing details.**
+
+- **Permissions.** The scan runs through `item_view_filter`, so two readers with different
+  grants correctly get different numbers. Pinned by
+  `tests/test_metrics.py::test_two_readers_get_the_totals_of_what_each_can_see`.
+- **Bounded.** `METRIC_ROW_LIMIT` (50,000), streaming `data` alone in batches of 1,000,
+  with `truncated` in the response and a note on the card. A metric is recomputed per
+  request *and* re-asked on the live-records interval, so an unbounded scan was a way to
+  spend the whole server.
+- **`_shape_for_read` was split** into `computed_columns` + a pure `shape_values`, so the
+  scan shapes records exactly as the grid does without hydrating 50k ORM instances. The
+  `set_committed_value` call stays where it was — see its docstring for why that matters.
+- **A renamed column reports an error on its card, not `0`.** Refs are checked against the
+  live columns before scanning; the break costs its own card, never the request.
+- **Cascade/restore/clone.** `Metric` joined `_LIST_CHILD_MODELS`, which covers delete and
+  restore in one line. Clone copies the rows **without remapping**: a formula names columns
+  by *name* and a clone keeps every name — the opposite of the view/form config problem in
+  §5.
+- **Frontend.** `features/metrics/` — `MetricBar` (the strip), `MetricsPanel` (a new
+  tab in list settings), `MetricDialog` (built on the `ColumnDialog` pattern). The values
+  query key is nested **under the items key**, so every existing
+  `invalidateQueries(["items", listUuid])` refreshes the cards for free.
+- **The strip is hidden by default**, behind a `Metrics` toggle on the list toolbar
+  (badged with how many the list has, so a hidden strip is distinguishable from a list with
+  none). `visible` gates the *query*, not just the markup, which is what stops every open
+  list from running a repeating full scan on the live interval. Page state, like the rest of
+  that bar — the app has no per-list UI preferences to persist it in.
+
+**Deliberately not built:** per-group subtotals (a view's `group_by` is a sort, not a
+`GROUP BY`, and the strip sits above the grid), standalone metric sharing (no
+`permissions_inherit`, so no new `ResourceType`), a SQL fast path, and any caching. See
+[known gaps §9](known-gaps.md).
+
+---
+
 ## How these compose
 
 - **1 + 2** share one conversion-and-backfill engine; type conversion is best *delivered as* a
@@ -422,3 +491,10 @@ seam. The shape:
 - **8** stands alone and touches none of the data-shape work; its one shared idea is the
   permission boundary — a live signal never carries record data, so every client re-reads
   through the endpoint that already enforces `item_view_filter`.
+- **9** inherits that same boundary — a total is a permissioned read of the records, which
+  is why it goes through the grid's own statement — and rides **8**'s refresh interval, so
+  the cards stay in step with the rows they describe. Its formula language extends the one
+  `calculated` columns already had rather than adding a second, which is the reverse of the
+  **1 + 2** relationship: those two share an engine because they do the same thing to
+  different columns; this shares an engine because it does a *different* thing to the same
+  expressions.
