@@ -141,18 +141,18 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
-## 6. Trash is done everywhere except principals and columns
+## 6. Trash is done everywhere except principals
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
 record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
 past its retention window.
 
-**Views, forms and metrics now have a bin too**, at `/lists/{uuid}/{kind}/deleted` with
+**Views, forms, metrics and columns now have a bin too**, at `/lists/{uuid}/{kind}/deleted` with
 `…/{kind}/{uuid}/restore` and `…/{kind}/{uuid}/permanent` — routes on each child's own
 collection, one shared implementation in `src/lists/bin/services.py`, swept by
 `purge_deleted_list_config`. Before that they were the worst of both: deleting one was
 irreversible *and* kept the row forever, because nothing read `deleted_at` back and no job
-reclaimed it. Two things about that surface are deliberate and worth knowing:
+reclaimed it. Three things about that surface are deliberate and worth knowing:
 
 - **uuid only, never a name.** Every child route is uuid-only now, but the bin could never
   have been anything else: the unique index on `name` is partial (`WHERE deleted_at IS
@@ -162,8 +162,33 @@ reclaimed it. Two things about that surface are deliberate and worth knowing:
 - **Gated on list-level `configure`**, the authority that creates them, because a deleted view
   resolves to no permission context of its own. That makes the bin coarser than the live routes
   for a view whose `permissions_inherit` is False — its recovery belongs to the list configurer.
+- **A column's restore is partial, and says so.** Restoring clears `deleted_at` and nothing
+  else, matching the other three. But deleting a column also nulls the list's
+  `primary_column_id` if it pointed there, and un-nests every lookup whose pairing referenced
+  it — neither comes back. `RestoredColumnRead` reports the first (`list_has_no_primary_column`,
+  read off the list's *current* state, so a primary chosen meanwhile is not flagged). It cannot
+  report the second: the pairing was cleared on the dependents, and an un-paired lookup is
+  indistinguishable from one that never had a parent.
 
-**Delete for good exists** for records, lists, workspaces and now these three: a `…/permanent`
+One thing about columns that is easy to get wrong, and worth stating plainly: **deleting a
+column hides its data, it does not erase it.** The values stay under the column's uuid in every
+record's `data` — which is exactly what makes the restore a real undo — and nothing but
+`…/permanent` or the purge job removes them.
+
+Readers no longer see them: `shape_values` drops any key with no live column, so a record's
+payload matches its schema. That is a deliberate pairing rather than a redundancy. Until it was
+added, a deleted column's values kept arriving in every record payload while the field itself
+had vanished from the UI, so "delete the column" looked like it hid something and did not.
+Filtering fixes the leak but makes the remaining hazard quieter, not smaller: someone deleting
+a column to get rid of sensitive values now sees exactly what they expect to see, and the
+values are still on the rows. `…/permanent` is the only thing that ends that.
+
+Filtering is safe against write-back because an update merges onto the *stored* dict
+(`_validate_data` starts from `dict(existing)`) and `_shape_for_read` assigns through
+`set_committed_value` and never flushes — so a client that reads a filtered record and PATCHes
+it cannot erase what it was not shown (`test_writing_a_record_does_not_erase_a_deleted_columns_values`).
+
+**Delete for good exists** for records, lists, workspaces and now these four: a `…/permanent`
 route on each, valid only from the bin, so destroying something is always two deliberate steps
 (`test_permanent_delete.py`, `test_list_config_bin.py`). Each clears its target's grants itself,
 because nothing else can once the row is gone (gap 3).
@@ -191,14 +216,8 @@ What is still missing:
   administration (unlike records, which are the workspace owner's), so a principal trash is a
   *separate* surface with a *different* authority — `require_superuser`, not list ownership —
   and probably its own page. Not folded into the per-list records bin.
-- **Columns have no bin, and the reason is the data behind them.** A record keeps a deleted
-  column's values in its `data` JSONB — deleting a column hides them, it does not erase them —
-  so restoring one un-hides data that may have been hidden on purpose, and destroying one has
-  to strip that key from every row it appears in. Neither half is the same decision as
-  restoring a saved view, which is why the bin covers three children and not four. No job
-  reclaims a soft-deleted column either, so those rows still accumulate.
-- **The views/forms/metrics bin has no UI.** It is API-only; `DeletedRecordsDialog`,
-  `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these three.
+- **The views/forms/metrics/columns bin has no UI.** It is API-only; `DeletedRecordsDialog`,
+  `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these four.
 - **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
   its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
   `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back

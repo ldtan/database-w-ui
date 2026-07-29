@@ -34,8 +34,14 @@ PAYLOADS = {
         "display_name": "Row count",
         "config": {"formula": "COUNT()"},
     },
+    "columns": {
+        "name": "notes",
+        "display_name": "Notes",
+        "type": "text",
+        "config": {},
+    },
 }
-MODELS = {"views": View, "forms": Form, "metrics": Metric}
+MODELS = {"views": View, "forms": Form, "metrics": Metric, "columns": Column}
 
 
 @pytest_asyncio.fixture
@@ -87,9 +93,9 @@ async def test_only_rows_past_the_window_are_destroyed(
         await _age(session_factory, MODELS[kind], old[kind], days=45)
 
     planned = await purge(days=30, dry_run=True)
-    assert planned == 3  # one of each kind
+    assert planned == 4  # one of each kind
 
-    assert await purge(days=30) == 3
+    assert await purge(days=30) == 4
 
     # The freshly deleted ones are still in their bins, restorable.
     for kind in PAYLOADS:
@@ -203,6 +209,99 @@ async def test_a_zero_day_window_purges_everything_deleted(
             await client.delete(f"/api/lists/{list_uuid}/{kind}/{uuid}")
         ).status_code == 204
 
-    assert await purge(days=0) == 3
+    assert await purge(days=0) == 4
     for kind in PAYLOADS:
         assert (await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")).json() == []
+
+
+async def test_purging_a_column_strips_its_values_from_every_record(
+    client, session_factory, list_uuid
+):
+    """The job's one data-touching step, and the case a naive join gets wrong.
+
+    Two doomed columns of the *same* list land in one batch. `UPDATE ... FROM columns`
+    joined per-column would pick a single join partner per record and leave one of the
+    two keys behind, so the statement groups by list and removes an array of keys.
+    """
+    first = await _create(client, list_uuid, "columns")
+    second = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/",
+            json={
+                "name": "second",
+                "display_name": "Second",
+                "type": "text",
+                "config": {},
+            },
+        )
+    ).json()["uuid"]
+    keeper = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/",
+            json={
+                "name": "keeper",
+                "display_name": "Keeper",
+                "type": "text",
+                "config": {},
+            },
+        )
+    ).json()["uuid"]
+
+    item_uuid = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {first: "a", second: "b", keeper: "c"}},
+        )
+    ).json()["uuid"]
+
+    for column in (first, second):
+        assert (
+            await client.delete(f"/api/lists/{list_uuid}/columns/{column}")
+        ).status_code == 204
+        await _age(session_factory, Column, column, days=45)
+
+    assert await purge(days=30) == 2
+
+    data = (
+        await client.get(f"/api/lists/{list_uuid}/items/{item_uuid}")
+    ).json()["data"]
+    assert first not in data
+    assert second not in data  # both, not whichever the planner happened to pick
+    assert data[keeper] == "c"
+
+
+async def test_a_columns_values_survive_while_it_is_still_restorable(
+    client, session_factory, list_uuid
+):
+    """Stripping is the *purge*'s job, not the delete's. While a column sits in the
+    bin its values stay on the row, which is what makes the restore a real undo.
+
+    Checked against storage rather than the API: `shape_values` drops keys with no live
+    column, so a deleted column's values are invisible over HTTP whether they are still
+    there or not. Only the row can answer this one.
+    """
+    column = await _create(client, list_uuid, "columns")
+    item_uuid = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {column: "still here"}}
+        )
+    ).json()["uuid"]
+    assert (
+        await client.delete(f"/api/lists/{list_uuid}/columns/{column}")
+    ).status_code == 204
+
+    # Inside the window, so a normal run leaves it entirely alone.
+    assert await purge(days=30) == 0
+    async with session_factory() as db:
+        row = (
+            await db.execute(select(ListItem).where(ListItem.uuid == item_uuid))
+        ).scalars().first()
+        assert row.data[column] == "still here"
+
+    # And the restore is a real undo, values included and served again.
+    restored = await client.post(f"/api/lists/{list_uuid}/columns/{column}/restore")
+    assert restored.status_code == 200, restored.text
+    data = (
+        await client.get(f"/api/lists/{list_uuid}/items/{item_uuid}")
+    ).json()["data"]
+    assert data[column] == "still here"

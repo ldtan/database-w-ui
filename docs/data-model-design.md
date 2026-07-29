@@ -373,7 +373,10 @@ Indexing & querying:
 - Add a **GIN index** on `data` to support filtering.
 - Filtering/sorting on JSONB is slower than native columns — acceptable for this tier;
   do not promise Airtable-scale performance on very large lists.
-- When a column is deleted, its key can be left in `data` (harmless) or lazily pruned.
+- When a column is deleted its key is **left in `data`**, which is what makes a restore a real
+  undo. Readers do not see it: `shape_values` drops keys with no live column, so a payload
+  matches the schema. The values are hidden, not gone — `DELETE /columns/{uuid}/permanent` and
+  the purge job behind it are the only things that remove them.
 - When a lookup target row is deleted, referring records would otherwise hold a **stale
   uuid** (there is no FK, per D4). **Implemented:** deleting a `list_item` scrubs its uuid
   from every lookup column that targets its list — clearing single values and filtering it

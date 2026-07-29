@@ -1,18 +1,22 @@
-"""The bin for a list's views, forms and metrics.
+"""The bin for a list's views, forms, metrics and columns.
 
-These three are siblings -- list-scoped, named, ordered, with their behaviour in a
-JSONB ``config`` -- and deleting one has always only set ``deleted_at``, like
-everything else here. Nothing ever read that back. There was no way to recover one
-through the API and no job to reclaim the row, so a deleted view sat in its table
-forever, invisible and permanent at the same time. This module is the other half.
+All four are siblings -- list-scoped, named, ordered -- and deleting one has always
+only set ``deleted_at``, like everything else here. Nothing ever read that back. There
+was no way to recover one through the API and no job to reclaim the row, so a deleted
+view sat in its table forever, invisible and permanent at the same time. This module
+is the other half.
 
-Written once against a model rather than three times over, because the three differ
-in exactly one respect that matters to a bin: a view or a form can be a grant target
-(``permission_grants.resource_type``), and a metric never is -- it is always its
-list's. That is the ``ResourceType`` in ``_KINDS``, and it is what decides whether a
-permanent delete has grants to clear. The routes live on each child's own collection
-beside the live ones and pass their model in; this module is what keeps the three
-from drifting apart.
+Written once against a model rather than four times over. Two things differ per kind
+and both live in ``_KINDS``: whether the row can be a grant target
+(``permission_grants.resource_type`` -- a view or form can, a metric or column never
+can), which decides whether a permanent delete has grants to clear; and the noun for
+its error messages. The routes live on each child's own collection beside the live
+ones and pass their model in; this module is what keeps the four from drifting apart.
+
+**A column is the odd one.** The other three are pure config and own nothing; a
+column's values sit under its uuid in every record's ``data``. So ``purge`` has a
+branch for it, and its restore reports what did not come back with it -- see
+``RestoredColumnRead``.
 
 **Every one of these routes is gated on list-level ``configure``** -- the authority
 that creates these three, and the only one that can still be resolved once they are
@@ -23,13 +27,8 @@ list-level ``delete`` for the same reason. It does mean the bin is coarser than 
 live routes for a view whose ``permissions_inherit`` is False: it was visible to
 fewer people than the list, and its recovery is the list configurer's.
 
-**Records and columns are deliberately absent**, for different reasons. Records have
-a bin already, older and shaped around per-record permissions, at
-``/lists/{uuid}/items/deleted``. Columns are schema rather than config: a record
-keeps a deleted column's values in its ``data`` JSONB, so restoring a column un-hides
-data that may have been hidden on purpose, and destroying one has to strip that key
-from every row it appears in. That is a different decision from restoring a saved
-view, and it is not this surface's to make.
+**Records are deliberately absent.** They have a bin of their own already, older and
+shaped around per-record permissions, at ``/lists/{uuid}/items/deleted``.
 
 **Only children binned on their own appear here.** These routes resolve a *live*
 list, and a list delete stamps every child with the list's own ``deleted_at`` and
@@ -51,6 +50,7 @@ from src.core.exceptions import ConflictError
 from src.core.utils import coerce_uuid
 from src.permissions.enums import ResourceType
 
+from ..columns.models import Column
 from ..forms.models import Form
 from ..metrics.models import Metric
 from ..views.models import View
@@ -61,7 +61,17 @@ _KINDS = {
     View: (ResourceType.view, "view"),
     Form: (ResourceType.form, "form"),
     Metric: (None, "metric"),
+    Column: (None, "column"),
 }
+
+# Drops one key from every record on the list. `jsonb_exists` rather than `data ? :key`
+# so no bare `?` reaches the driver, and so untouched rows are never rewritten.
+_STRIP_COLUMN_FROM_RECORDS = """
+    UPDATE list_items
+       SET data = data - :key
+     WHERE list_id = :list_id
+       AND jsonb_exists(data, :key)
+"""
 
 
 def _cutoff() -> datetime:
@@ -173,6 +183,15 @@ async def purge(
     at its resource polymorphically with no foreign key, so nothing cascades: while
     the row is soft-deleted its grants are inert, and hard-deleting it is precisely
     what would turn them into orphans pointing at a reused id.
+
+    **A column also takes its data.** The other three own no records; a column's values
+    live under its uuid in every record's ``data``, and deleting the column never
+    touched them -- ``shape_values`` stops serving them, which is what makes them
+    hidden, but nothing removes them. Dropping the row without dropping the keys would
+    strand that data permanently: no live column to read it through, no route to reach
+    it, and no way to delete it afterwards because nothing would name it. This is the
+    only surface that can free it, which is most of why a column bin is worth having
+    at all.
     """
     row = await get_deleted(db, model, list_id, uuid)
     if row is None:
@@ -186,6 +205,12 @@ async def purge(
                 "WHERE resource_type = :rt AND resource_id = :rid"
             ),
             {"rt": resource_type.value, "rid": row.id},
+        )
+    if model is Column:
+        # Before the row goes, while its uuid is still known.
+        await db.execute(
+            sa.text(_STRIP_COLUMN_FROM_RECORDS),
+            {"key": str(row.uuid), "list_id": list_id},
         )
     await db.execute(sa.delete(model).where(model.id == row.id))
     await db.commit()
