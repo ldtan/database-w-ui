@@ -1074,25 +1074,6 @@ class ListItemService:
         return resolved if multiple else resolved[0]
 
     @classmethod
-    async def scrub_principal_references(
-        cls, db: AsyncSession, column_type: ColumnType, principal_uuid: UUID
-    ) -> None:
-        """Drop references to a deleted user/group from every record that holds one.
-
-        These are soft references (a uuid in JSONB, no FK), so nothing cleans them
-        up automatically — the same trade lookup makes, and the same fix. Called
-        from UserService.delete / UserGroupService.delete; does not commit.
-        """
-        columns = (
-            await db.execute(
-                select(Column).where(
-                    Column.type == column_type, Column.deleted_at.is_(None)
-                )
-            )
-        ).scalars().all()
-        await cls._drop_reference(db, columns, str(principal_uuid))
-
-    @classmethod
     async def _validate_lookup(
         cls, db: AsyncSession, lst: List, column: Column, value, kept: set = frozenset()
     ):

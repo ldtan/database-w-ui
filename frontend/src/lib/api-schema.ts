@@ -153,6 +153,27 @@ export interface paths {
         patch: operations["update_my_settings_api_auth_users_me_settings_patch"];
         trace?: never;
     };
+    "/api/auth/users/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Users
+         * @description Accounts still inside the retention window — see src.auth.users.bin for why
+         *     this is superuser-only rather than gated on the data the account could reach.
+         */
+        get: operations["list_deleted_users_api_auth_users_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/users/{uuid}": {
         parameters: {
             query?: never;
@@ -172,6 +193,56 @@ export interface paths {
         patch: operations["update_user_api_auth_users__uuid__patch"];
         trace?: never;
     };
+    "/api/auth/users/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore User
+         * @description Bring a deleted account back, group memberships and all.
+         *
+         *     A real undo: the account keeps its uuid, so every `user` cell naming it resolves
+         *     again on its own, and its memberships were never thrown away — reads filtered them
+         *     while it was gone. See src.auth.users.bin.
+         */
+        post: operations["restore_user_api_auth_users__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/users/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge User
+         * @description Destroy a binned account for good, with its grants, profile and tokens.
+         *
+         *     Only something already in the bin can be purged, so this is always two deliberate
+         *     steps. **409 while the account still owns workspaces** — `workspaces.owner_id` is
+         *     a non-null foreign key, so the alternative to refusing is taking that data down
+         *     with the account. Reassign or delete them first; the workspace bin is where a
+         *     deleted one is dealt with.
+         */
+        delete: operations["purge_user_api_auth_users__uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/groups/": {
         parameters: {
             query?: never;
@@ -184,6 +255,23 @@ export interface paths {
         put?: never;
         /** Create Group */
         post: operations["create_group_api_auth_groups__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/groups/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Deleted Groups */
+        get: operations["list_deleted_groups_api_auth_groups_deleted_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -207,6 +295,54 @@ export interface paths {
         head?: never;
         /** Update Group */
         patch: operations["update_group_api_auth_groups__uuid__patch"];
+        trace?: never;
+    };
+    "/api/auth/groups/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Group
+         * @description Bring a deleted group back, members and all.
+         *
+         *     **This is the sharp edge of the bin and the reason it is superuser-only.** The
+         *     group keeps its id, so every grant naming it applies again the moment it is live —
+         *     and its membership survived the delete, so those grants reach the same people they
+         *     did before. Restoring a group is handing back access, not just a row.
+         */
+        post: operations["restore_group_api_auth_groups__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/auth/groups/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Group
+         * @description Destroy a binned group for good, with its grants and membership rows.
+         *
+         *     Nothing blocks this the way owned workspaces block an account: a group is only
+         *     ever a principal, never an owner.
+         */
+        delete: operations["purge_group_api_auth_groups__uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/workspaces/": {
@@ -1208,6 +1344,32 @@ export interface components {
             display_name: string;
             /** Description */
             description?: string | null;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+        };
+        /**
+         * BinnedPrincipalRead
+         * @description One soft-deleted account or group.
+         *
+         *     Narrower than the live read schemas and the same shape for both, like
+         *     `BinnedChildRead`. A bin row exists to be recognised and then restored or
+         *     destroyed, so it carries what identifies it and when it went. `members` is
+         *     deliberately absent rather than empty: the delete cleared them, so showing a
+         *     membership list here would show nothing and imply there had been nothing.
+         */
+        BinnedPrincipalRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Detail */
+            detail?: string | null;
             /**
              * Deleted At
              * Format: date-time
@@ -2613,6 +2775,38 @@ export interface operations {
             };
         };
     };
+    list_deleted_users_api_auth_users_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedPrincipalRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_user_api_auth_users__uuid__get: {
         parameters: {
             query?: never;
@@ -2708,6 +2902,66 @@ export interface operations {
             };
         };
     };
+    restore_user_api_auth_users__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_user_api_auth_users__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_groups_api_auth_groups__get: {
         parameters: {
             query?: {
@@ -2764,6 +3018,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UserGroupRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_deleted_groups_api_auth_groups_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedPrincipalRead"][];
                 };
             };
             /** @description Validation Error */
@@ -2860,6 +3146,66 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["UserGroupRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_group_api_auth_groups__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserGroupRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_group_api_auth_groups__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

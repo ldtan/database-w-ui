@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Any, Literal, Optional, List, get_args
 from uuid import UUID
 from zoneinfo import available_timezones
@@ -167,6 +168,27 @@ class UserRead(UserBase):
     # Deleted accounts come back only when a caller resolves a uuid one of its
     # records already holds, so the cell can render "(deleted)" rather than a raw id.
     is_deleted: bool = False
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BinnedPrincipalRead(BaseModel):
+    """One soft-deleted account or group.
+
+    Narrower than the live read schemas and the same shape for both, like
+    `BinnedChildRead`. A bin row exists to be recognised and then restored or
+    destroyed, so it carries what identifies it and when it went. `members` is
+    deliberately absent rather than empty: the delete cleared them, so showing a
+    membership list here would show nothing and imply there had been nothing.
+    """
+
+    uuid: UUID
+    # `username` for an account, `name` for a group — the label each is known by.
+    name: str
+    # Email for an account, description for a group. Enough to tell two similar rows
+    # apart before restoring one.
+    detail: Optional[str] = None
+    deleted_at: datetime
+
     model_config = ConfigDict(from_attributes=True)
 
 

@@ -109,9 +109,21 @@ class PermissionService:
         # Query membership directly rather than touching user.groups: under asyncpg
         # a lazy relationship load outside the greenlet raises MissingGreenlet, and
         # the DISABLE_AUTH user isn't loaded with groups eager-loaded.
+        #
+        # The join to `user_groups` is what keeps a deleted group inert. Deleting one
+        # used to drop its membership rows, so this needed no filter; they are kept now
+        # so a restore can put the group back whole (src/auth/users/bin.py), which
+        # means the rows outlive the group and the liveness check has to happen here.
+        # Without it, deleting a group would leave every grant it holds still reaching
+        # its members.
         rows = await db.execute(
-            select(user_group_association.c.group_id).where(
-                user_group_association.c.user_id == user_id
+            select(user_group_association.c.group_id)
+            .join(
+                UserGroup, UserGroup.id == user_group_association.c.group_id
+            )
+            .where(
+                user_group_association.c.user_id == user_id,
+                UserGroup.deleted_at.is_(None),
             )
         )
         ids = [row[0] for row in rows.all()]

@@ -8,11 +8,18 @@ the record. This job is what makes it permanent, after `PURGE_DELETED_AFTER_DAYS
     uv run python -m src.maintenance.purge_deleted_principals
 
 It clears their references and deletes their permission grants. **It does not delete
-the rows.** A user owns workspaces (`workspaces.owner_id` is a real foreign key), so
-destroying the row means answering "who owns their data now?" — a question with no
-safe default and no UI to ask it. The soft-deleted row stays: it is inert, it costs a
-few bytes, and it keeps every foreign key honest. Purging accounts properly needs an
-ownership-transfer story first.
+the rows**, and that is still deliberate. A user owns workspaces
+(`workspaces.owner_id` is a real foreign key), so destroying the row unattended means
+answering "who owns their data now?" — a question with no safe default. The
+soft-deleted row stays: it is inert, it costs a few bytes, and it keeps every foreign
+key honest.
+
+Destroying one is a *person's* decision now rather than a missing feature. The
+principal bin (`src/auth/users/bin.py`, `…/permanent` on both collections) will do it,
+and answers the ownership question by refusing while any workspace still names the
+account — including a soft-deleted one, which holds the key just the same. So the
+order is always: deal with the workspaces, then destroy the account. This job stays
+unattended and therefore stays out of it.
 """
 import argparse
 import asyncio
