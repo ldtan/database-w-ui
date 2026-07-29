@@ -94,8 +94,11 @@ export function ThemeSync() {
     if (previous.mode !== mode) patch.mode = mode;
     // Recorded before the request, not after: the PATCH resolving updates the cached
     // user, which re-runs this effect, and without this it would queue a second
-    // identical write.
-    serverValue.current = { theme, mode };
+    // identical write. Spread over `previous` rather than rebuilt from the two fields
+    // this component owns — the blob holds settings it knows nothing about (the
+    // timezone TimezoneSync reports), and the endpoint merges, so what the server
+    // holds afterwards is the old value with these two keys replaced.
+    serverValue.current = { ...previous, theme, mode };
     api
       .patch<ApiUser>("/auth/users/me/settings", patch)
       .then((user) => queryClient.setQueryData(["me"], user))

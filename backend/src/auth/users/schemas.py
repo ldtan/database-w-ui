@@ -1,5 +1,6 @@
 from typing import Any, Literal, Optional, List, get_args
 from uuid import UUID
+from zoneinfo import available_timezones
 
 from pydantic import (
     BaseModel,
@@ -20,7 +21,18 @@ from src.core.schemas import ResourceLink
 ThemeId = Literal["modern", "nordic", "brutalist", "luxury"]
 ThemeMode = Literal["light", "dark"]
 
-_SETTING_VALUES = {"theme": set(get_args(ThemeId)), "mode": set(get_args(ThemeMode))}
+# Not spelled as a Literal like the two above: an IANA zone id comes from a set of
+# several hundred that the tz database revises a few times a year, so it is checked
+# against zoneinfo rather than pinned in the type. Resolved once at import — the
+# lookup walks the tz database directory. An id, never a fixed offset: "+08:00"
+# stops being true the next time the zone's DST rules change.
+_TIMEZONES = available_timezones()
+
+_SETTING_VALUES = {
+    "theme": set(get_args(ThemeId)),
+    "mode": set(get_args(ThemeMode)),
+    "timezone": _TIMEZONES,
+}
 
 
 class UserSettings(BaseModel):
@@ -36,6 +48,18 @@ class UserSettings(BaseModel):
 
     theme: ThemeId = "modern"
     mode: ThemeMode = "light"
+    # Where this account's "today" falls, for resolving a `today`/`now` column
+    # default on the user's calendar instead of the server's (see
+    # lists.columns.validation.resolve_dynamic_default). TimezoneSync reports the
+    # browser's on load, so this is the value only until the user first appears.
+    #
+    # Defaulted rather than Optional, for the same reason theme and mode are: a null
+    # default is what openapi-typescript reads as "may be absent", and the frontend's
+    # Response<> in lib/types.ts — which promises every response field is present —
+    # is shallow, so a nullable field here becomes an `undefined` the callers have to
+    # thread through. Nothing needs to tell "never reported" from "reported UTC":
+    # both resolve to UTC, which is where the server would have stamped anyway.
+    timezone: str = "UTC"
     model_config = ConfigDict(extra="ignore")
 
     @model_validator(mode="before")
@@ -73,9 +97,25 @@ class UserSettingsUpdate(BaseModel):
 
     theme: Optional[ThemeId] = None
     mode: Optional[ThemeMode] = None
+    timezone: Optional[str] = None
     model_config = ConfigDict(extra="forbid")
 
-    @field_validator("theme", "mode", mode="before")
+    @field_validator("timezone")
+    @classmethod
+    def _known_zone(cls, value: Any) -> Any:
+        """Refuse a zone this build's tz database cannot resolve.
+
+        `theme` and `mode` get this for free from their Literal types; a zone id is
+        an open set, so the check is explicit. Loudly, because the failure it
+        prevents is silent: an unresolvable id falls back to UTC every time a
+        `today` default is stamped, which looks like working software right up
+        until someone's record is dated yesterday.
+        """
+        if value is not None and value not in _TIMEZONES:
+            raise ValueError(f"'{value}' is not a known IANA timezone")
+        return value
+
+    @field_validator("theme", "mode", "timezone", mode="before")
     @classmethod
     def _reject_explicit_null(cls, value: Any) -> Any:
         """`None` means "not sent", so it must not be sendable.

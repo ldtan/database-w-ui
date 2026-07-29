@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import { useAuth } from "./lib/auth";
 import { ThemeSync } from "./lib/themeSync";
+import { TimezoneSync } from "./lib/timezoneSync";
 import { AppLayout } from "./components/AppLayout";
 import { LoginPage } from "./features/auth/LoginPage";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
@@ -21,10 +22,13 @@ function RequireAuth({ children }: { children: ReactNode }) {
 export function App() {
   return (
     <>
-      {/* Renders nothing; inside AuthProvider so it can reconcile the device's
-          theme with the account's. Outside <Routes> so a navigation cannot
-          unmount it mid-save. */}
+      {/* Both render nothing; inside AuthProvider so they can reach the account,
+          outside <Routes> so a navigation cannot unmount them mid-save. ThemeSync
+          reconciles this device's theme with the account's; TimezoneSync tells the
+          account which zone this browser is in, so the server can stamp a `today`
+          default on the user's calendar. */}
       <ThemeSync />
+      <TimezoneSync />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
