@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,19 +21,19 @@ router = APIRouter(prefix="/{list_uuid}/views", tags=["views"])
 
 
 async def _visible_or_404(
-    db: AsyncSession, current_user: User, lst: List, ref: str
+    db: AsyncSession, current_user: User, lst: List, uuid: UUID
 ) -> View:
-    """The view this ref names, or 404 — including when it exists but is not the
+    """The view with this uuid, or 404 — including when it exists but is not the
     caller's to see.
 
-    A 403 would answer "a view by that name exists" to anyone who can reach the
-    list, and a view can be restricted further than its list is. That was harmless
-    while the only way to ask was an unguessable uuid; now that `ref` may be a name
-    (see src.lists.refs), it would be an enumeration oracle. `list_views` already
-    omits the views the caller cannot see, so "not found" is the answer that matches
-    everything else they can observe.
+    A 403 would answer "a view with this uuid exists" to anyone who can reach the
+    list, and a view can be restricted further than its list is. A uuid is not
+    guessable, so that admission buys an attacker nothing; the 404 stays because
+    `list_views` already omits the views the caller cannot see, and one route
+    calling a view absent while another calls it forbidden is a distinction that
+    only ever confuses.
     """
-    view = await ViewService.get_by_ref(db, lst.id, ref)
+    view = await ViewService.get_by_uuid(db, lst.id, uuid)
     if view is None or not await PermissionService.has(
         db, current_user, ResourceType.view, view.id, Action.view
     ):
@@ -66,25 +68,25 @@ async def list_views(
     return await ViewService.list(db, lst.id, current_user)
 
 
-@router.get("/{ref}", response_model=ViewRead)
+@router.get("/{uuid}", response_model=ViewRead)
 async def get_view(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await _visible_or_404(db, current_user, lst, ref)
+    return await _visible_or_404(db, current_user, lst, uuid)
 
 
-@router.patch("/{ref}", response_model=ViewRead)
+@router.patch("/{uuid}", response_model=ViewRead)
 async def update_view(
-    ref: str,
+    uuid: UUID,
     payload: ViewUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await _visible_or_404(db, current_user, lst, ref)
+    view = await _visible_or_404(db, current_user, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.view, view.id, Action.configure
     )
@@ -104,14 +106,14 @@ async def update_view(
     return view
 
 
-@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_view(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    view = await _visible_or_404(db, current_user, lst, ref)
+    view = await _visible_or_404(db, current_user, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.view, view.id, Action.configure
     )

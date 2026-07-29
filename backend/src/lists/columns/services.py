@@ -14,7 +14,6 @@ from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from ..items.models import ListItem
 from ..models import List
-from ..refs import get_by_ref
 from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
@@ -48,13 +47,6 @@ class ColumnService:
             return None
         result = await db.execute(cls._select(list_id).where(Column.uuid == parsed))
         return result.scalars().first()
-
-    @classmethod
-    async def get_by_ref(
-        cls, db: AsyncSession, list_id: int, ref: Union[str, UUID]
-    ) -> Optional[Column]:
-        """A column addressed by uuid or by name — see src.lists.refs."""
-        return await get_by_ref(db, Column, list_id, ref)
 
     @classmethod
     async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Column]:

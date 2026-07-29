@@ -1,12 +1,11 @@
 """Bin routes for a list's views, forms and metrics.
 
-Mounted at ``/lists/{list_uuid}/bin/{kind}`` rather than under each child collection,
-because ``/lists/{list_uuid}/views/deleted`` is not safe here the way
-``/lists/{list_uuid}/items/deleted`` is. Records are addressed by uuid alone, so no
-record can be called ``deleted``; a view, form or metric is addressed by uuid *or*
-name (src.lists.refs), ``deleted`` is a perfectly legal name, and that route would
-silently shadow anyone who had used it. A fixed segment under the list collides with
-nothing and needs no name reserved to stay that way.
+Mounted at ``/lists/{list_uuid}/bin/{kind}`` rather than under each child collection.
+That was forced while a view, form or metric could be addressed by name: ``deleted``
+is a legal name, so ``/lists/{list_uuid}/views/deleted`` would have silently shadowed
+anyone who used it, where ``/lists/{list_uuid}/items/deleted`` was safe because
+records are uuid-only. Every child is uuid-only now, so the hazard is gone and these
+routes belong under their own collections — folding them back is the next step.
 
 Gated on list-level ``configure`` -- the authority that creates these three and the
 only one that can still be resolved once they are deleted. A soft-deleted view has no

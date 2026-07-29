@@ -108,9 +108,13 @@ async def test_create_list_get_patch_and_delete(client, timesheet):
     listing = await client.get(f"/api/lists/{lst}/metrics/")
     assert [s["name"] for s in listing.json()] == ["total_hours"]
 
-    # Addressable by name as well as uuid, like every other child of a list.
-    by_name = await client.get(f"/api/lists/{lst}/metrics/total_hours")
-    assert by_name.json()["uuid"] == uuid
+    # Addressed by uuid alone, like every other child of a list. A name is not a
+    # uuid, so it is rejected rather than resolved.
+    by_uuid = await client.get(f"/api/lists/{lst}/metrics/{uuid}")
+    assert by_uuid.json()["uuid"] == uuid
+    assert (
+        await client.get(f"/api/lists/{lst}/metrics/total_hours")
+    ).status_code == 422
 
     patched = await client.patch(
         f"/api/lists/{lst}/metrics/{uuid}",

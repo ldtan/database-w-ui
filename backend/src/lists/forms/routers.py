@@ -1,3 +1,5 @@
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -19,19 +21,19 @@ router = APIRouter(prefix="/{list_uuid}/forms", tags=["forms"])
 
 
 async def _visible_or_404(
-    db: AsyncSession, current_user: User, lst: List, ref: str
+    db: AsyncSession, current_user: User, lst: List, uuid: UUID
 ) -> Form:
-    """The form this ref names, or 404 — including when it exists but is not the
+    """The form with this uuid, or 404 — including when it exists but is not the
     caller's to see.
 
-    A 403 would answer "a form by that name exists" to anyone who can reach the
-    list, and a form can be restricted further than its list is. That was harmless
-    while the only way to ask was an unguessable uuid; now that `ref` may be a name
-    (see src.lists.refs), it would be an enumeration oracle. `list_forms` already
-    omits the forms the caller cannot see, so "not found" is the answer that matches
-    everything else they can observe.
+    A 403 would answer "a form with this uuid exists" to anyone who can reach the
+    list, and a form can be restricted further than its list is. A uuid is not
+    guessable, so that admission buys an attacker nothing; the 404 stays because
+    `list_forms` already omits the forms the caller cannot see, and one route
+    calling a form absent while another calls it forbidden is a distinction that
+    only ever confuses.
     """
-    form = await FormService.get_by_ref(db, lst.id, ref)
+    form = await FormService.get_by_uuid(db, lst.id, uuid)
     if form is None or not await PermissionService.has(
         db, current_user, ResourceType.form, form.id, Action.view
     ):
@@ -66,25 +68,25 @@ async def list_forms(
     return await FormService.list(db, lst.id, current_user)
 
 
-@router.get("/{ref}", response_model=FormRead)
+@router.get("/{uuid}", response_model=FormRead)
 async def get_form(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return await _visible_or_404(db, current_user, lst, ref)
+    return await _visible_or_404(db, current_user, lst, uuid)
 
 
-@router.patch("/{ref}", response_model=FormRead)
+@router.patch("/{uuid}", response_model=FormRead)
 async def update_form(
-    ref: str,
+    uuid: UUID,
     payload: FormUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await _visible_or_404(db, current_user, lst, ref)
+    form = await _visible_or_404(db, current_user, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.form, form.id, Action.configure
     )
@@ -104,14 +106,14 @@ async def update_form(
     return form
 
 
-@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_form(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    form = await _visible_or_404(db, current_user, lst, ref)
+    form = await _visible_or_404(db, current_user, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.form, form.id, Action.configure
     )

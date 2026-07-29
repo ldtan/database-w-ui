@@ -472,7 +472,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/columns/{ref}": {
+    "/api/lists/{list_uuid}/columns/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -480,18 +480,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get Column */
-        get: operations["get_column_api_lists__list_uuid__columns__ref__get"];
+        get: operations["get_column_api_lists__list_uuid__columns__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Column */
-        delete: operations["delete_column_api_lists__list_uuid__columns__ref__delete"];
+        delete: operations["delete_column_api_lists__list_uuid__columns__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Column */
-        patch: operations["update_column_api_lists__list_uuid__columns__ref__patch"];
+        patch: operations["update_column_api_lists__list_uuid__columns__uuid__patch"];
         trace?: never;
     };
-    "/api/lists/{list_uuid}/columns/{ref}/options": {
+    "/api/lists/{list_uuid}/columns/{uuid}/options": {
         parameters: {
             query?: never;
             header?: never;
@@ -506,7 +506,7 @@ export interface paths {
          *     through it — so neither has to fetch a whole target list, which stops working
          *     once the target has more rows than the fetch's limit.
          */
-        get: operations["lookup_options_api_lists__list_uuid__columns__ref__options_get"];
+        get: operations["lookup_options_api_lists__list_uuid__columns__uuid__options_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -655,7 +655,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/views/{ref}": {
+    "/api/lists/{list_uuid}/views/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -663,15 +663,15 @@ export interface paths {
             cookie?: never;
         };
         /** Get View */
-        get: operations["get_view_api_lists__list_uuid__views__ref__get"];
+        get: operations["get_view_api_lists__list_uuid__views__uuid__get"];
         put?: never;
         post?: never;
         /** Delete View */
-        delete: operations["delete_view_api_lists__list_uuid__views__ref__delete"];
+        delete: operations["delete_view_api_lists__list_uuid__views__uuid__delete"];
         options?: never;
         head?: never;
         /** Update View */
-        patch: operations["update_view_api_lists__list_uuid__views__ref__patch"];
+        patch: operations["update_view_api_lists__list_uuid__views__uuid__patch"];
         trace?: never;
     };
     "/api/lists/{list_uuid}/forms/": {
@@ -692,7 +692,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/forms/{ref}": {
+    "/api/lists/{list_uuid}/forms/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -700,15 +700,15 @@ export interface paths {
             cookie?: never;
         };
         /** Get Form */
-        get: operations["get_form_api_lists__list_uuid__forms__ref__get"];
+        get: operations["get_form_api_lists__list_uuid__forms__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Form */
-        delete: operations["delete_form_api_lists__list_uuid__forms__ref__delete"];
+        delete: operations["delete_form_api_lists__list_uuid__forms__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Form */
-        patch: operations["update_form_api_lists__list_uuid__forms__ref__patch"];
+        patch: operations["update_form_api_lists__list_uuid__forms__uuid__patch"];
         trace?: never;
     };
     "/api/lists/{list_uuid}/metrics/": {
@@ -752,7 +752,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/metrics/{ref}": {
+    "/api/lists/{list_uuid}/metrics/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -760,15 +760,15 @@ export interface paths {
             cookie?: never;
         };
         /** Get Metric */
-        get: operations["get_metric_api_lists__list_uuid__metrics__ref__get"];
+        get: operations["get_metric_api_lists__list_uuid__metrics__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Metric */
-        delete: operations["delete_metric_api_lists__list_uuid__metrics__ref__delete"];
+        delete: operations["delete_metric_api_lists__list_uuid__metrics__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Metric */
-        patch: operations["update_metric_api_lists__list_uuid__metrics__ref__patch"];
+        patch: operations["update_metric_api_lists__list_uuid__metrics__uuid__patch"];
         trace?: never;
     };
     "/api/lists/{list_uuid}/bin/{kind}": {
@@ -3332,12 +3332,12 @@ export interface operations {
             };
         };
     };
-    get_column_api_lists__list_uuid__columns__ref__get: {
+    get_column_api_lists__list_uuid__columns__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3364,12 +3364,12 @@ export interface operations {
             };
         };
     };
-    delete_column_api_lists__list_uuid__columns__ref__delete: {
+    delete_column_api_lists__list_uuid__columns__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3394,12 +3394,12 @@ export interface operations {
             };
         };
     };
-    update_column_api_lists__list_uuid__columns__ref__patch: {
+    update_column_api_lists__list_uuid__columns__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3430,7 +3430,7 @@ export interface operations {
             };
         };
     };
-    lookup_options_api_lists__list_uuid__columns__ref__options_get: {
+    lookup_options_api_lists__list_uuid__columns__uuid__options_get: {
         parameters: {
             query?: {
                 /** @description Match rows by their label */
@@ -3444,7 +3444,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3874,12 +3874,12 @@ export interface operations {
             };
         };
     };
-    get_view_api_lists__list_uuid__views__ref__get: {
+    get_view_api_lists__list_uuid__views__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3906,12 +3906,12 @@ export interface operations {
             };
         };
     };
-    delete_view_api_lists__list_uuid__views__ref__delete: {
+    delete_view_api_lists__list_uuid__views__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3936,12 +3936,12 @@ export interface operations {
             };
         };
     };
-    update_view_api_lists__list_uuid__views__ref__patch: {
+    update_view_api_lists__list_uuid__views__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4038,12 +4038,12 @@ export interface operations {
             };
         };
     };
-    get_form_api_lists__list_uuid__forms__ref__get: {
+    get_form_api_lists__list_uuid__forms__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4070,12 +4070,12 @@ export interface operations {
             };
         };
     };
-    delete_form_api_lists__list_uuid__forms__ref__delete: {
+    delete_form_api_lists__list_uuid__forms__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4100,12 +4100,12 @@ export interface operations {
             };
         };
     };
-    update_form_api_lists__list_uuid__forms__ref__patch: {
+    update_form_api_lists__list_uuid__forms__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4236,12 +4236,12 @@ export interface operations {
             };
         };
     };
-    get_metric_api_lists__list_uuid__metrics__ref__get: {
+    get_metric_api_lists__list_uuid__metrics__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4268,12 +4268,12 @@ export interface operations {
             };
         };
     };
-    delete_metric_api_lists__list_uuid__metrics__ref__delete: {
+    delete_metric_api_lists__list_uuid__metrics__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4298,12 +4298,12 @@ export interface operations {
             };
         };
     };
-    update_metric_api_lists__list_uuid__metrics__ref__patch: {
+    update_metric_api_lists__list_uuid__metrics__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;

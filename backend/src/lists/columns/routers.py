@@ -46,21 +46,24 @@ async def list_columns(
     return await ColumnService.list(db, lst.id)
 
 
-@router.get("/{ref}", response_model=ColumnRead)
+@router.get("/{uuid}", response_model=ColumnRead)
 async def get_column(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
 ):
-    column = await ColumnService.get_by_ref(db, lst.id, ref)
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     return column
 
 
-@router.get("/{ref}/options", response_model=list[LookupOption])
+# The path `uuid` is this column; the query `uuid` (bound to `row_uuid` below) is the
+# rows to resolve. Two parameters of the same name in different places, which OpenAPI
+# keys by name *and* location, so they stay distinct to a generated client.
+@router.get("/{uuid}/options", response_model=list[LookupOption])
 async def lookup_options(
-    ref: str,
+    uuid: UUID,
     q: Optional[str] = Query(None, description="Match rows by their label"),
     row_uuid: Optional[list[UUID]] = Query(
         None,
@@ -92,7 +95,7 @@ async def lookup_options(
     through it — so neither has to fetch a whole target list, which stops working
     once the target has more rows than the fetch's limit.
     """
-    column = await ColumnService.get_by_ref(db, lst.id, ref)
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     try:
@@ -112,9 +115,9 @@ async def lookup_options(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.patch("/{ref}", response_model=ColumnRead)
+@router.patch("/{uuid}", response_model=ColumnRead)
 async def update_column(
-    ref: str,
+    uuid: UUID,
     payload: ColumnUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
@@ -123,7 +126,7 @@ async def update_column(
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
-    column = await ColumnService.get_by_ref(db, lst.id, ref)
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     try:
@@ -138,9 +141,9 @@ async def update_column(
     return column
 
 
-@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_column(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -148,6 +151,6 @@ async def delete_column(
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
-    column = await ColumnService.get_by_ref(db, lst.id, ref)
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
     if column is None or not await ColumnService.delete(db, lst, column.uuid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")

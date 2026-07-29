@@ -1,4 +1,5 @@
 from typing import Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,15 +21,15 @@ from .services import MetricService
 router = APIRouter(prefix="/{list_uuid}/metrics", tags=["metrics"])
 
 
-async def _or_404(db: AsyncSession, lst: List, ref: str) -> Metric:
-    """The metric this ref names, or 404.
+async def _or_404(db: AsyncSession, lst: List, uuid: UUID) -> Metric:
+    """The metric with this uuid, or 404.
 
     No visibility check of its own, unlike views and forms: a metric carries no
     permissions separate from its list, so reaching this route is the whole gate
-    and there is nothing a guessed name could confirm that `list_metrics` does
-    not already show.
+    and there is nothing this could confirm that `list_metrics` does not already
+    show.
     """
-    metric = await MetricService.get_by_ref(db, lst.id, ref)
+    metric = await MetricService.get_by_uuid(db, lst.id, uuid)
     if metric is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Metric not found"
@@ -62,7 +63,10 @@ async def list_metrics(
     return await MetricService.list(db, lst.id)
 
 
-# Declared before `/{ref}`, or the static segment would be read as a metric name.
+# Declared before `/{uuid}`. Names no longer compete for the segment, but ordering
+# still decides the route: FastAPI matches on path *shape* and validates afterwards,
+# so a later `/values` would be captured by `/{uuid}` and rejected as a malformed
+# uuid rather than reaching this.
 @router.get("/values", response_model=MetricValues)
 async def metric_values(
     view_uuid: Optional[str] = Query(default=None),
@@ -79,24 +83,24 @@ async def metric_values(
     return await MetricService.evaluate(db, lst, current_user, view_uuid, q)
 
 
-@router.get("/{ref}", response_model=MetricRead)
+@router.get("/{uuid}", response_model=MetricRead)
 async def get_metric(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _or_404(db, lst, ref)
+    return await _or_404(db, lst, uuid)
 
 
-@router.patch("/{ref}", response_model=MetricRead)
+@router.patch("/{uuid}", response_model=MetricRead)
 async def update_metric(
-    ref: str,
+    uuid: UUID,
     payload: MetricUpdate,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    metric = await _or_404(db, lst, ref)
+    metric = await _or_404(db, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
@@ -114,14 +118,14 @@ async def update_metric(
     return updated
 
 
-@router.delete("/{ref}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_metric(
-    ref: str,
+    uuid: UUID,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    metric = await _or_404(db, lst, ref)
+    metric = await _or_404(db, lst, uuid)
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )

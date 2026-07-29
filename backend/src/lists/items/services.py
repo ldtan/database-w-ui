@@ -27,8 +27,6 @@ from ..columns.models import Column
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
-from ..refs import get_by_ref
-from ..views.models import View
 from .filtering import apply_filters, apply_sorts
 from .models import ListItem
 from .schemas import ListItemCreate, ListItemUpdate
@@ -362,6 +360,8 @@ class ListItemService:
         """
         from src.permissions.services import PermissionService
 
+        from ..views.services import ViewService
+
         stmt = cls._select(lst.id).where(
             await PermissionService.item_view_filter(db, user, lst)
         )
@@ -371,7 +371,7 @@ class ListItemService:
         group_by = None
 
         if view_uuid is not None:
-            view = await get_by_ref(db, View, lst.id, view_uuid)
+            view = await ViewService.get_by_uuid(db, lst.id, view_uuid)
             if view is not None:
                 config = view.config or {}
                 stmt = apply_filters(stmt, config.get("filters"), columns)

@@ -12,11 +12,10 @@ in exactly one respect that matters to a bin: a view or a form can be a grant ta
 list's. That is the ``ResourceType`` in ``_KINDS``, and it is what decides whether a
 permanent delete has grants to clear.
 
-**Addressed by uuid, never by name.** Every other child route takes either (see
-src.lists.refs), and the bin cannot: the unique index on ``name`` is partial
-(``WHERE deleted_at IS NULL``), so a binned ``sales`` view and a live one coexist
-legitimately, and two binned ones can share a name as well. A name in the bin has no
-single answer, so it is not offered.
+**Addressed by uuid.** Every child route is now, but the bin never had a choice: the
+unique index on ``name`` is partial (``WHERE deleted_at IS NULL``), so a binned
+``sales`` view and a live one coexist legitimately, and two binned ones can share a
+name as well. A name in the bin has no single answer.
 
 **Only children binned on their own appear here.** These routes resolve a *live*
 list, and a list delete stamps every child with the list's own ``deleted_at`` and
