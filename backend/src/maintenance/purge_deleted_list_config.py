@@ -17,9 +17,15 @@ transaction; safe to kill and re-run.
 **A column takes its record data with it.** The other three own nothing; a column's
 values live under its uuid in every record's `data`, and the delete never touched
 them. Dropping the row alone would strand those values with nothing left to name
-them, so each batch strips the keys first -- one set-based UPDATE per batch rather
-than one per column, and grouped by list so a batch holding two columns of the same
-list removes both keys rather than whichever the planner picked.
+them, so each batch strips the keys first (`strip_column_keys`, in src.lists.purge,
+shared with the column bin's own permanent delete).
+
+That step is chunked separately, and the batch of columns above does not bound it: one
+column's values are spread over as many records as its list has, so 5,000 columns is a
+small batch right up until one of their lists holds a million rows. It is grouped by
+list and subtracts an array of keys, which is also what makes it correct -- a record
+matching two doomed columns of the same list has to lose both, where the join this
+replaced would pick a single partner per row and leave one behind.
 
 **Records are not here.** They have their own job (`purge_deleted_items`) because
 they need their inbound references cleared.
@@ -48,6 +54,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.infrastructure.model_registry  # noqa: F401
 from src.core.config import settings
 from src.infrastructure import database as db_module
+from src.lists.purge import strip_column_keys
 
 # Rows destroyed per transaction — bounded so locks are held for milliseconds.
 CHUNK = 5_000
@@ -62,21 +69,10 @@ _TABLES: tuple[tuple[str, Optional[str], bool], ...] = (
     ("columns", None, True),
 )
 
-# Strips every doomed column's key from the records that hold it, for one batch.
-# Grouped by list and removing an array of keys at once: `data - text[]` drops them
-# all, where a plain join would leave a record matching two doomed columns with only
-# one of them gone (UPDATE ... FROM picks a single join partner per target row).
-# `jsonb_exists_any` rather than `data ?| keys` so no bare `?` reaches the driver.
-_STRIP_COLUMN_KEYS = """
-    UPDATE list_items i
-       SET data = i.data - k.keys
-      FROM (SELECT list_id, array_agg(uuid::text) AS keys
-              FROM columns
-             WHERE id = ANY(:ids)
-             GROUP BY list_id) k
-     WHERE i.list_id = k.list_id
-       AND jsonb_exists_any(i.data, k.keys)
-"""
+# The doomed columns of one batch, as {list_id: [uuid, ...]}. The grouping used to
+# live in the UPDATE itself; it is here now because `strip_column_keys` works a list at
+# a time, which is what lets it batch the records it rewrites.
+_BATCH_KEYS = "SELECT list_id, uuid::text FROM columns WHERE id = ANY(:ids)"
 
 # Soft-deleted, past the window, and hanging off a list that is still live. The
 # `JOIN lists` is the whole of the "leave the list purge alone" rule above.
@@ -132,7 +128,17 @@ async def _purge_table(
             )
         if owns_record_data:
             # Before the rows go, while their uuids are still resolvable from :ids.
-            await db.execute(sa.text(_STRIP_COLUMN_KEYS), {"ids": list(ids)})
+            # One pass per list, each batching the records it rewrites: a single
+            # column's values can be spread over as many records as the list has.
+            # It commits as it goes, which is only tidy because the one kind that
+            # reaches here is never a grant target — nothing above has written yet.
+            keys_by_list: dict[int, list[str]] = {}
+            for list_id, key in (
+                await db.execute(sa.text(_BATCH_KEYS), {"ids": list(ids)})
+            ).all():
+                keys_by_list.setdefault(list_id, []).append(key)
+            for list_id, keys in keys_by_list.items():
+                await strip_column_keys(db, list_id, keys, commit=True)
         result = await db.execute(
             sa.text(f"DELETE FROM {table} WHERE id = ANY(:ids)"),
             {"ids": list(ids)},

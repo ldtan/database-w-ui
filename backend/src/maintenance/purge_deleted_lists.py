@@ -11,6 +11,12 @@ permanent, after `PURGE_DELETED_AFTER_DAYS` (default 30).
 Chunked and committed per batch, so a purge of a million rows never holds a long
 transaction; safe to kill and re-run.
 
+Chunked twice over, in fact: a batch of lists, and within it a batch of records. A
+list is the only thing here that carries an unbounded number of anything, so batching
+by list alone still left one `DELETE FROM list_items` sized by the largest list in the
+batch. That inner loop lives in src.lists.purge, shared with the three other cascades
+that destroy a list.
+
 It deletes each list's columns, records (list_items), views, forms, metrics, and
 their permission grants too.
 """
@@ -25,8 +31,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.infrastructure.model_registry  # noqa: F401
 from src.core.config import settings
 from src.infrastructure import database as db_module
+from src.lists.purge import drain_records
 
-# Rows destroyed per transaction — bounded so locks are held for milliseconds.
+# Lists destroyed per transaction — bounded so locks are held for milliseconds. Their
+# records are bounded separately, by `drain_records`: 5,000 lists is a small batch
+# only until one of them holds a million rows.
 CHUNK = 5_000
 
 
@@ -68,6 +77,12 @@ async def purge(days: int, dry_run: bool = False) -> int:
             if not ids:
                 return total
 
+            # Records first, and in batches of their own with their own grants — the
+            # only part of the cascade a single list can make arbitrarily large. It
+            # commits as it goes, so this runs before anything else in the batch has
+            # written; see src.lists.purge for why committing here is safe.
+            await drain_records(db, ids, commit=True)
+
             # Break the circular dependency first by nullifying lists' primary_column_id
             await db.execute(
                 sa.text(
@@ -76,13 +91,14 @@ async def purge(days: int, dry_run: bool = False) -> int:
                 {"ids": list(ids)},
             )
 
-            # Grants for the lists and all their descendants
+            # Grants for the lists and their views and forms. The records' went with
+            # them above, which is the only place they can go: once a batch of records
+            # is deleted nothing is left to find their grants by.
             await db.execute(
                 sa.text(
                     """
                     DELETE FROM permission_grants
                      WHERE (resource_type = 'list' AND resource_id = ANY(:ids))
-                        OR (resource_type = 'item' AND resource_id IN (SELECT id FROM list_items WHERE list_id = ANY(:ids)))
                         OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:ids)))
                         OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:ids)))
                     """
@@ -90,11 +106,7 @@ async def purge(days: int, dry_run: bool = False) -> int:
                 {"ids": list(ids)},
             )
 
-            # Children records
-            await db.execute(
-                sa.text("DELETE FROM list_items WHERE list_id = ANY(:ids)"),
-                {"ids": list(ids)},
-            )
+            # The remaining children
             await db.execute(
                 sa.text("DELETE FROM views WHERE list_id = ANY(:ids)"),
                 {"ids": list(ids)},
