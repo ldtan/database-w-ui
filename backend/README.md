@@ -232,6 +232,20 @@ Order matters where they overlap: the workspace and list purges own everything *
 deleted parent, so they run before the jobs that sweep individual children, and the grant
 sweep runs last because the purges are what orphan grants in the first place.
 
+**`purge_deleted_workspaces` / `purge_deleted_lists`** — destroy a parent past the window along
+with everything under it: records, columns, views, forms, metrics, and the grants of each, since
+nothing cascades to those. Both are chunked twice. Batching by list bounds nothing on its own —
+a list holds a handful of views and however many records somebody put in it — so the records are
+drained in batches of their own (`src/lists/purge.py`), each clearing its own item grants before
+the rows go, because the subquery that finds them stops matching once the first batch is gone.
+
+That inner loop is shared with the `permanent` routes, which pass `commit=False`. The difference
+is not a preference: a job works on rows past the window, which the bin already refuses to hand
+back, so a half-drained list is unreachable and the next run finishes it. The routes work while
+the parent is still restorable, where committing per batch would let an interrupted purge return
+a list short of records with nothing to say so — so they take the bounded statements and keep the
+one transaction.
+
 **`reconcile_shapes`** — toggling a column's `multiple` deliberately leaves its records alone
 (on a large list that rewrite is a multi-minute lock inside a web request), so the service
 tolerates both shapes and this job converges the stored data afterwards. Nothing depends on it
@@ -244,6 +258,10 @@ It also deletes those records' permission grants, which **nothing else does** �
 their resource with no foreign key, so a hard delete would otherwise leave them orphaned — and
 clears the `lookup` cells pointing at them. That clearing is *not* done at delete time: a soft
 delete destroys nothing, so it can be undone, and the cells render as "(deleted)" meanwhile.
+
+The clearing is one pass per referencing column rather than one per purged row — the difference
+between a handful of statements and millions — but each pass works through its records in
+batches too, since a single column's stale references can span a whole list.
 
 **`purge_deleted_list_config`** — the same, for a list's views, forms, metrics and columns,
 which have a bin on their own collections (`/lists/{uuid}/views/deleted` and so on). It touches
@@ -258,6 +276,11 @@ rows — grouped by list and removing an array of keys, since two doomed columns
 the same batch would otherwise leave one key behind. This is the only thing that ever frees
 that data: once the column row is gone, nothing names those keys again.
 
+That strip is chunked on its own (`src/lists/purge.py` again, shared with the column bin's
+permanent delete), and the batch of columns does not bound it: one column's values are spread
+over as many records as its list holds. Rewriting a row is heavier than deleting one, so it
+matters here at least as much as it does for the list purges.
+
 **`purge_deleted_principals`** — the same, for users and groups past the window: clears the
 `user`/`group` cells naming them and deletes their grants. It does **not** delete the rows. A
 user owns workspaces (a real foreign key), so destroying the row means answering "who owns their
@@ -270,6 +293,8 @@ means a different table per `resource_type`), so nothing cascades and they outli
 views and accounts they were about. This deletes the ones that can never apply again: resource
 or principal gone, or in the bin past the window. A grant on something still *inside* the window
 is left alone — that resource can still be restored, and its sharing should come back with it.
+Chunked like the purges: there is a grant per share, so a busy list's worth is not a small
+number, and the predicate that finds them is a `NOT EXISTS` against five tables.
 
 ## Development
 

@@ -26,6 +26,11 @@ grant's resource is unidentifiable.
 
 Kept separate from the purges on purpose: destroying records is not the same decision
 as tidying config that already has no effect, and they deserve their own cadence.
+
+Chunked and committed per batch like the purges, and for the same reason twice over: a
+grant is created per shared record, so a busy list's worth of them is not a small
+number, and the predicate that finds them is a NOT EXISTS against five tables. Nothing
+here is ever half-wrong — every grant this deletes was already inert.
 """
 import argparse
 import asyncio
@@ -37,6 +42,9 @@ import sqlalchemy as sa
 import src.infrastructure.model_registry  # noqa: F401
 from src.core.config import settings
 from src.infrastructure import database as db_module
+
+# Grants deleted per transaction — bounded so locks are held for milliseconds.
+CHUNK = 5_000
 
 # The table behind each resource_type. The whole point of the polymorphic pointer is
 # that the database cannot know this — so it is written down here, once.
@@ -96,11 +104,29 @@ async def sweep(days: int, dry_run: bool = False) -> int:
                 sa.text(f"SELECT count(*) FROM permission_grants WHERE {where}"),
                 params,
             )
-        result = await db.execute(
-            sa.text(f"DELETE FROM permission_grants WHERE {where}"), params
-        )
-        await db.commit()
-        return result.rowcount
+        # Chunked, like the purges: the predicate is a NOT EXISTS against five tables,
+        # so on a backlog this is both a lot of rows and an expensive row. Deleting the
+        # batch is what makes the next pass find the next one, and eventually none.
+        total = 0
+        while True:
+            ids = (
+                await db.execute(
+                    sa.text(
+                        f"SELECT id FROM permission_grants WHERE {where} "
+                        "ORDER BY id LIMIT :chunk"
+                    ),
+                    {**params, "chunk": CHUNK},
+                )
+            ).scalars().all()
+            if not ids:
+                return total
+
+            result = await db.execute(
+                sa.text("DELETE FROM permission_grants WHERE id = ANY(:ids)"),
+                {"ids": list(ids)},
+            )
+            await db.commit()
+            total += result.rowcount
 
 
 async def _main() -> None:
