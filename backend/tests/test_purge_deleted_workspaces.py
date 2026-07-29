@@ -12,6 +12,7 @@ from src.lists.columns.models import Column
 from src.lists.items.models import ListItem
 from src.lists.views.models import View
 from src.lists.forms.models import Form
+from src.lists.metrics.models import Metric
 from src.maintenance.purge_deleted_workspaces import purge
 from src.permissions.models import PermissionGrant
 
@@ -39,7 +40,7 @@ async def _age_workspace(session_factory, uuid: str, days: int) -> None:
         lists = (await db.execute(select(List).where(List.workspace_id == ws.id))).scalars().all()
         for lst in lists:
             lst.deleted_at = cutoff
-            for model in (Column, ListItem, View, Form):
+            for model in (Column, ListItem, View, Form, Metric):
                 await db.execute(
                     update(model)
                     .where(model.list_id == lst.id)
@@ -120,6 +121,18 @@ async def test_workspace_descendants_and_grants_go_with_it(
     assert resp.status_code == 201
     item_uuid = resp.json()["uuid"]
 
+    # A metric on that list: it has no grants of its own, but its row still has to
+    # go before the list it points at can.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/metrics/",
+        json={
+            "name": "row_count",
+            "display_name": "Row count",
+            "config": {"formula": "COUNT()"},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
     # Create permission grant on the workspace itself
     granted_ws = await client.post(
         "/api/permissions/grants",
@@ -151,6 +164,7 @@ async def test_workspace_descendants_and_grants_go_with_it(
     assert await _count_table(session_factory, Workspace) == 3  # default personal + Alice default Workspace + our workspace
     assert await _count_table(session_factory, List) == 1
     assert await _count_table(session_factory, ListItem) == 1
+    assert await _count_table(session_factory, Metric) == 1
     assert await _count_table(session_factory, PermissionGrant) == 2
 
     # Backdate and purge
@@ -161,6 +175,10 @@ async def test_workspace_descendants_and_grants_go_with_it(
     assert await _count_table(session_factory, Workspace) == 2  # only default personal + Alice default Workspace 1 remains
     assert await _count_table(session_factory, List) == 0
     assert await _count_table(session_factory, ListItem) == 0
+    assert await _count_table(session_factory, View) == 0
+    assert await _count_table(session_factory, Form) == 0
+    assert await _count_table(session_factory, Metric) == 0
+    assert await _count_table(session_factory, Column) == 0
     assert await _count_table(session_factory, PermissionGrant) == 0
 
 

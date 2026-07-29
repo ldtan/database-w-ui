@@ -11,8 +11,8 @@ permanent, after `PURGE_DELETED_AFTER_DAYS` (default 30).
 Chunked and committed per batch, so a purge of a million rows never holds a long
 transaction; safe to kill and re-run.
 
-It deletes each list's columns, records (list_items), views, forms, and their
-permission grants too.
+It deletes each list's columns, records (list_items), views, forms, metrics, and
+their permission grants too.
 """
 import argparse
 import asyncio
@@ -103,6 +103,12 @@ async def purge(days: int, dry_run: bool = False) -> int:
                 sa.text("DELETE FROM forms WHERE list_id = ANY(:ids)"),
                 {"ids": list(ids)},
             )
+            # Metrics have no grants of their own — they are always their list's —
+            # so unlike views and forms there is nothing above to clear first.
+            await db.execute(
+                sa.text("DELETE FROM metrics WHERE list_id = ANY(:ids)"),
+                {"ids": list(ids)},
+            )
             await db.execute(
                 sa.text("DELETE FROM columns WHERE list_id = ANY(:ids)"),
                 {"ids": list(ids)},
@@ -141,7 +147,7 @@ async def _main() -> None:
     if args.dry_run:
         print(f"Would destroy {count:,} list(s) {window}.")
     else:
-        print(f"Destroyed {count:,} list(s) {window}, and their columns, records, views, forms, and permission grants.")
+        print(f"Destroyed {count:,} list(s) {window}, and their columns, records, views, forms, metrics, and permission grants.")
 
 
 if __name__ == "__main__":
