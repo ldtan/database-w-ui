@@ -13,7 +13,7 @@ import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
-import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
+import { SMALL_SCREEN, WIDE_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import type { Crumb } from "../../components/Breadcrumbs";
 import { EmptyState } from "../../components/EmptyState";
 import { PageHeader } from "../../components/PageHeader";
@@ -103,6 +103,13 @@ export function ListDetailPage() {
   // render as cards instead. Same data, same actions, same selection — see
   // RecordCards.
   const small = useMediaQuery(SMALL_SCREEN);
+  // Below this the row's actions collapse to a single "⋮" — see WIDE_SCREEN for
+  // why the number is its own and not the sidebar's.
+  const wideActions = useMediaQuery(WIDE_SCREEN);
+  // Read by the actions column *and* by the table's minimum width, which counts
+  // that column: let the two drift apart and the grid either overflows by a hair
+  // or leaves a gap at the end of every row.
+  const actionsWidth = wideActions ? 7 : 4;
   const [showSettings, setShowSettings] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
@@ -399,6 +406,23 @@ export function ListDetailPage() {
   // caller's `view` on each form, so a view form un-shared from someone must not
   // reappear as an unconfigured one — that would route around the grant.
   const viewForm = formList.find((f) => f.type === "view") ?? null;
+
+  /**
+   * What clicking a row opens, or null when the caller may do neither.
+   *
+   * The grid's rows are clickable (see `selectionMode` on the DataTable), and
+   * this is the same choice the row's first two actions offer, in the same
+   * order — so the row and the buttons at the end of it can never disagree
+   * about what "open this record" means. Null also decides whether the row is
+   * *drawn* as clickable, so a viewer who can only read a row it cannot open
+   * does not get a pointer cursor promising something that will not happen.
+   */
+  const rowOpener = (row: ListItem) =>
+    viewForm
+      ? () => setViewItem(row)
+      : canItem(row.uuid, "edit")
+        ? () => setRecordDialog({ open: true, item: row })
+        : null;
 
   // A QR code always creates, so it is always the "create" form it fills — which
   // is what decides the fields it may write, and their names. Resolving them here
@@ -810,12 +834,28 @@ export function ListDetailPage() {
           // 8rem a column, not 10: the desktop sidebar takes 17rem off the page, and
           // at the old floor a perfectly ordinary six-column list overflowed by an
           // inch — enough to push the row actions off the edge, not enough for
-          // anyone to notice the grid had become scrollable. The 11rem is the two
-          // columns that are not data: the selection box and the actions.
-          tableStyle={{ minWidth: `${visibleCols.length * 8 + 11}rem` }}
-          selectionMode="multiple"
+          // anyone to notice the grid had become scrollable. Added to that are the
+          // two columns that are not data — the 3rem selection box and the actions,
+          // which narrow when they collapse to a kebab — plus a rem of slack.
+          tableStyle={{
+            minWidth: `${visibleCols.length * 8 + actionsWidth + 4}rem`,
+          }}
+          // "checkbox", not "multiple": both give the same multi-select through
+          // the column of checkboxes, but "multiple" also makes a click anywhere
+          // in a row toggle that row's selection, which spends the gesture a row
+          // is most often clicked *for*. Confined to the checkbox, the row itself
+          // is free to open the record — see `onRowClick` below.
+          selectionMode="checkbox"
           selection={selection}
           onSelectionChange={(e) => setSelection(e.value)}
+          // PrimeReact calls this before applying its own selection logic, and
+          // skips it entirely when the click landed on something clickable — so
+          // the checkbox and the action buttons keep their own behaviour without
+          // needing a guard here (RowActions stops propagation regardless).
+          onRowClick={(e) => rowOpener(e.data as ListItem)?.()}
+          rowClassName={(row: ListItem) =>
+            rowOpener(row) ? "grid-row-opens" : ""
+          }
           stripedRows
           // `lazy`: the grid holds one page, so it must not try to slice or sort
           // what it was given — it reports the page and the order it wants and the
@@ -874,6 +914,11 @@ export function ListDetailPage() {
           <DataColumn
             selectionMode="multiple"
             headerStyle={{ width: "3rem" }}
+            // Pinned to the left edge. On a list wide enough to scroll sideways
+            // the box that selects a row was reachable only at the start of that
+            // scroll — the same complaint as the actions, mirrored.
+            className="grid-pin-start"
+            headerClassName="grid-pin-start"
             exportable={false}
           />
           {visibleCols.map((col) => (
@@ -896,7 +941,15 @@ export function ListDetailPage() {
           ))}
           <DataColumn
             header=""
-            style={{ width: "7rem" }}
+            style={{ width: `${actionsWidth}rem` }}
+            // Pinned to the right edge, not moved to the left: a column wide
+            // enough to scroll past used to carry these buttons off the end, but
+            // moving them merely mirrors that — scroll right to read the twelfth
+            // column and they would be off the *left*. Pinned, they are reachable
+            // at any offset, and they stay where actions sit everywhere else in
+            // the app, ahead of neither the checkbox nor the row's first column.
+            className="grid-pin-end"
+            headerClassName="grid-pin-end"
             // RowActions stops click propagation itself, so an action never also
             // toggles the row's selection.
             body={(row: ListItem) => (
@@ -904,8 +957,10 @@ export function ListDetailPage() {
                 size="small"
                 // Reading and editing a record are what a row is for; sharing and
                 // deleting it are occasional, so they fold into the overflow rather
-                // than widening every row of the grid.
-                maxVisible={2}
+                // than widening every row of the grid. Under 1280px even those two
+                // fold in: a pinned column costs its width on every screen, and
+                // that is the range where the grid has the least to spare.
+                maxVisible={wideActions ? 2 : 0}
                 actions={[
                   {
                     key: "view",
