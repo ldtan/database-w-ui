@@ -245,14 +245,18 @@ their resource with no foreign key, so a hard delete would otherwise leave them 
 clears the `lookup` cells pointing at them. That clearing is *not* done at delete time: a soft
 delete destroys nothing, so it can be undone, and the cells render as "(deleted)" meanwhile.
 
-**`purge_deleted_list_config`** — the same, for a list's views, forms and metrics, which have
-a bin on their own collections (`/lists/{uuid}/views/deleted` and so on). It touches only
-children of a **live** list: those
-binned by a list delete share their list's `deleted_at` and belong to `purge_deleted_lists`, and
-leaving them there is what stops a `--days 0` run here from stripping the views off a list still
-sitting restorable in its bin. Views and forms can be grant targets, so it deletes their grants;
-a metric never is. Columns are not covered — hard-deleting one has to strip its key from every
-record's `data`, which is a decision about data rather than config.
+**`purge_deleted_list_config`** — the same, for a list's views, forms, metrics and columns,
+which have a bin on their own collections (`/lists/{uuid}/views/deleted` and so on). It touches
+only children of a **live** list: those binned by a list delete share their list's `deleted_at`
+and belong to `purge_deleted_lists`, and leaving them there is what stops a `--days 0` run here
+from stripping the views off a list still sitting restorable in its bin. Views and forms can be
+grant targets, so it deletes their grants; metrics and columns never are.
+
+A column also takes its record data with it. Its values live under its uuid in every record's
+`data` and the delete never touched them, so each batch strips those keys before dropping the
+rows — grouped by list and removing an array of keys, since two doomed columns of one list in
+the same batch would otherwise leave one key behind. This is the only thing that ever frees
+that data: once the column row is gone, nothing names those keys again.
 
 **`purge_deleted_principals`** — the same, for users and groups past the window: clears the
 `user`/`group` cells naming them and deletes their grants. It does **not** delete the rows. A

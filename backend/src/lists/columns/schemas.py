@@ -110,3 +110,25 @@ class ColumnRead(BaseModel):
     config: dict
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class RestoredColumnRead(ColumnRead):
+    """A restored column, plus what came back with it and what did not.
+
+    Restoring only clears `deleted_at`. Deleting a column also nulls the list's
+    `primary_column_id` if it pointed here, and un-nests every lookup whose pairing
+    referenced it — neither is reversed, for the same reason a list's restore does not
+    undo its cascade-scrub: nothing recorded what the state was, and guessing at it a
+    month later is worse than saying so.
+
+    The list's own field is at least *observable*, so the caller is told rather than
+    left to notice. The un-nested lookups are not: the pairing was cleared on the
+    dependents, and a lookup with no parent is indistinguishable from one that never
+    had it. Reporting those would need the delete to write down what it broke.
+    """
+
+    # True when the list currently has no primary column — which this delete may have
+    # caused. Deliberately about the list's state now, not about this column's history:
+    # if a different primary was chosen while this sat in the bin, there is nothing to
+    # fix and this is False.
+    list_has_no_primary_column: bool

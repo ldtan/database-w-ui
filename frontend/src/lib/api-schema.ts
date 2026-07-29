@@ -472,6 +472,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/columns/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Columns
+         * @description The list's binned columns — see src.lists.bin.services for what appears here
+         *     and why this is gated on the list rather than on each column.
+         */
+        get: operations["list_deleted_columns_api_lists__list_uuid__columns_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/columns/{uuid}": {
         parameters: {
             query?: never;
@@ -510,6 +531,56 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/columns/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Column
+         * @description Bring a column back, with its values — they were never removed from the records.
+         *
+         *     What does *not* come back is what the delete cleared elsewhere: the list's
+         *     `primary_column_id` if it pointed here, and the nesting pairing on any lookup that
+         *     referenced this column. `RestoredColumnRead` explains which of those the response
+         *     can speak to.
+         */
+        post: operations["restore_column_api_lists__list_uuid__columns__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/columns/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Purge Column
+         * @description Destroy a binned column **and the values it holds in every record**.
+         *
+         *     Only something already in the bin can be purged; a live column 404s here, so
+         *     destroying one is always two deliberate steps. Unlike the other three kinds this
+         *     is not only a config delete — it is the one route that can free record data a
+         *     deleted column left behind.
+         */
+        delete: operations["purge_column_api_lists__list_uuid__columns__uuid__permanent_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1955,6 +2026,43 @@ export interface components {
          * @enum {string}
          */
         ResourceType: "workspace" | "list" | "view" | "form" | "item";
+        /**
+         * RestoredColumnRead
+         * @description A restored column, plus what came back with it and what did not.
+         *
+         *     Restoring only clears `deleted_at`. Deleting a column also nulls the list's
+         *     `primary_column_id` if it pointed here, and un-nests every lookup whose pairing
+         *     referenced it — neither is reversed, for the same reason a list's restore does not
+         *     undo its cascade-scrub: nothing recorded what the state was, and guessing at it a
+         *     month later is worse than saying so.
+         *
+         *     The list's own field is at least *observable*, so the caller is told rather than
+         *     left to notice. The un-nested lookups are not: the pairing was cleared on the
+         *     dependents, and a lookup with no parent is indistinguishable from one that never
+         *     had it. Reporting those would need the delete to write down what it broke.
+         */
+        RestoredColumnRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            type: components["schemas"]["ColumnType"];
+            /** Position */
+            position: number;
+            /** Description */
+            description?: string | null;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
+            /** List Has No Primary Column */
+            list_has_no_primary_column: boolean;
+        };
         /** SortSpec */
         SortSpec: {
             /**
@@ -3415,6 +3523,40 @@ export interface operations {
             };
         };
     };
+    list_deleted_columns_api_lists__list_uuid__columns_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_column_api_lists__list_uuid__columns__uuid__get: {
         parameters: {
             query?: never;
@@ -3542,6 +3684,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LookupOption"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_column_api_lists__list_uuid__columns__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoredColumnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_column_api_lists__list_uuid__columns__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
