@@ -404,15 +404,51 @@ class ListItemService:
         skip: int = 0,
         limit: int = 100,
         q: Optional[str] = None,
+        sort_by: Optional[str] = None,
+        sort_dir: str = "asc",
     ) -> Sequence[ListItem]:
+        """One page of the records this caller may see, in this view, matching ``q``.
+
+        ``sort_by`` (a column uuid) is the order the *caller* asked for — a clicked
+        grid header — and it replaces the view's saved sorts rather than adding to
+        them: clicking a header means "order by this", not "then by this". Grouping
+        still leads, because `apply_sorts` puts it first and a group's rows have to
+        stay adjacent to be rendered under one heading.
+
+        The order has to be imposed here rather than in the browser now that only
+        one page is sent: sorting a page client-side would order the 25 rows that
+        happened to arrive, not the list.
+        """
         columns = await cls._columns_by_key(db, lst.id)
         stmt, sorts, group_by = await cls.visible_stmt(
             db, lst, user, columns, view_uuid, q
         )
+        if sort_by is not None and sort_by in columns:
+            sorts = [{"column_uuid": sort_by, "direction": sort_dir}]
         stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
         items = (await db.execute(stmt)).scalars().all()
         cls._shape_for_read(columns, items)
         return items
+
+    @classmethod
+    async def count(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        user,
+        view_uuid: Optional[Union[str, UUID]] = None,
+        q: Optional[str] = None,
+    ) -> int:
+        """How many records `list` would return without a page — the paginator's
+        total. Built off `visible_stmt`, the same predicate the listing uses, so
+        the count and the page it describes cannot drift apart.
+
+        No ordering: a count does not care, and imposing one would sort the whole
+        table to throw the order away.
+        """
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt, _, _ = await cls.visible_stmt(db, lst, user, columns, view_uuid, q)
+        return await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
     @classmethod
     async def query(

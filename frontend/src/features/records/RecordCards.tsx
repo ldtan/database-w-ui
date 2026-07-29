@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Checkbox } from "primereact/checkbox";
 import { Paginator } from "primereact/paginator";
 
@@ -22,11 +21,14 @@ interface Props {
   onSelectionChange: (next: ListItem[]) => void;
   /** Null unless the view groups; cards then carry the same subheaders the grid does. */
   groupColumn: Column | null;
-  /** Changes when the *question* changes (the view, the search) — not when the
-   *  answer is merely refetched. Paging returns to the top on a change. */
-  resetKey: string;
+  /** Offset of the page on screen, owned by the page (it is the `skip` sent to
+   *  the server), so the cards and the grid page the same list the same way. */
+  first: number;
   pageSize: number;
-  onPageSize: (rows: number) => void;
+  /** How many records match in total, not how many arrived — the paginator needs
+   *  the former to offer a page past this one. */
+  total: number;
+  onPage: (first: number, rows: number) => void;
   can: (uuid: string, action: PermissionAction) => boolean;
   /** Undefined when the list has no view form visible to this caller — the action
    *  then drops out, exactly as it does in the grid. */
@@ -45,12 +47,13 @@ interface Props {
  * through is the record, which is the thing you came to look at.
  *
  * It is a second *layout*, not a second implementation: values go through the same
- * `renderCell` the grid uses, and it drives the same selection, the same page size
- * and the same row actions.
+ * `renderCell` the grid uses, and it drives the same selection, the same page and
+ * the same row actions.
  *
- * Sorting comes in already applied: there is no column header to tap, so the page
- * sorts the records first — through the same `sortRows` the grid's columns use, so
- * neither layout can disagree with the other about what "sorted by Name" means.
+ * Both ordering and paging come in already applied. `items` is one page of records,
+ * already sorted, exactly as the server returned it — so this renders what it was
+ * given and reports where it wants to go next. It used to slice a local array,
+ * which paged only the records that had been fetched.
  */
 export function RecordCards({
   listUuid,
@@ -62,34 +65,17 @@ export function RecordCards({
   selection,
   onSelectionChange,
   groupColumn,
-  resetKey,
+  first,
   pageSize,
-  onPageSize,
+  total,
+  onPage,
   can,
   onView,
   onEdit,
   onShare,
   onDelete,
 }: Props) {
-  const [first, setFirst] = useState(0);
-
-  // A search or a view change asks a different question, so it starts at the top.
-  // Keyed on *that*, not on the `items` array: react-query hands back a new array
-  // after every mutation and every background refetch, so keying on its identity
-  // threw you back to page 1 whenever you edited a record — the grid, which keeps
-  // its own paging state, does not.
-  useEffect(() => setFirst(0), [resetKey]);
-
   const selected = new Set(selection.map((item) => item.uuid));
-  // Deleting the last records of the last page leaves `first` past the end, which
-  // would render an empty page with no way back to the records. Land on the new
-  // last page instead.
-  const lastPageFirst = Math.max(
-    0,
-    Math.floor((items.length - 1) / pageSize) * pageSize,
-  );
-  const start = Math.min(first, lastPageFirst);
-  const page = items.slice(start, start + pageSize);
 
   function toggle(item: ListItem, checked: boolean) {
     onSelectionChange(
@@ -112,14 +98,14 @@ export function RecordCards({
 
   return (
     <div className="flex flex-col gap-3">
-      {page.map((item, i) => {
+      {items.map((item, i) => {
         // The server orders by the group column, so a group starts wherever the
         // value differs from the row before it — the same subheader the grid draws,
         // without a second notion of what a group is.
         const groupValue = groupColumn ? item.data?.[groupColumn.uuid] : null;
         const startsGroup =
           !!groupColumn &&
-          (i === 0 || page[i - 1].data?.[groupColumn.uuid] !== groupValue);
+          (i === 0 || items[i - 1].data?.[groupColumn.uuid] !== groupValue);
 
         return (
           <div key={item.uuid} className="flex flex-col gap-2">
@@ -232,14 +218,11 @@ export function RecordCards({
       })}
 
       <Paginator
-        first={start}
+        first={first}
         rows={pageSize}
-        totalRecords={items.length}
+        totalRecords={total}
         rowsPerPageOptions={[10, 25, 50, 100]}
-        onPageChange={(e) => {
-          setFirst(e.first);
-          onPageSize(e.rows);
-        }}
+        onPageChange={(e) => onPage(e.first, e.rows)}
         template="PrevPageLink CurrentPageReport NextPageLink RowsPerPageDropdown"
       />
     </div>

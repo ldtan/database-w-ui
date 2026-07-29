@@ -50,6 +50,7 @@ async def create_item(
 
 @router.get("/", response_model=list[ListItemRead])
 async def list_items(
+    response: Response,
     lst: List = Depends(resolve_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -59,9 +60,32 @@ async def list_items(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match any column's text"),
+    sort_by: Optional[str] = Query(
+        None,
+        description="Column uuid to order by; replaces the view's saved sorts",
+    ),
+    sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
 ):
+    """Paging, searching and ordering server-side, so a page past the first is a
+    page of the *list* rather than of whatever the browser happened to hold.
+
+    The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
+    which is what a paginator needs; the body stays a plain array, like every other
+    listing here.
+    """
+    response.headers["X-Total-Count"] = str(
+        await ListItemService.count(db, lst, current_user, view_uuid=view_uuid, q=q)
+    )
     return await ListItemService.list(
-        db, lst, current_user, view_uuid=view_uuid, skip=skip, limit=limit, q=q
+        db,
+        lst,
+        current_user,
+        view_uuid=view_uuid,
+        skip=skip,
+        limit=limit,
+        q=q,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
     )
 
 
