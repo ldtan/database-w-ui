@@ -8,6 +8,7 @@ import { api, ApiError } from "../../lib/api";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
 import type { Column } from "../../lib/types";
+import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ColumnDialog } from "./ColumnDialog";
 
 interface Props {
@@ -33,6 +34,7 @@ export function ColumnsPanel({
     open: false,
     column: null,
   });
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const remove = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/columns/${uuid}`),
@@ -104,14 +106,25 @@ export function ColumnsPanel({
         </div>
       ))}
 
+      {/* The bin sits with this panel's own actions rather than on a screen of its
+          own: a deleted column is looked for where the live ones are listed. It is
+          offered whenever the panel is editable at all, because the route is gated
+          on the list's `configure` — exactly like adding and deleting here. */}
       {canConfigure && (
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             label="Add column"
             icon="pi pi-plus"
             outlined
             size="small"
             onClick={() => setEditing({ open: true, column: null })}
+          />
+          <Button
+            label="Deleted"
+            icon="pi pi-trash"
+            text
+            size="small"
+            onClick={() => setShowDeleted(true)}
           />
         </div>
       )}
@@ -122,6 +135,12 @@ export function ColumnsPanel({
         column={editing.column}
         visible={editing.open}
         onHide={() => setEditing({ open: false, column: null })}
+      />
+      <DeletedConfigDialog
+        listUuid={listUuid}
+        kind="columns"
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
       />
     </div>
   );

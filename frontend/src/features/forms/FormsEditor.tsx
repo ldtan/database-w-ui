@@ -12,6 +12,7 @@ import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
+import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 
@@ -63,11 +64,21 @@ interface Props {
   // False while the tab is not showing, so it does not seed its editor from a form
   // nobody is looking at.
   active: boolean;
+  /** The list's own `configure`, which is what the bin is gated on — a deleted form
+   *  resolves to no permission context of its own, so the per-form answers below
+   *  cannot speak for one. */
+  canConfigure: boolean;
 }
 
 /** Per-list form layouts. The body of what used to be its own dialog; it now lives
  *  as a tab in List settings. */
-export function FormsEditor({ listUuid, columns, forms, active }: Props) {
+export function FormsEditor({
+  listUuid,
+  columns,
+  forms,
+  active,
+  canConfigure,
+}: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
@@ -75,6 +86,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
   const [sharing, setSharing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [names, setNames] = useState({ displayName: "", name: "" });
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const activeForm =
     forms.find((f) => f.uuid === selectedUuid) ?? forms[0] ?? null;
@@ -164,8 +176,34 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
   }
 
+  // The bin has to be reachable from here too, and this is the state where it
+  // matters most: deleting the last form is exactly what empties this panel, and
+  // without the button below there would be no way back to the form that did it.
+  const binButton = canConfigure && (
+    <Button
+      label="Deleted"
+      icon="pi pi-trash"
+      text
+      onClick={() => setShowDeleted(true)}
+    />
+  );
+  const binDialog = (
+    <DeletedConfigDialog
+      listUuid={listUuid}
+      kind="forms"
+      visible={showDeleted}
+      onHide={() => setShowDeleted(false)}
+    />
+  );
+
   if (forms.length === 0) {
-    return <Message severity="info" text="This list has no forms." />;
+    return (
+      <div className="flex flex-col gap-3">
+        <Message severity="info" text="This list has no forms." />
+        {binButton && <div>{binButton}</div>}
+        {binDialog}
+      </div>
+    );
   }
 
   return (
@@ -206,6 +244,7 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
               onClick={() => setSharing(true)}
             />
           )}
+          {binButton}
         </div>
 
         {/* Order + field + two checkboxes + a label box is about 460px of columns
@@ -334,6 +373,8 @@ export function FormsEditor({ listUuid, columns, forms, active }: Props) {
           }}
         />
       )}
+
+      {binDialog}
     </>
   );
 }

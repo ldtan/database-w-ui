@@ -7,6 +7,7 @@ import { confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Metric } from "../../lib/types";
+import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { MetricDialog } from "./MetricDialog";
 import { metricsKey } from "./metricKeys";
 
@@ -26,6 +27,7 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
     open: false,
     metric: null,
   });
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const remove = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/metrics/${uuid}`),
@@ -98,13 +100,20 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
       ))}
 
       {canConfigure && (
-        <div>
+        <div className="flex flex-wrap items-center gap-2">
           <Button
             label="Add metric"
             icon="pi pi-plus"
             outlined
             size="small"
             onClick={() => setEditing({ open: true, metric: null })}
+          />
+          <Button
+            label="Deleted"
+            icon="pi pi-trash"
+            text
+            size="small"
+            onClick={() => setShowDeleted(true)}
           />
         </div>
       )}
@@ -114,6 +123,12 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
         metric={editing.metric}
         visible={editing.open}
         onHide={() => setEditing({ open: false, metric: null })}
+      />
+      <DeletedConfigDialog
+        listUuid={listUuid}
+        kind="metrics"
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
       />
     </div>
   );

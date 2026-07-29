@@ -1281,8 +1281,9 @@ export function GuidePage() {
 
       <Section id="bin" title="Recovering things you deleted">
         <p>
-          Deleting doesn’t destroy anything straight away. Records, lists, and whole
-          workspaces each go to a <strong>bin</strong> you can fetch them back from.
+          Deleting doesn’t destroy anything straight away. Everything you can delete
+          goes to a <strong>bin</strong> you can fetch it back from, and each bin sits
+          beside the thing it holds.
         </p>
         <ul className="flex flex-col gap-2">
           <li>
@@ -1296,6 +1297,16 @@ export function GuidePage() {
           <li>
             <strong>A workspace.</strong> Go to <Ui>Workspaces</Ui> and click{" "}
             <Ui>Deleted</Ui>.
+          </li>
+          <li>
+            <strong>A column, view, form, or metric.</strong> Open the list, click{" "}
+            <Ui>Settings</Ui>, go to that tab, and click <Ui>Deleted</Ui> — each of
+            the four has its own bin, on its own tab.
+          </li>
+          <li>
+            <strong>An account or group.</strong> Go to <Ui>People</Ui> and click{" "}
+            <Ui>Deleted</Ui> in the <Ui>Users</Ui> or <Ui>Groups</Ui> section. This
+            one is for administrators only.
           </li>
         </ul>
         <p>
@@ -1323,6 +1334,13 @@ export function GuidePage() {
           pointing at a list you delete, those cells are emptied — they’d point at
           nothing. Restoring the list brings back its own records, but not the links
           other lists had to it; you’d pick those again.
+        </Callout>
+        <Callout tone="warn" title="A deleted column is hidden, not erased">
+          Deleting a column hides what it held; every record still carries those
+          values, which is what lets <Ui>Restore</Ui> bring them back in full.{" "}
+          <Ui>Delete permanently</Ui> is the one that actually erases them, from
+          every record at once. If you deleted a column to get rid of what was in
+          it, that second step is the one that does it.
         </Callout>
       </Section>
 
