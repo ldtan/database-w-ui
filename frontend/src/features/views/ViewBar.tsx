@@ -30,11 +30,18 @@ interface Props {
   /**
    * Whether the page's live state has drifted from what this view has stored.
    *
-   * "Save view" used to sit on the toolbar at all times, which made it read as
-   * one of the things you *do* to a list rather than as an offer to keep the
-   * arrangement you have just made — and gave no way to tell, without opening
-   * the confirm dialog, whether there was anything to save. Undefined means the
-   * caller does not track it, and the button behaves as it always did.
+   * It decides whether "Save view" is *enabled*, not whether it is there. Both
+   * have been tried: the button first sat on the toolbar permanently, reading as
+   * one of the things you do to a list rather than as an offer to keep the
+   * arrangement you just made; hiding it until there was something to save fixed
+   * that and introduced two worse problems. You could only discover the button by
+   * changing something first, which is the wrong order to learn a control in, and
+   * it appeared mid-toolbar and pushed everything right of it sideways, under a
+   * cursor already on its way to another button.
+   *
+   * Disabled keeps the signal — nothing to save, and you can see that at a glance
+   * — without either. Undefined means the caller does not track drift, and the
+   * button stays enabled.
    */
   dirty?: boolean;
 }
@@ -42,10 +49,12 @@ interface Props {
 /**
  * Choose a view, save the current one, share it, add another.
  *
- * "Save view" writes the *page's* live state (`currentConfig` — sort, grouping,
- * hidden columns, page size) into the view. Nothing the toolbar does persists until
- * that button is pressed: a view is a saved arrangement, and changing what you are
- * looking at is not the same as changing what everyone else will look at.
+ * "Save view" writes the *page's* live state (`currentConfig` — sort, filter,
+ * grouping, hidden columns, page size) into the view. Nothing the toolbar does
+ * persists until that button is pressed: a view is a saved arrangement, and changing
+ * what you are looking at is not the same as changing what everyone else will look
+ * at. The filter joined that list when filtering stopped writing straight to the
+ * view; it was the one control that changed a shared object the moment you used it.
  *
  * A view can carry its own grants, so who may save or share *this* view is asked
  * per view, while adding one is a permission on the list.
@@ -151,20 +160,28 @@ export function ViewBar({
         aria-label="View"
         className="w-36 sm:w-48"
       />
-      {/* Only once there is something to save, when the caller tracks that. It
-          is then an outlined button rather than a text one: it is the odd
-          control on the bar that changes what *other people* will see. */}
-      {canSave && dirty !== false && (
+      {/* Outlined once there is something to save, and a plain text button while
+          there is not: it is the odd control on the bar that changes what *other
+          people* will see, so it should only draw the eye when pressing it would
+          actually do that. `showOnDisabled`, because a disabled button takes no
+          pointer events and its tooltip is the only thing that says why it is
+          disabled — without it the greyed-out state explains itself to nobody. */}
+      {canSave && (
         <Button
           label="Save view"
           icon="pi pi-save"
           outlined={dirty === true}
-          text={dirty === undefined}
+          text={dirty !== true}
           size="small"
+          disabled={dirty === false}
           onClick={confirmSave}
           loading={save.isPending}
-          tooltip="Save the current sort, grouping and columns to this view"
-          tooltipOptions={{ position: "bottom" }}
+          tooltip={
+            dirty === false
+              ? "Nothing to save — this view already looks like this"
+              : "Save the current sort, filter, grouping and columns to this view"
+          }
+          tooltipOptions={{ position: "bottom", showOnDisabled: true }}
         />
       )}
       {showShare && canShare && (
