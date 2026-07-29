@@ -483,15 +483,20 @@ export function ListDetailPage() {
    * straight to the view, so the two could not differ by construction; now that a
    * filter is a question you ask rather than a change you make, "Save view" is what
    * turns it into one, and it has to light up when you have asked something new.
-   * Conditions are rebuilt key by key for that comparison: one loaded from the view
-   * and one built by the editor can hold the same three fields in a different order,
-   * which `JSON.stringify` would report as a change.
+   *
+   * **Every nested object is rebuilt field by field, never compared as it arrived.**
+   * `JSON.stringify` is order-sensitive and the two sides do not agree on an order:
+   * a stored config comes back from JSONB with its keys in whatever order Postgres
+   * holds them (`{direction, column_uuid}`), while the page builds its own
+   * (`{column_uuid, direction}`). Comparing those directly reported a change on
+   * every render, which pinned "Save view" to the toolbar of any view with a saved
+   * sort — the exact always-on button the dirty flag was added to get rid of.
    */
   function fingerprint(config: ViewConfig | null | undefined): string {
     return JSON.stringify({
-      sorts: config?.sorts ?? [],
+      sorts: (config?.sorts ?? []).map((s) => [s.column_uuid, s.direction]),
       page_size: config?.page_size ?? 25,
-      group_by: config?.group_by ?? null,
+      group_by: config?.group_by?.column_uuid ?? null,
       hidden_columns: config?.hidden_columns ?? [],
       column_order: config?.column_order ?? [],
       filters: {
