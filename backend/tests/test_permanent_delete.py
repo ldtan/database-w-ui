@@ -42,6 +42,18 @@ async def test_permanent_delete_record(client, list_uuid, add_column):
 
 
 async def test_permanent_delete_list(client, workspace_uuid, list_uuid):
+    # A metric on the list: it is a child with a foreign key to `lists`, so the
+    # cascade has to take it or the final DELETE cannot land.
+    made = await client.post(
+        f"/api/lists/{list_uuid}/metrics/",
+        json={
+            "name": "row_count",
+            "display_name": "Row count",
+            "config": {"formula": "COUNT()"},
+        },
+    )
+    assert made.status_code == 201, made.text
+
     early = await client.delete(f"/api/lists/{list_uuid}/permanent")
     assert early.status_code == 404  # still live
 
@@ -56,6 +68,17 @@ async def test_permanent_delete_list(client, workspace_uuid, list_uuid):
 
 
 async def test_permanent_delete_workspace(client, workspace_uuid, list_uuid):
+    # As above, but reached through the workspace cascade rather than the list one.
+    made = await client.post(
+        f"/api/lists/{list_uuid}/metrics/",
+        json={
+            "name": "row_count",
+            "display_name": "Row count",
+            "config": {"formula": "COUNT()"},
+        },
+    )
+    assert made.status_code == 201, made.text
+
     early = await client.delete(f"/api/workspaces/{workspace_uuid}/permanent")
     assert early.status_code == 404  # still live
 

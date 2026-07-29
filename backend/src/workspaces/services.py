@@ -375,7 +375,7 @@ class WorkspaceService:
 
         Mirrors the workspace purge job's cascade, but for one workspace in a single
         transaction: run the list cascade for its lists (break the circular foreign
-        key, delete descendant grants, then records/views/forms/columns/lists), then
+        key, delete descendant grants, then records/views/forms/metrics/columns/lists), then
         the workspace's own grants, then the workspace. Inbound references were already
         scrubbed at soft-delete time. Irreversible.
         """
@@ -417,6 +417,8 @@ class WorkspaceService:
             await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM views WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            # Metrics are never a grant target, so they appear here but not above.
+            await db.execute(text("DELETE FROM metrics WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM columns WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM lists WHERE id = ANY(:list_ids)"), {"list_ids": list_ids})
 

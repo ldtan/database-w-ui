@@ -1,4 +1,4 @@
-# Render's Cron Job is a paid service type, so the four maintenance jobs run here.
+# Render's Cron Job is a paid service type, so the maintenance jobs run here.
 #
 # They are idempotent housekeeping and nothing depends on them having run — a missed night just
 # means soft-deleted rows outlive their window and reconciliation waits a day. That is what
@@ -54,6 +54,11 @@ jobs:
 
       - name: Purge deleted records
         run: uv run python -m src.maintenance.purge_deleted_items
+
+      # After the list purge, which owns the children of a deleted list; this one
+      # only takes views/forms/metrics binned on their own under a live list.
+      - name: Purge deleted views, forms and metrics
+        run: uv run python -m src.maintenance.purge_deleted_list_config
 
       - name: Purge deleted users and groups
         run: uv run python -m src.maintenance.purge_deleted_principals

@@ -141,11 +141,33 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
-## 6. Trash is done for records; principals and delete-for-good remain
+## 6. Trash is done everywhere except principals and columns
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
-record, user or group only sets `deleted_at`, and the two purge jobs (`purge_deleted_items`,
-`purge_deleted_principals`) hard-delete once a target is past its retention window.
+record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
+past its retention window.
+
+**Views, forms and metrics now have a bin too**, at `/lists/{uuid}/bin/{kind}` with
+`…/{uuid}/restore` and `…/{uuid}/permanent` (`src/lists/bin`), swept by
+`purge_deleted_list_config`. Before that they were the worst of both: deleting one was
+irreversible *and* kept the row forever, because nothing read `deleted_at` back and no job
+reclaimed it. Three things about that surface are deliberate and worth knowing:
+
+- **It is a fixed `/bin/` segment, not `/views/deleted`.** The records bin can afford
+  `/items/deleted` because records are addressed by uuid alone. These three are addressed by
+  uuid *or* name (`src.lists.refs`), `deleted` is a legal name, and that route would silently
+  shadow anyone who used it.
+- **uuid only, never a name.** The unique index on `name` is partial (`WHERE deleted_at IS
+  NULL`), so a binned `sales` view and a live one coexist legitimately and a name in the bin
+  has no single answer.
+- **Gated on list-level `configure`**, the authority that creates them, because a deleted view
+  resolves to no permission context of its own. That makes the bin coarser than the live routes
+  for a view whose `permissions_inherit` is False — its recovery belongs to the list configurer.
+
+**Delete for good exists** for records, lists, workspaces and now these three: a `…/permanent`
+route on each, valid only from the bin, so destroying something is always two deliberate steps
+(`test_permanent_delete.py`, `test_list_config_bin.py`). Each clears its target's grants itself,
+because nothing else can once the row is gone (gap 3).
 
 **Records now have a bin.** Each list page has a "Deleted records" surface
 (`DeletedRecordsDialog`) backed by `GET /lists/{uuid}/items/deleted` and
@@ -166,17 +188,22 @@ shape and are worth keeping in mind before extending it:
 
 What is still missing:
 
-- **Delete for good** = the purge path, run on demand for one record instead of by the cron
-  sweep. It must still clear the target's grants (see gap 3) and its now-dangling references —
-  the purge is the only thing that hard-deletes. Left out on purpose for now: auto-purge after
-  the retention window already handles permanent removal, so this is power, not necessity.
 - **Principals (users/groups) have no bin.** These are genuinely superuser identity
   administration (unlike records, which are the workspace owner's), so a principal trash is a
   *separate* surface with a *different* authority — `require_superuser`, not list ownership —
   and probably its own page. Not folded into the per-list records bin.
-- **Lists stay out.** Deleting a *list* is the deliberate exception that *does* scrub, and
-  restoring one "would mean un-cascading its columns, records, views and forms — a feature that
-  does not exist" (see "Deleting a list is the deliberate exception").
+- **Columns have no bin, and the reason is the data behind them.** A record keeps a deleted
+  column's values in its `data` JSONB — deleting a column hides them, it does not erase them —
+  so restoring one un-hides data that may have been hidden on purpose, and destroying one has
+  to strip that key from every row it appears in. Neither half is the same decision as
+  restoring a saved view, which is why `BinnedKind` covers three children and not four. No job
+  reclaims a soft-deleted column either, so those rows still accumulate.
+- **The views/forms/metrics bin has no UI.** It is API-only; `DeletedRecordsDialog`,
+  `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these three.
+- **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
+  its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
+  `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back
+  (see "Deleting a list is the deliberate exception").
 
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
@@ -730,8 +757,8 @@ a group leaves every cell pointing at it *intact*. The cell still holds the uuid
 
 The old behaviour scrubbed those references at delete time, which quietly made soft delete
 irreversible: the pointers were destroyed and nothing remembered them, so a restore would bring
-a record back stripped of every inbound relationship. Restore does not exist yet; this is what
-makes it *possible*.
+a record back stripped of every inbound relationship. Restore exists now (gap 6); this is what
+made it possible.
 
 Three rules hold it together, and all three are easy to get backwards:
 

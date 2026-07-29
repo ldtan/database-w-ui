@@ -771,6 +771,57 @@ export interface paths {
         patch: operations["update_metric_api_lists__list_uuid__metrics__ref__patch"];
         trace?: never;
     };
+    "/api/lists/{list_uuid}/bin/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Binned */
+        get: operations["list_binned_api_lists__list_uuid__bin__kind__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Binned */
+        post: operations["restore_binned_api_lists__list_uuid__bin__kind___uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/bin/{kind}/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge Binned */
+        delete: operations["purge_binned_api_lists__list_uuid__bin__kind___uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/export": {
         parameters: {
             query?: never;
@@ -945,6 +996,48 @@ export interface components {
          * @enum {string}
          */
         Action: "view" | "create" | "edit" | "delete" | "configure" | "share" | "manage" | "lookup";
+        /**
+         * BinnedChildRead
+         * @description One soft-deleted view, form or metric.
+         *
+         *     Narrower than the live read schemas on purpose, and the same shape for all three.
+         *     A bin row exists to be recognised and then restored or destroyed, so it carries
+         *     what identifies it and when it went -- not its ``config``. One schema is also what
+         *     lets the three kinds share a route; the price is that ``config`` is not previewable
+         *     from the bin, which is the right trade for a recovery surface.
+         */
+        BinnedChildRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description?: string | null;
+            /**
+             * Deleted At
+             * Format: date-time
+             */
+            deleted_at: string;
+        };
+        /**
+         * BinnedKind
+         * @description The list children that have a bin of their own.
+         *
+         *     Records and columns are deliberately absent, for different reasons. Records
+         *     already have one, older and shaped around per-record permissions, at
+         *     ``/lists/{uuid}/items/deleted``. Columns are schema rather than config: a record
+         *     keeps a deleted column's values in its ``data`` JSONB, so restoring a column
+         *     un-hides data that may have been hidden on purpose, and destroying one has to
+         *     strip that key from every row it appears in. That is a different decision from
+         *     restoring a saved view, and it is not this surface's to make.
+         * @enum {string}
+         */
+        BinnedKind: "views" | "forms" | "metrics";
         /** Body_import_list_api_lists__list_uuid__import_post */
         Body_import_list_api_lists__list_uuid__import_post: {
             /** File */
@@ -1757,6 +1850,28 @@ export interface components {
          * @enum {string}
          */
         ResourceType: "workspace" | "list" | "view" | "form" | "item";
+        /**
+         * RestoredChildRead
+         * @description What a restore hands back: enough to confirm which row came back, and to
+         *     address it.
+         *
+         *     No ``deleted_at`` -- it is null again, which is the whole point. No ``config``
+         *     either: the child's own endpoint is live the moment this returns, and is the one
+         *     place that describes each kind with its real schema.
+         */
+        RestoredChildRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Name */
+            name: string;
+            /** Display Name */
+            display_name: string;
+            /** Description */
+            description?: string | null;
+        };
         /** SortSpec */
         SortSpec: {
             /**
@@ -4207,6 +4322,105 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MetricRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_binned_api_lists__list_uuid__bin__kind__get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                kind: components["schemas"]["BinnedKind"];
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_binned_api_lists__list_uuid__bin__kind___uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: components["schemas"]["BinnedKind"];
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestoredChildRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_binned_api_lists__list_uuid__bin__kind___uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                kind: components["schemas"]["BinnedKind"];
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

@@ -30,6 +30,7 @@ from .items.routers import router as items_router
 from .views.routers import router as views_router
 from .forms.routers import router as forms_router
 from .metrics.routers import router as metrics_router
+from .bin.routers import router as bin_router
 from .transfer.routers import router as transfer_router
 
 
@@ -332,4 +333,7 @@ router.include_router(items_router)
 router.include_router(views_router)
 router.include_router(forms_router)
 router.include_router(metrics_router)
+# The bin for views/forms/metrics. A fixed `/bin/` segment rather than `/deleted`
+# under each collection, which a child could legally be named — see bin/routers.py.
+router.include_router(bin_router)
 router.include_router(transfer_router)
