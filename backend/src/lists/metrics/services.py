@@ -15,7 +15,6 @@ from ..columns.models import Column
 from ..items.models import ListItem
 from ..items.services import ListItemService, computed_columns, shape_values
 from ..models import List
-from ..refs import get_by_ref
 from . import aggregate
 from .models import Metric
 from .schemas import MetricConfig, MetricCreate, MetricUpdate, MetricValue, MetricValues
@@ -57,13 +56,6 @@ class MetricService:
             return None
         result = await db.execute(cls._select(list_id).where(Metric.uuid == parsed))
         return result.scalars().first()
-
-    @classmethod
-    async def get_by_ref(
-        cls, db: AsyncSession, list_id: int, ref: Union[str, UUID]
-    ) -> Optional[Metric]:
-        """A metric addressed by uuid or by name — see src.lists.refs."""
-        return await get_by_ref(db, Metric, list_id, ref)
 
     @classmethod
     async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Metric]:

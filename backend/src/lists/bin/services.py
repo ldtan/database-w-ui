@@ -10,13 +10,26 @@ Written once against a model rather than three times over, because the three dif
 in exactly one respect that matters to a bin: a view or a form can be a grant target
 (``permission_grants.resource_type``), and a metric never is -- it is always its
 list's. That is the ``ResourceType`` in ``_KINDS``, and it is what decides whether a
-permanent delete has grants to clear.
+permanent delete has grants to clear. The routes live on each child's own collection
+beside the live ones and pass their model in; this module is what keeps the three
+from drifting apart.
 
-**Addressed by uuid, never by name.** Every other child route takes either (see
-src.lists.refs), and the bin cannot: the unique index on ``name`` is partial
-(``WHERE deleted_at IS NULL``), so a binned ``sales`` view and a live one coexist
-legitimately, and two binned ones can share a name as well. A name in the bin has no
-single answer, so it is not offered.
+**Every one of these routes is gated on list-level ``configure``** -- the authority
+that creates these three, and the only one that can still be resolved once they are
+deleted. A soft-deleted view has no permission context of its own
+(``PermissionService._security_context`` returns None for a deleted resource), so the
+per-row checks the live routes use are not available here; the records bin sits on
+list-level ``delete`` for the same reason. It does mean the bin is coarser than the
+live routes for a view whose ``permissions_inherit`` is False: it was visible to
+fewer people than the list, and its recovery is the list configurer's.
+
+**Records and columns are deliberately absent**, for different reasons. Records have
+a bin already, older and shaped around per-record permissions, at
+``/lists/{uuid}/items/deleted``. Columns are schema rather than config: a record
+keeps a deleted column's values in its ``data`` JSONB, so restoring a column un-hides
+data that may have been hidden on purpose, and destroying one has to strip that key
+from every row it appears in. That is a different decision from restoring a saved
+view, and it is not this surface's to make.
 
 **Only children binned on their own appear here.** These routes resolve a *live*
 list, and a list delete stamps every child with the list's own ``deleted_at`` and
@@ -41,14 +54,13 @@ from src.permissions.enums import ResourceType
 from ..forms.models import Form
 from ..metrics.models import Metric
 from ..views.models import View
-from .enums import BinnedKind
 
-# Per kind: the model, how `permission_grants.resource_type` names it (None when it
-# is never a grant target), and the singular noun for error messages.
+# Per model: how `permission_grants.resource_type` names it (None when it is never a
+# grant target), and the singular noun for error messages.
 _KINDS = {
-    BinnedKind.views: (View, ResourceType.view, "view"),
-    BinnedKind.forms: (Form, ResourceType.form, "form"),
-    BinnedKind.metrics: (Metric, None, "metric"),
+    View: (ResourceType.view, "view"),
+    Form: (ResourceType.form, "form"),
+    Metric: (None, "metric"),
 }
 
 
@@ -61,8 +73,7 @@ def _cutoff() -> datetime:
     )
 
 
-def _select_deleted(kind: BinnedKind, list_id: int):
-    model = _KINDS[kind][0]
+def _select_deleted(model: type, list_id: int):
     return select(model).where(
         model.list_id == list_id,
         model.deleted_at.is_not(None),
@@ -72,15 +83,14 @@ def _select_deleted(kind: BinnedKind, list_id: int):
 
 async def list_deleted(
     db: AsyncSession,
-    kind: BinnedKind,
+    model: type,
     list_id: int,
     skip: int = 0,
     limit: int = 100,
 ) -> Sequence:
     """A list's bin for one kind, most recently deleted first."""
-    model = _KINDS[kind][0]
     stmt = (
-        _select_deleted(kind, list_id)
+        _select_deleted(model, list_id)
         .order_by(model.deleted_at.desc(), model.id.desc())
         .offset(skip)
         .limit(limit)
@@ -88,15 +98,15 @@ async def list_deleted(
     return (await db.execute(stmt)).scalars().all()
 
 
-async def count_deleted(db: AsyncSession, kind: BinnedKind, list_id: int) -> int:
+async def count_deleted(db: AsyncSession, model: type, list_id: int) -> int:
     """The paginator's total, built off the same predicate as the listing so the two
     cannot drift."""
-    stmt = select(func.count()).select_from(_select_deleted(kind, list_id).subquery())
+    stmt = select(func.count()).select_from(_select_deleted(model, list_id).subquery())
     return await db.scalar(stmt) or 0
 
 
 async def get_deleted(
-    db: AsyncSession, kind: BinnedKind, list_id: int, uuid: Union[str, UUID]
+    db: AsyncSession, model: type, list_id: int, uuid: Union[str, UUID]
 ) -> Optional[object]:
     """One row from the bin. None if there is no such row, or it is live, or it is
     already past the window -- restore and purge both want the same answer, and a
@@ -104,13 +114,12 @@ async def get_deleted(
     parsed = coerce_uuid(uuid)
     if parsed is None:
         return None
-    model = _KINDS[kind][0]
-    stmt = _select_deleted(kind, list_id).where(model.uuid == parsed)
+    stmt = _select_deleted(model, list_id).where(model.uuid == parsed)
     return (await db.execute(stmt)).scalars().first()
 
 
 async def restore(
-    db: AsyncSession, kind: BinnedKind, list_id: int, uuid: Union[str, UUID]
+    db: AsyncSession, model: type, list_id: int, uuid: Union[str, UUID]
 ) -> Optional[object]:
     """Bring one back. None if it is not in the bin.
 
@@ -129,11 +138,11 @@ async def restore(
     the restore instead would refuse to return something the app is perfectly willing
     to hold.
     """
-    row = await get_deleted(db, kind, list_id, uuid)
+    row = await get_deleted(db, model, list_id, uuid)
     if row is None:
         return None
 
-    model, _, noun = _KINDS[kind]
+    _, noun = _KINDS[model]
     parsed = row.uuid
     row.deleted_at = None
     try:
@@ -156,7 +165,7 @@ async def restore(
 
 
 async def purge(
-    db: AsyncSession, kind: BinnedKind, list_id: int, uuid: Union[str, UUID]
+    db: AsyncSession, model: type, list_id: int, uuid: Union[str, UUID]
 ) -> bool:
     """Destroy one for good. False if it is not in the bin. Irreversible.
 
@@ -165,11 +174,11 @@ async def purge(
     the row is soft-deleted its grants are inert, and hard-deleting it is precisely
     what would turn them into orphans pointing at a reused id.
     """
-    row = await get_deleted(db, kind, list_id, uuid)
+    row = await get_deleted(db, model, list_id, uuid)
     if row is None:
         return False
 
-    model, resource_type, _ = _KINDS[kind]
+    resource_type, _ = _KINDS[model]
     if resource_type is not None:
         await db.execute(
             sa.text(

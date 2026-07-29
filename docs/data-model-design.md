@@ -71,19 +71,25 @@ The shared slug type lives in `src/core/schemas.py` as `NameSlug`. `list_items`
 resources by `name` internally (uuids do that job, per D2/D4), so `name` is purely a
 handle for API/code consumers and is safe to rename.
 
-**A name is accepted wherever a child's uuid is** — `/lists/{list}/columns/first_name`
-is the same column as `/lists/{list}/columns/019f…`, and likewise for views, forms, and
-the `?view_uuid=` an item listing takes. A slug can never parse as a uuid, so the two
-are unambiguous; `src/lists/refs.py::get_by_ref` is the one resolver. It matches **live
-rows only**, because the unique index on `name` is partial and a deleted `notes` may sit
-beside a live one.
+**Every resource is addressed in a URL by uuid alone** — `/lists/{list}/columns/019f…`,
+and likewise for views, forms, metrics and the `?view_uuid=` an item listing takes. A
+name was accepted here too until it was withdrawn: a name and a literal path segment
+compete for the same slot, and the two had already collided — `/metrics/values` is
+declared ahead of `/{uuid}`, so a metric called `values` was creatable and permanently
+unreachable by name, and `/views/deleted` would have been the second instance. Reserving
+words as they accrue is a validation rule people trip over, bought for a convenience the
+UI never used.
 
-The uuid stays canonical: responses carry it, the frontend holds it, and a rename moves
-the name-URL out from under anyone who bookmarked it. **Lists themselves are addressed
-by uuid alone** — a list's name is unique only per *workspace*, which `/lists/{x}` does
-not carry, and a guessable identifier would turn the 403-vs-404 distinction on that
-route into an enumeration oracle. A column is already behind `view` on its list, so
-naming one tells a caller nothing they could not already see.
+Withdrawing it cost nothing structural because the uuid was always canonical: responses
+carry it and the frontend holds it. It is only *addressing* that is uuid-only — names
+remain the vocabulary elsewhere: metric formulas reference columns by name, and a
+`lookup`/`user`/`group` cell accepts a name and stores the uuid (§5 below), which is what
+lets an exported CSV import back.
+
+Lists were uuid-only from the start, for a reason that stands on its own: a list's name
+is unique only per *workspace*, which `/lists/{x}` does not carry, and a guessable
+identifier would turn the 403-vs-404 distinction on that route into an enumeration
+oracle.
 
 ---
 

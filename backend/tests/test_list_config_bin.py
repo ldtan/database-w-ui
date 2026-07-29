@@ -5,6 +5,10 @@ stayed on disk forever and nothing could bring it back. These cover the round tr
 the two edges that are real (a name taken while the row sat binned, and the retention
 window), and the parts that are deliberately *not* symmetric with the live routes.
 
+The three routes sit on each child's own collection — `/views/deleted`,
+`/views/{uuid}/restore`, `/views/{uuid}/permanent` — parametrized here over the three
+kinds because one implementation serves all of them (src.lists.bin.services).
+
 Runs as the seeded 'tester' user (DISABLE_AUTH), who owns everything, so the
 configure-level gate resolves via the owner short-circuit.
 """
@@ -73,20 +77,20 @@ async def test_delete_then_restore_round_trip(client, list_uuid, kind):
 
     # ...and present in the bin, with the timestamp a caller needs to show how much
     # of the window is left.
-    binned = await client.get(f"/api/lists/{list_uuid}/bin/{kind}")
+    binned = await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")
     assert binned.status_code == 200, binned.text
     assert binned.headers["X-Total-Count"] == "1"
     (row,) = binned.json()
     assert row["uuid"] == uuid
     assert row["deleted_at"] is not None
 
-    restored = await client.post(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore")
+    restored = await client.post(f"/api/lists/{list_uuid}/{kind}/{uuid}/restore")
     assert restored.status_code == 200, restored.text
     assert restored.json()["uuid"] == uuid
 
     # Back in the live collection, addressable again, and out of the bin.
     assert (await client.get(f"/api/lists/{list_uuid}/{kind}/{uuid}")).status_code == 200
-    assert (await client.get(f"/api/lists/{list_uuid}/bin/{kind}")).json() == []
+    assert (await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")).json() == []
 
 
 @pytest.mark.parametrize("kind", list(KINDS))
@@ -100,11 +104,11 @@ async def test_restore_conflicts_when_the_name_was_taken(client, list_uuid, kind
     replacement = await _create(client, list_uuid, kind)
     assert replacement != uuid
 
-    clash = await client.post(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore")
+    clash = await client.post(f"/api/lists/{list_uuid}/{kind}/{uuid}/restore")
     assert clash.status_code == 409, clash.text
 
     # The failed restore left it in the bin rather than half-applied.
-    binned = await client.get(f"/api/lists/{list_uuid}/bin/{kind}")
+    binned = await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")
     assert [row["uuid"] for row in binned.json()] == [uuid]
 
 
@@ -113,17 +117,17 @@ async def test_permanent_delete_only_from_the_bin(client, list_uuid, kind):
     uuid = await _create(client, list_uuid, kind)
 
     # A live one cannot be purged — destroying one is always two deliberate steps.
-    early = await client.delete(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/permanent")
+    early = await client.delete(f"/api/lists/{list_uuid}/{kind}/{uuid}/permanent")
     assert early.status_code == 404
 
     assert (await client.delete(f"/api/lists/{list_uuid}/{kind}/{uuid}")).status_code == 204
-    gone = await client.delete(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/permanent")
+    gone = await client.delete(f"/api/lists/{list_uuid}/{kind}/{uuid}/permanent")
     assert gone.status_code == 204
 
-    assert (await client.get(f"/api/lists/{list_uuid}/bin/{kind}")).json() == []
+    assert (await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")).json() == []
     # And it is not restorable afterwards.
     assert (
-        await client.post(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore")
+        await client.post(f"/api/lists/{list_uuid}/{kind}/{uuid}/restore")
     ).status_code == 404
 
 
@@ -136,21 +140,22 @@ async def test_past_the_window_it_leaves_the_bin(client, session_factory, list_u
     assert (await client.delete(f"/api/lists/{list_uuid}/{kind}/{uuid}")).status_code == 204
     await _age(session_factory, model, uuid, days=45)
 
-    binned = await client.get(f"/api/lists/{list_uuid}/bin/{kind}")
+    binned = await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")
     assert binned.json() == []
     assert binned.headers["X-Total-Count"] == "0"
     assert (
-        await client.post(f"/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore")
+        await client.post(f"/api/lists/{list_uuid}/{kind}/{uuid}/restore")
     ).status_code == 404
 
 
 async def test_the_bin_is_addressed_by_uuid_not_by_name(client, list_uuid):
-    """Every other child route takes a uuid *or* a name. The bin cannot: a binned
-    `by_owner` and a live one coexist legitimately, so a name has no single answer."""
+    """Every child route is uuid-only now, but the bin is the one that could never
+    have been anything else: a binned `by_owner` and a live one coexist legitimately,
+    so a name here has no single answer even in principle."""
     uuid = await _create(client, list_uuid, "views")
     assert (await client.delete(f"/api/lists/{list_uuid}/views/{uuid}")).status_code == 204
 
-    by_name = await client.post("/api/lists/%s/bin/views/by_owner/restore" % list_uuid)
+    by_name = await client.post("/api/lists/%s/views/by_owner/restore" % list_uuid)
     assert by_name.status_code == 422  # not a uuid, and not coerced into one
 
 
@@ -166,7 +171,7 @@ async def test_a_child_binned_on_its_own_survives_its_lists_round_trip(
     assert (await client.delete(f"/api/lists/{list_uuid}")).status_code == 204
     assert (await client.post(f"/api/lists/{list_uuid}/restore")).status_code == 200
 
-    binned = await client.get(f"/api/lists/{list_uuid}/bin/views")
+    binned = await client.get(f"/api/lists/{list_uuid}/views/deleted")
     assert [row["uuid"] for row in binned.json()] == [view]
     # The list's own default views came back live, so the restore did not simply
     # revive everything it found.
@@ -213,7 +218,7 @@ async def test_purging_a_view_takes_its_grants(client, session_factory, list_uui
 
     assert (await client.delete(f"/api/lists/{list_uuid}/views/{view}")).status_code == 204
     assert (
-        await client.delete(f"/api/lists/{list_uuid}/bin/views/{view}/permanent")
+        await client.delete(f"/api/lists/{list_uuid}/views/{view}/permanent")
     ).status_code == 204
 
     async with session_factory() as db:

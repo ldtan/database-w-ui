@@ -472,7 +472,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/columns/{ref}": {
+    "/api/lists/{list_uuid}/columns/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -480,18 +480,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get Column */
-        get: operations["get_column_api_lists__list_uuid__columns__ref__get"];
+        get: operations["get_column_api_lists__list_uuid__columns__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Column */
-        delete: operations["delete_column_api_lists__list_uuid__columns__ref__delete"];
+        delete: operations["delete_column_api_lists__list_uuid__columns__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Column */
-        patch: operations["update_column_api_lists__list_uuid__columns__ref__patch"];
+        patch: operations["update_column_api_lists__list_uuid__columns__uuid__patch"];
         trace?: never;
     };
-    "/api/lists/{list_uuid}/columns/{ref}/options": {
+    "/api/lists/{list_uuid}/columns/{uuid}/options": {
         parameters: {
             query?: never;
             header?: never;
@@ -506,7 +506,7 @@ export interface paths {
          *     through it — so neither has to fetch a whole target list, which stops working
          *     once the target has more rows than the fetch's limit.
          */
-        get: operations["lookup_options_api_lists__list_uuid__columns__ref__options_get"];
+        get: operations["lookup_options_api_lists__list_uuid__columns__uuid__options_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -655,7 +655,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/views/{ref}": {
+    "/api/lists/{list_uuid}/views/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Views
+         * @description The list's binned views — see src.lists.bin.services for what appears here
+         *     and why this is gated on the list rather than on each view.
+         */
+        get: operations["list_deleted_views_api_lists__list_uuid__views_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/views/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -663,15 +684,49 @@ export interface paths {
             cookie?: never;
         };
         /** Get View */
-        get: operations["get_view_api_lists__list_uuid__views__ref__get"];
+        get: operations["get_view_api_lists__list_uuid__views__uuid__get"];
         put?: never;
         post?: never;
         /** Delete View */
-        delete: operations["delete_view_api_lists__list_uuid__views__ref__delete"];
+        delete: operations["delete_view_api_lists__list_uuid__views__uuid__delete"];
         options?: never;
         head?: never;
         /** Update View */
-        patch: operations["update_view_api_lists__list_uuid__views__ref__patch"];
+        patch: operations["update_view_api_lists__list_uuid__views__uuid__patch"];
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/views/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore View */
+        post: operations["restore_view_api_lists__list_uuid__views__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/views/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge View */
+        delete: operations["purge_view_api_lists__list_uuid__views__uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/lists/{list_uuid}/forms/": {
@@ -692,7 +747,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/forms/{ref}": {
+    "/api/lists/{list_uuid}/forms/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Forms
+         * @description The list's binned forms — see src.lists.bin.services for what appears here
+         *     and why this is gated on the list rather than on each form.
+         */
+        get: operations["list_deleted_forms_api_lists__list_uuid__forms_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/forms/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -700,15 +776,49 @@ export interface paths {
             cookie?: never;
         };
         /** Get Form */
-        get: operations["get_form_api_lists__list_uuid__forms__ref__get"];
+        get: operations["get_form_api_lists__list_uuid__forms__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Form */
-        delete: operations["delete_form_api_lists__list_uuid__forms__ref__delete"];
+        delete: operations["delete_form_api_lists__list_uuid__forms__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Form */
-        patch: operations["update_form_api_lists__list_uuid__forms__ref__patch"];
+        patch: operations["update_form_api_lists__list_uuid__forms__uuid__patch"];
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/forms/{uuid}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Restore Form */
+        post: operations["restore_form_api_lists__list_uuid__forms__uuid__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/forms/{uuid}/permanent": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Purge Form */
+        delete: operations["purge_form_api_lists__list_uuid__forms__uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/lists/{list_uuid}/metrics/": {
@@ -752,7 +862,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/metrics/{ref}": {
+    "/api/lists/{list_uuid}/metrics/deleted": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deleted Metrics
+         * @description The list's binned metrics — see src.lists.bin.services for what appears here
+         *     and why this is gated on the list rather than on each metric.
+         */
+        get: operations["list_deleted_metrics_api_lists__list_uuid__metrics_deleted_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/metrics/{uuid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -760,35 +891,18 @@ export interface paths {
             cookie?: never;
         };
         /** Get Metric */
-        get: operations["get_metric_api_lists__list_uuid__metrics__ref__get"];
+        get: operations["get_metric_api_lists__list_uuid__metrics__uuid__get"];
         put?: never;
         post?: never;
         /** Delete Metric */
-        delete: operations["delete_metric_api_lists__list_uuid__metrics__ref__delete"];
+        delete: operations["delete_metric_api_lists__list_uuid__metrics__uuid__delete"];
         options?: never;
         head?: never;
         /** Update Metric */
-        patch: operations["update_metric_api_lists__list_uuid__metrics__ref__patch"];
+        patch: operations["update_metric_api_lists__list_uuid__metrics__uuid__patch"];
         trace?: never;
     };
-    "/api/lists/{list_uuid}/bin/{kind}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Binned */
-        get: operations["list_binned_api_lists__list_uuid__bin__kind__get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/lists/{list_uuid}/bin/{kind}/{uuid}/restore": {
+    "/api/lists/{list_uuid}/metrics/{uuid}/restore": {
         parameters: {
             query?: never;
             header?: never;
@@ -797,15 +911,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Restore Binned */
-        post: operations["restore_binned_api_lists__list_uuid__bin__kind___uuid__restore_post"];
+        /** Restore Metric */
+        post: operations["restore_metric_api_lists__list_uuid__metrics__uuid__restore_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/bin/{kind}/{uuid}/permanent": {
+    "/api/lists/{list_uuid}/metrics/{uuid}/permanent": {
         parameters: {
             query?: never;
             header?: never;
@@ -815,8 +929,8 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        /** Purge Binned */
-        delete: operations["purge_binned_api_lists__list_uuid__bin__kind___uuid__permanent_delete"];
+        /** Purge Metric */
+        delete: operations["purge_metric_api_lists__list_uuid__metrics__uuid__permanent_delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1002,9 +1116,14 @@ export interface components {
          *
          *     Narrower than the live read schemas on purpose, and the same shape for all three.
          *     A bin row exists to be recognised and then restored or destroyed, so it carries
-         *     what identifies it and when it went -- not its ``config``. One schema is also what
-         *     lets the three kinds share a route; the price is that ``config`` is not previewable
-         *     from the bin, which is the right trade for a recovery surface.
+         *     what identifies it and when it went -- not its ``config``. The cost is that a
+         *     config is not previewable from the bin, which is the right trade for a recovery
+         *     surface: restoring is cheap and reversible, so the way to inspect one is to bring
+         *     it back and look at the real thing.
+         *
+         *     A restore answers with the kind's own read schema rather than this one -- the row
+         *     is live again by then, and there is no reason for the caller to see less of it
+         *     than a ``GET`` would show.
          */
         BinnedChildRead: {
             /**
@@ -1024,20 +1143,6 @@ export interface components {
              */
             deleted_at: string;
         };
-        /**
-         * BinnedKind
-         * @description The list children that have a bin of their own.
-         *
-         *     Records and columns are deliberately absent, for different reasons. Records
-         *     already have one, older and shaped around per-record permissions, at
-         *     ``/lists/{uuid}/items/deleted``. Columns are schema rather than config: a record
-         *     keeps a deleted column's values in its ``data`` JSONB, so restoring a column
-         *     un-hides data that may have been hidden on purpose, and destroying one has to
-         *     strip that key from every row it appears in. That is a different decision from
-         *     restoring a saved view, and it is not this surface's to make.
-         * @enum {string}
-         */
-        BinnedKind: "views" | "forms" | "metrics";
         /** Body_import_list_api_lists__list_uuid__import_post */
         Body_import_list_api_lists__list_uuid__import_post: {
             /** File */
@@ -1850,28 +1955,6 @@ export interface components {
          * @enum {string}
          */
         ResourceType: "workspace" | "list" | "view" | "form" | "item";
-        /**
-         * RestoredChildRead
-         * @description What a restore hands back: enough to confirm which row came back, and to
-         *     address it.
-         *
-         *     No ``deleted_at`` -- it is null again, which is the whole point. No ``config``
-         *     either: the child's own endpoint is live the moment this returns, and is the one
-         *     place that describes each kind with its real schema.
-         */
-        RestoredChildRead: {
-            /**
-             * Uuid
-             * Format: uuid
-             */
-            uuid: string;
-            /** Name */
-            name: string;
-            /** Display Name */
-            display_name: string;
-            /** Description */
-            description?: string | null;
-        };
         /** SortSpec */
         SortSpec: {
             /**
@@ -3332,12 +3415,12 @@ export interface operations {
             };
         };
     };
-    get_column_api_lists__list_uuid__columns__ref__get: {
+    get_column_api_lists__list_uuid__columns__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3364,12 +3447,12 @@ export interface operations {
             };
         };
     };
-    delete_column_api_lists__list_uuid__columns__ref__delete: {
+    delete_column_api_lists__list_uuid__columns__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3394,12 +3477,12 @@ export interface operations {
             };
         };
     };
-    update_column_api_lists__list_uuid__columns__ref__patch: {
+    update_column_api_lists__list_uuid__columns__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3430,7 +3513,7 @@ export interface operations {
             };
         };
     };
-    lookup_options_api_lists__list_uuid__columns__ref__options_get: {
+    lookup_options_api_lists__list_uuid__columns__uuid__options_get: {
         parameters: {
             query?: {
                 /** @description Match rows by their label */
@@ -3444,7 +3527,7 @@ export interface operations {
             };
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3874,12 +3957,46 @@ export interface operations {
             };
         };
     };
-    get_view_api_lists__list_uuid__views__ref__get: {
+    list_deleted_views_api_lists__list_uuid__views_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_view_api_lists__list_uuid__views__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3906,12 +4023,12 @@ export interface operations {
             };
         };
     };
-    delete_view_api_lists__list_uuid__views__ref__delete: {
+    delete_view_api_lists__list_uuid__views__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3936,12 +4053,12 @@ export interface operations {
             };
         };
     };
-    update_view_api_lists__list_uuid__views__ref__patch: {
+    update_view_api_lists__list_uuid__views__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -3960,6 +4077,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ViewRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_view_api_lists__list_uuid__views__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ViewRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_view_api_lists__list_uuid__views__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4038,12 +4217,46 @@ export interface operations {
             };
         };
     };
-    get_form_api_lists__list_uuid__forms__ref__get: {
+    list_deleted_forms_api_lists__list_uuid__forms_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_form_api_lists__list_uuid__forms__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4070,12 +4283,12 @@ export interface operations {
             };
         };
     };
-    delete_form_api_lists__list_uuid__forms__ref__delete: {
+    delete_form_api_lists__list_uuid__forms__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4100,12 +4313,12 @@ export interface operations {
             };
         };
     };
-    update_form_api_lists__list_uuid__forms__ref__patch: {
+    update_form_api_lists__list_uuid__forms__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4124,6 +4337,68 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["FormRead"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_form_api_lists__list_uuid__forms__uuid__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FormRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    purge_form_api_lists__list_uuid__forms__uuid__permanent_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4236,12 +4511,46 @@ export interface operations {
             };
         };
     };
-    get_metric_api_lists__list_uuid__metrics__ref__get: {
+    list_deleted_metrics_api_lists__list_uuid__metrics_deleted_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_metric_api_lists__list_uuid__metrics__uuid__get: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4268,12 +4577,12 @@ export interface operations {
             };
         };
     };
-    delete_metric_api_lists__list_uuid__metrics__ref__delete: {
+    delete_metric_api_lists__list_uuid__metrics__uuid__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4298,12 +4607,12 @@ export interface operations {
             };
         };
     };
-    update_metric_api_lists__list_uuid__metrics__ref__patch: {
+    update_metric_api_lists__list_uuid__metrics__uuid__patch: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                ref: string;
+                uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
@@ -4334,47 +4643,11 @@ export interface operations {
             };
         };
     };
-    list_binned_api_lists__list_uuid__bin__kind__get: {
-        parameters: {
-            query?: {
-                skip?: number;
-                limit?: number;
-            };
-            header?: never;
-            path: {
-                kind: components["schemas"]["BinnedKind"];
-                list_uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BinnedChildRead"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    restore_binned_api_lists__list_uuid__bin__kind___uuid__restore_post: {
+    restore_metric_api_lists__list_uuid__metrics__uuid__restore_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                kind: components["schemas"]["BinnedKind"];
                 uuid: string;
                 list_uuid: string;
             };
@@ -4388,7 +4661,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["RestoredChildRead"];
+                    "application/json": components["schemas"]["MetricRead"];
                 };
             };
             /** @description Validation Error */
@@ -4402,12 +4675,11 @@ export interface operations {
             };
         };
     };
-    purge_binned_api_lists__list_uuid__bin__kind___uuid__permanent_delete: {
+    purge_metric_api_lists__list_uuid__metrics__uuid__permanent_delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                kind: components["schemas"]["BinnedKind"];
                 uuid: string;
                 list_uuid: string;
             };
