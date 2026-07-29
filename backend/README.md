@@ -190,27 +190,28 @@ POST /api/lists/{list_uuid}/columns
 }
 ```
 
-**A name works in the URL wherever a child's uuid does.** These address the same column:
+**URLs take a uuid, never a name.** A column, view, form or metric is addressed one way:
 
 ```
 GET /api/lists/{list_uuid}/columns/019f52df-…
-GET /api/lists/{list_uuid}/columns/due_date
 ```
 
-…and likewise for views, forms, and the view an item query applies
-(`/items/?view_uuid=open_only`). A slug can never parse as a uuid, so the two are
-unambiguous; one resolver — `src/lists/refs.py::get_by_ref` — tries the uuid and falls back
-to the name, matching **live rows only** (the unique index on `name` is partial, so a
-deleted `notes` column may sit beside a live one).
+…and likewise for the view an item query applies (`/items/?view_uuid=…`). A name used to
+be accepted here as well. It was withdrawn because names and the literal segments the
+routes need compete for the same slot, and they had already collided: `/metrics/values`
+is declared ahead of `/{uuid}`, so a metric called `values` was creatable and permanently
+unreachable by name. `/views/deleted` would have been the second case. Reserving words as
+they accrue is a validation rule people trip over, bought for a convenience the UI never
+used — it has always sent uuids.
 
-Two caveats:
+Two things that did not change:
 
-- **The uuid stays canonical.** Responses carry it, the frontend holds it, and renaming
-  moves the name-URL out from under anyone using it. Store uuids; type names.
-- **Lists themselves are uuid-only.** A list's name is unique per *workspace*, which
-  `/lists/{x}` does not carry, and a guessable identifier there would turn the 403-vs-404
-  answer into an enumeration oracle. (A view or form can be restricted more tightly than
-  its list, so those two routes answer **404, not 403**, to a caller who cannot see them.)
+- **Names are still the vocabulary off the URL.** A metric formula names its columns, and
+  a `lookup`/`user`/`group` cell may be *written* as a name and is stored as a uuid.
+- **Views and forms answer 404, not 403**, to a caller who cannot see them — they can be
+  restricted more tightly than their list, and `list_views`/`list_forms` already omit what
+  the caller cannot see, so one route calling a view absent while another calls it
+  forbidden would help nobody.
 
 ## Maintenance jobs
 
@@ -245,7 +246,8 @@ clears the `lookup` cells pointing at them. That clearing is *not* done at delet
 delete destroys nothing, so it can be undone, and the cells render as "(deleted)" meanwhile.
 
 **`purge_deleted_list_config`** — the same, for a list's views, forms and metrics, which have
-their own bin at `/lists/{uuid}/bin/{kind}`. It touches only children of a **live** list: those
+a bin on their own collections (`/lists/{uuid}/views/deleted` and so on). It touches only
+children of a **live** list: those
 binned by a list delete share their list's `deleted_at` and belong to `purge_deleted_lists`, and
 leaving them there is what stops a `--days 0` run here from stripping the views off a list still
 sitting restorable in its bin. Views and forms can be grant targets, so it deletes their grants;

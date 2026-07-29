@@ -147,19 +147,18 @@ Soft delete already destroys nothing (see "Soft delete destroys nothing" below):
 record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
 past its retention window.
 
-**Views, forms and metrics now have a bin too**, at `/lists/{uuid}/bin/{kind}` with
-`…/{uuid}/restore` and `…/{uuid}/permanent` (`src/lists/bin`), swept by
+**Views, forms and metrics now have a bin too**, at `/lists/{uuid}/{kind}/deleted` with
+`…/{kind}/{uuid}/restore` and `…/{kind}/{uuid}/permanent` — routes on each child's own
+collection, one shared implementation in `src/lists/bin/services.py`, swept by
 `purge_deleted_list_config`. Before that they were the worst of both: deleting one was
 irreversible *and* kept the row forever, because nothing read `deleted_at` back and no job
-reclaimed it. Three things about that surface are deliberate and worth knowing:
+reclaimed it. Two things about that surface are deliberate and worth knowing:
 
-- **It is a fixed `/bin/` segment, not `/views/deleted`.** The records bin can afford
-  `/items/deleted` because records are addressed by uuid alone. These three are addressed by
-  uuid *or* name (`src.lists.refs`), `deleted` is a legal name, and that route would silently
-  shadow anyone who used it.
-- **uuid only, never a name.** The unique index on `name` is partial (`WHERE deleted_at IS
+- **uuid only, never a name.** Every child route is uuid-only now, but the bin could never
+  have been anything else: the unique index on `name` is partial (`WHERE deleted_at IS
   NULL`), so a binned `sales` view and a live one coexist legitimately and a name in the bin
-  has no single answer.
+  has no single answer. (These routes sat at `/lists/{uuid}/bin/{kind}` until children became
+  uuid-only — the `/bin/` prefix existed only because `deleted` was itself a legal name.)
 - **Gated on list-level `configure`**, the authority that creates them, because a deleted view
   resolves to no permission context of its own. That makes the bin coarser than the live routes
   for a view whose `permissions_inherit` is False — its recovery belongs to the list configurer.
@@ -196,7 +195,7 @@ What is still missing:
   column's values in its `data` JSONB — deleting a column hides them, it does not erase them —
   so restoring one un-hides data that may have been hidden on purpose, and destroying one has
   to strip that key from every row it appears in. Neither half is the same decision as
-  restoring a saved view, which is why `BinnedKind` covers three children and not four. No job
+  restoring a saved view, which is why the bin covers three children and not four. No job
   reclaims a soft-deleted column either, so those rows still accumulate.
 - **The views/forms/metrics bin has no UI.** It is API-only; `DeletedRecordsDialog`,
   `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these three.

@@ -1,7 +1,8 @@
 """Destroy a list's saved config -- its views, forms and metrics -- once past the window.
 
 Deleting one of the three only sets `deleted_at`, so it can be recovered from the
-list's bin (`/lists/{uuid}/bin/{kind}`, src/lists/bin). This job is what eventually
+list's bin (`/lists/{uuid}/views/deleted` and its two siblings, src.lists.bin.services
+behind them). This job is what eventually
 makes that permanent, after `PURGE_DELETED_AFTER_DAYS` (default 30). Until it existed
 nothing ever reclaimed these rows: a view deleted on its own was unrecoverable *and*
 kept forever, which is the worst of both.
