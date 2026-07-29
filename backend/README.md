@@ -218,11 +218,18 @@ All are chunked, commit per batch, and are safe to kill and re-run. Run them fro
 systemd timer. All take `--dry-run`, which reports without changing anything.
 
 ```bash
-uv run python -m src.maintenance.reconcile_shapes          # value shapes -> column config
-uv run python -m src.maintenance.purge_deleted_items       # empty the bin past the window
-uv run python -m src.maintenance.purge_deleted_principals  # finalize deleted accounts
-uv run python -m src.maintenance.sweep_orphan_grants       # grants for things that are gone
+uv run python -m src.maintenance.reconcile_shapes            # value shapes -> column config
+uv run python -m src.maintenance.purge_deleted_workspaces    # workspaces past the window, and all under them
+uv run python -m src.maintenance.purge_deleted_lists         # lists past the window, and all under them
+uv run python -m src.maintenance.purge_deleted_items         # empty the bin past the window
+uv run python -m src.maintenance.purge_deleted_list_config   # views/forms/metrics binned on their own
+uv run python -m src.maintenance.purge_deleted_principals    # finalize deleted accounts
+uv run python -m src.maintenance.sweep_orphan_grants         # grants for things that are gone
 ```
+
+Order matters where they overlap: the workspace and list purges own everything *under* a
+deleted parent, so they run before the jobs that sweep individual children, and the grant
+sweep runs last because the purges are what orphan grants in the first place.
 
 **`reconcile_shapes`** — toggling a column's `multiple` deliberately leaves its records alone
 (on a large list that rewrite is a multi-minute lock inside a web request), so the service
@@ -236,6 +243,14 @@ It also deletes those records' permission grants, which **nothing else does** �
 their resource with no foreign key, so a hard delete would otherwise leave them orphaned — and
 clears the `lookup` cells pointing at them. That clearing is *not* done at delete time: a soft
 delete destroys nothing, so it can be undone, and the cells render as "(deleted)" meanwhile.
+
+**`purge_deleted_list_config`** — the same, for a list's views, forms and metrics, which have
+their own bin at `/lists/{uuid}/bin/{kind}`. It touches only children of a **live** list: those
+binned by a list delete share their list's `deleted_at` and belong to `purge_deleted_lists`, and
+leaving them there is what stops a `--days 0` run here from stripping the views off a list still
+sitting restorable in its bin. Views and forms can be grant targets, so it deletes their grants;
+a metric never is. Columns are not covered — hard-deleting one has to strip its key from every
+record's `data`, which is a decision about data rather than config.
 
 **`purge_deleted_principals`** — the same, for users and groups past the window: clears the
 `user`/`group` cells naming them and deletes their grants. It does **not** delete the rows. A

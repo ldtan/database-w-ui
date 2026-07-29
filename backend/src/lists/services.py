@@ -840,9 +840,9 @@ class ListService:
         Mirrors the list purge job's cascade, but for one list in a single
         transaction: break the circular ``primary_column_id`` foreign key, delete the
         polymorphic grants of the list and its descendants (nothing else does), then
-        the records, views, forms, columns, and finally the list. Inbound references
-        were already scrubbed when the list was soft-deleted, so there is nothing to
-        clear here. Irreversible.
+        the records, views, forms, metrics, columns, and finally the list. Inbound
+        references were already scrubbed when the list was soft-deleted, so there is
+        nothing to clear here. Irreversible.
         """
         lst = await cls.get_deleted_by_uuid(db, uuid)
         if lst is None:
@@ -870,6 +870,8 @@ class ListService:
         await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM views WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:ids)"), {"ids": ids})
+        # Metrics are never a grant target, so they appear here but not above.
+        await db.execute(text("DELETE FROM metrics WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM columns WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM lists WHERE id = ANY(:ids)"), {"ids": ids})
         await db.commit()
