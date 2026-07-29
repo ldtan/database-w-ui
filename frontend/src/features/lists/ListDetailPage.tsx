@@ -37,7 +37,6 @@ import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
 import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
-import { sortRows } from "../records/sortRows";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { collectLookupUuids } from "../lookups/LookupControls";
 import { collectPrincipalUuids } from "../principals/PrincipalControls";
@@ -77,14 +76,17 @@ const QrSubmitSession = lazy(() =>
  * persists on its own.
  *
  * Two renderers, one state: `DataTable` on a desktop, `RecordCards` below 640px
- * (see `useMediaQuery`). They share the same selection, the same page size, the
- * same per-record permissions and the same `renderCell` and `sortRows` — a value
- * or an order that differed between them would be a bug, not a design.
+ * (see `useMediaQuery`). They share the same selection, the same page, the same
+ * per-record permissions and the same `renderCell` — a value or an order that
+ * differed between them would be a bug, not a design.
  *
- * Filtering and searching are *server-side* (`?view_uuid=`, `?q=`), so the records
- * arriving here are already the ones to show; sorting and paging are client-side
- * over that page of records. Grouping pins the sort to the group column, because
- * the server has already ordered by it.
+ * Filtering, searching, sorting and paging are *all* server-side (`?view_uuid=`,
+ * `?q=`, `?sort_by=`, `?skip=`/`?limit=`), so the records arriving here are exactly
+ * the page to show, in the order to show it. Each of those was once done in the
+ * browser over whatever had been fetched, which quietly capped a list at the
+ * endpoint's default 100 rows and sorted only the rows that happened to be inside
+ * it. Grouping pins the sort to the group column, because the server orders by it
+ * first to keep a group's rows adjacent.
  */
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
@@ -122,6 +124,9 @@ export function ListDetailPage() {
   const [sortField, setSortField] = useState<string | undefined>(undefined);
   const [sortOrder, setSortOrder] = useState<SortOrder>(undefined);
   const [pageSize, setPageSize] = useState(25);
+  // The offset of the page on screen. Server-side, so this is the `skip` sent with
+  // the query rather than an index into an array the browser already holds.
+  const [first, setFirst] = useState(0);
   const [showFilter, setShowFilter] = useState(false);
   const [search, setSearch] = useState("");
   // Debounced so a query goes out per pause, not per keystroke.
@@ -149,19 +154,48 @@ export function ListDetailPage() {
   const live = useLiveList(listUuid);
   const items = useQuery({
     ...live,
-    // The search is part of the key: it is applied server-side, so the result is a
-    // different set of records, not a filtered view of the same one.
-    queryKey: ["items", listUuid, activeViewUuid, q],
+    // Everything that decides *which* records come back is part of the key, because
+    // every one of them is applied server-side: the page, the order, the view and
+    // the search each produce a different set of rows, not a rearrangement of one
+    // the browser already has.
+    queryKey: [
+      "items",
+      listUuid,
+      activeViewUuid,
+      q,
+      first,
+      pageSize,
+      sortField,
+      sortOrder,
+      groupBy,
+    ],
     queryFn: () => {
       const params = new URLSearchParams();
       if (activeViewUuid) params.set("view_uuid", activeViewUuid);
       if (q.trim()) params.set("q", q.trim());
-      const query = params.toString();
-      return api.get<ListItem[]>(
-        `/lists/${listUuid}/items/${query ? `?${query}` : ""}`,
+      params.set("skip", String(first));
+      params.set("limit", String(pageSize));
+      // Grouping pins the order to the group column, and it has to be *sent*: a
+      // group's records are only renderable under one subheader if they are
+      // adjacent, and with the page cut server-side that can no longer be arranged
+      // after the fact. Otherwise the order is whichever header was clicked.
+      if (groupBy) {
+        params.set("sort_by", groupBy);
+        params.set("sort_dir", "asc");
+      } else if (sortField && sortOrder) {
+        params.set("sort_by", sortField.replace(/^data\./, ""));
+        params.set("sort_dir", sortOrder === 1 ? "asc" : "desc");
+      }
+      return api.getPage<ListItem>(
+        `/lists/${listUuid}/items/?${params.toString()}`,
       );
     },
+    // Paging replaces the page rather than blanking the grid and dropping its
+    // height to nothing while the next one is in flight.
+    placeholderData: (prev) => prev,
   });
+  const rows = items.data?.items ?? [];
+  const total = items.data?.total ?? 0;
   const views = useQuery({
     queryKey: ["views", listUuid],
     queryFn: () => api.get<View[]>(`/lists/${listUuid}/views/`),
@@ -203,7 +237,7 @@ export function ListDetailPage() {
   const listActions = useEffectiveActions("list", listUuid);
   const canItem = useEffectiveActionsMap(
     "item",
-    (items.data ?? []).map((item) => item.uuid),
+    rows.map((item) => item.uuid),
     listActions,
   );
   const canView = useEffectiveActionsMap(
@@ -231,6 +265,24 @@ export function ListDetailPage() {
     setColumnOrder(view.config.column_order ?? []);
     setSelection([]); // selection doesn't carry across views
   }, [activeViewUuid, views.data]);
+
+  // The view, the search and the grouping are the *question*; changing any of them
+  // asks a different one, and its page 3 has nothing to do with the old one's. A
+  // mere refetch of the same question must not move you, which is why this is keyed
+  // on those and not on the records that come back.
+  useEffect(() => {
+    setFirst(0);
+  }, [activeViewUuid, q, groupBy]);
+
+  // Deleting the last records of the last page would otherwise leave `first` past
+  // the end — an empty grid with the records still there, one page back. Land on
+  // the new last page instead. Guarded on a loaded, non-empty result so it cannot
+  // fight the reset above while a query is in flight.
+  useEffect(() => {
+    if (total > 0 && first >= total) {
+      setFirst(Math.floor((total - 1) / pageSize) * pageSize);
+    }
+  }, [total, first, pageSize]);
 
   const deleteItem = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/items/${uuid}`),
@@ -320,17 +372,17 @@ export function ListDetailPage() {
   // shared request per column — see renderCell); the page only has to gather them,
   // so that the query key covers the whole page rather than a single row.
   const principalUuids = useMemo(
-    () => collectPrincipalUuids(cols, items.data ?? []),
-    [cols, items.data],
+    () => collectPrincipalUuids(cols, rows),
+    [cols, rows],
   );
   const lookupUuids = useMemo(
-    () => collectLookupUuids(cols, items.data ?? []),
-    [cols, items.data],
+    () => collectLookupUuids(cols, rows),
+    [cols, rows],
   );
 
   const formList = forms.data ?? [];
   const sharingItem =
-    (items.data ?? []).find((i) => i.uuid === sharingItemUuid) ?? null;
+    rows.find((i) => i.uuid === sharingItemUuid) ?? null;
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
     formList.find(
@@ -469,18 +521,9 @@ export function ListDetailPage() {
     canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
   };
 
-  // The cards have no column header to sort by, so the page sorts for them —
-  // through the same sortRows the grid's columns use, so the two layouts cannot
-  // disagree about what "sorted by Name" means. Grouping pins the order to the
-  // group column (the server already returned the records in it), so it is left
-  // alone. Only computed for the layout that needs it.
-  const sortedItems = useMemo(
-    () =>
-      small && !groupColumn
-        ? sortRows(items.data ?? [], sortField, sortOrder)
-        : (items.data ?? []),
-    [small, items.data, sortField, sortOrder, groupColumn],
-  );
+  // No client-side sort for either layout any more: the server returns the page
+  // already ordered. Sorting here could only reorder the rows on screen relative
+  // to the rest of the list, which is the bug this replaced.
 
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
@@ -519,9 +562,9 @@ export function ListDetailPage() {
         subtitle={
           cols.length === 0
             ? undefined
-            : `${items.data?.length ?? 0} record${
-                items.data?.length === 1 ? "" : "s"
-              } · ${cols.length} column${cols.length === 1 ? "" : "s"}`
+            : `${total} record${total === 1 ? "" : "s"} · ${
+                cols.length
+              } column${cols.length === 1 ? "" : "s"}`
         }
         actions={
           <>
@@ -698,7 +741,7 @@ export function ListDetailPage() {
       {small ? (
         <RecordCards
           listUuid={listUuid}
-          items={sortedItems}
+          items={rows}
           columns={visibleCols}
           loading={columns.isLoading || items.isLoading}
           principalUuids={principalUuids}
@@ -706,11 +749,13 @@ export function ListDetailPage() {
           selection={selection}
           onSelectionChange={setSelection}
           groupColumn={groupColumn}
-          // The view and the search are the question being asked; a refetch of the
-          // same question must not move you off the page you were reading.
-          resetKey={`${activeViewUuid ?? ""}|${q}`}
+          first={first}
           pageSize={pageSize}
-          onPageSize={setPageSize}
+          total={total}
+          onPage={(nextFirst, nextRows) => {
+            setFirst(nextFirst);
+            setPageSize(nextRows);
+          }}
           can={canItem}
           onView={viewForm ? (item) => setViewItem(item) : undefined}
           onEdit={(item) => setRecordDialog({ open: true, item })}
@@ -719,7 +764,7 @@ export function ListDetailPage() {
         />
       ) : (
         <DataTable
-          value={items.data ?? []}
+          value={rows}
           loading={columns.isLoading || items.isLoading}
           dataKey="uuid"
           // Bounds the wrapper's height so the header can stick to the top of it
@@ -742,10 +787,20 @@ export function ListDetailPage() {
           selection={selection}
           onSelectionChange={(e) => setSelection(e.value)}
           stripedRows
+          // `lazy`: the grid holds one page, so it must not try to slice or sort
+          // what it was given — it reports the page and the order it wants and the
+          // server answers with exactly those rows. `totalRecords` is the whole
+          // matching set, which is what makes the page links reach past this page.
+          lazy
           paginator
+          first={first}
           rows={pageSize}
+          totalRecords={total}
           rowsPerPageOptions={[10, 25, 50, 100]}
-          onPage={(e) => setPageSize(e.rows)}
+          onPage={(e) => {
+            setFirst(e.first);
+            setPageSize(e.rows);
+          }}
           sortMode="single"
           sortField={groupColumn ? `data.${groupBy}` : sortField}
           sortOrder={groupColumn ? 1 : sortOrder}
@@ -753,6 +808,9 @@ export function ListDetailPage() {
             if (groupColumn) return; // sort is pinned to the group column
             setSortField(e.sortField);
             setSortOrder(e.sortOrder);
+            // A new order renumbers every row, so "page 3" of the old one means
+            // nothing. Back to the first page, as a fresh search does.
+            setFirst(0);
           }}
           rowGroupMode={groupColumn ? "subheader" : undefined}
           groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
@@ -792,14 +850,12 @@ export function ListDetailPage() {
             <DataColumn
               key={col.uuid}
               field={`data.${col.uuid}`}
-              sortable={!groupColumn}
-              // Without this the grid sorts with PrimeReact's comparator and the
-              // cards with ours, and the same records come out in different orders
-              // depending on the screen: it floats blanks to the top on a descending
-              // sort, and puts "item10" before "item9".
-              sortFunction={(e) =>
-                sortRows(e.data as ListItem[], e.field, e.order)
-              }
+              // A calculated column stores nothing — its value is computed per row
+              // as the records are read — so there is no column in the database to
+              // order the whole list by, and a header that sorted only the page on
+              // screen would be the bug this page just lost. Not offered, rather
+              // than offered and quietly wrong.
+              sortable={!groupColumn && col.type !== "calculated"}
               // Deleting a column moved into List settings: a trash button on every
               // header crowded out the thing the grid is for.
               header={col.display_name}

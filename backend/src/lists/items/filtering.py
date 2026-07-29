@@ -9,7 +9,7 @@ from typing import Optional
 
 from sqlalchemy import Numeric, and_, cast, or_
 
-from ..columns.enums import ColumnType
+from ..columns.enums import COMPUTED_TYPES, ColumnType
 from ..columns.models import Column
 from .models import ListItem
 
@@ -78,6 +78,12 @@ def apply_filters(stmt, filters: Optional[dict], columns: dict[str, Column]):
 def _order_term(key: str, direction: str, columns: dict[str, Column]):
     column = columns.get(key)
     if column is None:
+        return None
+    # A calculated column stores nothing — its value is computed per row on read
+    # (see `_shape_for_read`), so there is no `data ->> key` to order by and the
+    # term would be NULL for every row. Dropped rather than emitted, so the
+    # ordering falls through to the next term instead of silently doing nothing.
+    if column.type in COMPUTED_TYPES:
         return None
     field = _field(key)
     if column.type == ColumnType.number:
