@@ -9,7 +9,7 @@ import { SplitButton } from "primereact/splitbutton";
 import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
-import { api, ApiError } from "../../lib/api";
+import { api, ApiError, type Page } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
@@ -36,6 +36,13 @@ import { RecordFormDialog } from "../records/RecordFormDialog";
 import { RecordViewDialog } from "../records/RecordViewDialog";
 import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
+import {
+  cellEditKind,
+  cellEditKinds,
+  cellPatch,
+  InlineCellEditor,
+  type CellDraft,
+} from "../records/inlineEdit";
 import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -156,6 +163,15 @@ export function ListDetailPage() {
   // reaching for localStorage or the view config for one boolean would be the
   // first of those rather than a use of one.
   const [showMetrics, setShowMetrics] = useState(false);
+  // "Edit cells": the grid's values become editable in place. Page state for the
+  // same reason `showMetrics` is — it is how you are working right now, not a
+  // property of the list or of the view, and it deliberately does not survive a
+  // reload: editing rows by accident is worse than turning the mode on again.
+  const [inlineEdit, setInlineEdit] = useState(false);
+  // What the open cell editor holds. A ref rather than state: it changes on every
+  // keystroke, and re-rendering a hundred-row grid for each one would be a real
+  // cost for a value nothing on screen reads until the edit is committed.
+  const cellDraft = useRef<CellDraft | null>(null);
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
@@ -308,6 +324,45 @@ export function ListDetailPage() {
         err instanceof ApiError ? err.message : undefined,
       ),
   });
+  // One cell, committed on its own. `PATCH /items/{uuid}` merges the keys it is
+  // given onto the stored record, so the body is the one column that changed (plus
+  // any lookup nested under it, which `cellPatch` clears) rather than the record.
+  const saveCell = useMutation({
+    mutationFn: (vars: { uuid: string; patch: Record<string, unknown> }) =>
+      api.patch<ListItem>(`/lists/${listUuid}/items/${vars.uuid}`, {
+        data: vars.patch,
+      }),
+    // Show the value the moment it is committed. Without this the cell falls back
+    // to what it held until the refetch lands — a visible flick back to the old
+    // value on every edit, which reads as the save having failed.
+    onMutate: (vars) => {
+      queryClient.setQueriesData<Page<ListItem>>(
+        { queryKey: ["items", listUuid] },
+        (page) =>
+          page && {
+            ...page,
+            items: page.items.map((item) =>
+              item.uuid === vars.uuid
+                ? { ...item, data: { ...item.data, ...vars.patch } }
+                : item,
+            ),
+          },
+      );
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not save that value",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+    // Both outcomes land here, and for the same reason: what is on screen is a
+    // guess. A save that worked may have recomputed a calculated column, restamped
+    // an `onupdate` one, or moved the record out of the filter it no longer
+    // matches; a save that failed left an optimistic value the server never
+    // accepted. Refetching settles it either way, so the rejected edit reverts
+    // itself and the toast explains why.
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] }),
+  });
   const setListInherit = useMutation({
     mutationFn: (value: boolean) =>
       api.patch(`/lists/${listUuid}`, { permissions_inherit: value }),
@@ -407,6 +462,16 @@ export function ListDetailPage() {
   // reappear as an unconfigured one — that would route around the grant.
   const viewForm = formList.find((f) => f.type === "view") ?? null;
 
+  // Editing a cell is editing a record, so the update form decides which columns
+  // may be written and which are read-only — the same answer the Edit dialog
+  // gets, from the same place. A list with no update form gets the default: every
+  // column except the calculated ones, which store nothing.
+  const updateForm = formList.find((f) => f.type === "update") ?? null;
+  const editKinds = useMemo(
+    () => cellEditKinds(resolveFields(cols, updateForm)),
+    [cols, updateForm],
+  );
+
   /**
    * What clicking a row opens, or null when the caller may do neither.
    *
@@ -416,13 +481,44 @@ export function ListDetailPage() {
    * about what "open this record" means. Null also decides whether the row is
    * *drawn* as clickable, so a viewer who can only read a row it cannot open
    * does not get a pointer cursor promising something that will not happen.
+   *
+   * While "Edit cells" is on, nothing: a click has become the gesture that opens
+   * the cell under it, and a row that also opened a dialog would spend the same
+   * click twice. The row's own actions still open the record either way, which is
+   * what keeps the reading surfaces reachable in edit mode.
    */
   const rowOpener = (row: ListItem) =>
-    viewForm
-      ? () => setViewItem(row)
-      : canItem(row.uuid, "edit")
-        ? () => setRecordDialog({ open: true, item: row })
-        : null;
+    inlineEdit
+      ? null
+      : viewForm
+        ? () => setViewItem(row)
+        : canItem(row.uuid, "edit")
+          ? () => setRecordDialog({ open: true, item: row })
+          : null;
+
+  /**
+   * A cell edit, on its way to the server.
+   *
+   * PrimeReact calls this when the cell leaves edit mode by any route that means
+   * "keep it" — Enter, Tab, a click elsewhere — and never on Escape, which is what
+   * makes Escape a cancel. The value comes from the draft the editor reported
+   * rather than from the event, for the reason `InlineCellEditor` explains.
+   */
+  function commitCell(column: Column, row: ListItem) {
+    const draft = cellDraft.current;
+    cellDraft.current = null;
+    // Not this cell's draft: the editor was never opened, or what is in hand
+    // belongs to a cell edited before it.
+    if (
+      !draft ||
+      draft.rowUuid !== row.uuid ||
+      draft.columnUuid !== column.uuid
+    ) {
+      return;
+    }
+    const patch = cellPatch(cols, column, row, draft.value);
+    if (patch) saveCell.mutate({ uuid: row.uuid, patch });
+  }
 
   // A QR code always creates, so it is always the "create" form it fills — which
   // is what decides the fields it may write, and their names. Resolving them here
@@ -740,6 +836,25 @@ export function ListDetailPage() {
           }
         />
 
+        {/* Reading is the default and editing is the mode you ask for, not the
+            other way round: a grid whose cells open an editor on every stray
+            click is one you cannot skim. Offered only where there is a grid to
+            edit — a phone renders cards, which have no cells — and only to
+            someone with a record on this page they may actually write to. It
+            survives its own condition while on, so turning it off never depends
+            on a filter that has hidden every editable row. */}
+        {!small &&
+          (inlineEdit || rows.some((row) => canItem(row.uuid, "edit"))) && (
+            <Button
+              label="Edit cells"
+              icon="pi pi-pencil"
+              text
+              className={inlineEdit ? "is-on" : undefined}
+              aria-pressed={inlineEdit}
+              onClick={() => setInlineEdit((on) => !on)}
+            />
+          )}
+
         {/* Off until asked for. A total is an occasional question, not something
             you need in front of you while reading rows — and revealing it is what
             starts the scan behind it, so a list nobody is totalling pays nothing.
@@ -848,6 +963,11 @@ export function ListDetailPage() {
           selectionMode="checkbox"
           selection={selection}
           onSelectionChange={(e) => setSelection(e.value)}
+          // Set only while the mode is on: with no edit mode a column's `editor`
+          // is inert, so this is the single switch that turns a grid of values
+          // into a grid of cells. "cell", not "row" — one value is committed at a
+          // time, which is what a partial PATCH per cell already means.
+          editMode={inlineEdit ? "cell" : undefined}
           // PrimeReact calls this before applying its own selection logic, and
           // skips it entirely when the click landed on something clickable — so
           // the checkbox and the action buttons keep their own behaviour without
@@ -921,24 +1041,93 @@ export function ListDetailPage() {
             headerClassName="grid-pin-start"
             exportable={false}
           />
-          {visibleCols.map((col) => (
-            <DataColumn
-              key={col.uuid}
-              field={`data.${col.uuid}`}
-              // A calculated column stores nothing — its value is computed per row
-              // as the records are read — so there is no column in the database to
-              // order the whole list by, and a header that sorted only the page on
-              // screen would be the bug this page just lost. Not offered, rather
-              // than offered and quietly wrong.
-              sortable={!groupColumn && col.type !== "calculated"}
-              // Deleting a column moved into List settings: a trash button on every
-              // header crowded out the thing the grid is for.
-              header={col.display_name}
-              body={(row: ListItem) =>
-                renderCell(col, row, listUuid, principalUuids, lookupUuids)
-              }
-            />
-          ))}
+          {visibleCols.map((col) => {
+            // Everything is "locked" while the mode is off, which is how a column
+            // that is editable in principle still renders as a plain value.
+            const kind = inlineEdit
+              ? cellEditKind(editKinds, col.uuid)
+              : "locked";
+            return (
+              <DataColumn
+                key={col.uuid}
+                field={`data.${col.uuid}`}
+                // A calculated column stores nothing — its value is computed per row
+                // as the records are read — so there is no column in the database to
+                // order the whole list by, and a header that sorted only the page on
+                // screen would be the bug this page just lost. Not offered, rather
+                // than offered and quietly wrong.
+                sortable={!groupColumn && col.type !== "calculated"}
+                // Deleting a column moved into List settings: a trash button on every
+                // header crowded out the thing the grid is for.
+                header={col.display_name}
+                // What a click here will do, said before it is clicked. A cell that
+                // will not open — a read-only field, a calculated column, a record
+                // this caller may read but not write — stays flat, and that
+                // flatness is the whole answer to "why won't this one edit?".
+                bodyClassName={(row: ListItem) =>
+                  kind === "locked" || !canItem(row.uuid, "edit")
+                    ? ""
+                    : kind === "inline"
+                      ? "cell-editable"
+                      : "cell-opens-record"
+                }
+                body={(row: ListItem) => {
+                  const cell = renderCell(
+                    col,
+                    row,
+                    listUuid,
+                    principalUuids,
+                    lookupUuids,
+                  );
+                  // Rich text and multiline have no cell-sized editor, so the
+                  // click goes where their editor lives instead of doing nothing.
+                  if (kind !== "dialog" || !canItem(row.uuid, "edit")) return cell;
+                  return (
+                    <span
+                      title={`Edit ${col.display_name} in the record's own form`}
+                      onClick={() => setRecordDialog({ open: true, item: row })}
+                    >
+                      {cell}
+                    </span>
+                  );
+                }}
+                editor={
+                  kind === "inline"
+                    ? (options) => (
+                        <InlineCellEditor
+                          listUuid={listUuid}
+                          column={col}
+                          columns={cols}
+                          row={options.rowData as ListItem}
+                          onDraft={(draft) => {
+                            cellDraft.current = draft;
+                          }}
+                        />
+                      )
+                    : undefined
+                }
+                // PrimeReact types this as returning nothing, but its cell click
+                // handler blocks the editor when it returns exactly `false` — the
+                // one hook that decides *per row*, which is the grain permissions
+                // come at. Without it a record you may read but not edit would open
+                // an editor and refuse the save afterwards.
+                onBeforeCellEditShow={(e) =>
+                  canItem((e.rowData as ListItem).uuid, "edit")
+                    ? undefined
+                    : false
+                }
+                onCellEditComplete={(e) =>
+                  commitCell(col, e.rowData as ListItem)
+                }
+                // Escape. The next editor to open reclaims the draft slot anyway,
+                // but an abandoned value has no business outliving the cell it was
+                // typed into.
+                onCellEditCancel={() => {
+                  cellDraft.current = null;
+                }}
+              />
+            );
+          })}
           <DataColumn
             header=""
             style={{ width: `${actionsWidth}rem` }}

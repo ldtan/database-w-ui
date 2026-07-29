@@ -964,6 +964,55 @@ a {
 .data-grid .p-datatable-tbody > tr.grid-row-opens {
   cursor: pointer;
 }
+/* --- "Edit cells": values edited in the grid ------------------------------
+   Only cells that will actually open something carry these classes (the page
+   decides, per column and per record), so the hint is never a promise the click
+   cannot keep — and a cell that stays flat while its neighbours light up is the
+   answer to "why won't this one edit?": a read-only field, a calculated column,
+   or a record you may read but not write. */
+.data-grid .p-datatable-tbody > tr > td.cell-editable {
+  cursor: pointer;
+}
+.data-grid .p-datatable-tbody > tr > td.cell-editable:hover {
+  outline: 1px dashed var(--brand);
+  outline-offset: -3px;
+  border-radius: var(--radius);
+}
+/* Rich text and multiline open the record's form instead — there is no editor of
+   theirs that fits a row. Marked on the value rather than the cell, so it reads
+   as a link to somewhere rather than as a box you are about to type in. */
+.data-grid .p-datatable-tbody > tr > td.cell-opens-record > span {
+  cursor: pointer;
+  /* The width of the cell, not the width of the words: an empty cell renders as
+     a single em dash, and a click target that small is one you have to aim at. */
+  display: inline-block;
+  min-width: 100%;
+}
+.data-grid .p-datatable-tbody > tr > td.cell-opens-record:hover > span {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+/* An open editor keeps the row the height it was: the padding a value needs is
+   not the padding an input needs, and left alone every row would jump as its
+   cell opened. */
+.data-grid .p-datatable-tbody > tr > td.p-cell-editing {
+  padding: 0.25rem 0.4rem;
+}
+.cell-editor {
+  width: 100%;
+}
+/* The editor fills the cell it replaced, whichever component the column's type
+   asked for — PrimeReact sizes its inputs to their content otherwise, so a date
+   picker would sit in the middle of a column twice its width. */
+.cell-editor > .p-inputtext,
+.cell-editor > .p-inputnumber,
+.cell-editor > .p-dropdown,
+.cell-editor > .p-calendar,
+.cell-editor > .p-autocomplete,
+.cell-editor .p-inputtext,
+.cell-editor .p-autocomplete-multiple-container {
+  width: 100%;
+}
 .p-datatable .p-datatable-tbody > tr {
   background: var(--surface);
   color: var(--text);
