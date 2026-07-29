@@ -23,6 +23,7 @@ from sqlalchemy import select, update
 
 from src.lists.columns.models import Column
 from src.lists.forms.models import Form
+from src.lists.items.models import ListItem
 from src.lists.metrics.models import Metric
 from src.lists.views.models import View
 
@@ -250,12 +251,25 @@ async def _record_data(client, list_uuid, item_uuid) -> dict:
     return resp.json()["data"]
 
 
-async def test_a_deleted_columns_values_stay_readable_and_come_back_on_restore(
-    client, list_uuid
+async def _stored_data(session_factory, item_uuid) -> dict:
+    """Straight off the row, past `shape_values` — the only way to see what a deleted
+    column still holds."""
+    async with session_factory() as db:
+        row = (
+            await db.execute(select(ListItem).where(ListItem.uuid == item_uuid))
+        ).scalars().first()
+        return dict(row.data or {})
+
+
+async def test_a_deleted_columns_values_are_kept_but_not_served(
+    client, session_factory, list_uuid
 ):
-    """Deleting a column hides the field in the UI, not the data: `_columns_by_key` is
-    live-only but `shape_values` passes unrecognised keys straight through. So restore
-    is not un-hiding anything — the values were being served the whole time."""
+    """The two halves that make restore an undo without making delete a leak: the
+    values stay on the row, and no reader sees them while the column is gone.
+
+    `shape_values` drops keys with no live column, so the payload matches the schema.
+    Nothing erases them, though — which is why permanent delete has to exist.
+    """
     column = await _create(client, list_uuid, "columns")
     item = await client.post(
         f"/api/lists/{list_uuid}/items/", json={"data": {column: "secret value"}}
@@ -267,18 +281,60 @@ async def test_a_deleted_columns_values_stay_readable_and_come_back_on_restore(
         await client.delete(f"/api/lists/{list_uuid}/columns/{column}")
     ).status_code == 204
 
-    # Gone from the schema...
+    # Gone from the schema, and gone from the payload with it.
     live = await client.get(f"/api/lists/{list_uuid}/columns/")
     assert column not in [c["uuid"] for c in live.json()]
-    # ...but still in the payload, which is exactly why permanent delete matters.
-    assert (await _record_data(client, list_uuid, item_uuid))[column] == "secret value"
+    assert column not in await _record_data(client, list_uuid, item_uuid)
+    assert column not in (await client.get(f"/api/lists/{list_uuid}/items/")).json()[0]["data"]
+
+    # Still on the row, untouched.
+    assert (await _stored_data(session_factory, item_uuid))[column] == "secret value"
 
     restored = await client.post(f"/api/lists/{list_uuid}/columns/{column}/restore")
     assert restored.status_code == 200, restored.text
     assert column in [
         c["uuid"] for c in (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
     ]
+    # And served again the moment the column is live, never having been rewritten.
     assert (await _record_data(client, list_uuid, item_uuid))[column] == "secret value"
+
+
+async def test_writing_a_record_does_not_erase_a_deleted_columns_values(
+    client, session_factory, list_uuid
+):
+    """The hazard filtering could have introduced. A client reads a record without the
+    deleted column's key and PATCHes it back; the merge starts from the *stored* dict
+    (`_validate_data`), so what the reader never saw is not what the writer drops."""
+    hidden = await _create(client, list_uuid, "columns")
+    visible = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/",
+            json={"name": "shown", "display_name": "Shown", "type": "text", "config": {}},
+        )
+    ).json()["uuid"]
+    item_uuid = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {hidden: "keep me", visible: "before"}},
+        )
+    ).json()["uuid"]
+
+    assert (
+        await client.delete(f"/api/lists/{list_uuid}/columns/{hidden}")
+    ).status_code == 204
+
+    patched = await client.patch(
+        f"/api/lists/{list_uuid}/items/{item_uuid}", json={"data": {visible: "after"}}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["data"][visible] == "after"
+
+    assert (await _stored_data(session_factory, item_uuid))[hidden] == "keep me"
+    # So the restore is still whole after a write it was invisible to.
+    assert (
+        await client.post(f"/api/lists/{list_uuid}/columns/{hidden}/restore")
+    ).status_code == 200
+    assert (await _record_data(client, list_uuid, item_uuid))[hidden] == "keep me"
 
 
 async def test_permanent_delete_strips_the_column_from_every_record(

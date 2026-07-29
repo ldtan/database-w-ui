@@ -156,10 +156,24 @@ def shape_values(
     under their own key. Kept separate from `_shape_for_read` so a caller holding
     plain dicts — a metric scan reads `data` alone rather than hydrating whole
     records — shapes them exactly as the grid does.
+
+    **A key with no live column is dropped.** Deleting a column leaves its values in
+    every record — that is what makes the restore a real undo — and this used to pass
+    them straight through, so a deleted column vanished from the grid while its values
+    kept arriving in every payload. The schema says which fields a record has, and a
+    reader should see exactly those.
+
+    Dropping it here is safe precisely because it is presentation: `_shape_for_read`
+    assigns through `set_committed_value` and never flushes, and an update merges onto
+    the *stored* dict (`_validate_data` starts from `dict(existing)`), so a client that
+    reads a filtered record and writes it back cannot erase what was filtered. The
+    values stay until `DELETE /columns/{uuid}/permanent` or the purge job removes them,
+    which remain the only things that do.
     """
     shaped = {
-        key: coerce_shape(columns[key], value) if key in columns else value
+        key: coerce_shape(columns[key], value)
         for key, value in data.items()
+        if key in columns
     }
     for key, _column, formula in computed:
         inputs = {

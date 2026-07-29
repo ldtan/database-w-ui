@@ -171,12 +171,22 @@ reclaimed it. Three things about that surface are deliberate and worth knowing:
   indistinguishable from one that never had a parent.
 
 One thing about columns that is easy to get wrong, and worth stating plainly: **deleting a
-column does not hide its data.** The values stay under the column's uuid in every record's
-`data`, `_columns_by_key` is live-only but `shape_values` passes unrecognised keys through, and
-`ListItemRead.data` is an unfiltered dict — so a deleted column's values keep coming back in
-every record payload. The field disappears from the UI, which renders off the columns list, and
-that is the whole of it. Anyone deleting a column to get rid of sensitive values needs
-`…/permanent`, which is the only surface that removes them.
+column hides its data, it does not erase it.** The values stay under the column's uuid in every
+record's `data` — which is exactly what makes the restore a real undo — and nothing but
+`…/permanent` or the purge job removes them.
+
+Readers no longer see them: `shape_values` drops any key with no live column, so a record's
+payload matches its schema. That is a deliberate pairing rather than a redundancy. Until it was
+added, a deleted column's values kept arriving in every record payload while the field itself
+had vanished from the UI, so "delete the column" looked like it hid something and did not.
+Filtering fixes the leak but makes the remaining hazard quieter, not smaller: someone deleting
+a column to get rid of sensitive values now sees exactly what they expect to see, and the
+values are still on the rows. `…/permanent` is the only thing that ends that.
+
+Filtering is safe against write-back because an update merges onto the *stored* dict
+(`_validate_data` starts from `dict(existing)`) and `_shape_for_read` assigns through
+`set_committed_value` and never flushes — so a client that reads a filtered record and PATCHes
+it cannot erase what it was not shown (`test_writing_a_record_does_not_erase_a_deleted_columns_values`).
 
 **Delete for good exists** for records, lists, workspaces and now these four: a `…/permanent`
 route on each, valid only from the bin, so destroying something is always two deliberate steps

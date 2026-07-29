@@ -274,7 +274,12 @@ async def test_a_columns_values_survive_while_it_is_still_restorable(
     client, session_factory, list_uuid
 ):
     """Stripping is the *purge*'s job, not the delete's. While a column sits in the
-    bin its values stay put, which is what makes the restore a real undo."""
+    bin its values stay on the row, which is what makes the restore a real undo.
+
+    Checked against storage rather than the API: `shape_values` drops keys with no live
+    column, so a deleted column's values are invisible over HTTP whether they are still
+    there or not. Only the row can answer this one.
+    """
     column = await _create(client, list_uuid, "columns")
     item_uuid = (
         await client.post(
@@ -287,12 +292,13 @@ async def test_a_columns_values_survive_while_it_is_still_restorable(
 
     # Inside the window, so a normal run leaves it entirely alone.
     assert await purge(days=30) == 0
-    data = (
-        await client.get(f"/api/lists/{list_uuid}/items/{item_uuid}")
-    ).json()["data"]
-    assert data[column] == "still here"
+    async with session_factory() as db:
+        row = (
+            await db.execute(select(ListItem).where(ListItem.uuid == item_uuid))
+        ).scalars().first()
+        assert row.data[column] == "still here"
 
-    # And the restore is a real undo, values included.
+    # And the restore is a real undo, values included and served again.
     restored = await client.post(f"/api/lists/{list_uuid}/columns/{column}/restore")
     assert restored.status_code == 200, restored.text
     data = (

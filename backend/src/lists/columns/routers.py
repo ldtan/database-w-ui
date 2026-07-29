@@ -194,7 +194,7 @@ async def restore_column(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Bring a column back, with its values — they were never removed from the records.
+    """Bring a column back, with its values — they were hidden, never removed.
 
     What does *not* come back is what the delete cleared elsewhere: the list's
     `primary_column_id` if it pointed here, and the nesting pairing on any lookup that

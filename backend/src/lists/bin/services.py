@@ -186,12 +186,12 @@ async def purge(
 
     **A column also takes its data.** The other three own no records; a column's values
     live under its uuid in every record's ``data``, and deleting the column never
-    touched them -- a soft-deleted column is invisible in the UI while its values are
-    still served in every record payload. Dropping the row without dropping the keys
-    would strand that data permanently: unreadable through any column, unreachable by
-    any route, and impossible to delete afterwards because nothing would name it. This
-    is the only surface that can free it, which is most of why a column bin is worth
-    having at all.
+    touched them -- ``shape_values`` stops serving them, which is what makes them
+    hidden, but nothing removes them. Dropping the row without dropping the keys would
+    strand that data permanently: no live column to read it through, no route to reach
+    it, and no way to delete it afterwards because nothing would name it. This is the
+    only surface that can free it, which is most of why a column bin is worth having
+    at all.
     """
     row = await get_deleted(db, model, list_id, uuid)
     if row is None:
