@@ -11,6 +11,7 @@ from src.lists.columns.models import Column
 from src.lists.items.models import ListItem
 from src.lists.views.models import View
 from src.lists.forms.models import Form
+from src.lists.metrics.models import Metric
 from src.maintenance.purge_deleted_lists import purge
 from src.permissions.models import PermissionGrant
 
@@ -35,7 +36,7 @@ async def _age_list(session_factory, uuid: str, days: int) -> None:
 
         # Soft delete is cascaded at the service layer, but backdating in tests needs
         # to update descendants too since they're in separate tables.
-        for model in (Column, ListItem, View, Form):
+        for model in (Column, ListItem, View, Form, Metric):
             await db.execute(
                 update(model)
                 .where(model.list_id == lst.id)
@@ -115,6 +116,18 @@ async def test_descendants_and_grants_go_with_it(
     assert resp.status_code == 201
     item_uuid = resp.json()["uuid"]
 
+    # 5. Metric — a child like the rest, and the one with no permission grants of
+    # its own, so only the row itself has to go.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/metrics/",
+        json={
+            "name": "row_count",
+            "display_name": "Row count",
+            "config": {"formula": "COUNT()"},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
     # Create permission grant on the list itself and on the item
     granted_list = await client.post(
         "/api/permissions/grants",
@@ -147,6 +160,7 @@ async def test_descendants_and_grants_go_with_it(
     assert await _count_table(session_factory, ListItem) == 1
     assert await _count_table(session_factory, View) >= 1
     assert await _count_table(session_factory, Form) >= 1
+    assert await _count_table(session_factory, Metric) == 1
     assert await _count_table(session_factory, PermissionGrant) == 2
 
     # Backdate and purge
@@ -156,6 +170,10 @@ async def test_descendants_and_grants_go_with_it(
     # Verify everything is gone
     assert await _count_table(session_factory, List) == 0
     assert await _count_table(session_factory, ListItem) == 0
+    assert await _count_table(session_factory, View) == 0
+    assert await _count_table(session_factory, Form) == 0
+    assert await _count_table(session_factory, Metric) == 0
+    assert await _count_table(session_factory, Column) == 0
     assert await _count_table(session_factory, PermissionGrant) == 0
 
 
