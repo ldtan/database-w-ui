@@ -57,6 +57,7 @@ backend/
     │   ├── users/           # users + groups (models/schemas/services/routers)
     │   └── tokens/          # login / refresh tokens
     ├── workspaces/          # tenancy layer: a user owns workspaces; lists live in them
+    ├── demo/                # demo scenarios: a whole plausible tenant, seeded
     └── lists/               # the lists feature (aggregate root = List)
         ├── models.py schemas.py services.py routers.py dependencies.py
         ├── columns/         # Column + ColumnType enum
@@ -317,6 +318,38 @@ by asserting a concurrent record `create` blocks while the lock is held.
 Model registration: a new SQLAlchemy model must be added to
 `src/infrastructure/model_registry.py` — the one import list shared by the app, the tests,
 and Alembic's `env.py`. Leave it out and autogenerate will emit a `DROP TABLE` for it.
+
+### Demo data
+
+An empty database is a poor place to look at any of this. `src/demo/` seeds a whole
+plausible tenant — a school — through the real services, so everything it writes is
+validated exactly as the API validates it:
+
+```bash
+uv run python -m src.demo.school                      # ~740 records, a few seconds
+uv run python -m src.demo.school --password letmein   # every seeded account shares one
+```
+
+It builds 16 accounts with person profiles, 6 groups, 5 workspaces, 17 lists using every
+`ColumnType`, and the views, forms, metrics and permission grants over them — including
+the states a tenant only reaches by being *used*: records and a column and a list in their
+bins, and a list transferred into another user's "Incoming" workspace.
+
+**Idempotent**: each resource is matched on its natural handle (a username, a `name` slug
+within its scope) and created only when missing, so a re-run fills the gaps left by one
+that died halfway and changes nothing else. Records are the exception — a record has no
+natural key — so a list that already holds records is left alone rather than doubled.
+
+Point it at a scratch database rather than your working one if you want it on its own:
+
+```bash
+DATABASE_URI='postgresql+asyncpg://…/mydb_demo' uv run alembic upgrade head
+DATABASE_URI='postgresql+asyncpg://…/mydb_demo' uv run python -m src.demo.school
+```
+
+The scenario's own docstring is the place to read *why* it is shaped as it is — in
+particular why one user owns four of the five workspaces, which is a constraint the app
+imposes on lookups rather than a story about the school.
 
 ## Notes & roadmap
 
