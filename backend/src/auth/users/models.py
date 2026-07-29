@@ -47,10 +47,21 @@ class User(BaseModel):
     # so an unrecognised key from a newer build survives a rollback instead of being
     # dropped by the first save from the older one.
     settings: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Deleted groups are filtered out of the join rather than out of each caller.
+    # Membership rows survive a delete now — that is what lets a restore bring the
+    # group back whole — so "is it still live?" has to be asked somewhere, and asking
+    # it here means every read of this relationship gets it for free. The permission
+    # resolver asks separately (`PermissionService._group_ids`) because it queries the
+    # association table directly, and that one is a security boundary rather than a
+    # display detail.
     groups: Mapped[list["UserGroup"]] = relationship(
         "UserGroup",
         secondary=user_group_association,
         back_populates="users",
+        secondaryjoin=lambda: sa.and_(
+            UserGroup.id == user_group_association.c.group_id,
+            UserGroup.deleted_at.is_(None),
+        ),
     )
 
 
@@ -71,8 +82,14 @@ class UserGroup(BaseModel):
     is_system: Mapped[bool] = mapped_column(
         sa.Boolean, default=False, server_default=sa.false(), nullable=False
     )
+    # The mirror of User.groups above: a deleted account stops appearing in its groups'
+    # membership without its membership rows being thrown away.
     users: Mapped[list[User]] = relationship(
         "User",
         secondary=user_group_association,
         back_populates="groups",
+        secondaryjoin=lambda: sa.and_(
+            User.id == user_group_association.c.user_id,
+            User.deleted_at.is_(None),
+        ),
     )

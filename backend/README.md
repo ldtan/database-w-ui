@@ -282,11 +282,15 @@ over as many records as its list holds. Rewriting a row is heavier than deleting
 matters here at least as much as it does for the list purges.
 
 **`purge_deleted_principals`** — the same, for users and groups past the window: clears the
-`user`/`group` cells naming them and deletes their grants. It does **not** delete the rows. A
-user owns workspaces (a real foreign key), so destroying the row means answering "who owns their
-data now?" — a question with no safe default and no UI to ask it. The soft-deleted row is inert
-and keeps every foreign key honest; proper account purging needs an ownership-transfer story
-first.
+`user`/`group` cells naming them and deletes their grants. It does **not** delete the rows, and
+still deliberately: it runs unattended, and a user owns workspaces through a real foreign key, so
+destroying the row means answering "who owns their data now?" — which needs a person. The
+soft-deleted row is inert and keeps every foreign key honest.
+
+Destroying one by hand is possible now, through the principal bin (`src/auth/users/bin.py`):
+`…/permanent` on `/auth/users` and `/auth/groups`, superuser-only, refusing while any workspace
+still names the account. Every account owns a personal workspace from creation, so in practice
+that means dealing with its workspaces first — which is the point.
 
 **`sweep_orphan_grants`** — grants point at their resource with no foreign key (`resource_id`
 means a different table per `resource_type`), so nothing cascades and they outlive the lists,

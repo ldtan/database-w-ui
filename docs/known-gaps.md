@@ -141,7 +141,7 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
-## 6. Trash is done everywhere except principals
+## 6. Trash is done everywhere; the four-kind bin has no UI
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
 record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
@@ -210,12 +210,40 @@ shape and are worth keeping in mind before extending it:
   resolve again, and a stale `multiple` shape is absorbed by `coerce_shape` on read (the same
   tolerance `reconcile_shapes` converges).
 
+**Principals have a bin too**, at `/auth/users/deleted` and `/auth/groups/deleted` with
+`restore` and `permanent` on each, one shared implementation in `src/auth/users/bin.py`. It is a
+*separate* surface with a *different* authority — `require_superuser`, not list ownership —
+because accounts and groups are identity administration and sit under the permission model:
+restoring a group hands back every grant it held. Three things about it are unlike the others:
+
+- **Restore is a real undo, memberships included** — and getting there was a security change, not
+  a cosmetic one. The deletes used to clear memberships so the row stopped appearing in the other
+  side's read schema, which made the delete lossy in a way nothing recorded: an account came back
+  with no groups and no way to tell it had ever had any. The rows are kept now and the reads
+  filter instead. Both relationships join through `deleted_at IS NULL` (`models.py`), which covers
+  every read of them at once — **but `PermissionService._group_ids` queries
+  `user_group_association` directly** and so gets no benefit from that. It checks liveness itself.
+  Without that check, deleting a group would have left every grant it holds still reaching its
+  members, which is the opposite of what deleting a group means. Anything else that reads the
+  association table directly has to make the same check
+  (`test_a_deleted_group_confers_nothing_while_it_is_binned`).
+- **Restore cannot 409.** `username`, `email` and a group's `name` are plain unique constraints
+  rather than the partial (`WHERE deleted_at IS NULL`) indexes the rest of the schema uses, so a
+  deleted principal keeps its name reserved and nothing can take it meanwhile. The cost is the
+  other side of that coin: a deleted account occupies its username and email forever.
+- **Permanent delete is asymmetrical, and for accounts it is usually blocked.** A group is only
+  ever a principal, so nothing stands in the way. An account owns workspaces through a non-null
+  foreign key, so `…/permanent` refuses with a 409 naming them — soft-deleted ones included,
+  since they hold the key just the same. Because `UserService.create` bootstraps a personal
+  workspace, **every** account owns at least one from birth, so destroying one always means
+  dealing with its workspaces first. That is the guard working as intended, not an edge case,
+  but it does mean there is no one-click account destruction and should not be one.
+
+`purge_deleted_principals` still does not delete rows, and still deliberately: it runs
+unattended, and the ownership question above needs a person.
+
 What is still missing:
 
-- **Principals (users/groups) have no bin.** These are genuinely superuser identity
-  administration (unlike records, which are the workspace owner's), so a principal trash is a
-  *separate* surface with a *different* authority — `require_superuser`, not list ownership —
-  and probably its own page. Not folded into the per-list records bin.
 - **The views/forms/metrics/columns bin has no UI.** It is API-only; `DeletedRecordsDialog`,
   `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these four.
 - **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back

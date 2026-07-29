@@ -5,8 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_current_user, require_superuser
-from .models import User
+from . import bin as bin_services
+from .models import User, UserGroup
 from .schemas import (
+    BinnedPrincipalRead,
     UserCreate,
     UserGroupCreate,
     UserGroupRead,
@@ -124,6 +126,33 @@ async def update_my_settings(
     return user
 
 
+# Declared before `/{uuid}`: FastAPI matches on path shape and validates afterwards,
+# so a later `/deleted` would be captured there and rejected as a malformed uuid.
+@router.get("/deleted", response_model=list[BinnedPrincipalRead])
+async def list_deleted_users(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Accounts still inside the retention window — see src.auth.users.bin for why
+    this is superuser-only rather than gated on the data the account could reach."""
+    response.headers["X-Total-Count"] = str(
+        await bin_services.count_deleted(db, User)
+    )
+    rows = await bin_services.list_deleted(db, User, skip=skip, limit=limit)
+    return [
+        BinnedPrincipalRead(
+            uuid=row.uuid,
+            name=row.username,
+            detail=row.email,
+            deleted_at=row.deleted_at,
+        )
+        for row in rows
+    ]
+
+
 @router.get("/{uuid}", response_model=UserRead)
 async def get_user(
     uuid: UUID,
@@ -183,6 +212,50 @@ async def delete_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
 
+@router.post("/{uuid}/restore", response_model=UserRead)
+async def restore_user(
+    uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+):
+    """Bring a deleted account back, group memberships and all.
+
+    A real undo: the account keeps its uuid, so every `user` cell naming it resolves
+    again on its own, and its memberships were never thrown away — reads filtered them
+    while it was gone. See src.auth.users.bin.
+    """
+    restored = await bin_services.restore(db, User, uuid)
+    if restored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )
+    return restored
+
+
+@router.delete("/{uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_user(
+    uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+):
+    """Destroy a binned account for good, with its grants, profile and tokens.
+
+    Only something already in the bin can be purged, so this is always two deliberate
+    steps. **409 while the account still owns workspaces** — `workspaces.owner_id` is
+    a non-null foreign key, so the alternative to refusing is taking that data down
+    with the account. Reassign or delete them first; the workspace bin is where a
+    deleted one is dealt with.
+    """
+    try:
+        destroyed = await bin_services.purge(db, User, uuid)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if not destroyed:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )
+
+
 @group_router.post("/", response_model=UserGroupRead, status_code=status.HTTP_201_CREATED)
 async def create_group(
     payload: UserGroupCreate,
@@ -216,6 +289,30 @@ async def list_groups(
         await UserGroupService.count(db, q=q, uuids=uuid)
     )
     return await UserGroupService.list(db, skip=skip, limit=limit, q=q, uuids=uuid)
+
+
+# Before `/{uuid}`, for the reason the users listing above gives.
+@group_router.get("/deleted", response_model=list[BinnedPrincipalRead])
+async def list_deleted_groups(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    response.headers["X-Total-Count"] = str(
+        await bin_services.count_deleted(db, UserGroup)
+    )
+    rows = await bin_services.list_deleted(db, UserGroup, skip=skip, limit=limit)
+    return [
+        BinnedPrincipalRead(
+            uuid=row.uuid,
+            name=row.name,
+            detail=row.description,
+            deleted_at=row.deleted_at,
+        )
+        for row in rows
+    ]
 
 
 @group_router.get("/{uuid}", response_model=UserGroupRead)
@@ -263,3 +360,41 @@ async def delete_group(
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Group not found")
     except PermissionDeniedError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+
+
+@group_router.post("/{uuid}/restore", response_model=UserGroupRead)
+async def restore_group(
+    uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+):
+    """Bring a deleted group back, members and all.
+
+    **This is the sharp edge of the bin and the reason it is superuser-only.** The
+    group keeps its id, so every grant naming it applies again the moment it is live —
+    and its membership survived the delete, so those grants reach the same people they
+    did before. Restoring a group is handing back access, not just a row.
+    """
+    restored = await bin_services.restore(db, UserGroup, uuid)
+    if restored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )
+    return restored
+
+
+@group_router.delete("/{uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_group(
+    uuid: UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_superuser),
+):
+    """Destroy a binned group for good, with its grants and membership rows.
+
+    Nothing blocks this the way owned workspaces block an account: a group is only
+    ever a principal, never an owner.
+    """
+    if not await bin_services.purge(db, UserGroup, uuid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )

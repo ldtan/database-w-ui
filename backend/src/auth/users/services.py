@@ -13,7 +13,6 @@ from src.core.exceptions import (
     PermissionDeniedError,
     UnknownReferenceError,
 )
-from src.lists.columns.enums import ColumnType
 from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash, verify_password
@@ -25,20 +24,6 @@ from .schemas import (
     UserSettingsUpdate,
     UserUpdate,
 )
-
-
-async def _scrub_column_references(
-    db: AsyncSession, column_type: ColumnType, principal_uuid: UUID
-) -> None:
-    """Drop this user/group from every `user`/`group` cell that references it.
-
-    Imported inside the function on purpose: the item service imports the user
-    *models*, so a module-level import of its *service* here would close a cycle
-    (the same reason PermissionService is imported lazily elsewhere).
-    """
-    from src.lists.items.services import ListItemService
-
-    await ListItemService.scrub_principal_references(db, column_type, principal_uuid)
 
 
 def _coerce_uuid(value: Union[str, UUID]) -> Optional[UUID]:
@@ -269,11 +254,14 @@ class UserService:
             await cls._guard_last_superuser(db, user)
 
         user.deleted_at = datetime.now(timezone.utc)
-        # Drop memberships so the user stops appearing in UserGroupRead.users.
-        user.groups.clear()
-        # `user` cells still holding this uuid are left alone: they are what makes a
-        # restore meaningful, and they render as "(deleted)" until the account is
-        # purged. See src/maintenance/purge_deleted_principals.py.
+        # Memberships are kept. They used to be cleared here so the account stopped
+        # appearing in UserGroupRead.users, but that made the delete lossy in a way
+        # nothing recorded: a restore brought the account back with no groups and no
+        # way to know it ever had any. The relationship filters deleted rows out of
+        # the join instead (see models.py), so it reads the same and undoes cleanly.
+        # `user` cells still holding this uuid are left alone for the same reason, and
+        # render as "(deleted)" until the account is purged. See
+        # src/maintenance/purge_deleted_principals.py.
         await db.commit()
         return True
 
@@ -469,7 +457,9 @@ class UserGroupService:
         cls._guard_system_group(group)
 
         group.deleted_at = datetime.now(timezone.utc)
-        # Drop memberships so the group stops appearing in UserRead.groups.
-        group.users.clear()
+        # Kept, for the reason UserService.delete gives. The group stops appearing in
+        # UserRead.groups because the relationship filters it, and stops conferring
+        # anything because PermissionService._group_ids checks the same thing — that
+        # second one is why this is a security change and not only a cosmetic one.
         await db.commit()
         return True
