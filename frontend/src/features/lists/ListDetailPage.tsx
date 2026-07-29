@@ -21,6 +21,7 @@ import { RowActions } from "../../components/RowActions";
 import { SearchInput } from "../../components/SearchInput";
 import type {
   Column,
+  FilterGroup,
   Form,
   ListItem,
   ListRead,
@@ -44,6 +45,7 @@ import { SortControl } from "../views/SortControl";
 import { ViewBar } from "../views/ViewBar";
 import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
+import { recordParams } from "../views/recordQuery";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
   useEffectiveActions,
@@ -51,6 +53,11 @@ import {
 } from "../permissions/useEffectiveActions";
 
 type SortOrder = 1 | 0 | -1 | null | undefined;
+
+/** No conditions. Sent as-is rather than omitted, which is what tells the server
+ *  "no filter" instead of "whatever the view saved" — the two differ for a view
+ *  that filters, and being able to look past one is the point. */
+const EMPTY_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
 
 // Split out of the bundle: the decoder it pulls in is ~110 kB gzipped — a quarter
 // of the whole app — for a dialog most sessions never open. It arrives when the
@@ -132,6 +139,11 @@ export function ListDetailPage() {
   // Debounced so a query goes out per pause, not per keystroke.
   const q = useDebounced(search);
   const [groupBy, setGroupBy] = useState<string | null>(null);
+  // The filter in effect right now. Seeded from the view and sent with the read,
+  // like the sort and the grouping beside it — filtering used to be the one control
+  // here that wrote straight to the view, so asking a question changed the list for
+  // everyone and needed `configure` to ask.
+  const [filters, setFilters] = useState<FilterGroup>(EMPTY_FILTER);
   // Starts hidden, and is page state like the rest of this bar rather than
   // something saved: the app has no per-list UI preferences to hang it on, and
   // reaching for localStorage or the view config for one boolean would be the
@@ -168,28 +180,21 @@ export function ListDetailPage() {
       sortField,
       sortOrder,
       groupBy,
+      filters,
     ],
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (activeViewUuid) params.set("view_uuid", activeViewUuid);
-      if (q.trim()) params.set("q", q.trim());
-      params.set("skip", String(first));
-      params.set("limit", String(pageSize));
-      // Grouping pins the order to the group column, and it has to be *sent*: a
-      // group's records are only renderable under one subheader if they are
-      // adjacent, and with the page cut server-side that can no longer be arranged
-      // after the fact. Otherwise the order is whichever header was clicked.
-      if (groupBy) {
-        params.set("sort_by", groupBy);
-        params.set("sort_dir", "asc");
-      } else if (sortField && sortOrder) {
-        params.set("sort_by", sortField.replace(/^data\./, ""));
-        params.set("sort_dir", sortOrder === 1 ? "asc" : "desc");
-      }
-      return api.getPage<ListItem>(
-        `/lists/${listUuid}/items/?${params.toString()}`,
-      );
-    },
+    queryFn: () =>
+      api.getPage<ListItem>(
+        `/lists/${listUuid}/items/?${recordParams({
+          viewUuid: activeViewUuid,
+          q,
+          filters,
+          groupBy,
+          sortField,
+          sortOrder,
+          skip: first,
+          limit: pageSize,
+        })}`,
+      ),
     // Paging replaces the page rather than blanking the grid and dropping its
     // height to nothing while the next one is in flight.
     placeholderData: (prev) => prev,
@@ -232,17 +237,16 @@ export function ListDetailPage() {
     { label: list.data?.display_name ?? "List" },
   ];
 
-  // Records and views can each carry their own grants, so row- and view-level
-  // controls are gated separately from the list as a whole.
+  // Records carry their own grants, so row-level controls are gated separately
+  // from the list as a whole. View-level permissions are not fetched here any
+  // more: the only thing this page gated on them was the filter button, and
+  // filtering no longer touches the view. `ViewBar` still resolves them for
+  // "Save view" and "Share view", which is where a view's permissions belong.
   const listActions = useEffectiveActions("list", listUuid);
   const canItem = useEffectiveActionsMap(
     "item",
     rows.map((item) => item.uuid),
     listActions,
-  );
-  const canView = useEffectiveActionsMap(
-    "view",
-    (views.data ?? []).map((view) => view.uuid),
   );
 
   // Default to the first view once loaded.
@@ -252,7 +256,7 @@ export function ListDetailPage() {
     }
   }, [views.data, activeViewUuid]);
 
-  // Apply the active view's saved sort + page size.
+  // Apply the active view's saved config.
   useEffect(() => {
     const view = views.data?.find((v) => v.uuid === activeViewUuid);
     if (!view) return;
@@ -261,18 +265,19 @@ export function ListDetailPage() {
     setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
     setPageSize(view.config.page_size ?? 25);
     setGroupBy(view.config.group_by?.column_uuid ?? null);
+    setFilters(view.config.filters ?? EMPTY_FILTER);
     setHiddenColumns(view.config.hidden_columns ?? []);
     setColumnOrder(view.config.column_order ?? []);
     setSelection([]); // selection doesn't carry across views
   }, [activeViewUuid, views.data]);
 
-  // The view, the search and the grouping are the *question*; changing any of them
-  // asks a different one, and its page 3 has nothing to do with the old one's. A
-  // mere refetch of the same question must not move you, which is why this is keyed
-  // on those and not on the records that come back.
+  // The view, the search, the grouping and the filter are the *question*; changing
+  // any of them asks a different one, and its page 3 has nothing to do with the old
+  // one's. A mere refetch of the same question must not move you, which is why this
+  // is keyed on those and not on the records that come back.
   useEffect(() => {
     setFirst(0);
-  }, [activeViewUuid, q, groupBy]);
+  }, [activeViewUuid, q, groupBy, filters]);
 
   // Deleting the last records of the last page would otherwise leave `first` past
   // the end — an empty grid with the records still there, one page back. Land on
@@ -446,7 +451,7 @@ export function ListDetailPage() {
   const moreMenu = useRef<Menu>(null);
 
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
-  const filterCount = activeView?.config.filters?.conditions?.length ?? 0;
+  const filterCount = filters.conditions.length;
   const groupColumn = groupBy
     ? (cols.find((c) => c.uuid === groupBy) ?? null)
     : null;
@@ -460,10 +465,7 @@ export function ListDetailPage() {
         ]
       : [],
     page_size: pageSize,
-    filters: activeView?.config.filters ?? {
-      conjunction: "and",
-      conditions: [],
-    },
+    filters,
     group_by: groupBy ? { column_uuid: groupBy } : null,
     hidden_columns: hiddenColumns,
     column_order: columnOrder,
@@ -475,17 +477,36 @@ export function ListDetailPage() {
    * Both sides go through the same defaults before they are compared, because a
    * view saved before `group_by` existed has no key for it while the page always
    * has `null` — and an absent field and a field set to its default are the same
-   * arrangement. Filters are left out on purpose: the filter dialog writes them
-   * straight to the view, so `currentConfig` carries the view's own object and
-   * the two can never differ.
+   * arrangement.
+   *
+   * Filters are in here now. They used to be excluded because the dialog wrote them
+   * straight to the view, so the two could not differ by construction; now that a
+   * filter is a question you ask rather than a change you make, "Save view" is what
+   * turns it into one, and it has to light up when you have asked something new.
+   *
+   * **Every nested object is rebuilt field by field, never compared as it arrived.**
+   * `JSON.stringify` is order-sensitive and the two sides do not agree on an order:
+   * a stored config comes back from JSONB with its keys in whatever order Postgres
+   * holds them (`{direction, column_uuid}`), while the page builds its own
+   * (`{column_uuid, direction}`). Comparing those directly reported a change on
+   * every render, which pinned "Save view" to the toolbar of any view with a saved
+   * sort — the exact always-on button the dirty flag was added to get rid of.
    */
   function fingerprint(config: ViewConfig | null | undefined): string {
     return JSON.stringify({
-      sorts: config?.sorts ?? [],
+      sorts: (config?.sorts ?? []).map((s) => [s.column_uuid, s.direction]),
       page_size: config?.page_size ?? 25,
-      group_by: config?.group_by ?? null,
+      group_by: config?.group_by?.column_uuid ?? null,
       hidden_columns: config?.hidden_columns ?? [],
       column_order: config?.column_order ?? [],
+      filters: {
+        conjunction: config?.filters?.conjunction ?? "and",
+        conditions: (config?.filters?.conditions ?? []).map((c) => [
+          c.column_uuid,
+          c.operator,
+          c.value ?? null,
+        ]),
+      },
     });
   }
   const viewDirty =
@@ -517,8 +538,11 @@ export function ListDetailPage() {
     onGroupBy: setGroupBy,
     filterCount,
     onOpenFilter: () => setShowFilter(true),
-    // Filters live on the view, so editing them is a change to that view.
-    canFilter: !!activeViewUuid && canView(activeViewUuid, "configure"),
+    // Filtering is now a way of reading, not a change to the view, so anyone who
+    // can see the records can narrow them. `configure` still guards *saving* the
+    // filter onto the view, which is where it belongs — that is the part that
+    // changes what everybody else sees.
+    canFilter: true,
   };
 
   // No client-side sort for either layout any more: the server returns the page
@@ -734,6 +758,7 @@ export function ListDetailPage() {
         metrics={metricList}
         viewUuid={activeViewUuid}
         q={q}
+        filters={filters}
         visible={showMetrics}
       />
 
@@ -1031,16 +1056,16 @@ export function ListDetailPage() {
         visible={showDeleted}
         onHide={() => setShowDeleted(false)}
       />
-      {activeViewUuid && (
-        <FilterDialog
-          listUuid={listUuid}
-          viewUuid={activeViewUuid}
-          columns={cols}
-          baseConfig={currentConfig}
-          visible={showFilter}
-          onHide={() => setShowFilter(false)}
-        />
-      )}
+      {/* No longer gated on there being an active view: a filter is this request's,
+          so a list with no views at all can still be narrowed. */}
+      <FilterDialog
+        listUuid={listUuid}
+        columns={cols}
+        value={filters}
+        onApply={setFilters}
+        visible={showFilter}
+        onHide={() => setShowFilter(false)}
+      />
       {sharingItem && (
         <ShareDialog
           visible={!!sharingItem}

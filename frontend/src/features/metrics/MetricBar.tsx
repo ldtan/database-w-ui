@@ -3,17 +3,19 @@ import { Skeleton } from "primereact/skeleton";
 
 import { api } from "../../lib/api";
 import { useLiveList } from "../../lib/useLiveList";
-import type { Metric, MetricValue, MetricValues } from "../../lib/types";
+import type { FilterGroup, Metric, MetricValue, MetricValues } from "../../lib/types";
+import { recordScopeParams } from "../views/recordQuery";
 import { metricsKey, metricValuesKey } from "./metricKeys";
 
 interface Props {
   listUuid: string;
   metrics: Metric[];
-  /** The view and search the grid is showing, so the cards describe the same
-   *  records. Both are part of the query key: a different question is a
+  /** The view, search and filter the grid is showing, so the cards describe the
+   *  same records. All three are part of the query key: a different question is a
    *  different answer, not a stale one. */
   viewUuid: string | null;
   q: string;
+  filters: FilterGroup;
   /** Whether the strip is revealed. Off by default (see ListDetailPage), and it
    *  gates the query as well as the markup — a metric is a scan of the whole
    *  list, re-run on the live interval, so a hidden strip must cost nothing
@@ -46,21 +48,25 @@ function format(value: MetricValue["value"], metric: Metric): string {
  * different numbers, which is correct: a total is a read of the records, and you
  * cannot total what you cannot see.
  */
-export function MetricBar({ listUuid, metrics, viewUuid, q, visible }: Props) {
+export function MetricBar({
+  listUuid,
+  metrics,
+  viewUuid,
+  q,
+  filters,
+  visible,
+}: Props) {
   const live = useLiveList(listUuid);
   const values = useQuery({
     // Cards follow the records: same live refresh, same guardrails.
     ...live,
-    queryKey: metricValuesKey(listUuid, viewUuid, q),
-    queryFn: () => {
-      const params = new URLSearchParams();
-      if (viewUuid) params.set("view_uuid", viewUuid);
-      if (q.trim()) params.set("q", q.trim());
-      const query = params.toString();
-      return api.get<MetricValues>(
-        `/lists/${listUuid}/metrics/values${query ? `?${query}` : ""}`,
-      );
-    },
+    queryKey: metricValuesKey(listUuid, viewUuid, q, filters),
+    queryFn: () =>
+      // The same builder the grid's own query uses, so "which records" cannot be
+      // answered one way for the rows and another for the totals above them.
+      api.get<MetricValues>(
+        `/lists/${listUuid}/metrics/values?${recordScopeParams({ viewUuid, q, filters })}`,
+      ),
     enabled: visible && metrics.length > 0,
   });
 

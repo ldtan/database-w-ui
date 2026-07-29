@@ -1,67 +1,56 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
-import { Message } from "primereact/message";
 
-import { api, ApiError } from "../../lib/api";
-import type { Column, FilterCondition, View, ViewConfig } from "../../lib/types";
+import type { Column, FilterCondition, FilterGroup } from "../../lib/types";
 import { FilterConditionsEditor, cleanConditions } from "./FilterConditionsEditor";
 
 interface Props {
   listUuid: string;
-  viewUuid: string;
   columns: Column[];
-  baseConfig: ViewConfig;
+  /** The filter currently in effect, which this opens on. */
+  value: FilterGroup;
+  onApply: (next: FilterGroup) => void;
   visible: boolean;
   onHide: () => void;
 }
 
 /**
- * Edit the active view's filter.
+ * Edit the filter the grid is reading through.
  *
- * Unlike the rest of the toolbar, this saves immediately: a filter lives on the
- * view, so changing it *is* a change to the view (hence the `configure` permission
- * the page checks before offering the button). It PATCHes the whole config —
- * `baseConfig` is the page's current state, so applying a filter does not silently
- * discard the sort or column order you had set but not saved.
+ * This used to PATCH the view the moment you pressed Apply, which made filtering
+ * three things it should never have been: permanent, shared with everyone who can
+ * see that view, and gated on `configure`. So the most ordinary question you can
+ * ask a list — "just the overdue ones" — was a change to the list, and someone
+ * with read access could not ask it at all.
  *
- * The conditions themselves are edited by `FilterConditionsEditor`, which the
- * import dialog also uses to pick which records to export.
+ * Now it hands the conditions back to the page, which sends them with the next
+ * read (`?filters=`). They are page state exactly like the sort, the grouping and
+ * the column order, and they travel into the view by the one route all of those
+ * share: the "Save view" button, when you decide the question was worth keeping.
  */
 export function FilterDialog({
   listUuid,
-  viewUuid,
   columns,
-  baseConfig,
+  value,
+  onApply,
   visible,
   onHide,
 }: Props) {
-  const queryClient = useQueryClient();
   const [conjunction, setConjunction] = useState<"and" | "or">("and");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
   useEffect(() => {
     if (!visible) return;
-    setConjunction(baseConfig.filters?.conjunction ?? "and");
-    setConditions(baseConfig.filters?.conditions ?? []);
+    setConjunction(value.conjunction ?? "and");
+    setConditions(value.conditions ?? []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
 
-  const apply = useMutation({
-    mutationFn: () => {
-      const config: ViewConfig = {
-        ...baseConfig,
-        filters: { conjunction, conditions: cleanConditions(conditions) },
-      };
-      return api.patch<View>(`/lists/${listUuid}/views/${viewUuid}`, { config });
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
-      onHide();
-    },
-  });
+  function apply() {
+    onApply({ conjunction, conditions: cleanConditions(conditions) });
+    onHide();
+  }
 
   return (
     <AppDialog
@@ -71,21 +60,22 @@ export function FilterDialog({
       style={{ width: 620 }}
       footer={
         <>
+          {(value.conditions?.length ?? 0) > 0 && (
+            <Button
+              label="Clear"
+              text
+              onClick={() => {
+                onApply({ conjunction: "and", conditions: [] });
+                onHide();
+              }}
+            />
+          )}
           <Button label="Cancel" text onClick={onHide} />
-          <Button
-            label="Apply"
-            icon="pi pi-check"
-            onClick={() => apply.mutate()}
-            loading={apply.isPending}
-          />
+          <Button label="Apply" icon="pi pi-check" onClick={apply} />
         </>
       }
     >
       <div className="flex flex-col gap-3">
-        {apply.error instanceof ApiError && (
-          <Message severity="error" text={apply.error.message} />
-        )}
-
         <FilterConditionsEditor
           listUuid={listUuid}
           columns={columns}

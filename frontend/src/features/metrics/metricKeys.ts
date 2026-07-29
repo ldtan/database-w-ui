@@ -13,10 +13,13 @@
  * the existing ones — is the kind of pairing that is correct on the day it is
  * written and quietly wrong six call sites later.
  */
+import type { FilterGroup } from "../../lib/types";
+
 export const metricsKey = (listUuid: string) => ["metrics", listUuid] as const;
 
 export const metricValuesKey = (
   listUuid: string,
   viewUuid: string | null,
   q: string,
-) => ["items", listUuid, "metrics", viewUuid, q] as const;
+  filters: FilterGroup,
+) => ["items", listUuid, "metrics", viewUuid, q, filters] as const;
