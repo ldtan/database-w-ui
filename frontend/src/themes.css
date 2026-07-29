@@ -912,6 +912,58 @@ a {
   max-height: max(22rem, calc(100vh - 19rem));
   overflow: auto;
 }
+/* The grid's two non-data columns are pinned to its edges, so a list with enough
+   columns to scroll sideways stops carrying its checkbox off one end and its
+   actions off the other. Scoped to `.data-grid` because it is the only table that
+   scrolls horizontally — everywhere else the columns are fixed and always fit.
+   Sticky resolves against `.p-datatable-wrapper` above, the same box the header
+   sticks to; `overflow: hidden` on `.p-datatable` is a rounding of the card's
+   corners and does not clip it. */
+.data-grid .p-datatable-thead > tr > th.grid-pin-start,
+.data-grid .p-datatable-tbody > tr > td.grid-pin-start {
+  position: sticky;
+  left: 0;
+  /* A hairline standing in for the table edge these cells no longer sit against,
+     so a pinned column reads as pinned rather than as one that failed to scroll. */
+  box-shadow: 1px 0 0 var(--border);
+}
+.data-grid .p-datatable-thead > tr > th.grid-pin-end,
+.data-grid .p-datatable-tbody > tr > td.grid-pin-end {
+  position: sticky;
+  right: 0;
+  box-shadow: -1px 0 0 var(--border);
+}
+/* `inherit` rather than a colour of its own: the row under a pinned cell may be
+   striped, hovered, or selected, and the cell has to be whichever its row is.
+   All four of those backgrounds are set on the `tr` (below), so inheriting picks
+   up every one without restating them here — and a pinned cell must have *some*
+   background, or the cells scrolling beneath it read straight through. */
+.data-grid .p-datatable-tbody > tr > td.grid-pin-start,
+.data-grid .p-datatable-tbody > tr > td.grid-pin-end {
+  background: inherit;
+  z-index: 1;
+}
+/* Four tiers, because the corner cells stick in two directions at once: a
+   scrolling cell (0), a pinned cell (1), the header (2), and the header's own
+   pinned cells (3), which have to clear both the header beside them and the
+   pinned column below them. The header's base z-index is 1 — left there it would
+   tie with a pinned body cell and lose on document order, letting the rows scroll
+   over the top of it. */
+.data-grid .p-datatable-thead > tr > th {
+  z-index: 2;
+}
+.data-grid .p-datatable-thead > tr > th.grid-pin-start,
+.data-grid .p-datatable-thead > tr > th.grid-pin-end {
+  z-index: 3;
+}
+/* A row that opens its record on click points like the control it has become.
+   PrimeReact hangs its own pointer rule off `p-selectable-row`, which a
+   checkbox-only selection no longer sets — and it would say the wrong thing
+   anyway: that class means "this row can be selected", where this one means
+   "this row will open something", which is not true of every row. */
+.data-grid .p-datatable-tbody > tr.grid-row-opens {
+  cursor: pointer;
+}
 .p-datatable .p-datatable-tbody > tr {
   background: var(--surface);
   color: var(--text);

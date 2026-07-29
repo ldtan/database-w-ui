@@ -25,6 +25,8 @@ interface Props {
    * overflow menu. Defaults to 3 — enough that a typical row (share/edit/delete)
    * never overflows. Rows with a fourth action, or a lot of them, pass 2 and keep
    * only what the row is *for* inline: the lists page and both record layouts do.
+   * 0 collapses everything, which is what a narrow records grid wants — there the
+   * column is pinned, so its width is spent whether or not it is being looked at.
    */
   maxVisible?: number;
   /** Button size, matched to the surface — records render theirs `small`. */
@@ -51,9 +53,13 @@ export function RowActions({ actions, maxVisible = 3, size }: Props) {
   const shown = actions.filter((a) => a.visible !== false);
   if (shown.length === 0) return null;
 
-  const overflows = shown.length > maxVisible;
-  const inline = overflows ? shown.slice(0, maxVisible) : shown;
-  const overflow = overflows ? shown.slice(maxVisible) : [];
+  // A lone action stays inline even where the caller asked for everything to
+  // collapse (`maxVisible={0}`): folding one button into a menu that holds one
+  // item costs a click and saves no width.
+  const limit = shown.length === 1 ? 1 : maxVisible;
+  const overflows = shown.length > limit;
+  const inline = overflows ? shown.slice(0, limit) : shown;
+  const overflow = overflows ? shown.slice(limit) : [];
 
   return (
     <div className="row-actions flex items-center gap-1">
