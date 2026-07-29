@@ -729,7 +729,23 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List Items */
+        /**
+         * List Items
+         * @description Filtering, grouping, searching, ordering and paging, all server-side — so a
+         *     page past the first is a page of the *list* rather than of whatever the browser
+         *     happened to hold.
+         *
+         *     A saved view supplies the filters, sorts and grouping. Every one of them can
+         *     also be given per request, in which case it stands in for what the view saved:
+         *     that is how someone reads a list a particular way without saving that way to the
+         *     list, and without needing `configure` on a view to do it. Omitting a parameter
+         *     and passing it empty therefore mean different things — the first defers to the
+         *     view, the second overrules it with nothing.
+         *
+         *     The total number of matches (ignoring skip/limit, honouring everything else)
+         *     comes back in X-Total-Count, which is what a paginator needs; the body stays a
+         *     plain array, like every other listing here.
+         */
         get: operations["list_items_api_lists__list_uuid__items__get"];
         put?: never;
         /** Create Item */
@@ -768,23 +784,6 @@ export interface paths {
         put?: never;
         /** Bulk Delete Items */
         post: operations["bulk_delete_items_api_lists__list_uuid__items_bulk_delete_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/lists/{list_uuid}/items/query": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Query Items */
-        post: operations["query_items_api_lists__list_uuid__items_query_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1057,8 +1056,9 @@ export interface paths {
          * Metric Values
          * @description Every metric's value over the records this caller can see.
          *
-         *     Takes the same `view_uuid` and `q` as the items endpoint, so the numbers
-         *     describe exactly what the grid is showing.
+         *     Takes the same `view_uuid`, `q` and `filters` as the items endpoint, so the
+         *     numbers describe exactly what the grid is showing — including a filter applied
+         *     for this request only, which never touched the view.
          */
         get: operations["metric_values_api_lists__list_uuid__metrics_values_get"];
         put?: never;
@@ -1839,26 +1839,6 @@ export interface components {
             created: number;
             /** Errors */
             errors?: components["schemas"]["ImportError"][];
-        };
-        /**
-         * ItemQuery
-         * @description Ad-hoc filter/sort/limit for reading records without a saved view
-         *     (used by export).
-         */
-        ItemQuery: {
-            filters?: components["schemas"]["FilterGroup"];
-            /** Sorts */
-            sorts?: components["schemas"]["SortSpec"][];
-            /**
-             * Skip
-             * @default 0
-             */
-            skip: number;
-            /**
-             * Limit
-             * @default 100
-             */
-            limit: number;
         };
         /** ListClone */
         ListClone: {
@@ -4113,6 +4093,13 @@ export interface operations {
                 limit?: number;
                 /** @description Match any column's text */
                 q?: string | null;
+                /** @description Column uuid to order by; replaces the view's saved sorts. Empty means no order at all, as distinct from omitting it */
+                sort_by?: string | null;
+                sort_dir?: string;
+                /** @description Column uuid to group by; replaces the view's saved grouping. Empty means no grouping, as distinct from omitting it */
+                group_by?: string | null;
+                /** @description Filter the records for this request only, as a URL-encoded JSON filter group: {"conjunction": "and"|"or", "conditions": [{"column_uuid", "operator", "value"}]}. Replaces the view's saved filters; an empty `conditions` list means no filter at all, which is how a caller asks for the whole list through a filtered view. */
+                filters?: string | null;
             };
             header?: never;
             path: {
@@ -4233,41 +4220,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkDeleteResult"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    query_items_api_lists__list_uuid__items_query_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                list_uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ItemQuery"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ListItemRead"][];
                 };
             };
             /** @description Validation Error */
@@ -5032,6 +4984,8 @@ export interface operations {
             query?: {
                 view_uuid?: string | null;
                 q?: string | null;
+                /** @description Filter the records for this request only, as a URL-encoded JSON filter group: {"conjunction": "and"|"or", "conditions": [{"column_uuid", "operator", "value"}]}. Replaces the view's saved filters; an empty `conditions` list means no filter at all, which is how a caller asks for the whole list through a filtered view. */
+                filters?: string | null;
             };
             header?: never;
             path: {

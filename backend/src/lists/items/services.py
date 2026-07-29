@@ -360,17 +360,29 @@ class ListItemService:
         columns: dict[str, Column],
         view_uuid: Optional[Union[str, UUID]] = None,
         q: Optional[str] = None,
+        filters: Optional[dict] = None,
+        group_by: Optional[dict] = None,
     ) -> tuple[sa.Select, Optional[list], Optional[dict]]:
         """The records this caller may see, through this view, matching this search.
 
         Everything that decides *which* records a request is about, in one place:
-        the permission filter, the view's saved filters, and the search. Returns
-        the view's sorts and grouping alongside rather than applying them, because
-        a caller that only aggregates (see the metrics service) has no use for an
-        order and should not pay to impose one.
+        the permission filter, the filters, and the search. Returns the sorts and
+        the grouping alongside rather than applying them, because a caller that only
+        aggregates (see the metrics service) has no use for an order and should not
+        pay to impose one.
 
-        Both readers go through this so a metric can never disagree with the grid
+        Every reader goes through this so a metric can never disagree with the grid
         it sits above about what is on screen.
+
+        A view supplies the filters, sorts and grouping by default. ``filters`` and
+        ``group_by`` are the caller's own, for this request only, and each *replaces*
+        the view's rather than narrowing it further — they are how you ask a question
+        of a list without saving the question to it. None means "not asked, use the
+        view's"; a filter group with no conditions therefore means something
+        different, namely "no filter", which is how a caller reads the whole list
+        through a view that filters.
+
+        The search is not an override of anything: it narrows whatever is left.
         """
         from src.permissions.services import PermissionService
 
@@ -382,16 +394,20 @@ class ListItemService:
         # A search narrows whatever the view already shows, rather than replacing it.
         stmt = await cls._apply_search(db, lst, user, stmt, q, columns)
         sorts = None
-        group_by = None
+        saved_filters = None
 
         if view_uuid is not None:
             view = await ViewService.get_by_uuid(db, lst.id, view_uuid)
             if view is not None:
                 config = view.config or {}
-                stmt = apply_filters(stmt, config.get("filters"), columns)
+                saved_filters = config.get("filters")
                 sorts = config.get("sorts")
-                group_by = config.get("group_by")
+                if group_by is None:
+                    group_by = config.get("group_by")
 
+        stmt = apply_filters(
+            stmt, saved_filters if filters is None else filters, columns
+        )
         return stmt, sorts, group_by
 
     @classmethod
@@ -406,14 +422,26 @@ class ListItemService:
         q: Optional[str] = None,
         sort_by: Optional[str] = None,
         sort_dir: str = "asc",
+        filters: Optional[dict] = None,
+        group_by: Optional[dict] = None,
     ) -> Sequence[ListItem]:
         """One page of the records this caller may see, in this view, matching ``q``.
 
         ``sort_by`` (a column uuid) is the order the *caller* asked for — a clicked
         grid header — and it replaces the view's saved sorts rather than adding to
-        them: clicking a header means "order by this", not "then by this". Grouping
-        still leads, because `apply_sorts` puts it first and a group's rows have to
-        stay adjacent to be rendered under one heading.
+        them: clicking a header means "order by this", not "then by this". The same
+        rule governs ``filters`` and ``group_by`` (see `visible_stmt`): each is this
+        request's answer, and it stands in for whatever the view saved.
+
+        Grouping still leads the ordering, because `apply_sorts` puts it first and a
+        group's rows have to stay adjacent to be rendered under one heading. A sort
+        is not lost to it — it breaks ties *within* each group.
+
+        Passing ``sort_by`` as an empty string means "no order at all", as distinct
+        from omitting it, which falls back to the view's. Naming a column that does
+        not exist is read the same way: the caller stated an order and it cannot be
+        honoured, so quietly substituting the view's would answer a question nobody
+        asked.
 
         The order has to be imposed here rather than in the browser now that only
         one page is sent: sorting a page client-side would order the 25 rows that
@@ -421,10 +449,14 @@ class ListItemService:
         """
         columns = await cls._columns_by_key(db, lst.id)
         stmt, sorts, group_by = await cls.visible_stmt(
-            db, lst, user, columns, view_uuid, q
+            db, lst, user, columns, view_uuid, q, filters, group_by
         )
-        if sort_by is not None and sort_by in columns:
-            sorts = [{"column_uuid": sort_by, "direction": sort_dir}]
+        if sort_by is not None:
+            sorts = (
+                [{"column_uuid": sort_by, "direction": sort_dir}]
+                if sort_by in columns
+                else []
+            )
         stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
         items = (await db.execute(stmt)).scalars().all()
         cls._shape_for_read(columns, items)
@@ -438,42 +470,22 @@ class ListItemService:
         user,
         view_uuid: Optional[Union[str, UUID]] = None,
         q: Optional[str] = None,
+        filters: Optional[dict] = None,
     ) -> int:
         """How many records `list` would return without a page — the paginator's
         total. Built off `visible_stmt`, the same predicate the listing uses, so
-        the count and the page it describes cannot drift apart.
+        the count and the page it describes cannot drift apart. That is why it takes
+        ``filters`` too: a total that ignored the filter would offer pages the filter
+        has already emptied.
 
-        No ordering: a count does not care, and imposing one would sort the whole
-        table to throw the order away.
+        No grouping and no ordering: neither changes how many rows match, and
+        imposing an order would sort the whole table to throw the order away.
         """
         columns = await cls._columns_by_key(db, lst.id)
-        stmt, _, _ = await cls.visible_stmt(db, lst, user, columns, view_uuid, q)
-        return await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
-
-    @classmethod
-    async def query(
-        cls,
-        db: AsyncSession,
-        lst: List,
-        user,
-        filters: Optional[dict] = None,
-        sorts: Optional[list] = None,
-        skip: int = 0,
-        limit: int = 100,
-    ) -> Sequence[ListItem]:
-        """Read records with ad-hoc filters/sorts (no saved view). Unknown
-        columns are ignored; empty sorts fall back to id-ascending order."""
-        from src.permissions.services import PermissionService
-
-        columns = await cls._columns_by_key(db, lst.id)
-        base = cls._select(lst.id).where(
-            await PermissionService.item_view_filter(db, user, lst)
+        stmt, _, _ = await cls.visible_stmt(
+            db, lst, user, columns, view_uuid, q, filters
         )
-        stmt = apply_filters(base, filters, columns)
-        stmt = apply_sorts(stmt, sorts, columns).offset(skip).limit(limit)
-        items = (await db.execute(stmt)).scalars().all()
-        cls._shape_for_read(columns, items)
-        return items
+        return await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
     @classmethod
     async def create(

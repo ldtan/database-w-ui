@@ -170,13 +170,19 @@ class MetricService:
         user,
         view_uuid: Optional[Union[str, UUID]] = None,
         q: Optional[str] = None,
+        filters: Optional[dict] = None,
     ) -> MetricValues:
         """Answer every metric on the list in one pass over its records.
 
-        The records are whatever the caller may see through this view and search
-        — `ListItemService.visible_stmt` is the same statement the grid reads —
-        so two people with different grants correctly get different numbers from
+        The records are whatever the caller may see through this view, search and
+        filter — `ListItemService.visible_stmt` is the same statement the grid reads
+        — so two people with different grants correctly get different numbers from
         the same card, and a filtered view reports on what it shows.
+
+        ``filters`` is here for the same reason `q` is: a total sitting above a grid
+        has to be a total *of that grid*. Narrowing the records without narrowing the
+        cards would leave a "Total owed" reading the whole list while the rows under
+        it show one customer, which is worse than showing nothing.
         """
         metrics = await cls.list(db, lst.id)
         if not metrics:
@@ -221,7 +227,7 @@ class MetricService:
             }
 
             stmt, _sorts, _group_by = await ListItemService.visible_stmt(
-                db, lst, user, columns, view_uuid, q
+                db, lst, user, columns, view_uuid, q, filters
             )
             # `data` alone, ordered by id: an aggregate has no use for the view's
             # sort, and hydrating whole records would cost 50k ORM instances for

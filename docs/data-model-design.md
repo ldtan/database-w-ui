@@ -425,6 +425,16 @@ Validate the operator against the referenced column's `type` in the app layer. E
 entries in `hidden_columns` and `column_order`. An empty `hidden_columns` shows every
 column; an empty `column_order` uses the list's default order.
 
+**A view is a default, not the only way to ask.** `filters`, `sorts` and `group_by` can
+each be given per request on `GET /lists/{uuid}/items/` (`?filters=` as URL-encoded JSON,
+`?sort_by=`/`?sort_dir=`, `?group_by=`), where they *replace* what the view saved rather
+than narrowing it further. That is what lets someone read a list a particular way without
+saving that way onto a shared object — filtering used to require `configure` on a view
+and changed it for everyone. Omitting a parameter defers to the view; passing it empty
+overrules the view with nothing, which is how a filtered view is read past. `?q=` is the
+exception and composes: it narrows whatever is left. The UI holds all of these as page
+state seeded from the active view, and "Save view" is what writes them back.
+
 **Column order.** `columns.position` is the list's *default* column order. A view may
 override it with `column_order` (an ordered list of column uuids); columns absent from
 that list fall after it in `position` order, so newly-added columns still appear. Forms
@@ -533,11 +543,13 @@ Notes:
   so there is no cycle to detect.
 - **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
   The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
-- **`GET /lists/{uuid}/metrics/values?view_uuid=&q=`** answers every metric in **one
-  scan**, so the cards always agree with each other. The scan is
+- **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in
+  **one scan**, so the cards always agree with each other. The scan is
   `ListItemService.visible_stmt` — the same statement the grid reads — so it honours the
-  caller's permissions, the view's filters and the search, and the cards agree with what
-  is on screen. Two people with different grants correctly see different numbers.
+  caller's permissions, the filters and the search, and the cards agree with what is on
+  screen. It takes `filters` for that last reason: a total above a grid narrowed for one
+  request has to be a total *of that grid*. Two people with different grants correctly
+  see different numbers.
 - **Bounded at `METRIC_ROW_LIMIT` (50,000) records**, past which the response sets
   `truncated` and the card says so. See known-gaps.
 - **No `permissions_inherit`**, unlike views and forms: a metric carries no permissions

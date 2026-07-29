@@ -11,13 +11,12 @@ from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
 
-from ..dependencies import resolve_list_or_404
+from ..dependencies import filter_param, resolve_list_or_404
 from ..models import List
 from .schemas import (
     BulkDeleteRequest,
     BulkDeleteResult,
     DeletedListItemRead,
-    ItemQuery,
     ListItemCreate,
     ListItemRead,
     ListItemUpdate,
@@ -62,19 +61,44 @@ async def list_items(
     q: Optional[str] = Query(None, description="Match any column's text"),
     sort_by: Optional[str] = Query(
         None,
-        description="Column uuid to order by; replaces the view's saved sorts",
+        description=(
+            "Column uuid to order by; replaces the view's saved sorts. Empty means "
+            "no order at all, as distinct from omitting it"
+        ),
     ),
     sort_dir: str = Query("asc", pattern="^(asc|desc)$"),
+    group_by: Optional[str] = Query(
+        None,
+        description=(
+            "Column uuid to group by; replaces the view's saved grouping. Empty "
+            "means no grouping, as distinct from omitting it"
+        ),
+    ),
+    filters: Optional[dict] = Depends(filter_param),
 ):
-    """Paging, searching and ordering server-side, so a page past the first is a
-    page of the *list* rather than of whatever the browser happened to hold.
+    """Filtering, grouping, searching, ordering and paging, all server-side — so a
+    page past the first is a page of the *list* rather than of whatever the browser
+    happened to hold.
 
-    The total number of matches (ignoring skip/limit) comes back in X-Total-Count,
-    which is what a paginator needs; the body stays a plain array, like every other
-    listing here.
+    A saved view supplies the filters, sorts and grouping. Every one of them can
+    also be given per request, in which case it stands in for what the view saved:
+    that is how someone reads a list a particular way without saving that way to the
+    list, and without needing `configure` on a view to do it. Omitting a parameter
+    and passing it empty therefore mean different things — the first defers to the
+    view, the second overrules it with nothing.
+
+    The total number of matches (ignoring skip/limit, honouring everything else)
+    comes back in X-Total-Count, which is what a paginator needs; the body stays a
+    plain array, like every other listing here.
     """
+    # "" is how a caller says "no grouping" as opposed to "whatever the view says";
+    # an empty dict is falsy, so `apply_sorts` skips it, but it is not None, so it
+    # still displaces the view's.
+    grouping = None if group_by is None else ({"column_uuid": group_by} if group_by else {})
     response.headers["X-Total-Count"] = str(
-        await ListItemService.count(db, lst, current_user, view_uuid=view_uuid, q=q)
+        await ListItemService.count(
+            db, lst, current_user, view_uuid=view_uuid, q=q, filters=filters
+        )
     )
     return await ListItemService.list(
         db,
@@ -86,6 +110,8 @@ async def list_items(
         q=q,
         sort_by=sort_by,
         sort_dir=sort_dir,
+        filters=filters,
+        group_by=grouping,
     )
 
 
@@ -132,24 +158,6 @@ async def bulk_delete_items(
             permitted.append(uuid)
     deleted = await ListItemService.bulk_delete(db, lst, permitted)
     return {"deleted": deleted}
-
-
-@router.post("/query", response_model=list[ListItemRead])
-async def query_items(
-    payload: ItemQuery,
-    lst: List = Depends(resolve_list_or_404),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    return await ListItemService.query(
-        db,
-        lst,
-        current_user,
-        filters=payload.filters.model_dump(),
-        sorts=[s.model_dump() for s in payload.sorts],
-        skip=payload.skip,
-        limit=payload.limit,
-    )
 
 
 @router.get("/{uuid}", response_model=ListItemRead)

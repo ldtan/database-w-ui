@@ -13,7 +13,7 @@ from src.permissions.services import PermissionService
 
 from ..bin import services as bin_services
 from ..bin.schemas import BinnedChildRead
-from ..dependencies import get_list_or_404
+from ..dependencies import filter_param, get_list_or_404
 from ..models import List
 from .models import Metric
 from .schemas import MetricCreate, MetricRead, MetricUpdate, MetricValues
@@ -73,16 +73,18 @@ async def list_metrics(
 async def metric_values(
     view_uuid: Optional[str] = Query(default=None),
     q: Optional[str] = Query(default=None),
+    filters: Optional[dict] = Depends(filter_param),
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Every metric's value over the records this caller can see.
 
-    Takes the same `view_uuid` and `q` as the items endpoint, so the numbers
-    describe exactly what the grid is showing.
+    Takes the same `view_uuid`, `q` and `filters` as the items endpoint, so the
+    numbers describe exactly what the grid is showing — including a filter applied
+    for this request only, which never touched the view.
     """
-    return await MetricService.evaluate(db, lst, current_user, view_uuid, q)
+    return await MetricService.evaluate(db, lst, current_user, view_uuid, q, filters)
 
 
 # Before `/{uuid}` for the same reason as `/values` above.
