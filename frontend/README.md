@@ -74,7 +74,8 @@ src/
   features/
     auth/         # login (the only unauthenticated page)
     workspaces/   # workspaces + the lists shared with you directly
-    lists/        # lists of a workspace; a list's records; the List settings dialog
+    lists/        # lists of a workspace; a list's records; the List settings dialog;
+                  # DeletedConfigDialog, the bin its four config kinds share
     columns/      # add/edit a column, and the columns panel in List settings
     records/      # the record form, the mobile card layout, renderCell, sortRows,
                   # and the QR scanner (QrScanDialog + qrFill)
@@ -82,7 +83,7 @@ src/
     forms/        # per-list form layouts
     metrics/    # the aggregate cards above the grid, and their settings panel
     permissions/  # Share dialog/panel and the effective-actions hooks
-    people/       # accounts and groups (identity administration)
+    people/       # accounts and groups (identity administration), and their bin
     profile/      # your own account and profile
     transfer/     # CSV/JSON import + export
     lookups/      # lookup cells, fields and filter inputs
@@ -294,6 +295,38 @@ and passes `dirty` to `ViewBar`.
 
 Run `npm run gen:api` to keep the TypeScript types in sync with the Python models
 instead of the hand-written `src/lib/types.ts`.
+
+## Bins
+
+Nothing in this app is deleted outright — a delete sets `deleted_at`, and a nightly job
+destroys the row once it is past the retention window. Every kind that behaves that way
+has a bin, and each bin sits **beside the thing it holds** rather than on one "deleted
+things" screen: you go looking for a missing view where the views are listed.
+
+| Component | Where it is offered | Gated on |
+|-----------|--------------------|----------|
+| `DeletedRecordsDialog` | the list page's overflow menu | list-level `delete` |
+| `DeletedListsDialog` | the lists page | the workspace's `delete` |
+| `DeletedWorkspacesDialog` | the workspaces page | ownership (the backend scopes it) |
+| `DeletedConfigDialog` | each tab of List settings | list-level `configure` |
+| `DeletedPrincipalsDialog` | the People page, per section | superuser |
+
+The last two are each **one component covering several kinds**, because the API behind
+them is one module behind several prefixes: same row shape, same three routes
+(`/deleted`, `/{uuid}/restore`, `/{uuid}/permanent`), same gate. What differs per kind is
+wording and which queries a restore invalidates, so that is a lookup table at the top of
+the file rather than four near-identical components to keep in step.
+
+Two things are worth copying if a sixth kind ever gets one:
+
+- **The bin's query key is nested under its subject's live key** — `["views", listUuid,
+  "deleted", first, rows]`. Every `invalidateQueries({ queryKey: ["views", listUuid] })`
+  already in the app therefore refreshes the bin by prefix match, so deleting something
+  leaves the bin correct without the delete having to know a bin exists.
+- **A restore can legitimately fail, and the message matters.** A name is unique only
+  among live rows, so something created meanwhile may hold it; and destroying an account
+  is refused while it still owns workspaces. Both come back as the backend's own text
+  through the error toast — the 409 that names the workspaces *is* the useful part.
 
 ## Notes
 

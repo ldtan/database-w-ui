@@ -101,6 +101,7 @@ export function ListSettingsDialog({
           onSelect={onSelectView}
           currentConfig={currentConfig}
           controls={viewControls}
+          canConfigure={canConfigure}
         />
       ),
     },
@@ -113,6 +114,7 @@ export function ListSettingsDialog({
           columns={columns}
           forms={forms}
           active={visible}
+          canConfigure={canConfigure}
         />
       ),
     },

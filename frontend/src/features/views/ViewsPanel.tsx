@@ -10,6 +10,7 @@ import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, View, ViewConfig } from "../../lib/types";
+import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { ViewBar } from "./ViewBar";
 import { ViewControls } from "./ViewControls";
@@ -33,6 +34,10 @@ interface Props {
   onSelect: (uuid: string | null) => void;
   currentConfig: ViewConfig;
   controls: ViewControlsState;
+  /** The list's own `configure`, which is what the bin is gated on — a deleted view
+   *  resolves to no permission context of its own, so the per-view answers below
+   *  cannot speak for one. */
+  canConfigure: boolean;
 }
 
 /** The whole of a view's settings, in one place.
@@ -50,11 +55,13 @@ export function ViewsPanel({
   onSelect,
   currentConfig,
   controls,
+  canConfigure,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [renaming, setRenaming] = useState<View | null>(null);
   const [names, setNames] = useState({ displayName: "", name: "" });
+  const [showDeleted, setShowDeleted] = useState(false);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
@@ -127,7 +134,21 @@ export function ViewsPanel({
       <ViewControls {...controls} stacked />
 
       <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">All views</span>
+        {/* The bin heads the roll of views rather than sitting under it: this list
+            can be long, and a deleted view is found by looking where the live ones
+            are listed. */}
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium">All views</span>
+          {canConfigure && (
+            <Button
+              label="Deleted"
+              icon="pi pi-trash"
+              text
+              size="small"
+              onClick={() => setShowDeleted(true)}
+            />
+          )}
+        </div>
         {views.map((view) => (
           <div
             key={view.uuid}
@@ -198,6 +219,13 @@ export function ViewsPanel({
           />
         </div>
       </AppDialog>
+
+      <DeletedConfigDialog
+        listUuid={listUuid}
+        kind="views"
+        visible={showDeleted}
+        onHide={() => setShowDeleted(false)}
+      />
     </div>
   );
 }

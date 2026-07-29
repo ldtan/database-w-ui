@@ -141,7 +141,7 @@ reflected on the next read, no backfill — at these costs, all currently accept
 
 ---
 
-## 6. Trash is done everywhere; the four-kind bin has no UI
+## 6. Trash is done everywhere, and every bin now has a surface
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a
 record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
@@ -242,10 +242,27 @@ restoring a group hands back every grant it held. Three things about it are unli
 `purge_deleted_principals` still does not delete rows, and still deliberately: it runs
 unattended, and the ownership question above needs a person.
 
+**All six bins are now reachable from the app**, which they were not when the last two were
+added. Two components cover the four that arrived together, each written once against the
+kind rather than copied per kind, matching the API modules behind them:
+
+- `DeletedConfigDialog` serves columns, views, forms and metrics, mounted from each kind's own
+  tab in List settings — the bin sits beside the thing it holds, which is where the records,
+  lists and workspaces bins already sat. It is the caller that checks list-level `configure`
+  before offering it, matching the gate on the routes. Restoring a column is the one case with
+  something to report back: `list_has_no_primary_column` becomes a warning toast, because that
+  is the half of the delete the restore cannot undo.
+- `DeletedPrincipalsDialog` serves accounts and groups from the People page, offered only to a
+  superuser, matching that surface's separate authority. A blocked account purge (the 409 above)
+  reaches the user as the backend's own message, workspace names included — that list is the
+  entire point of the refusal and must not be flattened into "could not delete".
+
+Each bin's query key is nested under its subject's live key — `["views", listUuid, "deleted",
+…]` — so every `invalidateQueries` already in the app refreshes the bin by prefix match.
+Deleting a view leaves the bin correct without the delete having to know a bin exists.
+
 What is still missing:
 
-- **The views/forms/metrics/columns bin has no UI.** It is API-only; `DeletedRecordsDialog`,
-  `DeletedListsDialog` and `DeletedWorkspacesDialog` have no counterpart for these four.
 - **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
   its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
   `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back

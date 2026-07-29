@@ -17,6 +17,7 @@ import { RowActions } from "../../components/RowActions";
 import { SearchInput } from "../../components/SearchInput";
 import { SkeletonRows } from "../../components/Skeleton";
 import { UserAvatar } from "../../components/UserAvatar";
+import { DeletedPrincipalsDialog } from "./DeletedPrincipalsDialog";
 import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
 
@@ -103,6 +104,12 @@ export function PeoplePage() {
     open: boolean;
     group: ApiUserGroup | null;
   }>({ open: false, group: null });
+  // One bin per principal, beside the section that holds it, and one flag each so
+  // the two keep their own paging. Superuser-only like the rest of the writing
+  // here — restoring a group hands back every grant it held, which is the same
+  // authority as editing its membership.
+  const [showDeletedUsers, setShowDeletedUsers] = useState(false);
+  const [showDeletedGroups, setShowDeletedGroups] = useState(false);
 
   const removeGroup = useMutation({
     mutationFn: (uuid: string) => api.del(`/auth/groups/${uuid}`),
@@ -159,11 +166,19 @@ export function PeoplePage() {
             {userTotal > 0 && <span className="badge">{userTotal}</span>}
           </div>
           {canAdminister && (
-            <Button
-              label="Add user"
-              icon="pi pi-user-plus"
-              onClick={() => setUserDialog({ open: true, user: null })}
-            />
+            <div className="flex items-center gap-2">
+              <Button
+                label="Deleted"
+                icon="pi pi-trash"
+                text
+                onClick={() => setShowDeletedUsers(true)}
+              />
+              <Button
+                label="Add user"
+                icon="pi pi-user-plus"
+                onClick={() => setUserDialog({ open: true, user: null })}
+              />
+            </div>
           )}
         </div>
 
@@ -269,11 +284,19 @@ export function PeoplePage() {
             {groupTotal > 0 && <span className="badge">{groupTotal}</span>}
           </div>
           {canAdminister && (
-            <Button
-              label="New group"
-              icon="pi pi-plus"
-              onClick={() => setGroupDialog({ open: true, group: null })}
-            />
+            <div className="flex items-center gap-2">
+              <Button
+                label="Deleted"
+                icon="pi pi-trash"
+                text
+                onClick={() => setShowDeletedGroups(true)}
+              />
+              <Button
+                label="New group"
+                icon="pi pi-plus"
+                onClick={() => setGroupDialog({ open: true, group: null })}
+              />
+            </div>
           )}
         </div>
 
@@ -395,6 +418,16 @@ export function PeoplePage() {
         visible={groupDialog.open}
         onHide={() => setGroupDialog({ open: false, group: null })}
         group={groupDialog.group}
+      />
+      <DeletedPrincipalsDialog
+        kind="users"
+        visible={showDeletedUsers}
+        onHide={() => setShowDeletedUsers(false)}
+      />
+      <DeletedPrincipalsDialog
+        kind="groups"
+        visible={showDeletedGroups}
+        onHide={() => setShowDeletedGroups(false)}
       />
     </div>
   );

@@ -50,6 +50,13 @@ export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
 // extension, exactly as DeletedListItem does through the generated model.
 export type DeletedWorkspace = Workspace & { deleted_at: string };
 export type DeletedList = ListRead & { deleted_at: string };
+/** One row of a list's config bin — a deleted column, view, form or metric. The
+ *  same shape for all four, and deliberately narrower than their live schemas: it
+ *  carries what identifies the thing and when it went, not its `config`. */
+export type BinnedChild = Response<Schemas["BinnedChildRead"]>;
+/** One row of the accounts/groups bin, narrow for the same reason. `detail` is the
+ *  email of an account and the description of a group. */
+export type BinnedPrincipal = Response<Schemas["BinnedPrincipalRead"]>;
 export type Person = Response<Schemas["PersonRead"]>;
 export type ApiUser = Response<Schemas["UserRead"]>;
 export type ApiUserGroup = Response<Schemas["UserGroupRead"]>;
@@ -142,6 +149,13 @@ export type View = Omit<Response<Schemas["ViewRead"]>, "config"> & {
 export type Form = Omit<Response<Schemas["FormRead"]>, "config"> & {
   config: FormConfig;
 };
+
+/** What restoring a column answers with: the column, plus the one consequence of
+ *  its delete that the restore does *not* undo and can still be observed — the
+ *  list being left without a primary column. Built on the refined `Column` so the
+ *  `config` shape does not have to be stated twice. */
+export type RestoredColumn = Column &
+  Pick<Response<Schemas["RestoredColumnRead"]>, "list_has_no_primary_column">;
 
 /** Metrics need no refinement, unlike the three above: a metric's config is one
  *  shape whatever the metric is, so the backend types it as a Pydantic model and
