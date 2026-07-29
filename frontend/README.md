@@ -65,8 +65,8 @@ src/
                   # themeSync (ties the theme to the account), query client, hand-written
                   # API types, and small shared helpers: links (safeHref), temporal, slug,
                   # people, useMediaQuery, useDebounced
-  components/     # app shell: AppLayout, AppSidebar (desktop rail), NavDrawer (the same
-                  # navigation below 1024px), NavTree (what both of them render),
+  components/     # app shell: AppLayout, AppSidebar (the rail — beside the page above
+                  # 1024px, inside a drawer below it), NavTree (what it renders),
                   # AccountMenu + UserAvatar (the account control), AppDialog,
                   # NameFields, Breadcrumbs, ThemeSwitcher
                   # page furniture: PageHeader, EmptyState, Skeleton, SearchInput,
@@ -197,13 +197,23 @@ surfaces now edit a record's fields: the Add/Edit dialog and a session's presets
 
 `AppLayout` is a navigation rail and the page beside it.
 
-On a desktop (`DESKTOP_SCREEN`, 1024px) the rail is `AppSidebar`: the wordmark, the
-tree, and — in its footer — the account and the theme controls. There is no header
-bar at that width, because a strip repeating what the rail already carries would be
-chrome saying nothing. Below it the rail is not rendered at all; a slim header
-appears with a burger, and `NavDrawer` carries the same tree.
+The rail is `AppSidebar`: the wordmark, the tree, and — in its footer — the account
+and the theme controls. On a desktop (`DESKTOP_SCREEN`, 1024px) it sits beside the
+page, and there is no header bar, because a strip repeating what the rail already
+carries would be chrome saying nothing. Below that width the *same component* is
+mounted inside a `<Sidebar>` overlay behind a slim header's burger, with `enabled`
+holding its fetches until the panel is opened and `onNavigate` closing it behind a
+tap.
 
-Both render **one** component, `components/NavTree.tsx` — the app's sections, your
+There used to be a second component for the narrow case. It carried the same tree in
+a different shell, which meant anything added to the rail's own bands silently did
+not exist on a phone — so the header's account and theme controls moved into the
+rail's footer (a 17rem drawer leaves the header visible beside it, and a second copy
+of each would have sat next to the original), and the drawer's profile band and Log
+out row folded into `AccountMenu`, whose menu already carried the same three lines
+and both actions.
+
+It renders **one** component, `components/NavTree.tsx` — the app's sections, your
 workspaces with their lists (fetched lazily, per expanded workspace), and the lists
 shared with you. Two copies would be two ideas of what the app contains, and they
 would drift the first time a section was added to one of them.

@@ -299,6 +299,28 @@ a {
   border-right: var(--border-width) solid var(--border);
   z-index: 10;
 }
+/* The same rail, mounted inside the mobile drawer instead of beside the page. The
+   panel already supplies the width, the full height and the edge against the page,
+   so the rail drops its own rather than nesting a second set inside the first.
+   Scoped by ancestor rather than a modifier class, so AppSidebar needs no prop
+   describing where it happens to be. */
+.nav-drawer .app-sidebar {
+  position: static;
+  height: 100%;
+  width: auto;
+  border-right: 0;
+  background: transparent;
+}
+/* The rail brings its own padding on every band, and the panel's would sit inside
+   it as a second margin. The column has to fill the panel for the account footer
+   to reach the bottom, which is the whole reason only the tree scrolls. */
+.nav-drawer .p-sidebar-content {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+}
 .app-content {
   flex: 1;
   /* Without this a wide grid inside a flex child refuses to shrink and pushes
