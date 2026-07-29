@@ -49,6 +49,13 @@ interface Props {
 /**
  * Choose a view, save the current one, share it, add another.
  *
+ * Every one of those degrades on its own, so this renders on a list with no views
+ * at all — where it reduces to a single "New view" button. That is the case it
+ * matters most in: the way you make a list's first view is to arrange the records
+ * the way you want and keep the arrangement, and the button that keeps it lives
+ * here. The bar used to be hidden in exactly that situation, which took the
+ * filter, grouping and column controls with it.
+ *
  * "Save view" writes the *page's* live state (`currentConfig` — sort, filter,
  * grouping, hidden columns, page size) into the view. Nothing the toolbar does
  * persists until that button is pressed: a view is a saved arrangement, and changing
@@ -87,6 +94,8 @@ export function ViewBar({
   );
   const canSave = !!activeView && canView(activeView.uuid, "configure");
   const canShare = !!activeView && canView(activeView.uuid, "share");
+  // Spelled out where it stands alone: the settings tab, and a list with no views.
+  const spellOutNew = showShare || views.length === 0;
 
   const save = useMutation({
     mutationFn: () =>
@@ -152,14 +161,20 @@ export function ViewBar({
 
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <Dropdown
-        value={activeUuid}
-        options={views.map((v) => ({ label: v.display_name, value: v.uuid }))}
-        onChange={(e) => onSelect(e.value as string)}
-        placeholder="View"
-        aria-label="View"
-        className="w-36 sm:w-48"
-      />
+      {/* A picker with nothing to pick is worse than no picker: it takes the width
+          of the widest control on the bar to say "View", and implies there are
+          views to choose between. What a list with no views needs is the button
+          below, not this. */}
+      {views.length > 0 && (
+        <Dropdown
+          value={activeUuid}
+          options={views.map((v) => ({ label: v.display_name, value: v.uuid }))}
+          onChange={(e) => onSelect(e.value as string)}
+          placeholder="View"
+          aria-label="View"
+          className="w-36 sm:w-48"
+        />
+      )}
       {/* Outlined once there is something to save, and a plain text button while
           there is not: it is the odd control on the bar that changes what *other
           people* will see, so it should only draw the eye when pressing it would
@@ -194,13 +209,16 @@ export function ViewBar({
       )}
       {listActions.has("configure") && (
         // Icon-only on the toolbar, where it is a rarity beside controls used
-        // constantly; the settings tab has the room to spell it out.
+        // constantly; the settings tab has the room to spell it out. So does a
+        // list with no views, where there is no dropdown beside it to lend it
+        // context and a lone "+" among the record controls says nothing about
+        // what it adds — which is the one moment this button matters most.
         <Button
           icon="pi pi-plus"
           text
-          label={showShare ? "New view" : undefined}
+          label={spellOutNew ? "New view" : undefined}
           aria-label="New view"
-          tooltip={showShare ? undefined : "New view"}
+          tooltip={spellOutNew ? undefined : "New view"}
           tooltipOptions={{ position: "bottom" }}
           onClick={() => setCreating(true)}
         />
@@ -246,7 +264,7 @@ export function ViewBar({
           <Field
             label="View name"
             htmlFor="new-view-name"
-            hint="It starts from the sort, grouping and columns showing right now."
+            hint="It starts from the sort, filter, grouping and columns showing right now."
           >
             <InputText
               id="new-view-name"

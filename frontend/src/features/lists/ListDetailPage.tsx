@@ -669,26 +669,31 @@ export function ListDetailPage() {
       />
 
       {/* One bar, and everything on it changes what you are looking at rather
-          than what the list *is*. Sort and search are about the records, so it
-          stands whether or not the list has views: a list whose views were all
-          deleted still has its records, and used to lose the search box — and,
-          briefly, the sort control — along with them. Only the view-shaped
-          controls come and go. */}
+          than what the list *is*. None of it depends on the list having views: a
+          list whose views were all deleted still has its records, and used to lose
+          the search box — and, briefly, the sort control — along with them.
+          Filtering, grouping and column visibility joined them here once they
+          became this page's state rather than the view's. A list with no views
+          could previously not be filtered, grouped or narrowed to a few columns at
+          all, and offered no way to make a view either, since the button that adds
+          one lives on the bar that was missing. The only thing left that needs a
+          view is choosing between them, and that is `ViewBar`'s own business. */}
       <div className="toolbar" data-tour="list-toolbar">
+        <ViewBar
+          listUuid={listUuid}
+          views={views.data ?? []}
+          activeUuid={activeViewUuid}
+          onSelect={setActiveViewUuid}
+          currentConfig={currentConfig}
+          dirty={viewDirty}
+        />
+        {/* Only between two groups that are both there. With no views `ViewBar` is
+            a single "New view" button, or nothing at all without `configure`, and
+            a divider would be marking a boundary that has one side. */}
         {views.data && views.data.length > 0 && (
-          <>
-            <ViewBar
-              listUuid={listUuid}
-              views={views.data}
-              activeUuid={activeViewUuid}
-              onSelect={setActiveViewUuid}
-              currentConfig={currentConfig}
-              dirty={viewDirty}
-            />
-            <span className="toolbar-divider" aria-hidden />
-            <ViewControls {...viewControls} />
-          </>
+          <span className="toolbar-divider" aria-hidden />
         )}
+        <ViewControls {...viewControls} />
 
         {/* Sorting otherwise lives in the grid's column headers, which a card
             list does not have — so on a phone there was no way to sort at all.
