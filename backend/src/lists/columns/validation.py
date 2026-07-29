@@ -5,9 +5,10 @@ and the item service (validating record values), so the two never drift. Lookup
 validation needs the database and stays in the item service.
 """
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from typing import Optional
 from urllib.parse import urlsplit
+from zoneinfo import ZoneInfo
 
 from src.core.exceptions import ValidationError
 
@@ -65,16 +66,45 @@ def is_dynamic_default(column_type: ColumnType, default) -> bool:
     return isinstance(default, str) and default in dynamic_tokens(column_type)
 
 
+def _wall_clock_now(user) -> datetime:
+    """The current wall-clock reading where the acting user is.
+
+    Their zone rather than the process's: the server runs on UTC, so stamping
+    `today` for someone in UTC+8 writes yesterday's date through the first eight
+    hours of their day — disagreeing with the calendar they typed every other cell
+    in the row against, and with the date the picker would have offered them.
+
+    Naive on the way out, because these columns hold a wall-clock value and not an
+    instant (see frontend/src/lib/temporal.ts). A stamped value has to be
+    indistinguishable from a typed one, or the two sort against each other wrongly
+    and min/max comparison raises over the mixed convention.
+
+    Falls back to UTC when nobody is acting, no zone has been recorded yet, or the
+    stored id is not one this build's tz database knows — an id that was renamed or
+    dropped between tzdata releases. Wrong by an offset beats refusing the write.
+    """
+    # getattr covers both "no acting user" and a user whose blob is empty.
+    name = (getattr(user, "settings", None) or {}).get("timezone")
+    try:
+        tz = ZoneInfo(name) if name else timezone.utc
+    except (KeyError, ValueError):
+        # ZoneInfoNotFoundError (a KeyError) for an unknown id; ValueError for one
+        # that is not a well-formed key at all.
+        tz = timezone.utc
+    return datetime.now(tz).replace(tzinfo=None)
+
+
 def resolve_dynamic_default(column_type: ColumnType, default, user=None):
     """Resolve a dynamic token to a concrete value; else pass the value through.
 
-    Temporal tokens become an ISO string for *now*; ``current_user`` becomes the
-    acting user's uuid (or None when there is no acting user to attribute it to)."""
+    Temporal tokens become an ISO string for *now* in the acting user's timezone
+    (see _wall_clock_now); ``current_user`` becomes the acting user's uuid (or None
+    when there is no acting user to attribute it to)."""
     if not is_dynamic_default(column_type, default):
         return default
     if column_type == ColumnType.user:
         return str(user.uuid) if user is not None else None
-    now = datetime.now()
+    now = _wall_clock_now(user)
     if column_type == ColumnType.date:
         return now.date().isoformat()
     if column_type == ColumnType.time:

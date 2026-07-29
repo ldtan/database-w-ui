@@ -64,7 +64,11 @@ async def test_a_fresh_account_reads_the_defaults(make_client, session_factory):
     async with make_client(user) as client:
         resp = await client.get("/api/auth/users/me")
         assert resp.status_code == 200
-        assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+        assert resp.json()["settings"] == {
+            "theme": "modern",
+            "mode": "light",
+            "timezone": "UTC",
+        }
 
 
 async def test_settings_survive_a_new_session(make_client, session_factory):
@@ -77,7 +81,11 @@ async def test_settings_survive_a_new_session(make_client, session_factory):
             SETTINGS_URL, json={"theme": "brutalist", "mode": "dark"}
         )
         assert resp.status_code == 200
-        assert resp.json()["settings"] == {"theme": "brutalist", "mode": "dark"}
+        assert resp.json()["settings"] == {
+            "theme": "brutalist",
+            "mode": "dark",
+            "timezone": "UTC",
+        }
 
     # A separate client, standing in for a second device.
     async with session_factory() as db:
@@ -85,7 +93,11 @@ async def test_settings_survive_a_new_session(make_client, session_factory):
 
     async with make_client(reloaded) as client:
         resp = await client.get("/api/auth/users/me")
-        assert resp.json()["settings"] == {"theme": "brutalist", "mode": "dark"}
+        assert resp.json()["settings"] == {
+            "theme": "brutalist",
+            "mode": "dark",
+            "timezone": "UTC",
+        }
 
 
 async def test_a_write_merges_and_does_not_replace(make_client, session_factory):
@@ -100,7 +112,11 @@ async def test_a_write_merges_and_does_not_replace(make_client, session_factory)
         # the default and the earlier choice would be silently lost.
         resp = await client.patch(SETTINGS_URL, json={"mode": "dark"})
         assert resp.status_code == 200
-        assert resp.json()["settings"] == {"theme": "luxury", "mode": "dark"}
+        assert resp.json()["settings"] == {
+            "theme": "luxury",
+            "mode": "dark",
+            "timezone": "UTC",
+        }
 
 
 async def test_an_unknown_key_is_rejected(make_client, session_factory):
@@ -118,7 +134,11 @@ async def test_an_unknown_key_is_rejected(make_client, session_factory):
 
         # Neither attempt left anything behind.
         resp = await client.get("/api/auth/users/me")
-        assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+        assert resp.json()["settings"] == {
+            "theme": "modern",
+            "mode": "light",
+            "timezone": "UTC",
+        }
 
 
 async def test_a_null_value_is_rejected(make_client, session_factory):
@@ -141,7 +161,11 @@ async def test_a_null_value_is_rejected(make_client, session_factory):
 
         resp = await client.get("/api/auth/users/me")
         assert resp.status_code == 200
-        assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+        assert resp.json()["settings"] == {
+            "theme": "modern",
+            "mode": "light",
+            "timezone": "UTC",
+        }
 
 
 async def test_a_read_tolerates_an_unrecognised_stored_value(
@@ -158,7 +182,11 @@ async def test_a_read_tolerates_an_unrecognised_stored_value(
         resp = await client.get("/api/auth/users/me")
         assert resp.status_code == 200
         # The unreadable key falls back to its default; the readable one is untouched.
-        assert resp.json()["settings"] == {"theme": "modern", "mode": "dark"}
+        assert resp.json()["settings"] == {
+            "theme": "modern",
+            "mode": "dark",
+            "timezone": "UTC",
+        }
 
 
 async def test_a_read_tolerates_an_unrecognised_stored_key(
@@ -176,7 +204,11 @@ async def test_a_read_tolerates_an_unrecognised_stored_key(
     async with make_client(user) as client:
         resp = await client.get("/api/auth/users/me")
         assert resp.status_code == 200
-        assert resp.json()["settings"] == {"theme": "nordic", "mode": "light"}
+        assert resp.json()["settings"] == {
+            "theme": "nordic",
+            "mode": "light",
+            "timezone": "UTC",
+        }
 
         # And a write from the older build preserves the key it cannot see, rather
         # than dropping it — the merge is what makes the rollback non-destructive.
@@ -192,6 +224,62 @@ async def test_a_read_tolerates_an_unrecognised_stored_key(
         }
 
 
+async def test_a_timezone_round_trips(make_client, session_factory):
+    """Unlike theme and mode this one is read by the *backend*, to stamp `today` and
+    `now` column defaults — so what a browser reports has to come back intact."""
+    async with session_factory() as db:
+        user = await _make_user(db, "traveller")
+
+    async with make_client(user) as client:
+        resp = await client.patch(SETTINGS_URL, json={"timezone": "Asia/Manila"})
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["settings"]["timezone"] == "Asia/Manila"
+
+        # And a later move overwrites it: the browser is the authority on where the
+        # user is, so re-reporting is how the stored value stays true.
+        resp = await client.patch(SETTINGS_URL, json={"timezone": "Europe/Lisbon"})
+        assert resp.json()["settings"]["timezone"] == "Europe/Lisbon"
+        # Untouched keys survive, as for any other setting.
+        assert resp.json()["settings"]["theme"] == "modern"
+
+
+async def test_an_unknown_timezone_is_rejected(make_client, session_factory):
+    """No Literal to lean on here, so the check is explicit — and it matters more
+    than for theme: an unresolvable zone does not fail visibly, it silently sends
+    every `today` default back to UTC."""
+    async with session_factory() as db:
+        user = await _make_user(db, "lost")
+
+    async with make_client(user) as client:
+        for bad in ["Mars/Olympus_Mons", "+08:00", "PST", ""]:
+            resp = await client.patch(SETTINGS_URL, json={"timezone": bad})
+            assert resp.status_code == 422, f"{bad!r}: {resp.text}"
+
+        resp = await client.get("/api/auth/users/me")
+        assert resp.json()["settings"]["timezone"] == "UTC"
+
+
+async def test_a_read_tolerates_an_unrecognised_stored_timezone(
+    make_client, session_factory
+):
+    """A zone that resolved on the machine that wrote it need not resolve on the one
+    reading it — a build of zoneinfo without the `backward` link set drops the older
+    aliases, and tzdata retires ids between releases. /me must still load.
+    """
+    async with session_factory() as db:
+        user = await _make_user(db, "stale")
+        user.settings = {"theme": "nordic", "timezone": "Europe/Atlantis"}
+        await db.commit()
+
+    async with make_client(user) as client:
+        resp = await client.get("/api/auth/users/me")
+        assert resp.status_code == 200
+        # Falls back to the default rather than serving a zone nothing can resolve —
+        # and the frontend reports a live one on load, so it is corrected in-session.
+        assert resp.json()["settings"]["timezone"] == "UTC"
+        assert resp.json()["settings"]["theme"] == "nordic"
+
+
 async def test_settings_are_per_account(make_client, session_factory):
     """The route takes no uuid, so it can only ever write the caller's own row."""
     async with session_factory() as db:
@@ -203,4 +291,8 @@ async def test_settings_are_per_account(make_client, session_factory):
 
     async with make_client(two) as client:
         resp = await client.get("/api/auth/users/me")
-        assert resp.json()["settings"] == {"theme": "modern", "mode": "light"}
+        assert resp.json()["settings"] == {
+            "theme": "modern",
+            "mode": "light",
+            "timezone": "UTC",
+        }

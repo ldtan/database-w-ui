@@ -276,6 +276,58 @@ Two things a metric deliberately does **not** do: it has no `permissions_inherit
 views and forms — it carries no permissions of its own, so list `view` reads and list
 `configure` writes), and it has no per-group subtotals (see data-model §10).
 
+## 10. Two kinds of datetime, and only one of them is an instant
+
+The app stores datetimes under two conventions on purpose, and the difference is the
+first thing to get straight before touching any of this.
+
+- **System timestamps are instants, in UTC.** `created_at`/`updated_at`/`deleted_at`
+  (`core/mixins.py`), token expiry, and grant expiry are `DateTime(timezone=True)` written
+  with `datetime.now(timezone.utc)`. The frontend renders them with `toLocaleString()`, so
+  the browser converts. Grant expiry is the one that compares against the **database**
+  clock (`func.now()` in `PermissionService._not_expired`) rather than the Python one, so
+  a grant cannot expire halfway through a multi-check authorization pass; every other
+  expiry in the app uses the process clock, which is the same UTC but a different clock.
+- **`date`/`time`/`datetime` column values are wall-clock readings, and carry no zone at
+  all.** A birth date, a shift start, an invoice due date. They are stored as the string
+  the user typed and read back the same way — `frontend/src/lib/temporal.ts` parses and
+  formats with local `Date` component accessors and **ignores any offset suffix**, never
+  going through `toISOString()`.
+
+**Do not "fix" the second one by converting it to UTC.** A `date` has no time-of-day to
+convert, so it lands a day early for anyone west of whoever typed it; a `time` has no date,
+and DST means you cannot even pick an offset without one; a future `datetime` freezes an
+offset that the jurisdiction may change before the date arrives; and a due date belongs to
+the record, not to whichever of its readers is currently looking. `SharePanel` sending
+`toISOString()` for a grant expiry is correct precisely because that one *is* an instant —
+the two conventions coexist deliberately.
+
+**What the user's timezone is for.** `users.settings.timezone` (an IANA id, defaulting to
+`"UTC"`) exists for one job: resolving the `today`/`now` dynamic default on the user's
+calendar rather than the server's. Before it, `resolve_dynamic_default` called a bare
+`datetime.now()` — UTC on Render — so a `today` default stamped yesterday's date through
+the first eight hours of the day for anyone in UTC+8, disagreeing with the calendar they
+typed every other cell in the row against. It resolves to a **naive** datetime on the way
+out (`_wall_clock_now`), because a stamped value has to be indistinguishable from a typed
+one or the two sort against each other wrongly.
+
+Follow-ups, in the order they will be missed:
+
+- **Only the browser ever writes it.** `TimezoneSync` reports
+  `Intl.DateTimeFormat().resolvedOptions().timeZone` on load and re-reports whenever it
+  differs, which is right for a travelling user but leaves no way to *override* it — a
+  picker in the profile page is the missing piece for anyone whose machine is set wrong.
+- **`TimezoneSync` has no test**, because the frontend has no test runner at all. Its loop
+  terminates by inspection (PATCH → cache update → `local === stored` → early return, with
+  the `pushed` ref covering the in-flight window), which is not the same as a green test.
+- **Display of instants ignores the setting.** The three `toLocaleString()` call sites (the
+  deleted-workspaces, deleted-lists and deleted-records dialogs) use the browser's zone,
+  which is right in almost every case and inconsistent with the account preference in the
+  rest. Centralising them behind one `formatInstant()` would make that a one-line choice.
+- **`zoneinfo` reads the OS tz database**, which Windows does not have — hence the
+  unconditional `tzdata` dependency. If it ever goes missing, `available_timezones()`
+  returns empty, every zone looks unknown, writes 422, and `today` quietly reverts to UTC.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

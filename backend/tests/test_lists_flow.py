@@ -1,9 +1,11 @@
 """End-to-end tests over the HTTP API: workspaces, lists, columns, records."""
-from datetime import date
+from datetime import datetime, timezone
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 
+from src.auth.users.models import User
 from src.lists.columns.models import Column
 from src.lists.forms.models import Form
 from src.lists.items.models import ListItem
@@ -311,13 +313,79 @@ async def test_choice_config_patch_keeps_options(client, list_uuid, add_column):
 
 
 async def test_dynamic_default_today(client, list_uuid, add_column):
+    """With no zone recorded for the user, the stamp falls back to UTC — not to the
+    server process's local time, which would make the value depend on where the box
+    happens to be configured."""
     col = await add_column(
         list_uuid, name="due", display_name="Due", type="date",
         config={"default": "today"},
     )
     resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
     assert resp.status_code == 201, resp.text
-    assert resp.json()["data"][col] == date.today().isoformat()
+    assert resp.json()["data"][col] == datetime.now(timezone.utc).date().isoformat()
+
+
+async def test_dynamic_default_today_uses_the_users_timezone(
+    client, list_uuid, add_column, session_factory, user_id
+):
+    """The stamp follows the user's calendar rather than the server's clock.
+
+    Two zones 25 hours apart, so their local dates differ no matter what time the
+    suite runs: were the setting ignored, both records would carry the same date.
+    Compared against each zone's own `today` rather than a fixed string, because the
+    right answer moves with the clock.
+    """
+    col = await add_column(
+        list_uuid, name="due", display_name="Due", type="date",
+        config={"default": "today"},
+    )
+
+    stamped = {}
+    for zone in ("Pacific/Kiritimati", "Pacific/Niue"):  # UTC+14 and UTC-11
+        async with session_factory() as db:
+            user = await db.get(User, user_id)
+            # A new dict, not a mutation: JSONB is not mutation-tracked.
+            user.settings = {**(user.settings or {}), "timezone": zone}
+            await db.commit()
+
+        resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+        assert resp.status_code == 201, resp.text
+        stamped[zone] = resp.json()["data"][col]
+        assert stamped[zone] == datetime.now(ZoneInfo(zone)).date().isoformat()
+
+    assert stamped["Pacific/Kiritimati"] != stamped["Pacific/Niue"]
+
+
+async def test_dynamic_now_is_stored_without_an_offset(
+    client, list_uuid, add_column, session_factory, user_id
+):
+    """A stamped datetime has to be indistinguishable from a typed one.
+
+    These columns hold a wall-clock reading, so resolving `now` in the user's zone
+    must not leak that zone into the value: a stored offset would sort against the
+    naive values beside it wrongly, and min/max comparison raises outright on the
+    mixed convention (see validation.validate_scalar).
+    """
+    async with session_factory() as db:
+        user = await db.get(User, user_id)
+        user.settings = {**(user.settings or {}), "timezone": "Asia/Manila"}
+        await db.commit()
+
+    col = await add_column(
+        list_uuid, name="seen", display_name="Seen", type="datetime",
+        config={"default": "now"},
+    )
+    resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert resp.status_code == 201, resp.text
+
+    value = resp.json()["data"][col]
+    stamped = datetime.fromisoformat(value)
+    assert stamped.tzinfo is None, value
+    # And it reads as Manila's wall clock, not UTC's. As a delta rather than a
+    # prefix match, so an hour boundary crossed mid-test cannot fail it; UTC would
+    # be eight hours out, far outside the window.
+    manila = datetime.now(ZoneInfo("Asia/Manila")).replace(tzinfo=None)
+    assert abs((stamped - manila).total_seconds()) < 60, value
 
 
 async def test_static_default_applied_when_empty(client, list_uuid, add_column):

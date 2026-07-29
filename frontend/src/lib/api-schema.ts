@@ -1896,6 +1896,11 @@ export interface components {
              * @enum {string}
              */
             mode: "light" | "dark";
+            /**
+             * Timezone
+             * @default UTC
+             */
+            timezone: string;
         };
         /**
          * UserSettingsUpdate
@@ -1913,6 +1918,8 @@ export interface components {
             theme?: ("modern" | "nordic" | "brutalist" | "luxury") | null;
             /** Mode */
             mode?: ("light" | "dark") | null;
+            /** Timezone */
+            timezone?: string | null;
         };
         /** UserUpdate */
         UserUpdate: {

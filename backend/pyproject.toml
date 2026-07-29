@@ -12,6 +12,13 @@ dependencies = [
     "argon2-cffi>=25.1.0",
     "alembic>=1.18.5",
     "nh3>=0.3.6",
+    # `zoneinfo` reads the *operating system's* tz database, which Windows does not
+    # have — so a per-user timezone (users.settings.timezone) resolves nothing on a
+    # Windows dev box without this. Unconditional rather than marked for win32:
+    # available_timezones() returning empty makes every zone look unknown, which
+    # rejects the writes and silently sends `today` defaults back to UTC. 350KB to
+    # not have that depend on the base image.
+    "tzdata>=2025.2",
 ]
 
 [dependency-groups]
