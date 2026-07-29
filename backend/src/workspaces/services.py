@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import settings
 from src.core.exceptions import ConflictError, PermissionDeniedError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
+from src.lists.purge import drain_records
 
 from .models import Workspace
 from .schemas import WorkspaceCreate, WorkspaceUpdate
@@ -374,10 +375,15 @@ class WorkspaceService:
         it. Returns False if it is not in the bin.
 
         Mirrors the workspace purge job's cascade, but for one workspace in a single
-        transaction: run the list cascade for its lists (break the circular foreign
-        key, delete descendant grants, then records/views/forms/metrics/columns/lists), then
-        the workspace's own grants, then the workspace. Inbound references were already
-        scrubbed at soft-delete time. Irreversible.
+        transaction: run the list cascade for its lists (drain the records, break the
+        circular foreign key, delete descendant grants, then
+        views/forms/metrics/columns/lists), then the workspace's own grants, then the
+        workspace. Inbound references were already scrubbed at soft-delete time.
+        Irreversible.
+
+        The records go in batches (``drain_records``) without committing between them,
+        for the reason ``ListService.purge`` gives: a workspace is only purgeable while
+        it is still restorable, so a half-finished purge must roll back whole.
         """
         workspace = await cls.get_deleted_by_uuid(db, uuid)
         if workspace is None:
@@ -395,6 +401,7 @@ class WorkspaceService:
             ).scalars().all()
         )
         if list_ids:
+            await drain_records(db, list_ids, commit=False)
             # Break the circular dependency (lists.primary_column_id -> columns.id).
             await db.execute(
                 text(
@@ -402,19 +409,19 @@ class WorkspaceService:
                 ),
                 {"list_ids": list_ids},
             )
+            # The records' grants went with them above — once they are deleted nothing
+            # is left to find their grants by.
             await db.execute(
                 text(
                     """
                     DELETE FROM permission_grants
                      WHERE (resource_type = 'list' AND resource_id = ANY(:list_ids))
-                        OR (resource_type = 'item' AND resource_id IN (SELECT id FROM list_items WHERE list_id = ANY(:list_ids)))
                         OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:list_ids)))
                         OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:list_ids)))
                     """
                 ),
                 {"list_ids": list_ids},
             )
-            await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM views WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
             # Metrics are never a grant target, so they appear here but not above.

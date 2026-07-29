@@ -53,6 +53,7 @@ from src.permissions.enums import ResourceType
 from ..columns.models import Column
 from ..forms.models import Form
 from ..metrics.models import Metric
+from ..purge import strip_column_keys
 from ..views.models import View
 
 # Per model: how `permission_grants.resource_type` names it (None when it is never a
@@ -63,15 +64,6 @@ _KINDS = {
     Metric: (None, "metric"),
     Column: (None, "column"),
 }
-
-# Drops one key from every record on the list. `jsonb_exists` rather than `data ? :key`
-# so no bare `?` reaches the driver, and so untouched rows are never rewritten.
-_STRIP_COLUMN_FROM_RECORDS = """
-    UPDATE list_items
-       SET data = data - :key
-     WHERE list_id = :list_id
-       AND jsonb_exists(data, :key)
-"""
 
 
 def _cutoff() -> datetime:
@@ -207,11 +199,11 @@ async def purge(
             {"rt": resource_type.value, "rid": row.id},
         )
     if model is Column:
-        # Before the row goes, while its uuid is still known.
-        await db.execute(
-            sa.text(_STRIP_COLUMN_FROM_RECORDS),
-            {"key": str(row.uuid), "list_id": list_id},
-        )
+        # Before the row goes, while its uuid is still known. Batched, since the
+        # records holding it are the one part of this sized by the data — and without
+        # committing between batches, because a binned column is restorable right up
+        # until this succeeds (see src.lists.purge).
+        await strip_column_keys(db, list_id, [str(row.uuid)], commit=False)
     await db.execute(sa.delete(model).where(model.id == row.id))
     await db.commit()
     return True

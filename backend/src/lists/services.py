@@ -24,6 +24,7 @@ from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
 from .models import List
+from .purge import drain_records
 from .schemas import ListCreate, ListRead, ListUpdate
 from .metrics.models import Metric
 from .views.models import View
@@ -838,36 +839,43 @@ class ListService:
         Returns False if it is not in the bin.
 
         Mirrors the list purge job's cascade, but for one list in a single
-        transaction: break the circular ``primary_column_id`` foreign key, delete the
-        polymorphic grants of the list and its descendants (nothing else does), then
-        the records, views, forms, metrics, columns, and finally the list. Inbound
-        references were already scrubbed when the list was soft-deleted, so there is
-        nothing to clear here. Irreversible.
+        transaction: drain the records, break the circular ``primary_column_id``
+        foreign key, delete the polymorphic grants of the list and its descendants
+        (nothing else does), then the views, forms, metrics, columns, and finally the
+        list. Inbound references were already scrubbed when the list was soft-deleted,
+        so there is nothing to clear here. Irreversible.
+
+        The records go in batches (``drain_records``) because they are the one part of
+        this a list can make arbitrarily large, but *without* committing between them:
+        a list is only purgeable while it is still inside the retention window, which
+        is exactly while ``restore`` still works on it. An interrupted purge here has
+        to leave the list whole rather than restorable and short of records.
         """
         lst = await cls.get_deleted_by_uuid(db, uuid)
         if lst is None:
             return False
 
         ids = [lst.id]
+        await drain_records(db, ids, commit=False)
         # Break the circular dependency (lists.primary_column_id -> columns.id) first,
         # or deleting the columns violates the foreign key.
         await db.execute(
             text("UPDATE lists SET primary_column_id = NULL WHERE id = ANY(:ids)"),
             {"ids": ids},
         )
+        # The records' grants went with them above — once they are deleted nothing is
+        # left to find their grants by.
         await db.execute(
             text(
                 """
                 DELETE FROM permission_grants
                  WHERE (resource_type = 'list' AND resource_id = ANY(:ids))
-                    OR (resource_type = 'item' AND resource_id IN (SELECT id FROM list_items WHERE list_id = ANY(:ids)))
                     OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:ids)))
                     OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:ids)))
                 """
             ),
             {"ids": ids},
         )
-        await db.execute(text("DELETE FROM list_items WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM views WHERE list_id = ANY(:ids)"), {"ids": ids})
         await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:ids)"), {"ids": ids})
         # Metrics are never a grant target, so they appear here but not above.

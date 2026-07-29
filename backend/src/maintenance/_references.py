@@ -6,10 +6,16 @@ delete reversible, and what lets the cell render as "(deleted)" rather than pret
 the relationship never existed. Only once the target is destroyed, or has sat in the
 bin past the retention window, is the pointer worth nothing and cleared.
 
-Set-based on purpose: one UPDATE per referencing column, however many records or
-targets are involved. The obvious alternative — scrub per purged row — is one UPDATE
-per column *per row*, which turns purging a million records into millions of
-statements.
+Set-based on purpose: one pass per referencing column, however many records or targets
+are involved. The obvious alternative — scrub per purged row — is one UPDATE per column
+*per row*, which turns purging a million records into millions of statements.
+
+Set-based is not the same as unbounded, though, and it used to be both: one statement
+per column rewriting every record of the list that held a stale reference. Each column
+now works through its records in batches, committed as it goes. Only the purge jobs
+call this, and they work on targets already past the retention window — so there is
+nothing here that a half-finished pass makes wrong, and re-running simply finds fewer
+references left to clear.
 """
 from datetime import datetime
 
@@ -19,6 +25,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.lists.columns.enums import PRINCIPAL_TYPES, ColumnType
 from src.lists.columns.models import Column
+
+# Records rewritten per transaction, matching the purge jobs that call this.
+CHUNK = 5_000
 
 # `live` is the set of uuids still worth pointing at. Everything else is dropped from
 # the cell: nulled if the column holds one value, filtered out of the array if it
@@ -38,8 +47,16 @@ UPDATE list_items
                          '[]'::jsonb)
                 ELSE 'null'::jsonb
            END)
- WHERE list_id = :list_id
-   AND (
+ WHERE id = ANY(:ids)
+"""
+
+# The records whose cell still names something outside `live`. This used to be the
+# UPDATE's own WHERE; it is separate now so the same predicate can pick a batch of ids
+# first. It is also what makes the loop terminate: the rewrite above is exactly what
+# turns this false for the rows it touched, so the next pass finds the next batch and
+# eventually none.
+_STALE = """
+       (
          (jsonb_typeof(data -> :key) = 'array'
           AND EXISTS (SELECT 1
                         FROM jsonb_array_elements(data -> :key) AS elem
@@ -48,6 +65,14 @@ UPDATE list_items
           AND (data ->> :key) NOT IN (SELECT uuid FROM live))
        )
 """
+
+# Concatenated rather than formatted: the predicate contains `'{}'` (jsonb's "whole
+# document" path), which str.format would read as a placeholder.
+_BATCH = (
+    "SELECT id FROM list_items WHERE list_id = :list_id AND "
+    + _STALE
+    + " ORDER BY id LIMIT :chunk"
+)
 
 # Targets still worth pointing at: alive, or in the bin but inside the window, where a
 # restore is still promised and the reference has to be waiting for it.
@@ -100,16 +125,26 @@ async def clear_expired(db: AsyncSession, cutoff: datetime) -> int:
         else:
             continue  # a lookup with no target: nothing to resolve against
 
-        result = await db.execute(
-            sa.text(live + _CLEAR),
-            {
-                "list_id": column.list_id,
-                "key": str(column.uuid),
-                "cutoff": cutoff,
-                "target": str(target) if target else None,
-            },
-        )
-        touched += result.rowcount
+        params = {
+            "list_id": column.list_id,
+            "key": str(column.uuid),
+            "cutoff": cutoff,
+            "target": str(target) if target else None,
+        }
+        while True:
+            ids = (
+                await db.execute(
+                    sa.text(live + _BATCH), {**params, "chunk": CHUNK}
+                )
+            ).scalars().all()
+            if not ids:
+                break
+
+            result = await db.execute(
+                sa.text(live + _CLEAR), {**params, "ids": list(ids)}
+            )
+            await db.commit()
+            touched += result.rowcount
 
     await db.commit()
     return touched
