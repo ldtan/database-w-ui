@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -11,6 +11,8 @@ from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
 
+from ..bin import services as bin_services
+from ..bin.schemas import BinnedChildRead
 from ..dependencies import get_list_or_404
 from ..models import List
 from .models import Metric
@@ -83,6 +85,27 @@ async def metric_values(
     return await MetricService.evaluate(db, lst, current_user, view_uuid, q)
 
 
+# Before `/{uuid}` for the same reason as `/values` above.
+@router.get("/deleted", response_model=list[BinnedChildRead])
+async def list_deleted_metrics(
+    response: Response,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """The list's binned metrics — see src.lists.bin.services for what appears here
+    and why this is gated on the list rather than on each metric."""
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    response.headers["X-Total-Count"] = str(
+        await bin_services.count_deleted(db, Metric, lst.id)
+    )
+    return await bin_services.list_deleted(db, Metric, lst.id, skip=skip, limit=limit)
+
+
 @router.get("/{uuid}", response_model=MetricRead)
 async def get_metric(
     uuid: UUID,
@@ -130,3 +153,42 @@ async def delete_metric(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     await MetricService.delete(db, lst.id, metric.uuid)
+
+
+@router.post("/{uuid}/restore", response_model=MetricRead)
+async def restore_metric(
+    uuid: UUID,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    try:
+        restored = await bin_services.restore(db, Metric, lst.id, uuid)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if restored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )
+    return restored
+
+
+@router.delete("/{uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_metric(
+    uuid: UUID,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Only something already in the bin can be purged; a live metric 404s here, so
+    # destroying one is always two deliberate steps. Same rule as records and lists.
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    if not await bin_services.purge(db, Metric, lst.id, uuid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )

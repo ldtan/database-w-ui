@@ -93,7 +93,7 @@ async def test_only_rows_past_the_window_are_destroyed(
 
     # The freshly deleted ones are still in their bins, restorable.
     for kind in PAYLOADS:
-        binned = await client.get(f"/api/lists/{list_uuid}/bin/{kind}")
+        binned = await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")
         assert [row["uuid"] for row in binned.json()] == [fresh[kind]], kind
 
 
@@ -205,4 +205,4 @@ async def test_a_zero_day_window_purges_everything_deleted(
 
     assert await purge(days=0) == 3
     for kind in PAYLOADS:
-        assert (await client.get(f"/api/lists/{list_uuid}/bin/{kind}")).json() == []
+        assert (await client.get(f"/api/lists/{list_uuid}/{kind}/deleted")).json() == []

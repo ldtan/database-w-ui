@@ -17,7 +17,7 @@ transaction; safe to kill and re-run.
 (`purge_deleted_items`) because they need their inbound references cleared. Columns
 have none yet, deliberately: hard-deleting one has to strip its key from every
 record's `data` JSONB, and that is a decision with data behind it rather than
-config -- see the `BinnedKind` docstring.
+config -- see `src.lists.bin.services`.
 
 **It only touches children of a *live* list.** A list delete stamps every child with
 the list's own `deleted_at`, and those come due at the same moment the list does, so
