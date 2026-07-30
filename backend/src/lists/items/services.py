@@ -194,12 +194,26 @@ class ListItemService:
 
     @classmethod
     async def get_by_uuid(
-        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+        cls,
+        db: AsyncSession,
+        list_id: int,
+        uuid: Union[str, UUID],
+        for_update: bool = False,
     ) -> Optional[ListItem]:
+        """`for_update` locks the row until the transaction commits, for a caller
+        that will read the record, change it in Python and write it back.
+
+        Off by default, and deliberately: a read that only renders the record gains
+        nothing from the lock and would make every page view queue behind whoever
+        is mid-write.
+        """
         parsed = coerce_uuid(uuid)
         if parsed is None:
             return None
-        result = await db.execute(cls._select(list_id).where(ListItem.uuid == parsed))
+        stmt = cls._select(list_id).where(ListItem.uuid == parsed)
+        if for_update:
+            stmt = stmt.with_for_update()
+        result = await db.execute(stmt)
         return result.scalars().first()
 
     @classmethod
@@ -515,7 +529,15 @@ class ListItemService:
         payload: ListItemUpdate,
         user=None,
     ) -> Optional[ListItem]:
-        item = await cls.get_by_uuid(db, lst.id, uuid)
+        # Locked, because the merge below is a read-modify-write of a single JSONB
+        # blob: two writers touching *different* columns of the same record would
+        # otherwise both build `merged` from the value they read before either
+        # committed, and whichever commits last silently drops the other's column.
+        # The UPDATE's own lock comes too late to help — by then `merged` is already
+        # built from the stale read. Taking it at the SELECT makes the second writer
+        # wait and then merge into the first one's result. It also hands
+        # `_enforce_unique` a row that cannot change under it mid-check.
+        item = await cls.get_by_uuid(db, lst.id, uuid, for_update=True)
         if item is None:
             return None
 
