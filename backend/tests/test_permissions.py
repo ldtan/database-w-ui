@@ -416,6 +416,162 @@ async def test_http_shared_with_me(make_client, session_factory):
         assert [item["uuid"] for item in resp.json()] == [list_uuid]
 
 
+async def test_http_workspace_grant_does_not_orphan_its_lists(
+    make_client, session_factory
+):
+    """Sharing a *workspace* shares its lists too, but those lists are reachable by
+    browsing the workspace — so they must not also appear in the flat "Shared with
+    me" section, which exists only for lists that have nowhere else to hang.
+
+    The two filters answer different questions: `shared` is about ownership (and the
+    lookup target picker wants every non-owned list), `workspace_hidden` is about
+    reachability. This is the case where they disagree.
+    """
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        workspace_uuid = str(ws.uuid)
+        list_uuid = str(lst.uuid)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.workspace,
+                resource_uuid=ws.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+
+    async with make_client(other) as client:
+        # The whole workspace was shared, so it is browsable...
+        resp = await client.get("/api/workspaces/?shared=true")
+        assert workspace_uuid in [w["uuid"] for w in resp.json()]
+        # ...and stays out of the caller's own workspaces, which is the split the
+        # nav tree renders as two sections.
+        resp = await client.get("/api/workspaces/?shared=false")
+        assert workspace_uuid not in [w["uuid"] for w in resp.json()]
+
+        # The list is shared — it is not owned by the caller.
+        resp = await client.get("/api/lists/?shared=true")
+        assert [item["uuid"] for item in resp.json()] == [list_uuid]
+
+        # ...but it is *not* homeless: its workspace is right there to browse into,
+        # so it is excluded from the section that would show it a second time.
+        resp = await client.get("/api/lists/?shared=true&workspace_hidden=true")
+        assert resp.json() == []
+        assert resp.headers["X-Total-Count"] == "0"
+
+        # The complement returns it, and the paginator's total agrees with the body
+        # — the two go through one set of conditions precisely so they cannot drift.
+        resp = await client.get("/api/lists/?shared=true&workspace_hidden=false")
+        assert [item["uuid"] for item in resp.json()] == [list_uuid]
+        assert resp.headers["X-Total-Count"] == "1"
+
+
+async def test_http_list_grant_survives_the_workspace_hidden_filter(
+    make_client, session_factory
+):
+    """The other half: a list granted *without* its workspace is reachable no other
+    way, so it must pass the filter the nav tree's "Shared with me" applies."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        workspace_uuid = str(ws.uuid)
+        list_uuid = str(lst.uuid)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+
+    async with make_client(other) as client:
+        resp = await client.get("/api/workspaces/?shared=true")
+        assert workspace_uuid not in [w["uuid"] for w in resp.json()]
+
+        resp = await client.get("/api/lists/?shared=true&workspace_hidden=true")
+        assert [item["uuid"] for item in resp.json()] == [list_uuid]
+        assert resp.headers["X-Total-Count"] == "1"
+        # Withheld, as ever: naming a workspace the caller was denied would leak it.
+        assert resp.json()[0]["workspace_display_name"] is None
+
+
+@pytest.mark.parametrize("break_inheritance", [False, True])
+async def test_http_a_shared_list_is_always_reachable_somewhere(
+    break_inheritance, make_client, session_factory
+):
+    """The invariant the whole split rests on: filtering the flat section down to
+    homeless lists must never hide a list that has no home either.
+
+    The dangerous shape is a list held by a *direct* grant whose workspace is also
+    shared — it fails `workspace_hidden`, so it is only reachable if browsing that
+    workspace finds it. Doubly so when the list has opted out of inheritance and
+    stands on the direct grant alone, which is the case where the workspace-level
+    and list-level paths disagree about why it is visible.
+    """
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        workspace_uuid = str(ws.uuid)
+        list_uuid = str(lst.uuid)
+        for resource_type, resource_uuid in (
+            (ResourceType.workspace, ws.uuid),
+            (ResourceType.list, lst.uuid),
+        ):
+            await PermissionService.upsert_grant(
+                db,
+                owner,
+                GrantCreate(
+                    resource_type=resource_type,
+                    resource_uuid=resource_uuid,
+                    user_uuid=other.uuid,
+                    actions=[Action.view],
+                ),
+            )
+        if break_inheritance:
+            await ListService.update(
+                db, lst.uuid, ListUpdate(permissions_inherit=False)
+            )
+
+    async with make_client(other) as client:
+        # Not homeless: its workspace is right there, so it stays out of the flat
+        # run rather than appearing twice.
+        resp = await client.get("/api/lists/?shared=true&workspace_hidden=true")
+        assert resp.json() == []
+        # ...and the home it was excluded in favour of really does hold it.
+        resp = await client.get("/api/workspaces/?shared=true")
+        assert workspace_uuid in [w["uuid"] for w in resp.json()]
+        resp = await client.get(f"/api/lists/?workspace_uuid={workspace_uuid}")
+        assert list_uuid in [item["uuid"] for item in resp.json()]
+
+
+async def test_http_lookup_target_picker_keeps_the_whole_shared_set(
+    make_client, session_factory
+):
+    """A regression guard for the filter split: the lookup target picker asks for
+    `shared=true` alone, and must keep seeing lists that arrived through a workspace
+    grant. Narrowing `shared` itself would have silently emptied that picker."""
+    async with session_factory() as db:
+        owner, other, ws, lst = await _fixture_world(db)
+        list_uuid = str(lst.uuid)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.workspace,
+                resource_uuid=ws.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+
+    async with make_client(other) as client:
+        resp = await client.get("/api/lists/?shared=true&lookup_targets=true")
+        assert list_uuid in [item["uuid"] for item in resp.json()]
+
+
 async def test_http_export_respects_item_permissions(make_client, session_factory):
     """Export is a read of the records, so it must hide the same rows the grid does.
     It previously streamed every row in the list, leaking records whose inheritance

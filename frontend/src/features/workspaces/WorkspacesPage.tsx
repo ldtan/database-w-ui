@@ -28,14 +28,96 @@ import { DeletedWorkspacesDialog } from "./DeletedWorkspacesDialog";
 // report "no match" for anything past the limit.
 const ROWS = 12;
 
+/** One workspace card. Shared by both grids on this page: a workspace someone
+ *  gave you looks and behaves like your own, and its controls are gated by its
+ *  effective actions rather than by ownership — so a view-only share simply shows
+ *  fewer of them. */
+function WorkspaceCard({
+  workspace: ws,
+  can,
+  tour,
+  onShare,
+  onRename,
+  onDelete,
+}: {
+  workspace: Workspace;
+  can: (uuid: string, action: "share" | "configure" | "delete") => boolean;
+  tour?: boolean;
+  onShare: (ws: Workspace) => void;
+  onRename: (ws: Workspace) => void;
+  onDelete: (ws: Workspace) => void;
+}) {
+  return (
+    <div
+      data-tour={tour ? "workspace-card" : undefined}
+      className="surface-card link-card p-3 flex items-start justify-between gap-2"
+    >
+      <Link
+        to={`/workspaces/${ws.uuid}`}
+        className="no-underline link-card-target flex items-start gap-3 min-w-0"
+      >
+        <span
+          className={`entity-icon${ws.is_system ? " is-muted" : ""}`}
+          aria-hidden
+        >
+          <i className={ws.is_system ? "pi pi-inbox" : "pi pi-th-large"} />
+        </span>
+        <span className="flex flex-col min-w-0">
+          <span className="font-medium truncate">{ws.display_name}</span>
+          <span className="text-sm text-muted truncate">
+            {ws.is_system ? "Lists transferred to you" : ws.name}
+          </span>
+        </span>
+      </Link>
+      {/* The Incoming inbox is immutable — no rename/delete/share; the recipient
+          acts on the lists inside it, not on the box. */}
+      <div className="link-card-above">
+        <RowActions
+          maxVisible={1}
+          actions={[
+            {
+              key: "share",
+              icon: "pi pi-share-alt",
+              label: "Share workspace",
+              visible: !ws.is_system && can(ws.uuid, "share"),
+              onClick: () => onShare(ws),
+            },
+            {
+              key: "edit",
+              icon: "pi pi-pencil",
+              label: "Rename workspace",
+              visible: !ws.is_system && can(ws.uuid, "configure"),
+              onClick: () => onRename(ws),
+            },
+            {
+              key: "delete",
+              icon: "pi pi-trash",
+              label: "Delete workspace",
+              severity: "danger",
+              visible: !ws.is_system && can(ws.uuid, "delete"),
+              onClick: () => onDelete(ws),
+            },
+          ]}
+        />
+      </div>
+    </div>
+  );
+}
+
 /**
- * The Workspaces page: your workspaces, plus the lists shared with you directly.
+ * The Workspaces page: your workspaces, plus everything shared with you.
  *
- * That second section is not a convenience. A list can be granted without its
- * workspace, in which case the workspace is invisible to you and the list hangs off
- * nothing — without "Shared with me" it would exist and be unreachable. It shows
- * the list's own slug rather than "in «Workspace»", because naming a workspace you
- * were deliberately not given would leak it.
+ * "Shared with me" holds two kinds of thing, fetched by two different questions.
+ * A workspace shared whole appears as a workspace, and its lists are reached by
+ * opening it. A list shared *without* its workspace has no workspace you can open
+ * — it hangs off nothing — so it is listed here directly; without this section it
+ * would exist and be unreachable. Those loose lists show the list's own slug
+ * rather than "in «Workspace»", because naming a workspace you were deliberately
+ * not given would leak it.
+ *
+ * Asking only "which lists do I not own?" conflates the two, which is what put
+ * every list of a shared workspace on this page twice — once inside the workspace
+ * and once loose down here.
  *
  * A shared workspace may be view-only, so each row's controls are gated by that
  * workspace's own effective actions rather than by ownership.
@@ -60,28 +142,39 @@ export function WorkspacesPage() {
   useEffect(() => setSharedFirst(0), [sharedQ]);
 
   const workspaces = useQuery({
-    queryKey: ["workspaces", "search", wsQ, wsFirst, wsRows],
+    queryKey: ["workspaces", "owned", wsQ, wsFirst, wsRows],
     queryFn: () =>
       api.getPage<Workspace>(
-        `/workspaces/?skip=${wsFirst}&limit=${wsRows}` +
+        `/workspaces/?shared=false&skip=${wsFirst}&limit=${wsRows}` +
           `&q=${encodeURIComponent(wsQ.trim())}`,
       ),
     placeholderData: (prev) => prev, // don't blank the list while paging
   });
-  // A shared workspace may be view-only, so gate its controls per row.
-  const can = useEffectiveActionsMap(
-    "workspace",
-    (workspaces.data?.items ?? []).map((ws) => ws.uuid),
-  );
 
-  // A list can be shared without its workspace, which then stays invisible — so
-  // these lists have no workspace to browse into and would otherwise be
-  // unreachable.
+  // Workspaces shared with you whole. Unpaginated: people are given a handful of
+  // workspaces, not hundreds, and a second pager inside the section below would
+  // cost more attention than it saves. The cap is high enough to say so honestly.
+  const sharedWorkspaces = useQuery({
+    queryKey: ["workspaces", "shared", sharedQ],
+    queryFn: () =>
+      api.getPage<Workspace>(
+        `/workspaces/?shared=true&limit=100` +
+          `&q=${encodeURIComponent(sharedQ.trim())}`,
+      ),
+    placeholderData: (prev) => prev,
+  });
+
+  // A list can be shared *without* its workspace, which then stays invisible — so
+  // it has no workspace to browse into and would be unreachable without this
+  // section. Lists that came in via a shared workspace are deliberately absent:
+  // they are reachable through that workspace's own card above, and listing them
+  // here as well showed every one of them twice.
   const shared = useQuery({
-    queryKey: ["lists", "shared", sharedQ, sharedFirst, sharedRows],
+    queryKey: ["lists", "shared", "unreachable", sharedQ, sharedFirst, sharedRows],
     queryFn: () =>
       api.getPage<ListRead>(
-        `/lists/?shared=true&skip=${sharedFirst}&limit=${sharedRows}` +
+        `/lists/?shared=true&workspace_hidden=true` +
+          `&skip=${sharedFirst}&limit=${sharedRows}` +
           `&q=${encodeURIComponent(sharedQ.trim())}`,
       ),
     placeholderData: (prev) => prev,
@@ -89,8 +182,19 @@ export function WorkspacesPage() {
 
   const shownWorkspaces = workspaces.data?.items ?? [];
   const wsTotal = workspaces.data?.total ?? 0;
+  const shownSharedWorkspaces = sharedWorkspaces.data?.items ?? [];
+  const sharedWsTotal = sharedWorkspaces.data?.total ?? 0;
   const shownShared = shared.data?.items ?? [];
-  const sharedTotal = shared.data?.total ?? 0;
+  const sharedListTotal = shared.data?.total ?? 0;
+  // The badge counts everything in the section, workspaces and loose lists alike.
+  const sharedTotal = sharedWsTotal + sharedListTotal;
+
+  // A shared workspace may be view-only, so gate its controls per row — for both
+  // grids at once, so the two cards render from one batched permission read.
+  const can = useEffectiveActionsMap(
+    "workspace",
+    [...shownWorkspaces, ...shownSharedWorkspaces].map((ws) => ws.uuid),
+  );
 
   const [creating, setCreating] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
@@ -135,6 +239,11 @@ export function WorkspacesPage() {
         err instanceof ApiError ? err.message : undefined,
       ),
   });
+
+  function startRename(ws: Workspace) {
+    setRenaming(ws);
+    setNames({ displayName: ws.display_name, name: ws.name });
+  }
 
   function confirmDelete(ws: Workspace) {
     confirmDialog({
@@ -209,72 +318,15 @@ export function WorkspacesPage() {
           {/* The tour points at one card rather than the grid: a spotlight the
               size of forty of them lights the page rather than a thing on it. */}
           {shownWorkspaces.map((ws, i) => (
-            <div
+            <WorkspaceCard
               key={ws.uuid}
-              data-tour={i === 0 ? "workspace-card" : undefined}
-              className="surface-card link-card p-3 flex items-start justify-between gap-2"
-            >
-              <Link
-                to={`/workspaces/${ws.uuid}`}
-                className="no-underline link-card-target flex items-start gap-3 min-w-0"
-              >
-                <span
-                  className={`entity-icon${ws.is_system ? " is-muted" : ""}`}
-                  aria-hidden
-                >
-                  <i
-                    className={ws.is_system ? "pi pi-inbox" : "pi pi-th-large"}
-                  />
-                </span>
-                <span className="flex flex-col min-w-0">
-                  <span className="font-medium truncate">
-                    {ws.display_name}
-                  </span>
-                  <span className="text-sm text-muted truncate">
-                    {ws.is_system
-                      ? "Lists transferred to you"
-                      : ws.name}
-                  </span>
-                </span>
-              </Link>
-              {/* The Incoming inbox is immutable — no rename/delete/share; the
-                  recipient acts on the lists inside it, not on the box. */}
-              <div className="link-card-above">
-                <RowActions
-                  maxVisible={1}
-                  actions={[
-                    {
-                      key: "share",
-                      icon: "pi pi-share-alt",
-                      label: "Share workspace",
-                      visible: !ws.is_system && can(ws.uuid, "share"),
-                      onClick: () => setSharing(ws),
-                    },
-                    {
-                      key: "edit",
-                      icon: "pi pi-pencil",
-                      label: "Rename workspace",
-                      visible: !ws.is_system && can(ws.uuid, "configure"),
-                      onClick: () => {
-                        setRenaming(ws);
-                        setNames({
-                          displayName: ws.display_name,
-                          name: ws.name,
-                        });
-                      },
-                    },
-                    {
-                      key: "delete",
-                      icon: "pi pi-trash",
-                      label: "Delete workspace",
-                      severity: "danger",
-                      visible: !ws.is_system && can(ws.uuid, "delete"),
-                      onClick: () => confirmDelete(ws),
-                    },
-                  ]}
-                />
-              </div>
-            </div>
+              workspace={ws}
+              can={can}
+              tour={i === 0}
+              onShare={setSharing}
+              onRename={startRename}
+              onDelete={confirmDelete}
+            />
           ))}
         </div>
       )}
@@ -304,16 +356,37 @@ export function WorkspacesPage() {
               <span className="badge">{sharedTotal}</span>
             </div>
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Lists someone gave you directly, without the workspace around them.
+              Workspaces other people shared with you, and lists they gave you on
+              their own — without the workspace around them.
             </p>
           </div>
           <SearchInput
             value={sharedSearch}
             onChange={setSharedSearch}
-            placeholder="Search shared lists…"
+            placeholder="Search shared workspaces and lists…"
           />
-          {!shared.isLoading && shownShared.length === 0 && (
-            <Message severity="info" text="No shared lists match that search." />
+          {!shared.isLoading &&
+            !sharedWorkspaces.isLoading &&
+            shownShared.length === 0 &&
+            shownSharedWorkspaces.length === 0 && (
+              <Message
+                severity="info"
+                text="Nothing shared with you matches that search."
+              />
+            )}
+          {shownSharedWorkspaces.length > 0 && (
+            <div className="card-grid">
+              {shownSharedWorkspaces.map((ws) => (
+                <WorkspaceCard
+                  key={ws.uuid}
+                  workspace={ws}
+                  can={can}
+                  onShare={setSharing}
+                  onRename={startRename}
+                  onDelete={confirmDelete}
+                />
+              ))}
+            </div>
           )}
           <div className="card-grid">
             {shownShared.map((list) => (
@@ -329,28 +402,28 @@ export function WorkspacesPage() {
                     <span className="font-medium truncate">
                       {list.display_name}
                     </span>
-                    {/* Same-named lists are common here, so disambiguate by owner
-                        and — only when the caller can see it — the workspace. The
-                        backend sends workspace_display_name only for a viewable
-                        workspace, so this never names one the caller was denied;
-                        otherwise it falls back to the list's own slug. */}
+                    {/* Same-named lists are common here, so disambiguate by owner.
+                        Never by workspace: these are exactly the lists whose
+                        workspace the caller cannot view, so the backend withholds
+                        its name — printing it would leak a workspace they were
+                        deliberately not given. The list's own slug stands in. */}
                     <span className="text-sm text-muted truncate">
                       {list.owner_username
                         ? `owned by ${list.owner_username}`
                         : list.name}
-                      {list.workspace_display_name &&
-                        ` · in ${list.workspace_display_name}`}
                     </span>
                   </span>
                 </Link>
               </div>
             ))}
           </div>
-          {sharedTotal > sharedRows && (
+          {/* Pages the loose lists only — the shared workspaces above are
+              unpaginated, so counting them here would page past the end. */}
+          {sharedListTotal > sharedRows && (
             <Paginator
               first={sharedFirst}
               rows={sharedRows}
-              totalRecords={sharedTotal}
+              totalRecords={sharedListTotal}
               rowsPerPageOptions={[12, 24, 48, 96]}
               onPageChange={(e) => {
                 setSharedFirst(e.first);

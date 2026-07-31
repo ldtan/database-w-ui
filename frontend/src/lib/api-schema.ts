@@ -356,6 +356,9 @@ export interface paths {
          * List Workspaces
          * @description Searching and paging server-side; the total match count (ignoring skip/limit)
          *     comes back in X-Total-Count for the paginator, leaving the body a plain array.
+         *
+         *     ``shared`` is omitted by default, so a caller that does not ask keeps getting
+         *     owned and shared workspaces together, as this endpoint always has.
          */
         get: operations["list_workspaces_api_workspaces__get"];
         put?: never;
@@ -455,6 +458,11 @@ export interface paths {
          *     ``lookup_targets`` is off by default, so every existing caller keeps showing only
          *     lists the caller can open — a lookup-only list stays out of the nav and out of
          *     "Shared with me", which is the point of that grant.
+         *
+         *     ``shared`` and ``workspace_hidden`` are two different questions and both are
+         *     needed: the first asks who owns the list, the second whether the caller can open
+         *     the workspace holding it. "Shared with me" combines them to find the lists that
+         *     have no other way in; the lookup target picker wants ``shared`` alone.
          */
         get: operations["list_lists_api_lists__get"];
         put?: never;
@@ -3205,6 +3213,8 @@ export interface operations {
                 limit?: number;
                 /** @description Match name or display name */
                 q?: string | null;
+                /** @description True for workspaces shared with the caller, False for the ones they own. Omit for both. */
+                shared?: boolean | null;
             };
             header?: never;
             path?: never;
@@ -3460,6 +3470,8 @@ export interface operations {
                 shared?: boolean;
                 /** @description Also include lists shared only as lookup targets — lists the caller holds 'lookup' but not 'view' on. For the lookup target picker. */
                 lookup_targets?: boolean;
+                /** @description Filter on whether the caller can view the list's parent workspace. True keeps only lists whose workspace is hidden from them — the ones that hang off nothing and are reachable no other way. Omit for both. */
+                workspace_hidden?: boolean | null;
                 skip?: number;
                 limit?: number;
                 /** @description Match list name or display name */

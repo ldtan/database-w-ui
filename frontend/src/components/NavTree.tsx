@@ -99,6 +99,60 @@ function WorkspaceLists({
   );
 }
 
+/** One workspace in the tree: a chevron that opens it and a link that goes to it.
+ *  Used for both your workspaces and the ones shared with you, because a shared
+ *  workspace browses exactly like your own — that it is someone else's is a fact
+ *  about which section it sits in, not about how it behaves. */
+function WorkspaceBranch({
+  workspace,
+  open,
+  onToggle,
+  pathname,
+  onNavigate,
+}: {
+  workspace: Workspace;
+  open: boolean;
+  onToggle: (uuid: string) => void;
+  pathname: string;
+  onNavigate?: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center">
+        {/* The chevron opens the branch; the name opens the workspace. Seeing
+            what is inside and going inside are two intentions, and one target
+            cannot serve both. */}
+        <button
+          type="button"
+          className="nav-chevron"
+          aria-label={`${open ? "Collapse" : "Expand"} ${workspace.display_name}`}
+          aria-expanded={open}
+          onClick={() => onToggle(workspace.uuid)}
+        >
+          <i className={open ? "pi pi-chevron-down" : "pi pi-chevron-right"} />
+        </button>
+        <div className="flex-1 min-w-0">
+          <NavLink
+            to={`/workspaces/${workspace.uuid}`}
+            label={workspace.display_name}
+            active={pathname === `/workspaces/${workspace.uuid}`}
+            onNavigate={onNavigate}
+          />
+        </div>
+      </div>
+      {open && (
+        <div className="flex flex-col gap-0.5">
+          <WorkspaceLists
+            workspaceUuid={workspace.uuid}
+            activePath={pathname}
+            onNavigate={onNavigate}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   /** False while the tree is off-screen (a closed drawer), so nothing is fetched
    *  for navigation nobody has asked to see. */
@@ -110,12 +164,20 @@ interface Props {
 
 /**
  * Everywhere you can go: the app's sections, your workspaces and their lists,
- * and the lists shared with you directly.
+ * and everything other people have shared with you.
  *
  * One component, rendered in two places — the desktop sidebar and the mobile
  * drawer — because they are the same navigation at two widths. Two copies would
  * be two ideas of what the app contains, and they would drift the first time a
  * section was added to one of them.
+ *
+ * "Shared with me" holds two different things, and they are fetched by two
+ * different questions. A whole workspace someone shared appears as a branch, and
+ * its lists come from expanding it. A list shared *on its own* sits in a
+ * workspace you cannot open, so it hangs off nothing and is listed flat — that is
+ * what `workspace_hidden=true` asks for. Asking only "which lists do I not own?"
+ * would return both sets, and every list of a shared workspace would appear
+ * twice: once under its branch and once in the flat run below.
  *
  * The workspace whose page (or whose list) you are on expands itself, so
  * arriving anywhere by any route leaves the tree showing where you are.
@@ -125,15 +187,23 @@ export function NavTree({ enabled, onNavigate }: Props) {
   const [expanded, setExpanded] = useState<string[]>([]);
 
   const workspaces = useQuery({
-    queryKey: ["workspaces"],
-    queryFn: () => api.get<Workspace[]>("/workspaces/"),
+    queryKey: ["workspaces", "owned"],
+    queryFn: () => api.get<Workspace[]>("/workspaces/?shared=false"),
     enabled,
   });
-  // Lists shared with you directly: their workspace is not yours to see, so they
-  // hang off no branch of the tree above and would otherwise be unreachable.
+  // Workspaces handed to you whole. They browse like your own, so they get the
+  // same expandable branch — just under a heading that says whose they are.
+  const sharedWorkspaces = useQuery({
+    queryKey: ["workspaces", "shared"],
+    queryFn: () => api.get<Workspace[]>("/workspaces/?shared=true"),
+    enabled,
+  });
+  // Lists shared with you on their own: their workspace is not yours to see, so
+  // they hang off no branch above and would otherwise be unreachable.
   const shared = useQuery({
-    queryKey: ["lists", "shared"],
-    queryFn: () => api.get<ListRead[]>("/lists/?shared=true"),
+    queryKey: ["lists", "shared", "unreachable"],
+    queryFn: () =>
+      api.get<ListRead[]>("/lists/?shared=true&workspace_hidden=true"),
     enabled,
   });
 
@@ -199,54 +269,34 @@ export function NavTree({ enabled, onNavigate }: Props) {
             None yet
           </span>
         )}
-        {workspaces.data?.map((ws) => {
-          const open = expanded.includes(ws.uuid);
-          return (
-            <div key={ws.uuid} className="flex flex-col gap-0.5">
-              <div className="flex items-center">
-                {/* The chevron opens the branch; the name opens the workspace.
-                    Seeing what is inside and going inside are two intentions,
-                    and one target cannot serve both. */}
-                <button
-                  type="button"
-                  className="nav-chevron"
-                  aria-label={`${open ? "Collapse" : "Expand"} ${ws.display_name}`}
-                  aria-expanded={open}
-                  onClick={() => toggle(ws.uuid)}
-                >
-                  <i
-                    className={
-                      open ? "pi pi-chevron-down" : "pi pi-chevron-right"
-                    }
-                  />
-                </button>
-                <div className="flex-1 min-w-0">
-                  <NavLink
-                    to={`/workspaces/${ws.uuid}`}
-                    label={ws.display_name}
-                    active={pathname === `/workspaces/${ws.uuid}`}
-                    onNavigate={onNavigate}
-                  />
-                </div>
-              </div>
-              {open && (
-                <div className="flex flex-col gap-0.5">
-                  <WorkspaceLists
-                    workspaceUuid={ws.uuid}
-                    activePath={pathname}
-                    onNavigate={onNavigate}
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
+        {workspaces.data?.map((ws) => (
+          <WorkspaceBranch
+            key={ws.uuid}
+            workspace={ws}
+            open={expanded.includes(ws.uuid)}
+            onToggle={toggle}
+            pathname={pathname}
+            onNavigate={onNavigate}
+          />
+        ))}
       </div>
 
-      {shared.data && shared.data.length > 0 && (
+      {/* Both empty means nothing was shared with you — the heading goes away
+          rather than standing over a blank run. */}
+      {(sharedWorkspaces.data?.length ?? 0) + (shared.data?.length ?? 0) > 0 && (
         <div className="flex flex-col gap-0.5">
           <span className="nav-section mb-1">Shared with me</span>
-          {shared.data.map((list) => (
+          {sharedWorkspaces.data?.map((ws) => (
+            <WorkspaceBranch
+              key={ws.uuid}
+              workspace={ws}
+              open={expanded.includes(ws.uuid)}
+              onToggle={toggle}
+              pathname={pathname}
+              onNavigate={onNavigate}
+            />
+          ))}
+          {shared.data?.map((list) => (
             <NavLink
               key={list.uuid}
               to={`/lists/${list.uuid}`}

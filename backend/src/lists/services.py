@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID, uuid7
 
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import func, not_, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -84,6 +84,7 @@ class ListService:
         shared_only: bool,
         q: Optional[str],
         action: Action = Action.view,
+        workspace_hidden: Optional[bool] = None,
     ) -> list[ColumnElement[bool]]:
         """The WHERE conditions for a visible-lists query, shared by ``list`` and
         ``count`` so the page and its total can never describe different queries.
@@ -99,6 +100,16 @@ class ListService:
             conds.append(Workspace.uuid == coerce_uuid(workspace_uuid))
         if shared_only:
             conds.append(Workspace.owner_id != user.id)
+        if workspace_hidden is not None:
+            # Whether the caller can open this list's *parent workspace* — a
+            # different question from whether they own it, and the one that decides
+            # if a shared list has a home in the nav tree or hangs off nothing.
+            # Reuses the workspace listing's own membership test, so the two can
+            # never disagree about what is reachable. Negating it is null-safe:
+            # PermissionGrant.resource_id is non-nullable, so the inner IN yields no
+            # NULL for NOT to swallow.
+            visible = await PermissionService.workspace_view_filter(db, user)
+            conds.append(not_(visible) if workspace_hidden else visible)
         if q and q.strip():
             pattern = like_pattern(q.strip())
             conds.append(
@@ -120,14 +131,22 @@ class ListService:
         limit: int = 100,
         q: Optional[str] = None,
         lookup_targets: bool = False,
+        workspace_hidden: Optional[bool] = None,
     ) -> Sequence[ListRead]:
         """Lists the user can view (owned, directly granted, or inherited from a
         workspace grant), optionally scoped to one workspace or filtered by ``q``.
 
-        ``shared_only`` keeps just the lists the user does not own. A list can be
-        granted without its workspace being visible, so those lists sit inside a
-        workspace the user cannot open — this is what backs the "Shared with me"
-        section, the only way to reach them.
+        ``shared_only`` keeps just the lists the user does not own — every list
+        reachable through someone else's grant, whether that grant sits on the list
+        or on its workspace. It is the ownership axis, and the lookup target picker
+        wants exactly it: any list you do not own is a legitimate lookup target.
+
+        ``workspace_hidden`` is the *reachability* axis, and the two come apart. A
+        list granted without its workspace sits inside a workspace the user cannot
+        open, so it hangs off nothing in the nav tree — passing True keeps just
+        those, which is what the "Shared with me" section needs. Lists that came in
+        through a workspace grant are already reachable by browsing that workspace,
+        and listing them again there would show them twice.
 
         ``lookup_targets`` widens the query from ``view`` to ``lookup``, adding the
         lists shared *only* as lookup targets. It exists for one caller — the target
@@ -150,6 +169,7 @@ class ListService:
             shared_only,
             q,
             Action.lookup if lookup_targets else Action.view,
+            workspace_hidden,
         )
         stmt = (
             select(List)
@@ -195,6 +215,7 @@ class ListService:
         shared_only: bool = False,
         q: Optional[str] = None,
         lookup_targets: bool = False,
+        workspace_hidden: Optional[bool] = None,
     ) -> int:
         """Total matching lists, ignoring skip/limit — what the paginator needs."""
         conds = await cls._visible_conditions(
@@ -204,6 +225,7 @@ class ListService:
             shared_only,
             q,
             Action.lookup if lookup_targets else Action.view,
+            workspace_hidden,
         )
         stmt = (
             select(func.count(func.distinct(List.id)))

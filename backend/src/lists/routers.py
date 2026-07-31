@@ -74,6 +74,14 @@ async def list_lists(
             "holds 'lookup' but not 'view' on. For the lookup target picker."
         ),
     ),
+    workspace_hidden: Optional[bool] = Query(
+        None,
+        description=(
+            "Filter on whether the caller can view the list's parent workspace. "
+            "True keeps only lists whose workspace is hidden from them — the ones "
+            "that hang off nothing and are reachable no other way. Omit for both."
+        ),
+    ),
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match list name or display name"),
@@ -89,6 +97,11 @@ async def list_lists(
     ``lookup_targets`` is off by default, so every existing caller keeps showing only
     lists the caller can open — a lookup-only list stays out of the nav and out of
     "Shared with me", which is the point of that grant.
+
+    ``shared`` and ``workspace_hidden`` are two different questions and both are
+    needed: the first asks who owns the list, the second whether the caller can open
+    the workspace holding it. "Shared with me" combines them to find the lists that
+    have no other way in; the lookup target picker wants ``shared`` alone.
     """
     response.headers["X-Total-Count"] = str(
         await ListService.count(
@@ -98,6 +111,7 @@ async def list_lists(
             shared_only=shared,
             q=q,
             lookup_targets=lookup_targets,
+            workspace_hidden=workspace_hidden,
         )
     )
     return await ListService.list(
@@ -109,6 +123,7 @@ async def list_lists(
         limit=limit,
         q=q,
         lookup_targets=lookup_targets,
+        workspace_hidden=workspace_hidden,
     )
 
 
