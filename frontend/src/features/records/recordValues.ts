@@ -18,6 +18,20 @@ export interface ResolvedField {
 }
 
 /**
+ * A column the server writes for you cannot be an input, whatever a form config
+ * says: `config.onupdate` is stamped over anything sent on every accepted write
+ * (`ListItemService._validate_data`). Read-only rather than absent, because a
+ * "last modified" is exactly the sort of thing you want to *see* on a record —
+ * which is what `enabled: false` already means everywhere it is read.
+ *
+ * The same reasoning `resolveFields` applies to calculated columns, one step
+ * short of it: those store nothing at all, so they are dropped rather than shown.
+ */
+function writable(column: Column): boolean {
+  return !column.config.onupdate;
+}
+
+/**
  * Apply the form's config: only included fields, in order, with enabled and
  * label overrides. An empty/absent config means "all columns in schema order".
  *
@@ -37,20 +51,6 @@ export interface ResolvedField {
  * the form editor and saved. This is the same rule a view's `column_order` follows
  * (data-model §7), for the same reason.
  */
-/**
- * A column the server writes for you cannot be an input, whatever a form config
- * says: `config.onupdate` is stamped over anything sent on every accepted write
- * (`ListItemService._validate_data`). Read-only rather than absent, because a
- * "last modified" is exactly the sort of thing you want to *see* on a record —
- * which is what `enabled: false` already means everywhere it is read.
- *
- * The same reasoning `resolveFields` applies to calculated columns, one step
- * short of it: those store nothing at all, so they are dropped rather than shown.
- */
-function writable(column: Column): boolean {
-  return !column.config.onupdate;
-}
-
 export function resolveFields(
   columns: Column[],
   form: Form | null,
