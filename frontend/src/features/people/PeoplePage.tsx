@@ -9,6 +9,7 @@ import { api, ApiError } from "../../lib/api";
 import { useCurrentUser } from "../../lib/auth";
 import { fullName } from "../../lib/people";
 import { useDebounced } from "../../lib/useDebounced";
+import { SMALL_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup, Person } from "../../lib/types";
 import { EmptyState } from "../../components/EmptyState";
@@ -50,6 +51,14 @@ export function PeoplePage() {
   // backend. Reads stay open so everyone can see who is in what.
   const me = useCurrentUser();
   const canAdminister = me?.is_superuser ?? false;
+
+  // Below this the secondary actions keep their icon and drop their label, the way
+  // a row's actions already do (see RowActions). Three labelled buttons and a
+  // heading do not fit a phone on one line, and the primary action — the reason
+  // anyone opened this section — should not be the one that gets pushed off.
+  // Their `aria-label` stays either way, so what collapses is the pixels, not the
+  // name.
+  const compactActions = useMediaQuery(SMALL_SCREEN);
 
   const [userSearch, setUserSearch] = useState("");
   const [groupSearch, setGroupSearch] = useState("");
@@ -163,21 +172,28 @@ export function PeoplePage() {
 
       {/* ---------------------------------------------------------- Users */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        {/* Wraps rather than squeezes, the same as PageHeader. Shedding the labels
+            above is what actually keeps this on one line; the wrap is the floor
+            under it, for the widths where even icons and one labelled button do not
+            fit. A flex row that cannot wrap has only one way to resolve that, which
+            is to run off the right edge. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-lg font-semibold">Users</h2>
             {userTotal > 0 && <span className="badge">{userTotal}</span>}
           </div>
           {canAdminister && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                label="Deleted"
+                label={compactActions ? undefined : "Deleted"}
+                aria-label="Deleted users"
                 icon="pi pi-trash"
                 text
                 onClick={() => setShowDeletedUsers(true)}
               />
               <Button
-                label="Import users"
+                label={compactActions ? undefined : "Import users"}
+                aria-label="Import users"
                 icon="pi pi-upload"
                 text
                 onClick={() => setShowBatchUsers(true)}
@@ -287,15 +303,19 @@ export function PeoplePage() {
 
       {/* --------------------------------------------------------- Groups */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        {/* Same treatment as Users above. Two buttons rather than three, so this
+            one is not overflowing today — but it is the same row at a narrower
+            window, and having the two sections behave differently is its own bug. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-lg font-semibold">Groups</h2>
             {groupTotal > 0 && <span className="badge">{groupTotal}</span>}
           </div>
           {canAdminister && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
-                label="Deleted"
+                label={compactActions ? undefined : "Deleted"}
+                aria-label="Deleted groups"
                 icon="pi pi-trash"
                 text
                 onClick={() => setShowDeletedGroups(true)}
