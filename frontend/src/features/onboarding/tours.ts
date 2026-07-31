@@ -250,6 +250,7 @@ export function tipsFor(pathname: string): PageTip[] {
       { icon: "pi pi-users", text: "Groups are for sharing with a whole team at once instead of person by person." },
       { icon: "pi pi-globe", text: "Authenticated Users means everyone with an account here, including people who join later." },
       { icon: "pi pi-shield", text: "Only an administrator can add accounts or change them. Everyone else can look." },
+      { icon: "pi pi-upload", text: "Import users sets up a whole list of people from one spreadsheet. Download the template inside it to see the headings." },
     ];
   }
   if (pathname === "/profile") {

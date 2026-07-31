@@ -66,6 +66,21 @@ export type UserSettings = Response<Schemas["UserSettings"]>;
 export type UserSettingsUpdate = Schemas["UserSettingsUpdate"];
 export type Grant = Response<Schemas["GrantRead"]>;
 
+/** One account the batch importer created. `generated_password` is set only for the
+ *  rows whose password the server minted, and it comes back exactly once — nothing
+ *  stores it and there is no way to ask again. */
+export type CreatedUser = Response<Schemas["CreatedUser"]>;
+export type BatchUserError = Response<Schemas["BatchUserError"]>;
+/** The result of a batch user import.
+ *
+ * The two arrays are re-spelled rather than left to `Response<>`, which is shallow:
+ * it would make `created` present but leave its *elements* raw, so every consumer
+ * would be back to `?? null`-ing fields that a response always carries. */
+export type BatchUserSummary = Omit<
+  Response<Schemas["BatchUserSummary"]>,
+  "created" | "errors"
+> & { created: CreatedUser[]; errors: BatchUserError[] };
+
 export type ColumnType = Schemas["ColumnType"];
 export type FormType = Schemas["FormType"];
 export type ResourceType = Schemas["ResourceType"];

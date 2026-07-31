@@ -885,3 +885,16 @@ those are re-read.** Concretely:
 
 Nothing here is enforceable by a test, which is why it is written down. Treat the guide and
 the tours as part of the UI's surface area rather than as documentation about it.
+
+**The batch-import template's headings are duplicated across the language boundary.**
+`HEADERS` in `features/people/BatchUserDialog.tsx` lists the twelve CSV columns the template
+writes; `KNOWN_HEADERS` in `src/auth/users/batch/parsing.py` is the set the server accepts.
+Nothing checks them against each other. This is the same class of duplication the bullet
+above describes, and it is not automatable the way `COLUMN_TYPE_OPTIONS` was — the generated
+`api-schema.ts` publishes the *response* types, not the accepted header list, because the
+headers are a CSV convention rather than a JSON schema.
+
+It fails safely, which is the only reason it is acceptable: a header the frontend invents is
+rejected by `check_headers` with a `400` naming it, so the template breaks loudly on the
+first use rather than silently dropping a column. Adding a column to the import means
+editing both, plus the example row beside `HEADERS` and the guide's People section.

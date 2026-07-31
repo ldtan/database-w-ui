@@ -75,6 +75,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/users/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Users Csv
+         * @description Create many accounts from one CSV.
+         *
+         *     Superuser-only, like every other account write -- accounts and group membership
+         *     sit *underneath* the permission model, so whoever can mint them can route around
+         *     it.
+         *
+         *     Two kinds of failure, deliberately kept apart. A problem with the *file* -- wrong
+         *     columns, too many rows, not text -- is a 400, because nothing in it can be
+         *     trusted and nothing has been created. A problem with a *row* comes back inside
+         *     the summary, because the rows around it were fine and are already saved.
+         *
+         *     **The response carries generated passwords in plaintext.** It is the only place
+         *     they exist; nothing stores them and there is no way to ask again. Do not log it.
+         */
+        post: operations["import_users_csv_api_auth_users_import_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/users/": {
         parameters: {
             query?: never;
@@ -1325,6 +1357,25 @@ export interface components {
          * @enum {string}
          */
         Action: "view" | "create" | "edit" | "delete" | "configure" | "share" | "manage" | "lookup";
+        /** BatchUserError */
+        BatchUserError: {
+            /** Row */
+            row: number;
+            /** Message */
+            message: string;
+        };
+        /** BatchUserSummary */
+        BatchUserSummary: {
+            /** Created */
+            created?: components["schemas"]["CreatedUser"][];
+            /** Errors */
+            errors?: components["schemas"]["BatchUserError"][];
+            /**
+             * Superusers Created
+             * @default 0
+             */
+            superusers_created: number;
+        };
         /**
          * BinnedChildRead
          * @description One soft-deleted view, form or metric.
@@ -1390,6 +1441,11 @@ export interface components {
             file: string;
             /** Format */
             format?: string | null;
+        };
+        /** Body_import_users_csv_api_auth_users_import_post */
+        Body_import_users_csv_api_auth_users_import_post: {
+            /** File */
+            file: string;
         };
         /** Body_login_for_access_token_api_auth_tokens_login_post */
         Body_login_for_access_token_api_auth_tokens_login_post: {
@@ -1546,6 +1602,20 @@ export interface components {
             /** Description */
             description?: string | null;
             config?: components["schemas"]["ColumnConfig"] | null;
+        };
+        /** CreatedUser */
+        CreatedUser: {
+            /** Row */
+            row: number;
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Username */
+            username: string;
+            /** Generated Password */
+            generated_password?: string | null;
         };
         /** DeletedListItemRead */
         DeletedListItemRead: {
@@ -2637,6 +2707,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    import_users_csv_api_auth_users_import_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_users_csv_api_auth_users_import_post"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BatchUserSummary"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

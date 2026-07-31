@@ -83,9 +83,10 @@ src/
     forms/        # per-list form layouts
     metrics/    # the aggregate cards above the grid, and their settings panel
     permissions/  # Share dialog/panel and the effective-actions hooks
-    people/       # accounts and groups (identity administration), and their bin
+    people/       # accounts and groups (identity administration), their bin,
+                  # and batch account creation from a CSV
     profile/      # your own account and profile
-    transfer/     # CSV/JSON import + export
+    transfer/     # CSV/JSON import + export, for a list's records
     lookups/      # lookup cells, fields and filter inputs
     principals/   # user/group cells, fields and filter inputs
     references/   # ReferencePicker — the typeahead all of the above share

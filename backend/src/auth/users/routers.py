@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..dependencies import get_current_user, require_superuser
 from . import bin as bin_services
+from .batch.routers import router as batch_router
 from .models import User, UserGroup
 from .schemas import (
     BinnedPrincipalRead,
@@ -41,6 +42,13 @@ group_router = APIRouter(
     tags=["groups"],
     dependencies=[Depends(get_current_user)],
 )
+
+# Included here, before the /{uuid} routes below are registered, so the literal
+# /import path is matched ahead of the parameterised ones -- the convention
+# list_deleted_users documents. Nothing actually collides today (the only other POSTs
+# under /users are "/" and "/{uuid}/restore"), which is the point: it stays true when
+# the next one is added.
+router.include_router(batch_router)
 
 
 @router.post("/", response_model=UserRead, status_code=status.HTTP_201_CREATED)
