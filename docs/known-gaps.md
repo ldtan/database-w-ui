@@ -418,6 +418,38 @@ Follow-ups, in the order they will be missed:
   unconditional `tzdata` dependency. If it ever goes missing, `available_timezones()`
   returns empty, every zone looks unknown, writes 422, and `today` quietly reverts to UTC.
 
+## 11. Column type conversion ships narrow, and on purpose
+
+`type` is no longer immutable — a conversion changes it (planned features §1). What that
+buys and what it costs are both worth knowing before extending it.
+
+- **Only pairs with `text` on one side, plus `date` ↔ `datetime`.** Everything else is
+  refused with a message naming the two hops. That is not a stub: chaining X → text → Y
+  automatically would collapse two reports and two decision points into one action, and the
+  entire design exists so a person reads the report before anything changes. If you widen
+  the matrix, widen it with direct pairs that are *better* than the round trip (as
+  `date` ↔ `datetime` is), not with auto-chaining.
+- **`calculated` is excluded in both directions** and is the obvious next piece. Converting
+  away from it means evaluating the formula per row and persisting the result — real work,
+  but the evaluator already exists (`computed_columns` / `evaluate`). Converting *to* it
+  means discarding stored values, which needs its own confirmation, not a cell converter.
+- **The cutover mutates `Column.type` in place.** It is the one operation that does, and it
+  is what keeps the column's uuid, name and position — so views, forms, formulas and
+  `primary_column_id` need no repointing. Anything that caches a column's type across a
+  request would break here, and nothing does today.
+- **Storage roughly doubles for the duration.** Every record holds the old value and the new
+  one between the backfill and the cutover. On a 1GB database that is worth checking before
+  converting a large text column.
+- **`required` and `unique` are cutover gates, not backfill rules**, so a report can come
+  back clean and the commit still refuse. That is deliberate — per cell they would fail every
+  ordinary blank — but it does mean the report does not tell you whether the commit will
+  succeed. A dry-run of the gates would.
+- **Above `ROW_CEILING` (50k) a conversion is refused in the request** and the caller is told
+  to use the maintenance workflow. Nothing in that workflow runs it yet: the service function
+  is callable and chunked, but no entry point exists. A list that big cannot be created on the
+  current free tier, which is why it was left.
+- **No UI.** The feature is API-only.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

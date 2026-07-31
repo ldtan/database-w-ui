@@ -100,6 +100,44 @@ class LookupOption(BaseModel):
     deleted: bool = False
 
 
+class ConversionStart(BaseModel):
+    """The column to convert *into*: a type, and that type's settings.
+
+    The config is validated from scratch against the new type rather than merged
+    onto the old one — a `choice`'s options and a `lookup`'s target mean nothing to
+    a `number`, and carrying them over would be carrying over the previous type's
+    assumptions. For `text` -> `choice`, leaving `options` unset mints one per
+    distinct value in the source.
+    """
+
+    type: ColumnType
+    config: ColumnConfig = Field(default_factory=ColumnConfig)
+
+
+class ConversionFailure(BaseModel):
+    record_uuid: UUID
+    message: str
+
+
+class ConversionReport(BaseModel):
+    """What a backfill did, for a person to read before committing to it.
+
+    Nothing about the list has changed at this point: the values live in a hidden
+    column that no view, filter, form or formula can see. Committing swaps them in;
+    abandoning throws them away.
+    """
+
+    target_uuid: UUID
+    # What the column becomes if this is committed. Echoed back rather than left
+    # to the caller to remember, so a report is readable on its own.
+    new_type: ColumnType
+    converted: int
+    failed: int
+    errors: list[ConversionFailure]
+    # True when more cells failed than the report names individually.
+    errors_truncated: bool
+
+
 class ColumnRead(BaseModel):
     uuid: UUID
     name: str
