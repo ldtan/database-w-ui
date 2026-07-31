@@ -135,11 +135,44 @@ envVarGroups:
 
       - key: DEBUG
         value: "False"
+
+      # Declared, not merely absent. DISABLE_AUTH resolves every request to the first row
+      # of the users table — the superuser — with no token at all, so setting it here would
+      # publish the whole app to anyone holding the URL. The app now refuses to start when
+      # it is true and DEBUG is not (src/core/config.py), which turns that mistake into a
+      # failed deploy instead of a silent one. Naming it here as well means someone has to
+      # edit a line that says False, rather than add a variable that looks harmless.
+      - key: DISABLE_AUTH
+        value: "False"
+
       # Empty on purpose: the rewrite above makes the SPA same-origin, so there is no
       # cross-origin request to allow. It is only needed for the VITE_API_BASE fallback
       # described in the README.
+      #
+      # Note this is not an access control. CORS governs what other *browser pages* may
+      # read from the API; it is ignored by curl and by every script. What protects the
+      # API is the bearer token on every route, and — on login, the one route that has to
+      # answer before a caller has proved anything — the failure limits below.
       - key: ALLOWED_ORIGINS
         value: ""
+
+      # Failed sign-ins per username, and per source address, inside a rolling window,
+      # before login answers 429. Defaults (10 / 50 / 15 minutes) apply if unset; they are
+      # named here because the seeded username is `admin` below and is not a secret.
+      #
+      # The counters are per process (src/auth/tokens/throttle.py). That is exact while the
+      # free plan runs a single instance, and becomes N times looser the moment this service
+      # is scaled — the same boundary as the alembic note on startCommand above.
+      #
+      # If the per-address limit ever locks out real users, the cause is a proxy hop that
+      # does not forward the original client address, making everyone share one bucket: set
+      # LOGIN_MAX_FAILURES_PER_IP to 0 and the per-username limit carries on alone.
+      - key: LOGIN_MAX_FAILURES_PER_USERNAME
+        value: "10"
+      - key: LOGIN_MAX_FAILURES_PER_IP
+        value: "50"
+      - key: LOGIN_THROTTLE_WINDOW_MINUTES
+        value: "15"
 
       # The bootstrap account, seeded on first boot while the users table is empty. On a public
       # URL, `changeme` is a public login: set a real password.

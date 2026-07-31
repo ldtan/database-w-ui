@@ -148,7 +148,10 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `DATABASE_URI` | — (required) | Async SQLAlchemy URL (`postgresql+asyncpg://…`). |
 | `ALLOWED_ORIGINS` | `""` | Comma-separated CORS origins. |
 | `DEBUG` | `false` | Debug mode. |
-| `DISABLE_AUTH` | `false` | Dev-only: bypass auth and act as the first user. |
+| `DISABLE_AUTH` | `false` | Dev-only: bypass auth and act as the first user. Requires `DEBUG=true` — the app refuses to start otherwise, because on a reachable URL it hands every route to anyone, as the superuser, with no token. |
+| `LOGIN_THROTTLE_WINDOW_MINUTES` | `15` | How long a failed sign-in is counted for. |
+| `LOGIN_MAX_FAILURES_PER_USERNAME` | `10` | Failed sign-ins per username per window before login answers `429`. A success clears the tally. |
+| `LOGIN_MAX_FAILURES_PER_IP` | `50` | The same per source address, to catch one host spraying across many usernames. `0` disables it — set that if a proxy in front of the API makes every user arrive as one address. |
 | `FIRST_SUPERUSER_USERNAME` | `admin` | Bootstrap user username. |
 | `FIRST_SUPERUSER_EMAIL` | `admin@example.com` | Bootstrap user email. |
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
@@ -158,6 +161,18 @@ All settings are read from `.env` (see `src/core/config.py`).
 
 All routes are mounted under `API_PREFIX` (`/api`) and, except login, require a bearer
 token. Obtain one from `POST /api/auth/tokens/login`.
+
+The API is public by design and protected by that token, not by its network position: the
+SPA runs in a browser, so anything it can call, any HTTP client can call. `ALLOWED_ORIGINS`
+is not an access control — CORS only governs what other *browser pages* may read, and is
+ignored entirely by scripts. The unauthenticated surface is exactly `/health`, `/docs`,
+`/redoc`, `/openapi.json`, and the three routes under `…/auth/tokens`; everything else is
+`401` without a token.
+
+Login is therefore the one route an attacker can reach, and it is rate-limited on failures —
+per username, and per source address — returning `429` with a `Retry-After` header once a
+budget is spent. See `src/auth/tokens/throttle.py` for the thresholds, the reasoning, and
+the single-instance assumption the counters rest on.
 
 | Area | Endpoints |
 |------|-----------|

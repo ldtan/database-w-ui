@@ -1,3 +1,4 @@
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -21,6 +22,47 @@ class Settings(BaseSettings):
     # This is the window in which a delete can still be undone, so it is a policy
     # decision, not a tuning knob. 0 means "purge as soon as the job runs".
     PURGE_DELETED_AFTER_DAYS: int = 30
+
+    # Login throttling — see src/auth/tokens/throttle.py for what these buy and
+    # for the single-instance assumption underneath them. Failures only: a
+    # caller typing the right password is never turned away, and a success
+    # clears that username's tally.
+    LOGIN_THROTTLE_WINDOW_MINUTES: int = 15
+    # Per username. This is the one that stops guessing at a named account, and
+    # the one that cannot be evaded, since the username is the thing being
+    # attacked. The cost of it is the classic lockout: someone can spend wrong
+    # passwords to keep a real person out for the length of the window.
+    LOGIN_MAX_FAILURES_PER_USERNAME: int = 10
+    # Per source address, to catch one host spraying across many usernames.
+    # Best-effort, because the address is read from X-Forwarded-For: if the
+    # deployment ever puts a proxy in front of the API that does *not* forward
+    # the original client address, every user arrives as one address and shares
+    # this bucket. Generous for that reason. 0 disables it and leaves the
+    # per-username limit doing the work.
+    LOGIN_MAX_FAILURES_PER_IP: int = 50
+
+    @model_validator(mode="after")
+    def _auth_may_only_be_disabled_in_debug(self) -> "Settings":
+        """DISABLE_AUTH is a development shortcut and a production disaster.
+
+        It does not merely skip the token check: get_current_user resolves the
+        caller to the *first row* of the users table, which is the seeded
+        superuser. Set on a public deployment it hands every route to anyone who
+        can reach the URL, with no credential at all and nothing in the logs to
+        distinguish them from the real administrator.
+
+        A single mistyped environment variable is all that stands between the
+        two, so refuse to construct at all rather than boot into it. Pairing it
+        with DEBUG means turning it on is a deliberate two-flag act.
+        """
+        if self.DISABLE_AUTH and not self.DEBUG:
+            raise ValueError(
+                "DISABLE_AUTH=True requires DEBUG=True. It resolves every "
+                "request to the first user in the database — the superuser — "
+                "without a token, so it is only ever safe on a development "
+                "machine. Unset it, or set DEBUG=True if this really is one."
+            )
+        return self
 
     @property
     def allowed_origins(self) -> list[str]:
