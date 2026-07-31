@@ -103,5 +103,6 @@ host:
   guide and the in-app tours describe by name.**
 - [Planned features](docs/planned-features.md) — nine asked-for capabilities: list
   transfer, cross-workspace moves, cloning, nested and cross-workspace lookups, live
-  records and metrics are built; column type conversion and column data migration are
-  not. What exists to build on, the load-bearing details, and the decisions still open.
+  records, metrics, and column type conversion (including duplicating a column) are
+  built; copying into an *already existing* column is not. What exists to build on, the
+  load-bearing details, and the decisions still open.
