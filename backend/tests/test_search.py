@@ -116,9 +116,16 @@ async def test_group_search(make_client, session_factory):
     async with session_factory() as db:
         admin = await _make_user(db, "root", superuser=True)
         await UserGroupService.create(
-            db, UserGroupCreate(name="engineering", description="builds things")
+            db,
+            UserGroupCreate(
+                name="engineering",
+                display_name="Engineering",
+                description="builds things",
+            ),
         )
-        await UserGroupService.create(db, UserGroupCreate(name="sales"))
+        await UserGroupService.create(
+            db, UserGroupCreate(name="sales", display_name="Sales")
+        )
 
     async with make_client(admin) as client:
         found = (await client.get("/api/auth/groups/?q=engin")).json()
@@ -126,6 +133,24 @@ async def test_group_search(make_client, session_factory):
         # Description matches too.
         found = (await client.get("/api/auth/groups/?q=builds")).json()
         assert [g["name"] for g in found] == ["engineering"]
+
+
+async def test_a_group_is_found_by_either_of_its_names(make_client, session_factory):
+    """The slug and the label diverge, and someone searching has read one or the
+    other — the People page shows the label, an export or a CSV carries the slug."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "root", superuser=True)
+        await UserGroupService.create(
+            db, UserGroupCreate(name="registrar", display_name="Registrar's Office")
+        )
+
+    async with make_client(admin) as client:
+        by_slug = (await client.get("/api/auth/groups/?q=regist")).json()
+        assert [g["name"] for g in by_slug] == ["registrar"]
+
+        # "Office" appears only in the display name.
+        by_label = (await client.get("/api/auth/groups/?q=Office")).json()
+        assert [g["name"] for g in by_label] == ["registrar"]
 
 
 async def test_pagination_and_total_count(make_client, session_factory):
@@ -164,7 +189,9 @@ async def test_group_pagination_total(make_client, session_factory):
     async with session_factory() as db:
         admin = await _make_user(db, "root", superuser=True)
         for i in range(7):
-            await UserGroupService.create(db, UserGroupCreate(name=f"group{i}"))
+            await UserGroupService.create(
+                db, UserGroupCreate(name=f"group{i}", display_name=f"Group {i}")
+            )
 
     async with make_client(admin) as client:
         resp = await client.get("/api/auth/groups/?skip=0&limit=3")
@@ -241,8 +268,8 @@ async def test_users_can_be_resolved_by_uuid(make_client, session_factory):
 async def test_groups_can_be_resolved_by_uuid(make_client, session_factory):
     async with session_factory() as db:
         caller = await _make_user(db, "root", superuser=True)
-        wanted = await UserGroupService.create(db, UserGroupCreate(name="editors"))
-        await UserGroupService.create(db, UserGroupCreate(name="viewers"))
+        wanted = await UserGroupService.create(db, UserGroupCreate(name="editors", display_name="Editors"))
+        await UserGroupService.create(db, UserGroupCreate(name="viewers", display_name="Viewers"))
 
     async with make_client(caller) as client:
         found = (await client.get(f"/api/auth/groups/?uuid={wanted.uuid}")).json()

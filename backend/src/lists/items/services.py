@@ -3,7 +3,7 @@ from typing import Optional, Sequence, Union
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -267,14 +267,21 @@ class ListItemService:
         """
         if column.type in PRINCIPAL_TYPES:
             model = User if column.type == ColumnType.user else UserGroup
-            label = (
-                User.username if column.type == ColumnType.user else UserGroup.name
+            # A user has one label; a group has two since the name/display_name split,
+            # and both have to match. The cell *renders* the display name, so matching
+            # only the slug would fail to find a group the searcher is looking at —
+            # while matching only the display name would fail to find one they know by
+            # the slug their export or CSV uses.
+            labels = (
+                [User.username]
+                if column.type == ColumnType.user
+                else [UserGroup.name, UserGroup.display_name]
             )
             rows = await db.execute(
                 select(model.uuid)
                 .where(
                     model.deleted_at.is_(None),
-                    label.ilike(pattern, escape=LIKE_ESCAPE),
+                    or_(*(l.ilike(pattern, escape=LIKE_ESCAPE) for l in labels)),
                 )
                 .limit(_SEARCH_REF_MAX)
             )

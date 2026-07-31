@@ -44,7 +44,13 @@ class GrantRead(BaseModel):
     user_uuid: Optional[UUID] = None
     user_username: Optional[str] = None
     group_uuid: Optional[UUID] = None
+    # The label to render, so this is the group's `display_name` — the counterpart of
+    # `user_username` above, not of the group's `name`. That slug rides along
+    # separately because `display_name` is not unique: the Share panel prints it under
+    # the label so two groups reading alike can still be told apart before someone
+    # grants access to the wrong one.
     group_name: Optional[str] = None
+    group_slug: Optional[str] = None
     actions: list[Action]
     # None means the grant never expires. A grant already past this is listed (so the
     # owner can see and renew or remove it) but confers nothing.

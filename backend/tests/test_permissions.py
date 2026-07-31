@@ -139,7 +139,7 @@ async def test_group_grant_applies_to_members(session_factory):
     async with session_factory() as db:
         owner, member, _, lst = await _fixture_world(db)
         group = await UserGroupService.create(
-            db, UserGroupCreate(name="team", user_uuids=[member.uuid])
+            db, UserGroupCreate(name="team", display_name="Team", user_uuids=[member.uuid])
         )
 
         await PermissionService.upsert_grant(
@@ -217,7 +217,7 @@ async def test_form_targeting_and_configure_scope(session_factory):
         owner, other, _, lst = await _fixture_world(db)
         member = await _make_user(db, "member")
         group = await UserGroupService.create(
-            db, UserGroupCreate(name="audience", user_uuids=[member.uuid])
+            db, UserGroupCreate(name="audience", display_name="Audience", user_uuids=[member.uuid])
         )
 
         # Both other and member can view the list.

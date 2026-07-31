@@ -16,7 +16,12 @@ from src.core.exceptions import (
 from src.workspaces.services import WorkspaceService
 
 from ..helpers import get_password_hash, verify_password
-from .models import AUTHENTICATED_USERS_NAME, User, UserGroup
+from .models import (
+    AUTHENTICATED_USERS_DISPLAY_NAME,
+    AUTHENTICATED_USERS_NAME,
+    User,
+    UserGroup,
+)
 from .schemas import (
     UserCreate,
     UserGroupCreate,
@@ -303,7 +308,7 @@ class UserGroupService:
     def _guard_system_group(group: UserGroup) -> None:
         if group.is_system:
             raise PermissionDeniedError(
-                f"System group {AUTHENTICATED_USERS_NAME!r} is immutable"
+                f"System group {AUTHENTICATED_USERS_DISPLAY_NAME!r} is immutable"
             )
 
     @staticmethod
@@ -313,13 +318,19 @@ class UserGroupService:
 
     @staticmethod
     def _apply_search(stmt, q: Optional[str]):
-        """Shared by list() and count() so the page and its total cannot drift."""
+        """Shared by list() and count() so the page and its total cannot drift.
+
+        Both names, because they diverged: someone typing "Registrar" is reading the
+        display name off the People page, and matching only the slug would answer
+        "no such group" about a group they are looking at.
+        """
         if not (q and q.strip()):
             return stmt
         pattern = like_pattern(q.strip())
         return stmt.where(
             or_(
                 UserGroup.name.ilike(pattern, escape=LIKE_ESCAPE),
+                UserGroup.display_name.ilike(pattern, escape=LIKE_ESCAPE),
                 UserGroup.description.ilike(pattern, escape=LIKE_ESCAPE),
             )
         )
@@ -406,6 +417,7 @@ class UserGroupService:
         users = await cls._resolve_users(db, payload.user_uuids)
         group = UserGroup(
             name=payload.name,
+            display_name=payload.display_name,
             description=payload.description,
             users=users,
         )
@@ -433,8 +445,12 @@ class UserGroupService:
         data = payload.model_dump(exclude_unset=True)
         if "user_uuids" in data:
             group.users = await cls._resolve_users(db, data.pop("user_uuids"))
-        if "name" in data and data["name"] is None:
-            data.pop("name")
+        # Both are NOT NULL, and `exclude_unset` cannot tell an omitted key from one
+        # explicitly set to null — so an explicit null would reach the database as a
+        # constraint violation rather than as the no-op the caller plainly meant.
+        for required in ("name", "display_name"):
+            if required in data and data[required] is None:
+                data.pop(required)
         for field, value in data.items():
             setattr(group, field, value)
 

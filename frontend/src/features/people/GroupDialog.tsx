@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
-import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { MultiSelect } from "primereact/multiselect";
 import { Button } from "primereact/button";
 
 import { api, ApiError } from "../../lib/api";
 import { Field } from "../../components/Field";
+import { NameFields, type NamePair } from "../../components/NameFields";
+import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { ApiUser, ApiUserGroup } from "../../lib/types";
 
@@ -25,6 +26,11 @@ interface Props {
  * So adding someone to a group here hands them, silently, every permission that
  * group has anywhere in the app — which is why this dialog is superuser-only, and
  * why membership is worth more care than the plain list of checkboxes suggests.
+ *
+ * The `name`/`display_name` pair carries more weight here than it does for a list.
+ * A group's slug is what a batch-user CSV's `groups` column and an exported `group`
+ * cell name it by, so changing it after the fact invalidates files people are
+ * holding — hence `linked={false}` when editing, the same as everywhere else.
  */
 export function GroupDialog({ visible, onHide, group }: Props) {
   const queryClient = useQueryClient();
@@ -39,13 +45,16 @@ export function GroupDialog({ visible, onHide, group }: Props) {
     enabled: visible,
   });
 
-  const [name, setName] = useState("");
+  const [names, setNames] = useState<NamePair>({ displayName: "", name: "" });
   const [description, setDescription] = useState("");
   const [members, setMembers] = useState<string[]>([]);
 
   useEffect(() => {
     if (!visible) return;
-    setName(group?.name ?? "");
+    setNames({
+      displayName: group?.display_name ?? "",
+      name: group?.name ?? "",
+    });
     setDescription(group?.description ?? "");
     setMembers(group?.users.map((u) => u.uuid) ?? []);
   }, [visible, group]);
@@ -53,7 +62,8 @@ export function GroupDialog({ visible, onHide, group }: Props) {
   const save = useMutation({
     mutationFn: () => {
       const body = {
-        name: name.trim(),
+        name: names.name.trim(),
+        display_name: names.displayName.trim(),
         description: description.trim() || null,
         user_uuids: members,
       };
@@ -63,7 +73,10 @@ export function GroupDialog({ visible, onHide, group }: Props) {
     },
     onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["groups"] });
-      toast.success(editing ? "Group saved" : "Group created", saved.name);
+      toast.success(
+        editing ? "Group saved" : "Group created",
+        saved.display_name,
+      );
       onHide();
     },
     onError: (err) =>
@@ -80,7 +93,7 @@ export function GroupDialog({ visible, onHide, group }: Props) {
 
   return (
     <AppDialog
-      header={editing ? `Edit ${group!.name}` : "New group"}
+      header={editing ? `Edit ${group!.display_name}` : "New group"}
       visible={visible}
       onHide={onHide}
       style={{ width: 460 }}
@@ -92,20 +105,20 @@ export function GroupDialog({ visible, onHide, group }: Props) {
             icon={editing ? "pi pi-check" : "pi pi-plus"}
             onClick={() => save.mutate()}
             loading={save.isPending}
-            disabled={!name.trim()}
+            disabled={!names.displayName.trim() || !isValidName(names.name)}
           />
         </>
       }
     >
       <div className="flex flex-col gap-4">
-        <Field label="Name" htmlFor="g-name">
-          <InputText
-            id="g-name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            autoFocus
-          />
-        </Field>
+        <NameFields
+          key={group?.uuid ?? "new"}
+          idPrefix="group"
+          value={names}
+          onChange={setNames}
+          linked={!editing}
+          autoFocus
+        />
         <Field label="Description" htmlFor="g-desc" optional>
           <InputTextarea
             id="g-desc"

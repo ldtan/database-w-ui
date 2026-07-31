@@ -121,6 +121,14 @@ STAFF = [
     ("t.reyes", "Mr", "Teodoro", None, "Reyes", None, (1996, 9, 15), "Substitute teacher"),
 ]
 
+# Keyed by the group's slug `name`; the first element of each value is the
+# `display_name`.
+#
+# Each key is exactly what `slugify_name` makes of the display name beside it, which
+# is not cosmetic: the migration that gave groups a slug (b3f9d47c1a06) derived one
+# the same way, so a tenant seeded before that change is *found* by `ensure_group`
+# rather than duplicated beside itself on the next run. Hence "registrar_s_office"
+# rather than the tidier "registrar" -- the tidier one would not match.
 GROUPS = {
     "teachers": (
         "Teachers",
@@ -133,22 +141,22 @@ GROUPS = {
         "Principal's office, registrar and finance.",
         ["m.reyes", "s.villanueva", "b.lim", "admin"],
     ),
-    "registrar": (
+    "registrar_s_office": (
         "Registrar's Office",
         "Keeps the student record: admissions, enrolment and transcripts.",
         ["s.villanueva", "m.reyes"],
     ),
-    "heads": (
+    "department_heads": (
         "Department Heads",
         "Curriculum and teaching-load review.",
         ["c.delacruz", "l.tan", "j.cruz"],
     ),
-    "support": (
+    "student_support": (
         "Student Support",
         "Guidance and the clinic. Sees student welfare records.",
         ["d.okafor", "n.santos"],
     ),
-    "library": (
+    "library_staff": (
         "Library Staff",
         "Runs the catalogue and circulation.",
         ["f.aquino"],
@@ -174,11 +182,14 @@ DEPARTMENT_OF = {
     "t.reyes": "Mathematics",
 }
 
+# Slugs, not display names: this fills a `group` cell, and a group cell resolves a
+# written value against `UserGroup.name` (see ListItemService._validate_principal) so
+# that a file our own export produced imports back cleanly.
 GROUP_OF = {
-    "m.reyes": "Administration", "s.villanueva": "Registrar's Office",
-    "b.lim": "Administration", "d.okafor": "Student Support",
-    "n.santos": "Student Support", "f.aquino": "Library Staff",
-    "c.delacruz": "Department Heads", "admin": "Administration",
+    "m.reyes": "administration", "s.villanueva": "registrar_s_office",
+    "b.lim": "administration", "d.okafor": "student_support",
+    "n.santos": "student_support", "f.aquino": "library_staff",
+    "c.delacruz": "department_heads", "admin": "administration",
 }
 
 
@@ -545,10 +556,10 @@ async def build_principals(w, password):
             last_name=last, name_suffix=suffix, birth_date=date(*born),
         )
 
-    for key, (name, description, members) in GROUPS.items():
-        w.groups[key] = await ensure_group(
+    for name, (display_name, description, members) in GROUPS.items():
+        w.groups[name] = await ensure_group(
             w.db, w.report,
-            name=name, description=description,
+            name=name, display_name=display_name, description=description,
             members=[w.users[username] for username in members],
         )
 
@@ -1738,7 +1749,7 @@ async def build_operations(w):
             "department": DEPARTMENT_OF.get(username, "Administration"),
             "position": role,
             "employment_type": "Substitute" if username == "t.reyes" else "Full-time",
-            "primary_group": GROUP_OF.get(username, "Teachers"),
+            "primary_group": GROUP_OF.get(username, "teachers"),
             "hired_on": date(rng.randint(2012, 2025), rng.randint(1, 12),
                              rng.randint(1, 28)).isoformat(),
             "work_email": f"mailto:{username}@westbrook.example.edu",
@@ -1862,7 +1873,7 @@ async def build_sharing(w):
     for actor, workspace, actions, principal in [
         (registrar, "academics", VIEWER, {"group": w.groups["teachers"]}),
         (registrar, "academics", MANAGER, {"group": w.groups["administration"]}),
-        (registrar, "student_services", EDITOR, {"group": w.groups["support"]}),
+        (registrar, "student_services", EDITOR, {"group": w.groups["student_support"]}),
         (registrar, "library", MANAGER, {"user": w.users["f.aquino"]}),
         (registrar, "library", VIEWER, {"group": w.groups["everyone"]}),
         (itadmin, "operations", [Action.view, Action.create, Action.edit],
@@ -1875,7 +1886,7 @@ async def build_sharing(w):
 
     for actor, list_name, actions, principal in [
         (registrar, "enrollments", EDITOR, {"group": w.groups["teachers"]}),
-        (registrar, "students", VIEWER, {"group": w.groups["support"]}),
+        (registrar, "students", VIEWER, {"group": w.groups["student_support"]}),
         (registrar, "clinic_visits", MANAGER, {"user": w.users["n.santos"]}),
         (registrar, "attendance", [Action.view, Action.create, Action.edit],
          {"group": w.groups["teachers"]}),
@@ -1883,7 +1894,7 @@ async def build_sharing(w):
         # are the only way in besides ownership.
         (registrar, "counseling_cases", MANAGER, {"user": w.users["d.okafor"]}),
         (registrar, "counseling_cases", VIEWER, {"user": w.users["m.reyes"]}),
-        (itadmin, "staff_directory", VIEWER, {"group": w.groups["heads"]}),
+        (itadmin, "staff_directory", VIEWER, {"group": w.groups["department_heads"]}),
         (itadmin, "facility_requests", [Action.view, Action.create],
          {"group": w.groups["everyone"]}),
     ]:
@@ -1910,7 +1921,7 @@ async def build_sharing(w):
     if intake is not None:
         await grant(w.db, w.report, registrar,
                     resource_type=ResourceType.form, resource_uuid=intake.uuid,
-                    actions=VIEWER, group=w.groups["registrar"])
+                    actions=VIEWER, group=w.groups["registrar_s_office"])
 
     # One record, shared by itself. This works over the API; the UI cannot yet
     # render a record whose list the viewer cannot open — see docs/known-gaps.md.

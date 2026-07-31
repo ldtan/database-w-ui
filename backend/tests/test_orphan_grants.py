@@ -24,7 +24,7 @@ async def principals(session_factory):
         u = await UserService.create(
             db, UserCreate(username="alice", email="a@example.com", password="pw")
         )
-        g = await UserGroupService.create(db, UserGroupCreate(name="editors"))
+        g = await UserGroupService.create(db, UserGroupCreate(name="editors", display_name="Editors"))
         return str(u.uuid), str(g.uuid)
 
 
@@ -71,7 +71,11 @@ async def test_the_share_dialog_stops_listing_deleted_principals(
 
     async with session_factory() as db:
         await UserService.delete(db, alice)
-    assert [g["group_name"] for g in (await client.get(url)).json()] == ["editors"]
+    # `group_name` is the label to render, so it is the display name; the slug rides
+    # alongside it for the Share panel to disambiguate with.
+    remaining = (await client.get(url)).json()
+    assert [g["group_name"] for g in remaining] == ["Editors"]
+    assert [g["group_slug"] for g in remaining] == ["editors"]
 
     async with session_factory() as db:
         await UserGroupService.delete(db, editors)

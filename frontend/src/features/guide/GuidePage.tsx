@@ -1114,13 +1114,13 @@ export function GuidePage() {
           in it — a quick way to give a whole team access at once.
         </Callout>
         <Callout tone="tip" title="Sharing with everybody">
-          One group, <Ui>Authenticated Users</Ui>, is built in and always means
-          “everyone with an account here”, including people who join later. Share
-          with it when something is meant for the whole organisation. On the{" "}
-          <Ui>People</Ui> page it looks like a group with no members: that’s
-          expected, since membership is automatic rather than a list someone
-          maintains. For the same reason the app won’t let anyone rename, edit, or
-          delete it.
+          One group, <Ui>Authenticated Users</Ui> (<code>authenticated_users</code> in
+          a file), is built in and always means “everyone with an account here”,
+          including people who join later. Share with it when something is meant for
+          the whole organisation. On the <Ui>People</Ui> page it looks like a group
+          with no members: that’s expected, since membership is automatic rather than
+          a list someone maintains. For the same reason the app won’t let anyone
+          rename, edit, or delete it.
         </Callout>
       </Section>
 
@@ -1225,11 +1225,19 @@ export function GuidePage() {
             <Ui>Download template</Ui> inside it to get a file with the right
             headings and one filled-in example row to copy. You can give each person
             a profile in the same file: fill in the name columns and they get one,
-            leave them empty and they don’t.
+            leave them empty and they don’t. The <Ui>groups</Ui> column wants each
+            group’s <Ui>API name</Ui> — the short one shown under the group on the{" "}
+            <Ui>People</Ui> page — separated by semicolons. Get one wrong and the app
+            tells you which name to use instead.
           </li>
           <li>
             They can also create groups (<Ui>New group</Ui>) and choose their members —
-            handy for sharing with a whole team in one go.
+            handy for sharing with a whole team in one go. A group has two names, the
+            same as a list does: the <Ui>Name</Ui> you read on screen, and an{" "}
+            <Ui>API name</Ui> underneath it — a short one like <code>year_9</code>{" "}
+            that files use. Renaming the first is free; the second is what an import
+            file and an exported spreadsheet refer to, so changing it can leave older
+            files pointing at nothing.
           </li>
           <li>
             Everyone has a <Link to="/profile" style={{ color: "var(--brand)" }}>

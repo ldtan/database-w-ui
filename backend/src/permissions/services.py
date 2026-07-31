@@ -578,7 +578,8 @@ class PermissionService:
             user_uuid=grant.user.uuid if grant.user else None,
             user_username=grant.user.username if grant.user else None,
             group_uuid=grant.group.uuid if grant.group else None,
-            group_name=grant.group.name if grant.group else None,
+            group_name=grant.group.display_name if grant.group else None,
+            group_slug=grant.group.name if grant.group else None,
             actions=[Action(a) for a in (grant.actions or [])],
             expires_at=grant.expires_at,
         )

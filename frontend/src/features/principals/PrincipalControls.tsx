@@ -36,9 +36,15 @@ const PATHS: Record<PrincipalType, string> = {
 // records are private (owner or superuser only), while /auth/users is readable by
 // any authenticated user so the Share dialog can list principals. Rendering
 // "Grace Hopper" in a cell would leak personal data to every viewer of the list.
+//
+// A group has no such constraint, so it gets its `display_name` — which is why a
+// cell reads "Registrar's Office" while an export of the same cell writes
+// `registrar_office`. The screen is for people and the file has to round-trip.
 function labelOf(kind: PrincipalType, row: ApiUser | ApiUserGroup): string {
   const name =
-    kind === "user" ? (row as ApiUser).username : (row as ApiUserGroup).name;
+    kind === "user"
+      ? (row as ApiUser).username
+      : (row as ApiUserGroup).display_name;
   // A deleted account still names the person who owned the record. Saying so beats
   // showing a uuid, and beats pretending the cell was always empty.
   return row.is_deleted ? `${name} (deleted)` : name;

@@ -36,14 +36,15 @@ const HEADERS = [
 ];
 
 // One filled-in row, because a bare header line does not convey that `groups` is
-// semicolon-separated or that `birth_date` wants YYYY-MM-DD.
+// semicolon-separated, that it wants each group's API name rather than its label, or
+// that `birth_date` wants YYYY-MM-DD.
 const EXAMPLE = [
   "alovelace",
   "ada@example.com",
   "",
   "true",
   "false",
-  "Teachers;Year 9",
+  "teachers;year_9",
   "Dr",
   "Ada",
   "King",
@@ -149,9 +150,11 @@ export function BatchUserDialog({ visible, onHide }: Props) {
           <strong>username</strong> and <strong>email</strong> are required; leave{" "}
           <strong>password</strong> blank and one is generated. Fill the name columns
           to give the account a profile, or leave them blank for an account without
-          one. <strong>groups</strong> takes existing group names separated by
-          semicolons. Each row is validated on the server and a bad one is skipped,
-          not fatal. Not sure of the shape? Download the template.
+          one. <strong>groups</strong> takes the <em>API names</em> of existing groups
+          — the slug shown under each group on this page, like{" "}
+          <code>year_9</code>, not the label <q>Year 9</q> — separated by semicolons.
+          Each row is validated on the server and a bad one is skipped, not fatal. Not
+          sure of the shape? Download the template.
         </p>
 
         <FileUpload
