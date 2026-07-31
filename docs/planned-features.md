@@ -34,12 +34,18 @@ themselves rewritten, not just the declared type.
 **The precedent to copy — and where it stops.** Toggling a column's `multiple` is O(1) and
 *never* rewrites records: the mismatch is absorbed on read by `coerce_shape` and converged later
 by the `reconcile_shapes` cron (known-gaps: "Toggling a column's `multiple`"). That "tolerate on
-read, converge in the background" pattern is the right instinct — a synchronous UPDATE over every
-row inside a web request is measured at ~25s per 1M rows holding row locks, which is not
-acceptable. But a type conversion **cannot** be tolerated on read the way a shape mismatch can:
-`"42"` and `42` are the same value in two shapes, whereas `"May 4, 2026"` and the date
-`2026-05-04` are not — one has to be *computed* from the other. So conversion needs an explicit,
-chunked, killable backfill job (model it on `reconcile_shapes.py`), not a read-time coercion.
+read, converge in the background" pattern looks like the right instinct, and the ~25s-per-1M
+measurement gets quoted in support of it — but read that number carefully: it is `jsonb_set`
+executing *inside Postgres*, one statement, no round trip. It is the cost of the **fastest**
+option, not of a rewrite in general.
+
+A type conversion still **cannot** be tolerated on read the way a shape mismatch can. `"42"` and
+`42` are the same value in two shapes, whereas `"May 4, 2026"` and the date `2026-05-04` are not
+— one has to be *computed* from the other. And the tolerance does not actually reach far enough
+even for shape: filters and sorts read raw JSONB and absorb nothing, which for a type conversion
+means hard query errors rather than merely wrong answers (see the decision below, and known-gaps).
+So conversion needs an explicit, chunked, killable backfill (model it on `reconcile_shapes.py`),
+never a read-time coercion.
 
 **The conversion matrix is where the real work is.** A few are lossless and cheap; most are
 not:
@@ -63,20 +69,56 @@ not:
 change invalidates the old type's keys wholesale — a `choice`'s `options`, a `lookup`'s
 `target_list_uuid` — and requires the new type's. Validate the *new* config from scratch.
 
-**Needs a decision:**
-- **Which pairs are supported?** A conservative v1 is the safe conversions above plus
-  text↔number; everything else deferred. The alternative is a full matrix with per-pair rules.
-- **Unconvertible-cell policy.** When some cells convert and some don't (`text` → `number` over a
-  column with a stray `"n/a"`), do we (a) refuse the whole conversion, (b) blank the offenders, or
-  (c) best-effort and return a per-row error report? Import already does (c) — reuse its
-  `{created, errors}` summary shape.
-- **Sync or async.** Small lists could convert in the request; large ones need the background job.
-  Picking one boundary (row count) keeps a single code path.
+**Decided — the conversion runs into a *new* column, never in place.** Add a column of the target
+type, convert into it, let the user read the report, then swap it in. The reason is not
+tidiness: an in-place conversion has a window where the declared type and the stored bytes
+disagree, and `filtering.py` reaches past every Python-side guard straight into the JSONB
+(known-gaps: "Toggling a column's `multiple`"). Measured on the demo database, a `number` column
+holding one text cell makes `apply_sorts` raise
+`InvalidTextRepresentationError: invalid input syntax for type numeric`, so a half-converted
+column does not degrade — every sort and range filter on it **500s** until the last row lands.
+Writing into a separate column removes the window instead of trying to survive it: the old
+column stays correct for every view, filter, form and formula until the moment of the swap; the
+new one starts empty and only ever receives values that already passed the target type's
+validation, so its invariant holds from the first row rather than eventually; and an unhappy
+result is abandoned by deleting a column nobody was using. This is what makes a conversion
+reversible until the user commits, and it is why #1 is delivered *through* #2 — they share one
+engine.
 
-**Recommended shape:** this feature is best delivered *through* feature 2, not as an in-place
-mutation — add a new column of the target type, migrate/convert the data into it, verify, then
-drop the old column. That makes every conversion reversible until the user commits, and it means
-type conversion and data migration share one engine.
+**Decided — convert in Python, not SQL.** Postgres can rewrite the structural pairs far faster,
+but it cannot resolve a reference label (that needs `PermissionService.item_view_filter`, a
+Python-composed expression over the permission tables), cannot validate against the target
+column's config, cannot name the cells that failed, and cannot mint `choice` options. Two
+engines would also mean the same logical conversion behaving differently depending on which path
+it took. Since the loop is in Python anyway, `_validate_value` comes free and enforces both the
+type-level invariants the SQL layer depends on *and* the config-level ones (`max_length`,
+`required`, `unique`) that it does not.
+
+**Decided — inline, with a row-count ceiling; no job queue.** Free Postgres is 1GB, so the
+million-row list the ~25s figure describes is not reachable on this deployment;
+`METRIC_ROW_LIMIT` is already 50k and a Python backfill at that size is seconds. Convert in the
+request, and above the ceiling refuse with "too large to convert interactively" and route the
+caller to the maintenance workflow, which already runs against the same database on someone
+else's compute. Keep the backfill chunked and committed per batch anyway (copy
+`reconcile_shapes`) so the same function serves both callers unmodified. A queue would be
+infrastructure the 512MB instance pays for and no reachable list needs.
+
+**Note the storage cost:** mid-conversion every record holds both the old and the new value, so
+the list's JSONB roughly doubles. Worth a size check before starting on a 1GB database.
+
+**Still open:**
+- **Which pairs ship in v1** — conservative (text hub + `date` ↔ `datetime`) or the full matrix.
+- **What happens to cells that fail** — blank them, or block the swap until the user fixes them.
+  The new-column model makes "show the report and let them choose" cheap, which it would not have
+  been in place.
+- **Swap mechanics** — the clean version gives the new column the old one's uuid and name at
+  cutover so views, forms and formulas never need repointing, at the cost of one chunked SQL
+  rekey of the record data (pure byte-moving, no conversion in it). The alternative is the
+  old→new uuid remap already built for clone.
+- **`Column` has no `hidden` flag**, so a scratch column would show in the grid mid-conversion.
+  Either add one (small migration, honest semantics) or create it soft-deleted — `deleted_at`
+  already hides a column from every reader while preserving its record values, but a stalled
+  conversion could have its scratch column taken by the purge job.
 
 ---
 
@@ -91,10 +133,10 @@ write it under the target's. If source and target are the **same type**, that's 
 of the JSONB value. If they differ, each cell goes through feature 1's conversion — which is why
 these two features share an engine and should ship together.
 
-**The same performance boundary as feature 1.** A copy over a large list is the same
-per-row UPDATE over JSONB, so it belongs in the same chunked, committed-per-batch, killable job
-as `reconcile_shapes` — not a web request. Include soft-deleted records or not per the same
-reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a stale shape).
+**The same delivery decisions as feature 1**, which are settled above: Python engine, chunked and
+committed per batch like `reconcile_shapes`, run inline below a row-count ceiling and from the
+maintenance workflow above it. Include soft-deleted records, per the same reasoning
+`reconcile_shapes` uses (it does, so a restore doesn't resurrect a stale shape).
 
 **Two edges that will bite:**
 - **`unique` on the target.** Copying a source with repeats into a `unique` target creates
@@ -104,7 +146,10 @@ reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a sta
   reverse takes the first element. `coerce_shape` already expresses exactly this — call it, don't
   re-derive it.
 
-**Needs a decision:**
+**Needs a decision — but only for the standalone use.** When #1 drives it the answers are pinned:
+a conversion always overwrites (the target column is new and empty) and always copies (the source
+survives until the swap, which is what makes it reversible). What is still open is what a user
+invoking #2 *directly* gets:
 - **Overwrite policy.** Overwrite the target unconditionally, or only fill cells where the target
   is empty? Fill-empty-only is the safer default for merging two columns; overwrite is what a
   pre-drop migration wants.
