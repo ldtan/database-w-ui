@@ -43,6 +43,7 @@ import {
   InlineCellEditor,
   type CellDraft,
 } from "../records/inlineEdit";
+import { recordPagesKey } from "../records/recordKeys";
 import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -194,8 +195,7 @@ export function ListDetailPage() {
     // the search each produce a different set of rows, not a rearrangement of one
     // the browser already has.
     queryKey: [
-      "items",
-      listUuid,
+      ...recordPagesKey(listUuid),
       activeViewUuid,
       q,
       first,
@@ -224,6 +224,14 @@ export function ListDetailPage() {
   });
   const rows = items.data?.items ?? [];
   const total = items.data?.total ?? 0;
+  // The rows the grid is *currently* showing, for the cell editor to open from.
+  // PrimeReact hands its `editor` a snapshot of the row rather than the row, so
+  // an editor opened after a poll would otherwise be seeded from what the record
+  // held when its cell first rendered — see `InlineCellEditor`'s `row`.
+  const rowByUuid = useMemo(
+    () => new Map(rows.map((row) => [row.uuid, row])),
+    [rows],
+  );
   const views = useQuery({
     queryKey: ["views", listUuid],
     queryFn: () => api.get<View[]>(`/lists/${listUuid}/views/`),
@@ -335,9 +343,15 @@ export function ListDetailPage() {
     // Show the value the moment it is committed. Without this the cell falls back
     // to what it held until the refetch lands — a visible flick back to the old
     // value on every edit, which reads as the save having failed.
+    //
+    // Keyed on the *pages* rather than on `["items", listUuid]`, which is the
+    // namespace the metric values share (see `recordKeys`): matching that would
+    // hand this page-shaped updater a `MetricValues`, and `page.items.map` on an
+    // object with no `items` throws — inside `onMutate`, which runs before
+    // `mutationFn`, so the PATCH would never even be sent.
     onMutate: (vars) => {
       queryClient.setQueriesData<Page<ListItem>>(
-        { queryKey: ["items", listUuid] },
+        { queryKey: recordPagesKey(listUuid) },
         (page) =>
           page && {
             ...page,
@@ -502,7 +516,9 @@ export function ListDetailPage() {
    * PrimeReact calls this when the cell leaves edit mode by any route that means
    * "keep it" — Enter, Tab, a click elsewhere — and never on Escape, which is what
    * makes Escape a cancel. The value comes from the draft the editor reported
-   * rather than from the event, for the reason `InlineCellEditor` explains.
+   * rather than from the event, for the reason `InlineCellEditor` explains, and
+   * so does the value it is measured against — `row` is here to answer *which
+   * cell this is*, which is the one question the event's row can be trusted on.
    */
   function commitCell(column: Column, row: ListItem) {
     const draft = cellDraft.current;
@@ -516,8 +532,8 @@ export function ListDetailPage() {
     ) {
       return;
     }
-    const patch = cellPatch(cols, column, row, draft.value);
-    if (patch) saveCell.mutate({ uuid: row.uuid, patch });
+    const patch = cellPatch(cols, column, draft);
+    if (patch) saveCell.mutate({ uuid: draft.rowUuid, patch });
   }
 
   // A QR code always creates, so it is always the "create" form it fills — which
@@ -1093,17 +1109,22 @@ export function ListDetailPage() {
                 }}
                 editor={
                   kind === "inline"
-                    ? (options) => (
-                        <InlineCellEditor
-                          listUuid={listUuid}
-                          column={col}
-                          columns={cols}
-                          row={options.rowData as ListItem}
-                          onDraft={(draft) => {
-                            cellDraft.current = draft;
-                          }}
-                        />
-                      )
+                    ? (options) => {
+                        // `rowData` is trusted for the record's identity and for
+                        // nothing else; the values come from the cache.
+                        const snapshot = options.rowData as ListItem;
+                        return (
+                          <InlineCellEditor
+                            listUuid={listUuid}
+                            column={col}
+                            columns={cols}
+                            row={rowByUuid.get(snapshot.uuid) ?? snapshot}
+                            onDraft={(draft) => {
+                              cellDraft.current = draft;
+                            }}
+                          />
+                        );
+                      }
                     : undefined
                 }
                 // PrimeReact types this as returning nothing, but its cell click

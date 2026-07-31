@@ -12,6 +12,11 @@
  * alternative — a sibling key and a second `invalidateQueries` beside each of
  * the existing ones — is the kind of pairing that is correct on the day it is
  * written and quietly wrong six call sites later.
+ *
+ * The literal `"metrics"` in the values key is what keeps that prefix a
+ * namespace rather than a collision: it names this query among the others living
+ * under `["items", listUuid]`, so a cache *write* aimed at one of them cannot
+ * also be handed this one. `recordKeys` states the rule from the other side.
  */
 import type { FilterGroup } from "../../lib/types";
 
