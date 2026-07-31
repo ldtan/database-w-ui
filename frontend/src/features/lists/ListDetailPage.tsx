@@ -385,7 +385,16 @@ export function ListDetailPage() {
     // hand this page-shaped updater a `MetricValues`, and `page.items.map` on an
     // object with no `items` throws — inside `onMutate`, which runs before
     // `mutationFn`, so the PATCH would never even be sent.
-    onMutate: (vars) => {
+    onMutate: async (vars) => {
+      // Any refetch already in flight has to be called off first. `useLiveList`
+      // puts a `refetchInterval` on these pages, so a poll issued before this
+      // edit can answer after the optimistic write and put the pre-edit value
+      // back on screen — the very flick this optimistic write exists to prevent,
+      // in a narrower window. It corrects itself when `onSuccess` lands, which is
+      // why this was survivable rather than urgent; cancelling makes it not
+      // happen. Awaiting is safe here in a way a throw would not be: `onMutate`
+      // runs before `mutationFn`, so anything that rejects in it costs the PATCH.
+      await queryClient.cancelQueries({ queryKey: recordPagesKey(listUuid) });
       // Snapshotted before the write so that a refusal can be taken back without
       // asking the server anything. A refetch cannot do that job: offline there
       // is nothing to refetch, and the value the server rejected would sit on
