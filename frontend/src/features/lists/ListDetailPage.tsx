@@ -37,10 +37,10 @@ import { RecordViewDialog } from "../records/RecordViewDialog";
 import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
 import {
-  cellEditKind,
   cellEditKinds,
   cellPatch,
   type CellDraft,
+  type CellEditKind,
 } from "../records/cellEdit";
 import { InlineCellEditor } from "../records/inlineEdit";
 import { recordPagesKey } from "../records/recordKeys";
@@ -1110,9 +1110,14 @@ export function ListDetailPage() {
           {visibleCols.map((col) => {
             // Everything is "locked" while the mode is off, which is how a column
             // that is editable in principle still renders as a plain value.
-            const kind = inlineEdit
-              ? cellEditKind(editKinds, col.uuid)
+            const kind: CellEditKind = inlineEdit
+              ? (editKinds.get(col.uuid) ?? "locked")
               : "locked";
+            // One answer for the outline, the cell body and the gate on opening an
+            // editor. Asked separately they could disagree about the same cell —
+            // a cell drawn as editable that refuses to open, or the reverse.
+            const isEditable = (row: ListItem) =>
+              kind !== "locked" && canItem(row.uuid, "edit");
             return (
               <DataColumn
                 key={col.uuid}
@@ -1131,13 +1136,14 @@ export function ListDetailPage() {
                 // this caller may read but not write — stays flat, and that
                 // flatness is the whole answer to "why won't this one edit?".
                 bodyClassName={(row: ListItem) =>
-                  kind === "locked" || !canItem(row.uuid, "edit")
+                  !isEditable(row)
                     ? ""
                     : kind === "inline"
                       ? "cell-editable"
                       : "cell-opens-record"
                 }
                 body={(row: ListItem) => {
+                  const editing = isEditable(row);
                   const cell = renderCell(
                     col,
                     row,
@@ -1145,7 +1151,7 @@ export function ListDetailPage() {
                     principalUuids,
                     lookupUuids,
                     "compact",
-                    kind === "inline" && canItem(row.uuid, "edit"),
+                    kind === "inline" && editing,
                   );
                   // Rich text and multiline have no cell-sized editor, so the
                   // click goes where their editor lives instead of doing nothing.
@@ -1153,7 +1159,7 @@ export function ListDetailPage() {
                   // `editor`, so PrimeReact renders no tab stop for it, and the row
                   // click is off while the mode is on — leaving this the only route
                   // to those columns, and until now a mouse-only one.
-                  if (kind !== "dialog" || !canItem(row.uuid, "edit")) return cell;
+                  if (kind !== "dialog" || !editing) return cell;
                   const openRecord = () => setRecordDialog({ open: true, item: row });
                   const hint = `Edit ${col.display_name} in the record's own form`;
                   return (
@@ -1200,9 +1206,7 @@ export function ListDetailPage() {
                 // come at. Without it a record you may read but not edit would open
                 // an editor and refuse the save afterwards.
                 onBeforeCellEditShow={(e) =>
-                  canItem((e.rowData as ListItem).uuid, "edit")
-                    ? undefined
-                    : false
+                  isEditable(e.rowData as ListItem) ? undefined : false
                 }
                 onCellEditComplete={() => commitCell()}
                 // Escape. The next editor to open reclaims the draft slot anyway,
