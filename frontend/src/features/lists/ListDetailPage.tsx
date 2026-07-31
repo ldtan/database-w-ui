@@ -515,23 +515,23 @@ export function ListDetailPage() {
    *
    * PrimeReact calls this when the cell leaves edit mode by any route that means
    * "keep it" — Enter, Tab, a click elsewhere — and never on Escape, which is what
-   * makes Escape a cancel. The value comes from the draft the editor reported
-   * rather than from the event, for the reason `InlineCellEditor` explains, and
-   * so does the value it is measured against — `row` is here to answer *which
-   * cell this is*, which is the one question the event's row can be trusted on.
+   * makes Escape a cancel.
+   *
+   * Everything it needs is in the draft, and deliberately so. PrimeReact keys its
+   * body cells by row *index*, so a poll that reorders or repages the rows leaves
+   * an open editor sitting where a different record now is; the event's row is
+   * that different record. The draft knows which record and which column it was
+   * typed into, and a row moving on screen is no reason to throw away what
+   * somebody typed.
    */
-  function commitCell(column: Column, row: ListItem) {
+  function commitCell() {
     const draft = cellDraft.current;
     cellDraft.current = null;
-    // Not this cell's draft: the editor was never opened, or what is in hand
-    // belongs to a cell edited before it.
-    if (
-      !draft ||
-      draft.rowUuid !== row.uuid ||
-      draft.columnUuid !== column.uuid
-    ) {
-      return;
-    }
+    if (!draft) return;
+    // The one thing a draft cannot outlive: the column it belongs to being
+    // deleted while its editor was open. There is nothing left to patch.
+    const column = cols.find((c) => c.uuid === draft.columnUuid);
+    if (!column) return;
     const patch = cellPatch(cols, column, draft);
     if (patch) saveCell.mutate({ uuid: draft.rowUuid, patch });
   }
@@ -1137,9 +1137,7 @@ export function ListDetailPage() {
                     ? undefined
                     : false
                 }
-                onCellEditComplete={(e) =>
-                  commitCell(col, e.rowData as ListItem)
-                }
+                onCellEditComplete={() => commitCell()}
                 // Escape. The next editor to open reclaims the draft slot anyway,
                 // but an abandoned value has no business outliving the cell it was
                 // typed into.
