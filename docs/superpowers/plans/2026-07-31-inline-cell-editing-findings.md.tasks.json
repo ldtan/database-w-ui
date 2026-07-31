@@ -46,7 +46,7 @@
     {
       "id": 5,
       "subject": "Task 6: One vocabulary for text modes (#12)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** The `rich` / `multiline` / everything-else rule is stated once and read by all three surfaces that branch on it (#12).\n\n**Files:**\n- Modify: `frontend/src/features/records/recordValues.ts` (add `TextMode`, `textMode`, `needsFullEditor`)\n- Modify: `frontend/src/features/records/cellEdit.ts:cellEditKinds`\n- Modify: `frontend/src/features/records/RecordFields.tsx:94-121`\n- Modify: `frontend/src/features/records/renderCell.tsx:86-111`\n- Modify: `frontend/src/features/records/recordValues.test.ts`\n- Modify: `frontend/src/features/records/cellEdit.test.ts`\n\n**Acceptance Criteria:**\n- [ ] `textMode` returns `\"single\"` for a non-text column, an unset mode, and an unrecognised mode\n- [ ] `cellEditKinds`, `RecordFields` and `renderCell` all call `textMode`; none of them reads `config.text_mode` directly\n- [ ] `cellEditKinds` returns `\"dialog\"` for rich and multiline, `\"inline\"` otherwise, `\"locked\"` when disabled\n\n**Verify:** `cd frontend && npm test` → `Tests 18 passed (18)`\n\nFull steps with code in the plan doc → Task 6. Branch `fix/cell-affordance-and-keyboard-reach` is created in this task's final step.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/recordValues.ts\", \"frontend/src/features/records/cellEdit.ts\", \"frontend/src/features/records/RecordFields.tsx\", \"frontend/src/features/records/renderCell.tsx\", \"frontend/src/features/records/recordValues.test.ts\", \"frontend/src/features/records/cellEdit.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"textMode returns single for non-text, unset and unrecognised\", \"no surface reads config.text_mode directly any more\", \"cellEditKinds maps rich/multiline to dialog, else inline, disabled to locked\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         4
@@ -55,7 +55,7 @@
     {
       "id": 6,
       "subject": "Task 7: A link cell in edit mode opens its editor (#5)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A link column stops advertising an editor it will not open (#5).\n\n**Files:**\n- Modify: `frontend/src/features/records/renderCell.tsx:26-33` (signature) and `:65-81` (link branch)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the column `body`)\n\n**Acceptance Criteria:**\n- [ ] `renderCell` takes `editing = false` as its last parameter\n- [ ] `RecordCards` and `RecordViewDialog` are untouched and get the default\n- [ ] With the mode on and the row editable, a link cell renders `linkLabel(...)` as text, no `<a>`\n- [ ] With the mode off, the anchor is back\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 7.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/renderCell.tsx\", \"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"renderCell takes editing = false as its last parameter\", \"RecordCards and RecordViewDialog untouched\", \"link cell renders plain label in edit mode on an editable row\", \"anchor returns when the mode is off\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         5
@@ -64,7 +64,7 @@
     {
       "id": 7,
       "subject": "Task 8: Escape closes the panel, not the cell edit (#10)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Dismissing a dropdown's overlay with Escape stops throwing away the option just chosen (#10).\n\n**Files:**\n- Modify: `frontend/src/features/records/inlineEdit.tsx` (`InlineCellEditor`'s wrapper)\n\n**Acceptance Criteria:**\n- [ ] `onKeyDownCapture` records whether `[data-pr-is-overlay]` is in the document when Escape is pressed\n- [ ] `onKeyDown` on the same element stops propagation only when that ref is set, and resets it\n- [ ] Escape on a cell with no overlay open still cancels the edit\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 8. Do NOT key this off `event.defaultPrevented`: `dropdown.cjs.js:1187-1190` calls `preventDefault()` whether or not a panel is open, so that flag is set on every Escape in a dropdown and swallowing it would break cancel outright.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/inlineEdit.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"capture handler samples [data-pr-is-overlay] on Escape\", \"bubble handler stops propagation only when the ref is set, and resets it\", \"Escape with no overlay open still cancels the cell edit\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         6
@@ -73,7 +73,7 @@
     {
       "id": 8,
       "subject": "Task 9: Keyboard reach for record-opening cells (#11)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** Rich-text and multiline columns stop being mouse-only in edit mode (#11).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `kind === \"dialog\"` branch of the column `body`)\n\n**Acceptance Criteria:**\n- [ ] The span has `role=\"button\"`, `tabIndex={0}` and an `aria-label` naming the column\n- [ ] Enter and Space open the record dialog; Space does not scroll the page\n- [ ] The existing `title` is kept\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 9.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"span has role=button, tabIndex=0 and an aria-label naming the column\", \"Enter and Space open the dialog and Space does not scroll\", \"existing title preserved\"], \"modelTier\": \"mechanical\"}\n```",
       "blockedBy": [
         7
@@ -82,7 +82,7 @@
     {
       "id": 9,
       "subject": "Task 10: Ship PR 2",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** PR 2 is merged into `main` and `main` is synced locally.\n\n**Files:** none — git and `gh` only.\n\n**Acceptance Criteria:**\n- [ ] `npx tsc --noEmit`, `npm test` and `npm run build` all pass on the branch tip\n- [ ] PR body names the findings closed (#5, #10, #11, #12) and cites the PrimeReact lines behind #10\n- [ ] PR merged, local `main` fast-forwarded, tree clean\n\n**Verify:** `gh pr view <n> --json state` → `{\"state\":\"MERGED\"}`\n\nFull commands and PR body in the plan doc → Task 10. No AI attribution in the commit or PR.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view --json state\", \"acceptanceCriteria\": [\"tsc, npm test and build all pass on branch tip\", \"PR body names #5, #10, #11, #12 and cites dropdown.cjs.js:1187-1190 and datatable.cjs.js:1232-1238\", \"PR merged and local main fast-forwarded clean\"], \"modelTier\": \"mechanical\"}\n```",
       "blockedBy": [
         8

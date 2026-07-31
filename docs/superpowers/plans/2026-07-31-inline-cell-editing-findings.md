@@ -935,7 +935,7 @@ Branch: `fix/cell-affordance-and-keyboard-reach`
 - Modify: `frontend/src/features/records/recordValues.ts` (add `TextMode`, `textMode`, `needsFullEditor`)
 - Modify: `frontend/src/features/records/cellEdit.ts:cellEditKinds`
 - Modify: `frontend/src/features/records/RecordFields.tsx:94-121`
-- Modify: `frontend/src/features/records/renderCell.tsx:86-111`
+- Modify: `frontend/src/features/records/renderCell.tsx:86-112`
 - Modify: `frontend/src/features/records/recordValues.test.ts`
 - Modify: `frontend/src/features/records/cellEdit.test.ts`
 
@@ -950,7 +950,13 @@ Branch: `fix/cell-affordance-and-keyboard-reach`
 
 - [ ] **Step 1: Add the accessor to `recordValues.ts`**
 
-Append at the end of the file:
+`TextMode` is **not** declared here. It already exists at `lib/types.ts:80`, it
+is what `ColumnConfig.text_mode` is typed with, and `ColumnDialog.tsx` imports it
+from there — declaring a second one in a task whose point is that the rule is
+stated once would be the joke writing itself. Add `TextMode` to the existing
+`../../lib/types` type import at the top of `recordValues.ts`.
+
+Then append at the end of the file:
 
 ```ts
 /**
@@ -958,13 +964,11 @@ Append at the end of the file:
  *
  * A text column's editor comes from its config rather than its type — "single"
  * and "multiline" used to be the `text` and `long_text` types — and anything
- * unrecognised, including unset, is a single line. Stated once here because three
- * surfaces branch on it and must not drift: which editor the dialog renders, how
- * the value displays in a cell or a dialog, and whether a grid cell can hold an
- * editor at all.
+ * unrecognised, including unset, is a single line. The accessor lives here
+ * because three surfaces branch on it and must not drift: which editor the dialog
+ * renders, how the value displays in a cell or a dialog, and whether a grid cell
+ * can hold an editor at all.
  */
-export type TextMode = "rich" | "multiline" | "single";
-
 export function textMode(column: Column): TextMode {
   if (column.type !== "text") return "single";
   const mode = column.config.text_mode;
