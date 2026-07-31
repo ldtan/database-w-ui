@@ -7,9 +7,10 @@ import { confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
-import type { Column } from "../../lib/types";
+import type { Column, ColumnType, ConversionReport } from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ColumnDialog } from "./ColumnDialog";
+import { ConversionReportDialog } from "./ConversionReportDialog";
 
 interface Props {
   listUuid: string;
@@ -34,6 +35,15 @@ export function ColumnsPanel({
     open: false,
     column: null,
   });
+  // A conversion is two dialogs: pick the new type, then read the report and
+  // decide. `converting` drives the first, `review` the second — and the second
+  // needs the type that was chosen, which the report itself does not carry.
+  const [converting, setConverting] = useState<Column | null>(null);
+  const [review, setReview] = useState<{
+    column: Column;
+    newType: ColumnType;
+    report: ConversionReport;
+  } | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
 
   const remove = useMutation({
@@ -93,6 +103,20 @@ export function ColumnsPanel({
                 aria-label={`Edit column ${column.display_name}`}
                 onClick={() => setEditing({ open: true, column })}
               />
+              {/* Separate from Edit because it is a different kind of change: a
+                  conversion rewrites every record's value and cannot be undone by
+                  editing back. A calculated column stores nothing, so there is
+                  nothing to convert. */}
+              {column.type !== "calculated" && (
+                <Button
+                  icon="pi pi-sync"
+                  text
+                  size="small"
+                  aria-label={`Convert column ${column.display_name} to another type`}
+                  tooltip="Change type"
+                  onClick={() => setConverting(column)}
+                />
+              )}
               <Button
                 icon="pi pi-trash"
                 text
@@ -136,6 +160,37 @@ export function ColumnsPanel({
         visible={editing.open}
         onHide={() => setEditing({ open: false, column: null })}
       />
+      {/* Keyed on the column so the form resets between conversions rather than
+          carrying the previous column's target type into the next one. */}
+      {converting && (
+        <ColumnDialog
+          key={`convert:${converting.uuid}`}
+          listUuid={listUuid}
+          workspaceUuid={workspaceUuid}
+          column={converting}
+          visible
+          mode="convert"
+          onHide={() => setConverting(null)}
+          onConverted={(report) =>
+            setReview({
+              column: converting,
+              // The dialog does not report back the type it sent, so read it off
+              // the hidden column the conversion just built.
+              newType: report.new_type,
+              report,
+            })
+          }
+        />
+      )}
+      {review && (
+        <ConversionReportDialog
+          listUuid={listUuid}
+          column={review.column}
+          newType={review.newType}
+          report={review.report}
+          onDone={() => setReview(null)}
+        />
+      )}
       <DeletedConfigDialog
         listUuid={listUuid}
         kind="columns"

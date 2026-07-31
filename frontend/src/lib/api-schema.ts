@@ -712,6 +712,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/columns/{uuid}/convert": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Start Conversion
+         * @description Convert this column's values into a new column of another type.
+         *
+         *     Changes **nothing** about the list. The converted values land in a hidden column
+         *     that no view, filter, form or formula can see, and the report says what did and
+         *     did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
+         *     away with `DELETE` — the column keeps working normally either way until then.
+         *
+         *     A conversion is only converted *in place* in the sense that committing retypes
+         *     this column and keeps its uuid, so nothing referring to it needs changing.
+         */
+        post: operations["start_conversion_api_lists__list_uuid__columns__uuid__convert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/columns/{uuid}/convert/{target_uuid}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Commit Conversion
+         * @description Swap the converted values in. The point of no return.
+         *
+         *     `required` and `unique` are checked here rather than during the backfill — per
+         *     cell they are the wrong question, since a blank source cell is ordinary and a
+         *     duplicate only matters once the column is real. A failure here leaves the
+         *     conversion in progress, so it can be fixed and committed again.
+         *
+         *     The original values are not destroyed: they land in a binned column named
+         *     `<name>__before_conversion`, restorable for the usual retention window.
+         */
+        post: operations["commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post"];
+        /**
+         * Abandon Conversion
+         * @description Throw an in-progress conversion away, values and all.
+         *
+         *     A hard delete rather than the bin: nothing ever saw this column, so there is
+         *     nothing worth restoring.
+         */
+        delete: operations["abandon_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/columns/{uuid}/restore": {
         parameters: {
             query?: never;
@@ -1602,6 +1665,54 @@ export interface components {
             /** Description */
             description?: string | null;
             config?: components["schemas"]["ColumnConfig"] | null;
+        };
+        /** ConversionFailure */
+        ConversionFailure: {
+            /**
+             * Record Uuid
+             * Format: uuid
+             */
+            record_uuid: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * ConversionReport
+         * @description What a backfill did, for a person to read before committing to it.
+         *
+         *     Nothing about the list has changed at this point: the values live in a hidden
+         *     column that no view, filter, form or formula can see. Committing swaps them in;
+         *     abandoning throws them away.
+         */
+        ConversionReport: {
+            /**
+             * Target Uuid
+             * Format: uuid
+             */
+            target_uuid: string;
+            new_type: components["schemas"]["ColumnType"];
+            /** Converted */
+            converted: number;
+            /** Failed */
+            failed: number;
+            /** Errors */
+            errors: components["schemas"]["ConversionFailure"][];
+            /** Errors Truncated */
+            errors_truncated: boolean;
+        };
+        /**
+         * ConversionStart
+         * @description The column to convert *into*: a type, and that type's settings.
+         *
+         *     The config is validated from scratch against the new type rather than merged
+         *     onto the old one — a `choice`'s options and a `lookup`'s target mean nothing to
+         *     a `number`, and carrying them over would be carrying over the previous type's
+         *     assumptions. For `text` -> `choice`, leaving `options` unset mints one per
+         *     distinct value in the source.
+         */
+        ConversionStart: {
+            type: components["schemas"]["ColumnType"];
+            config?: components["schemas"]["ColumnConfig"];
         };
         /** CreatedUser */
         CreatedUser: {
@@ -4133,6 +4244,106 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["LookupOption"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    start_conversion_api_lists__list_uuid__columns__uuid__convert_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionStart"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversionReport"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                target_uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ColumnRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    abandon_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                target_uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
