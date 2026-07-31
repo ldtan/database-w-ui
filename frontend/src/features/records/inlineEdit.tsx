@@ -23,7 +23,7 @@
  * record: that is per-record (`canItem(uuid, "edit")`) and belongs to the page,
  * which already resolves it for every row on screen.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { Column, ListItem } from "../../lib/types";
 import { RecordField } from "./RecordFields";
@@ -78,7 +78,22 @@ export function cellEditKind(
 export interface CellDraft {
   rowUuid: string;
   columnUuid: string;
+  /**
+   * What the editor opened holding, carried alongside the draft so that the
+   * commit can ask "did this person change anything?" without consulting the
+   * grid — see `cellPatch`, which compares against this rather than against the
+   * stored cell.
+   */
+  initial: unknown;
   value: unknown;
+}
+
+/** One side of the comparison below, and the value actually sent. Absence is
+ *  spelled several ways — a cleared box is `""`, an emptied multi-select is
+ *  `[]`, a stored empty cell is `null` — and `isEmptyValue` is the rule the
+ *  dialog and the backend already share for collapsing them into one. */
+function toSend(column: Column, value: unknown): unknown {
+  return isEmptyValue(value) ? null : serialize(column, value);
 }
 
 /**
@@ -89,10 +104,15 @@ export interface CellDraft {
  * re-stamped on *every* accepted write — so a no-op PATCH would quietly move the
  * record's "last modified" without anybody having modified it.
  *
- * Both sides are normalised before they are compared, because the same absence
- * is spelled several ways: a cleared box is `""`, an emptied multi-select is
- * `[]`, and the stored cell is `null` (see `isEmptyValue`, which is the rule the
- * dialog and the backend already share).
+ * "Changed" means *this person changed it*, so the draft is compared against
+ * what the editor opened holding rather than against the record's current cell.
+ * Those are the same thing at the moment a cell opens and stop being the same
+ * thing the instant a poll lands: comparing against the record would read a
+ * cell somebody else has since edited as changed-by-us, and reverting their
+ * value on an Enter that typed nothing is the one outcome an untouched cell must
+ * never have. Comparing against the seed also keeps a lossy round trip from
+ * manufacturing an edit — `deserialize` then `serialize` turns a stored `14:30`
+ * into `14:30:00`, which differs from the stored string but not from itself.
  *
  * A changed lookup also clears every lookup nested under it, exactly as
  * `RecordFields` does when the dialog's parent field changes — a city chosen for
@@ -102,13 +122,12 @@ export interface CellDraft {
 export function cellPatch(
   columns: Column[],
   column: Column,
-  row: ListItem,
-  draft: unknown,
+  draft: CellDraft,
 ): Record<string, unknown> | null {
-  const next = isEmptyValue(draft) ? null : serialize(column, draft);
-  const stored = row.data?.[column.uuid];
-  const prev = isEmptyValue(stored) ? null : stored;
-  if (JSON.stringify(next) === JSON.stringify(prev)) return null;
+  const next = toSend(column, draft.value);
+  if (JSON.stringify(next) === JSON.stringify(toSend(column, draft.initial))) {
+    return null;
+  }
 
   const patch: Record<string, unknown> = { [column.uuid]: next };
   for (const uuid of nestedDescendants(columns, column.uuid)) patch[uuid] = null;
@@ -130,7 +149,8 @@ export function cellPatch(
  * decides *when* to commit is PrimeReact's cell lifecycle (Enter, Tab, a click
  * outside), which surfaces on the column as `onCellEditComplete`. `rowUuid` and
  * `columnUuid` travel with it so the page can tell a live draft from the remains
- * of the cell edited before it.
+ * of the cell edited before it, and `initial` travels with it so the commit can
+ * tell an edited cell from one merely opened.
  */
 export function InlineCellEditor({
   listUuid,
@@ -143,18 +163,33 @@ export function InlineCellEditor({
   column: Column;
   /** Every column, for an editor that reads a sibling cell — a nested lookup. */
   columns: Column[];
+  /**
+   * The record as the cache holds it *now*. Not PrimeReact's `rowData`, which is
+   * a snapshot taken when the cell mounted and re-synced only on an editing-meta
+   * change: seeded from that, an editor opened after a poll shows a value the
+   * grid stopped displaying, and filters a nested lookup's options by a parent
+   * cell that has moved on.
+   */
   row: ListItem;
   onDraft: (draft: CellDraft) => void;
 }) {
   const [value, setValue] = useState<unknown>(() =>
     deserialize(column, row.data?.[column.uuid] ?? null),
   );
+  // What we opened holding. A ref because nothing renders it and nothing may
+  // change it — it is the fixed point the commit measures the draft against.
+  const initial = useRef(value);
 
   // Claim the draft slot as the editor opens, so that a commit can always tell
   // which cell the value in hand belongs to — including a cell opened and
   // committed without a single keystroke.
   useEffect(() => {
-    onDraft({ rowUuid: row.uuid, columnUuid: column.uuid, value });
+    onDraft({
+      rowUuid: row.uuid,
+      columnUuid: column.uuid,
+      initial: initial.current,
+      value,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -167,7 +202,12 @@ export function InlineCellEditor({
         disabled={false}
         onChange={(v) => {
           setValue(v);
-          onDraft({ rowUuid: row.uuid, columnUuid: column.uuid, value: v });
+          onDraft({
+            rowUuid: row.uuid,
+            columnUuid: column.uuid,
+            initial: initial.current,
+            value: v,
+          });
         }}
         columns={columns}
         // The *stored* row: a nested lookup filters its options by the parent
