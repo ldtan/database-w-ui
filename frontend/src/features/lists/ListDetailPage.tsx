@@ -1034,6 +1034,20 @@ export function ListDetailPage() {
           // into a grid of cells. "cell", not "row" — one value is committed at a
           // time, which is what a partial PATCH per cell already means.
           editMode={inlineEdit ? "cell" : undefined}
+          // PrimeReact memoises every body cell against a fixed prop list
+          // (datatable.cjs.js:493) that does not include the column, so a cell
+          // holds on to the `canItem` closure it first rendered with. When the
+          // effective-actions query resolves after the grid has drawn, cells that
+          // just became editable never gain the affordance and their
+          // `onBeforeCellEditShow` still answers `false` on rows this caller may
+          // in fact write.
+          //
+          // The memo cannot be narrowed into correctness: adding `column` to
+          // `cellMemoProps` compares a React element rebuilt every render, which
+          // never matches, so the memo would be off in all but name. Off honestly
+          // is the smaller lie, and it also covers the case gating on the query
+          // would miss — a permission changed through the Share dialog mid-session.
+          cellMemo={false}
           // PrimeReact calls this before applying its own selection logic, and
           // skips it entirely when the click landed on something clickable — so
           // the checkbox and the action buttons keep their own behaviour without
