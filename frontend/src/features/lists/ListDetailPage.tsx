@@ -40,9 +40,9 @@ import {
   cellEditKind,
   cellEditKinds,
   cellPatch,
-  InlineCellEditor,
   type CellDraft,
-} from "../records/inlineEdit";
+} from "../records/cellEdit";
+import { InlineCellEditor } from "../records/inlineEdit";
 import { recordPagesKey } from "../records/recordKeys";
 import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";

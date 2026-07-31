@@ -139,12 +139,40 @@ export function buildRecordData(
   for (const { column, enabled } of fields) {
     if (!enabled) continue; // read-only fields keep their default/existing value
     const value = values[column.uuid];
-    const empty = isEmptyValue(value);
     if (editing) {
-      data[column.uuid] = empty ? null : serialize(column, value);
-    } else if (!empty) {
+      data[column.uuid] = toStored(column, value);
+    } else if (!isEmptyValue(value)) {
+      // Creating omits an empty field rather than nulling it, so the column's
+      // default still applies — which is why this branch is not `toStored`.
       data[column.uuid] = serialize(column, value);
     }
   }
   return data;
+}
+
+/**
+ * A form value as the API stores it: absent becomes `null`, anything else is
+ * serialized for its column.
+ *
+ * Absence is spelled several ways — a cleared box is `""`, an emptied
+ * multi-select is `[]`, a stored empty cell is `null` — and collapsing them in one
+ * place is what keeps the dialog and the grid agreeing about the same edit.
+ */
+export function toStored(column: Column, value: unknown): unknown {
+  return isEmptyValue(value) ? null : serialize(column, value);
+}
+
+/**
+ * The cells a changed parent invalidates, ready to spread into whatever is being
+ * built — a form's values, or a single-cell patch. A city picked for the old
+ * country means nothing once the country moves, and the two surfaces that clear
+ * it must not drift apart on what "under" means.
+ */
+export function clearedNested(
+  columns: Column[],
+  changedUuid: string,
+): Record<string, null> {
+  return Object.fromEntries(
+    nestedDescendants(columns, changedUuid).map((uuid) => [uuid, null]),
+  );
 }
