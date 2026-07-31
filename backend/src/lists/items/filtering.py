@@ -4,10 +4,14 @@ Values live in ``list_items.data`` as JSONB, so comparisons go through
 ``data ->> '<column_uuid>'`` (text). Number columns are cast to numeric so
 ranges and ordering are correct; ISO date/time strings compare and sort
 correctly as text.
+
+This is the one reader that cannot lean on ``coerce_shape`` — the comparison happens
+in Postgres, not in Python — so ``_field`` reproduces its rule in SQL. Get that wrong
+and a filter disagrees with the grid it filters.
 """
 from typing import Optional
 
-from sqlalchemy import Numeric, and_, cast, or_
+from sqlalchemy import Numeric, and_, case, cast, func, or_
 
 from ..columns.enums import COMPUTED_TYPES, ColumnType
 from ..columns.models import Column
@@ -16,8 +20,31 @@ from .models import ListItem
 _COMPARATORS = {">", ">=", "<", "<=", "gt", "gte", "lt", "lte"}
 
 
-def _field(key: str):
-    return ListItem.data[key].astext
+def _field(column: Column):
+    """The cell as a filter should see it — the value `coerce_shape` would return.
+
+    Records outlive the `multiple` setting that shaped them (known-gaps: "Toggling a
+    column's `multiple`"), and `->>` on a JSONB array yields its *serialized text*:
+    `["Main Building"]`, never `Main Building`. A single column whose records still
+    hold arrays would therefore drop every one of them from a filtered view — silently,
+    and until the nightly reconcile converged the data. So mirror `coerce_shape`'s rule
+    here in SQL: when the cell holds an array, take its first element, exactly as a
+    reader does. Comparing raw text and coercing everywhere else is what let the two
+    disagree in the first place.
+
+    A column that *declares* `multiple` is deliberately left alone: its records hold an
+    array legitimately, so there is no mismatch to absorb, and `contains` has always
+    searched the serialized array — which is the closest thing to element-wise matching
+    the filter language currently has. Giving multi-valued columns real per-element
+    operators is a separate piece of work.
+    """
+    cell = ListItem.data[str(column.uuid)]
+    if (column.config or {}).get("multiple"):
+        return cell.astext
+    return case(
+        (func.jsonb_typeof(cell) == "array", cell[0].astext),
+        else_=cell.astext,
+    )
 
 
 def _as_text(value: object) -> Optional[str]:
@@ -32,7 +59,7 @@ def _condition(cond: dict, columns: dict[str, Column]):
 
     op = cond.get("operator")
     value = cond.get("value")
-    field = _field(key)
+    field = _field(column)
     is_number = column.type == ColumnType.number
 
     if op in ("is", "eq", "="):
@@ -85,7 +112,7 @@ def _order_term(key: str, direction: str, columns: dict[str, Column]):
     # ordering falls through to the next term instead of silently doing nothing.
     if column.type in COMPUTED_TYPES:
         return None
-    field = _field(key)
+    field = _field(column)
     if column.type == ColumnType.number:
         field = cast(field, Numeric)
     return field.desc() if direction == "desc" else field.asc()
