@@ -1219,6 +1219,15 @@ export function GuidePage() {
             rights.
           </li>
           <li>
+            Setting up a whole class or team? <Ui>Import users</Ui> takes a
+            spreadsheet file instead — one row per person, so you fill it in once
+            rather than working the form twenty times. Click{" "}
+            <Ui>Download template</Ui> inside it to get a file with the right
+            headings and one filled-in example row to copy. You can give each person
+            a profile in the same file: fill in the name columns and they get one,
+            leave them empty and they don’t.
+          </li>
+          <li>
             They can also create groups (<Ui>New group</Ui>) and choose their members —
             handy for sharing with a whole team in one go.
           </li>
@@ -1232,6 +1241,14 @@ export function GuidePage() {
             circle come from.
           </li>
         </ul>
+        <Callout tone="warn" title="Passwords from an import are shown once">
+          Leave the <Ui>password</Ui> column empty in the file and the app makes a
+          strong password for that person. Those appear only on the panel you see
+          straight after the import — click <Ui>Download credentials</Ui> to save
+          them before you close it. They are not kept anywhere, so there is no way to
+          look one up later; if one goes missing, an administrator sets a new
+          password from <Ui>Edit user</Ui>.
+        </Callout>
         <Callout tone="tip" title="Changing your password">
           When you change your own password you’ll be asked for your current one too.
           People are always shown to others by their username, never their personal
@@ -1277,6 +1294,17 @@ export function GuidePage() {
           ignored, and a bad row is skipped while the good rows still import — nothing
           all-or-nothing.
         </Callout>
+        <p>
+          This is for the <em>records inside a list</em>. Setting up a lot of{" "}
+          <em>people</em> is a separate thing in a separate place — see{" "}
+          <a href="#people" style={{ color: "var(--brand)" }}>
+            People, groups, and your profile
+          </a>
+          . One difference worth knowing if you do both: a list ignores a heading it
+          doesn’t recognise, because every list has its own columns. The people file
+          refuses one instead, because there its headings are a fixed set, and a
+          misspelt <Ui>first_name</Ui> would otherwise quietly leave every name blank.
+        </p>
       </Section>
 
       <Section id="bin" title="Recovering things you deleted">

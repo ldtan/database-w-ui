@@ -55,6 +55,7 @@ backend/
     ├── infrastructure/      # async engine, session, Base, get_db, init_db
     ├── auth/                # authentication domain
     │   ├── users/           # users + groups (models/schemas/services/routers)
+    │   │   └── batch/       # many accounts from one uploaded CSV
     │   └── tokens/          # login / refresh tokens
     ├── workspaces/          # tenancy layer: a user owns workspaces; lists live in them
     ├── demo/                # demo scenarios: a whole plausible tenant, seeded
@@ -160,7 +161,7 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 
 | Area | Endpoints |
 |------|-----------|
-| Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD; `PATCH …/users/me/settings` (UI preferences, merged onto the stored blob) |
+| Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD; `PATCH …/users/me/settings` (UI preferences, merged onto the stored blob); `POST …/users/import` (many accounts from one CSV, superuser-only — see below) |
 | Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}` |
 | Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}` |
 | Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side) |
@@ -173,6 +174,35 @@ Creating a list requires a `workspace_uuid` (owned by the caller) in the body; t
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a
 list; the `get_list_or_404` dependency resolves the list through its workspace and enforces
 ownership, so an unowned list (and all its children) returns `404`.
+
+### Batch account creation (`POST /api/auth/users/import`)
+
+Superuser-only, `multipart/form-data` with one `file` field. A closed set of twelve CSV
+headers: `username`, `email`, `password`, `is_active`, `is_superuser`, `groups`, plus the
+six person fields (`name_prefix`, `first_name`, `middle_name`, `last_name`, `name_suffix`,
+`birth_date`). `;` separates group names and `true/false/1/0/yes/no` are the booleans —
+both borrowed from list import so there is one file convention, not two.
+
+**Two kinds of failure, kept apart.** A bad *file* — an unrecognised header, a missing
+`username`/`email` header, over 1000 rows, not UTF-8 — is a `400`, and nothing was created.
+A bad *row* comes back inside the summary as `{row, message}` while the rows around it
+commit, exactly as list import behaves.
+
+Unknown headers are **rejected** here, where list import ignores them. That inversion is
+deliberate: a list's columns are user-defined, so a header it lacks may be another list's
+column; this set is fixed, so `frist_name` is a file that would silently leave every name
+blank.
+
+Each row is created through `UserService.create` and `PersonService.create` rather than by
+inlining the inserts, so a batch-created account is indistinguishable from a form-created
+one — same hashing, same conflict message, same auto-provisioned `personal` workspace.
+Those services commit internally, which is why every row is already its own transaction and
+there is no savepoint machinery here.
+
+A blank `password` cell mints one (`secrets.token_urlsafe`) and returns it in the response
+as `generated_password`. **That response body is the only place it ever exists** — nothing
+persists it and there is no way to ask again, so it must not be logged. The frontend turns
+those into a one-time credentials CSV; a lost one is a password reset.
 
 ### Identifiers: `name` vs `display_name`
 
