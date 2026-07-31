@@ -550,6 +550,225 @@ async def test_unique_is_checked_at_the_cutover(client, list_uuid, add_column):
     assert "more than once" in resp.json()["detail"]
 
 
+# -- duplicating rather than replacing ------------------------------------
+
+async def test_naming_it_duplicates_instead_of_converting(
+    client, list_uuid, add_column
+):
+    """The same engine, the other ending: the new column goes live beside the
+    source and the source is left exactly as it was."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5", "12"])
+
+    report = (
+        await _convert(
+            client,
+            list_uuid,
+            col,
+            type="number",
+            name="qty_number",
+            display_name="Qty (number)",
+        )
+    ).json()
+    assert report["duplicate"] is True
+    assert (report["converted"], report["failed"]) == (2, 0)
+
+    created = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+        )
+    ).json()
+    assert created["name"] == "qty_number"
+    assert created["display_name"] == "Qty (number)"
+    assert created["type"] == "number"
+    assert created["uuid"] != col
+    # None of the conversion's bookkeeping survives onto a real column.
+    assert "_conversion_of" not in created["config"]
+    assert "_keep_source" not in created["config"]
+
+    # The source is untouched: same uuid, same type, same values.
+    source = (await client.get(f"/api/lists/{list_uuid}/columns/{col}")).json()
+    assert source["type"] == "text"
+    rows = await _rows(client, list_uuid)
+    assert sorted(r["data"][col] for r in rows) == ["12", "5"]
+    assert sorted(r["data"][created["uuid"]] for r in rows) == [5, 12]
+
+    # And nothing went to the bin, because nothing was displaced.
+    assert (await client.get(f"/api/lists/{list_uuid}/columns/deleted")).json() == []
+
+
+async def test_a_same_type_duplicate_is_a_straight_copy(client, list_uuid, add_column):
+    """The plain "copy this column" case — no conversion involved, and the config
+    comes along."""
+    col = await add_column(
+        list_uuid,
+        name="stage",
+        display_name="Stage",
+        type="choice",
+        config={"options": ["Todo", "Done"]},
+    )
+    await _add_rows(client, list_uuid, col, ["Todo", "Done"])
+
+    report = (
+        await _convert(
+            client, list_uuid, col, type="choice", name="stage_copy",
+            config={"options": ["Todo", "Done"]},
+        )
+    ).json()
+    assert (report["converted"], report["failed"]) == (2, 0)
+
+    created = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+        )
+    ).json()
+    assert created["config"]["options"] == ["Todo", "Done"]
+    rows = await _rows(client, list_uuid)
+    assert sorted(r["data"][created["uuid"]] for r in rows) == ["Done", "Todo"]
+    assert sorted(r["data"][col] for r in rows) == ["Done", "Todo"]
+
+
+async def test_duplicating_a_lookup_carries_its_target(
+    client, list_uuid, add_column, workspace_uuid
+):
+    """The dialog seeds a duplicate's config from the source, so the most
+    config-heavy type is the one worth pinning: a copied lookup must still point
+    where the original pointed."""
+    target = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "schools",
+                "display_name": "Schools",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    label = await add_column(target, name="name", display_name="Name", type="text")
+    await client.patch(f"/api/lists/{target}", json={"primary_column_uuid": label})
+    row = (
+        await client.post(
+            f"/api/lists/{target}/items/", json={"data": {label: "Springfield High"}}
+        )
+    ).json()["uuid"]
+
+    col = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    await _add_rows(client, list_uuid, col, [row])
+
+    report = (
+        await _convert(
+            client,
+            list_uuid,
+            col,
+            type="lookup",
+            name="school_copy",
+            config={"target_list_uuid": target, "multiple": False},
+        )
+    ).json()
+    assert (report["converted"], report["failed"]) == (1, 0)
+
+    created = (
+        await client.post(
+            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+        )
+    ).json()
+    assert created["config"]["target_list_uuid"] == target
+    # Same row uuid under both columns — a lookup copy is a straight JSONB copy.
+    listed = (await _rows(client, list_uuid))[0]["data"]
+    assert listed[created["uuid"]] == listed[col] == row
+
+
+async def test_a_duplicate_joins_the_list_in_creation_order(
+    client, list_uuid, add_column
+):
+    """It inherits the source's `position`, which sounds like "next to it" and is
+    not: nothing in the UI ever sets `position`, so every column is 0 and the order
+    falls through to `id`. A duplicate therefore appears last, like any new column.
+    Pinned because the inherited `position` reads as a placement promise."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await add_column(list_uuid, name="after", display_name="After", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    report = (
+        await _convert(client, list_uuid, col, type="text", name="qty_copy")
+    ).json()
+    await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+
+    names = [
+        c["name"] for c in (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    ]
+    assert names.index("qty_copy") > names.index("after")
+
+
+async def test_a_duplicate_cannot_take_a_name_already_in_use(
+    client, list_uuid, add_column
+):
+    """Checked before the backfill runs, not after: a conversion that succeeds and
+    then cannot be named would throw the work away for a reason known up front."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await add_column(list_uuid, name="taken", display_name="Taken", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    resp = await _convert(client, list_uuid, col, type="text", name="taken")
+    assert resp.status_code == 409
+    assert "already exists" in resp.json()["detail"]
+
+
+async def test_the_reserved_name_is_released_when_a_duplicate_is_abandoned(
+    client, list_uuid, add_column
+):
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    report = (
+        await _convert(client, list_uuid, col, type="text", name="qty_copy")
+    ).json()
+    await client.delete(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    again = await _convert(client, list_uuid, col, type="text", name="qty_copy")
+    assert again.status_code == 200, again.text
+
+
+async def test_a_display_name_without_a_name_is_refused(client, list_uuid, add_column):
+    """Ambiguous in the one direction that matters: it reads as a duplicate but
+    would run as a conversion and replace the column."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    resp = await _convert(
+        client, list_uuid, col, type="number", display_name="Qty (number)"
+    )
+    assert resp.status_code == 422
+
+
+async def test_a_duplicate_still_obeys_the_cutover_gates(client, list_uuid, add_column):
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5", "5"])
+
+    report = (
+        await _convert(
+            client,
+            list_uuid,
+            col,
+            type="number",
+            name="qty_number",
+            config={"unique": True},
+        )
+    ).json()
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    assert resp.status_code == 409
+    assert "more than once" in resp.json()["detail"]
+
+
 # -- the payloads the column dialog actually sends ------------------------
 
 # `ColumnDialog` builds one config object and fills in every key its target type

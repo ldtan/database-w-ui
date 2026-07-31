@@ -10,7 +10,9 @@ decides whether to go on:
 2. **commit** — swap the two columns' values in every record and retype the source
    column in place. This is the only moment the list changes, and it is atomic per
    chunk rather than instant, which is why nothing may reference the target until
-   it is done.
+   it is done. A **duplicate** (started with a name) takes the other ending: the new
+   column is simply made visible beside the source, which rewrites nothing at all
+   because its values are already under its own key.
 3. **abandon** — delete the scratch column and its values. Costs nothing, because
    nothing ever saw them.
 
@@ -77,6 +79,10 @@ MAX_REPORTED_ERRORS = 100
 # `ColumnConfig` field: it is bookkeeping this service owns, and a client must not
 # be able to set it. Config merges preserve unknown keys, so it survives a PATCH.
 CONVERSION_OF = "_conversion_of"
+# Marks the scratch column as a **duplicate**: at commit it goes live beside the
+# source rather than replacing it. Same bookkeeping rules as `CONVERSION_OF`, and
+# both are stripped from the config when the column becomes real.
+KEEP_SOURCE = "_keep_source"
 
 _SUFFIX = "__converting"
 
@@ -125,8 +131,18 @@ class ConversionService:
         target_type: ColumnType,
         config: ColumnConfig,
         user,
+        name: Optional[str] = None,
+        display_name: Optional[str] = None,
     ) -> dict:
-        """Create the hidden target column and backfill it. Returns the report."""
+        """Create the hidden target column and backfill it. Returns the report.
+
+        Naming it makes this a **duplicate** rather than a conversion: the column
+        goes live alongside the source at commit instead of replacing it. The name
+        is taken here rather than at commit so the scratch column holds it against
+        the unique index for the whole run — a backfill that succeeds and then
+        cannot be named would be a maddening way to lose the work.
+        """
+        duplicate = name is not None
         if await cls._find_scratch(db, lst, source) is not None:
             raise ConflictError(
                 f"'{source.name}' already has a conversion in progress. Commit or "
@@ -134,7 +150,8 @@ class ConversionService:
             )
 
         # Refuse the pair before creating anything, so a rejected conversion leaves
-        # no scratch column behind to clean up.
+        # no scratch column behind to clean up. A same-type duplicate is a straight
+        # copy, which `is_supported` already allows.
         probe = Column(type=target_type, name=source.name, config={})
         check_supported(source, probe)
 
@@ -162,14 +179,26 @@ class ConversionService:
         stored = await ColumnService._validate_config(
             db, lst, target_type, ColumnConfig(**supplied), user
         )
+        bookkeeping = {CONVERSION_OF: str(source.uuid)}
+        if duplicate:
+            bookkeeping[KEEP_SOURCE] = True
         target = Column(
             list_id=lst.id,
-            name=cls._scratch_name(source),
-            display_name=f"{source.display_name} (converting)",
-            type=target_type,
+            name=name if duplicate else cls._scratch_name(source),
+            display_name=(
+                display_name or name
+                if duplicate
+                else f"{source.display_name} (converting)"
+            ),
+            # Inherited, not computed. Columns are ordered by `position, id` and
+            # nothing in the UI ever sets `position`, so in practice every column
+            # is 0 and a duplicate sorts last by id rather than next to its source.
+            # Placing it adjacent would mean renumbering every column after it,
+            # which is a reordering feature and not this one.
             position=source.position,
+            type=target_type,
             hidden=True,
-            config={**stored, CONVERSION_OF: str(source.uuid)},
+            config={**stored, **bookkeeping},
         )
         db.add(target)
         try:
@@ -177,7 +206,9 @@ class ConversionService:
         except IntegrityError as exc:
             await db.rollback()
             raise ConflictError(
-                "A column is already using the name this conversion needs"
+                f"A column named '{name}' already exists on this list"
+                if duplicate
+                else "A column is already using the name this conversion needs"
             ) from exc
         await db.commit()
         await db.refresh(target)
@@ -185,6 +216,7 @@ class ConversionService:
         report = await cls._backfill(db, lst, source, target, user)
         report["target_uuid"] = str(target.uuid)
         report["new_type"] = target.type.value
+        report["duplicate"] = duplicate
         return report
 
     @classmethod
@@ -289,6 +321,20 @@ class ConversionService:
             )
 
         await cls._check_gates(db, lst, target)
+
+        if (target.config or {}).get(KEEP_SOURCE):
+            # A duplicate: the values are already under this column's own key, so
+            # there is nothing to move and no record to rewrite. Making it real is
+            # only a matter of letting readers see it.
+            target.hidden = False
+            target.config = {
+                key: value
+                for key, value in (target.config or {}).items()
+                if key not in (CONVERSION_OF, KEEP_SOURCE)
+            }
+            await db.commit()
+            await db.refresh(target)
+            return target
 
         skey, tkey = str(source.uuid), str(target.uuid)
         await cls._swap_values(db, lst.id, skey, tkey)

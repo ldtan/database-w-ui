@@ -1,7 +1,7 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.core.schemas import NameSlug
 
@@ -108,10 +108,29 @@ class ConversionStart(BaseModel):
     a `number`, and carrying them over would be carrying over the previous type's
     assumptions. For `text` -> `choice`, leaving `options` unset mints one per
     distinct value in the source.
+
+    **Naming it makes it a duplicate.** With a `name`, the new column goes live
+    *beside* the source when committed rather than replacing it, and the source is
+    left exactly as it was — so this is equally "copy this column" and "copy it,
+    converting on the way". Without a `name` it is a conversion, and the column
+    keeps the source's identity.
     """
 
     type: ColumnType
     config: ColumnConfig = Field(default_factory=ColumnConfig)
+    name: Optional[NameSlug] = None
+    display_name: Optional[str] = None
+
+    @model_validator(mode="after")
+    def _display_name_needs_a_name(self):
+        # Otherwise a caller who sent only a display name gets a conversion when
+        # they plainly meant a duplicate, and finds their column replaced.
+        if self.display_name is not None and self.name is None:
+            raise ValueError(
+                "display_name is only meaningful with name, which is what makes "
+                "this a duplicate rather than a conversion"
+            )
+        return self
 
 
 class ConversionFailure(BaseModel):
@@ -131,6 +150,9 @@ class ConversionReport(BaseModel):
     # What the column becomes if this is committed. Echoed back rather than left
     # to the caller to remember, so a report is readable on its own.
     new_type: ColumnType
+    # True when committing adds a column beside the source rather than replacing
+    # it — which changes what the commit means, so the report says so.
+    duplicate: bool
     converted: int
     failed: int
     errors: list[ConversionFailure]

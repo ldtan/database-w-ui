@@ -39,6 +39,7 @@ export function ColumnsPanel({
   // decide. `converting` drives the first, `review` the second — and the second
   // needs the type that was chosen, which the report itself does not carry.
   const [converting, setConverting] = useState<Column | null>(null);
+  const [duplicating, setDuplicating] = useState<Column | null>(null);
   const [review, setReview] = useState<{
     column: Column;
     newType: ColumnType;
@@ -108,14 +109,27 @@ export function ColumnsPanel({
                   editing back. A calculated column stores nothing, so there is
                   nothing to convert. */}
               {column.type !== "calculated" && (
-                <Button
-                  icon="pi pi-sync"
-                  text
-                  size="small"
-                  aria-label={`Convert column ${column.display_name} to another type`}
-                  tooltip="Change type"
-                  onClick={() => setConverting(column)}
-                />
+                <>
+                  <Button
+                    icon="pi pi-sync"
+                    text
+                    size="small"
+                    aria-label={`Convert column ${column.display_name} to another type`}
+                    tooltip="Change type"
+                    onClick={() => setConverting(column)}
+                  />
+                  {/* Same engine as Change type, opposite ending: this one adds a
+                      column and leaves the original alone. A calculated column
+                      stores nothing, so there is nothing to copy. */}
+                  <Button
+                    icon="pi pi-copy"
+                    text
+                    size="small"
+                    aria-label={`Duplicate column ${column.display_name}`}
+                    tooltip="Duplicate"
+                    onClick={() => setDuplicating(column)}
+                  />
+                </>
               )}
               <Button
                 icon="pi pi-trash"
@@ -176,6 +190,24 @@ export function ColumnsPanel({
               column: converting,
               // The dialog does not report back the type it sent, so read it off
               // the hidden column the conversion just built.
+              newType: report.new_type,
+              report,
+            })
+          }
+        />
+      )}
+      {duplicating && (
+        <ColumnDialog
+          key={`duplicate:${duplicating.uuid}`}
+          listUuid={listUuid}
+          workspaceUuid={workspaceUuid}
+          column={duplicating}
+          visible
+          mode="duplicate"
+          onHide={() => setDuplicating(null)}
+          onConverted={(report) =>
+            setReview({
+              column: duplicating,
               newType: report.new_type,
               report,
             })

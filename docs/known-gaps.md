@@ -448,7 +448,13 @@ buys and what it costs are both worth knowing before extending it.
   to use the maintenance workflow. Nothing in that workflow runs it yet: the service function
   is callable and chunked, but no entry point exists. A list that big cannot be created on the
   current free tier, which is why it was left.
-- **No UI.** The feature is API-only.
+- **A duplicate inherits the source's `position`**, which reads as "next to it" and is not.
+  Nothing in the UI ever sets `position`, so every column is 0 and the order falls through to
+  `id` — a duplicate appears last, like any other new column. Placing it adjacent means
+  renumbering every column after it, which is a reordering feature and not this one.
+- **Copying into an *already existing* column is still not built.** `ConversionService.start`
+  always creates its target, so that needs a target parameter and a decision the planned-features
+  doc still lists as open: overwrite the target, or only fill cells where it is empty.
 
 ## Behavior that surprises people
 

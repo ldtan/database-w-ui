@@ -2,8 +2,9 @@
 
 Nine capabilities that have been asked for. Each section says what it is, what already
 exists to build on, the load-bearing implementation details, and the decisions still
-open. All nine are now **implemented** — the heading says so, and where a section shipped
-narrower than it was scoped, it says what was left out.
+open. The heading of each says where it stands, and where a section shipped narrower than
+it was scoped, it says what was left out. Only §2 is still partly unbuilt: duplicating a
+column ships, copying into an **already existing** column does not.
 
 These share two roots in the existing model, so read them once here rather than nine times below:
 
@@ -113,6 +114,9 @@ backfill, cut over), behind three routes: `POST /columns/{uuid}/convert` returns
 `POST /columns/{uuid}/convert/{target_uuid}` commits it, `DELETE` on the same path abandons
 it. Tests in `tests/test_column_conversion.py`.
 
+Sending a `name` to the first route makes it a **duplicate** instead — same backfill, same
+report, but the new column goes live beside the source rather than replacing it. See §2.
+
 **The v1 matrix is the text hub plus one direct pair.** Every type converts *to* `text`
 and `text` converts to every type, so the matrix is 2N rules rather than N². `date` ↔
 `datetime` is direct, so widening and truncating do not take a text round trip. A pair with
@@ -165,7 +169,7 @@ column's stored uuids from cleanup.
 
 ---
 
-## 2. Column data migration (copy one column's data into another) — **implemented**
+## 2. Column data migration (copy one column's data into another) — **duplicate shipped; copy-into-existing not**
 
 Bulk-populate a target column from a source column across every record in a list — the
 "add a column, move the data over, delete the old one" workflow, and the safe delivery
@@ -188,6 +192,24 @@ maintenance workflow above it. Include soft-deleted records, per the same reason
 - **`multiple` shape mismatch.** A single→multiple copy wraps each value in a one-element list; the
   reverse takes the first element. `coerce_shape` already expresses exactly this — call it, don't
   re-derive it.
+
+**What is and is not built.** The engine ships in full under §1, and **duplicating a column**
+ships on top of it: `POST /columns/{uuid}/convert` with a `name` makes the new column go live
+*beside* the source at commit rather than replacing it. Same backfill, same report, same
+`required`/`unique` gates — only the ending differs, and that ending **rewrites no records at
+all**, because the values already sit under the new column's own key. The type may equal the
+source's, which `is_supported` already treats as a straight copy, so "copy this column" and
+"copy it, converting on the way" are one operation. The name is taken when the scratch column is
+created rather than at commit, so it is held against the unique index for the whole run — a
+backfill that succeeds and then cannot be named would be a maddening way to lose the work.
+
+The duplicate inherits the source's `position`, which sounds like "next to it" and is not:
+nothing in the UI sets `position`, so every column is 0 and the order falls through to `id`. A
+duplicate therefore appears last, like any new column. Placing it adjacent means renumbering
+every column after it, which is a reordering feature and not this one.
+
+**Still not built: copying into an already existing column.** `start` always creates its target,
+so that needs a target parameter and the overwrite policy below.
 
 **Needs a decision — but only for the standalone use.** When #1 drives it the answers are pinned:
 a conversion always overwrites (the target column is new and empty) and always copies (the source
