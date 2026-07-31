@@ -107,14 +107,60 @@ async def test_unknown_group_errors_the_row_and_creates_nothing(db):
     assert await UserService.get_by_username(db, "ada") is None
 
 
-async def test_known_groups_are_attached(db):
-    await UserGroupService.create(db, UserGroupCreate(name="Teachers"))
-    await UserGroupService.create(db, UserGroupCreate(name="Year 9"))
+async def _teachers_and_year_9(db):
+    await UserGroupService.create(
+        db, UserGroupCreate(name="teachers", display_name="Teachers")
+    )
+    await UserGroupService.create(
+        db, UserGroupCreate(name="year_9", display_name="Year 9")
+    )
 
-    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,Teachers;Year 9\n")
+
+async def test_known_groups_are_attached(db):
+    await _teachers_and_year_9(db)
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,teachers;year_9\n")
     assert summary.errors == []
     ada = await UserService.get_by_uuid(db, summary.created[0].uuid)
-    assert sorted(group.name for group in ada.groups) == ["Teachers", "Year 9"]
+    assert sorted(group.name for group in ada.groups) == ["teachers", "year_9"]
+
+
+async def test_the_display_name_is_not_accepted_as_a_group_reference(db):
+    """The file names groups by slug. Accepting the label too would hand back the
+    ambiguity the name/display_name split exists to remove."""
+    await _teachers_and_year_9(db)
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,Teachers\n")
+    assert summary.created == []
+    assert await UserService.get_by_username(db, "ada") is None
+
+
+async def test_a_display_name_in_the_file_is_answered_with_its_slug(db):
+    """The likeliest bad file is one written before the split, so the error earns its
+    keep by naming the replacement rather than only the mistake."""
+    await _teachers_and_year_9(db)
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,Year 9\n")
+    message = summary.errors[0].message
+    assert "Unknown group(s): Year 9" in message
+    assert "Did you mean: year_9?" in message
+
+
+async def test_the_slug_suggestion_ignores_case(db):
+    await _teachers_and_year_9(db)
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,TEACHERS X\n")
+    assert "Did you mean" not in summary.errors[0].message
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,tEaChErS\n")
+    assert "Did you mean: teachers?" in summary.errors[0].message
+
+
+async def test_an_unrecognisable_group_gets_no_suggestion(db):
+    await _teachers_and_year_9(db)
+
+    summary = await _run(db, f"{HEADER}\nada,ada@example.com,,,,Wildlife Club\n")
+    assert summary.errors[0].message == "Unknown group(s): Wildlife Club"
 
 
 async def test_superuser_promotion_is_applied_and_counted(db):

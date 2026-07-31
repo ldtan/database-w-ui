@@ -147,18 +147,30 @@ export function SharePanel({
   const grantedGroups = new Set(
     (grants.data ?? []).filter((g) => g.group_uuid).map((g) => g.group_uuid!),
   );
+  // A group's `display_name` is not unique, and this is the one picker where that
+  // costs something: choosing the wrong "Teachers" grants access to the wrong people.
+  // So the slug rides along as a second line, and as something the filter matches —
+  // otherwise typing the slug an export taught someone would find nothing.
   const principalGroups = [
     {
       label: "Users",
       items: (users.data ?? [])
         .filter((u) => !grantedUsers.has(u.uuid))
-        .map((u) => ({ label: u.username, value: `user:${u.uuid}` })),
+        .map((u) => ({
+          label: u.username,
+          sublabel: null,
+          value: `user:${u.uuid}`,
+        })),
     },
     {
       label: "Groups",
       items: (groups.data ?? [])
         .filter((g) => !grantedGroups.has(g.uuid))
-        .map((g) => ({ label: g.name, value: `group:${g.uuid}` })),
+        .map((g) => ({
+          label: g.display_name,
+          sublabel: g.name,
+          value: `group:${g.uuid}`,
+        })),
     },
   ];
 
@@ -203,10 +215,22 @@ export function SharePanel({
             // Drive the server-side query; the options are already narrowed, so
             // don't also filter them locally.
             filterMatchMode="contains"
+            // Both of a group's names, matching what the server searches. Without
+            // the second field a slug typed in full would be fetched and then
+            // filtered straight back out again.
+            filterBy="label,sublabel"
             onFilter={(e) => setSearch(e.filter)}
             resetFilterOnHide
             emptyFilterMessage="No matching users or groups"
             className="w-full"
+            itemTemplate={(option) => (
+              <div className="flex flex-col">
+                <span>{option.label}</span>
+                {option.sublabel && (
+                  <span className="text-xs text-faint">{option.sublabel}</span>
+                )}
+              </div>
+            )}
           />
 
           <Field label="Can">
@@ -289,7 +313,18 @@ export function SharePanel({
                     <span className="entity-icon is-muted" style={{ width: "1.75rem", height: "1.75rem", fontSize: "0.8rem" }} aria-hidden>
                       <i className={isUser ? "pi pi-user" : "pi pi-users"} />
                     </span>
-                    <span className="flex-1 truncate font-medium">{name}</span>
+                    <span className="flex-1 truncate">
+                      <span className="font-medium">{name}</span>
+                      {/* Same reasoning as the picker: two groups can read alike,
+                          and this row is where someone decides one has too much
+                          access. */}
+                      {grant.group_slug && (
+                        <span className="text-xs text-faint">
+                          {" "}
+                          {grant.group_slug}
+                        </span>
+                      )}
+                    </span>
                     {expiry && (
                       <span
                         className={`badge${expiry.expired ? "" : ""}`}

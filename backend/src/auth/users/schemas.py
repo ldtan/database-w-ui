@@ -12,7 +12,7 @@ from pydantic import (
     model_validator,
 )
 
-from src.core.schemas import ResourceLink
+from src.core.schemas import NameSlug, ResourceLink
 
 
 # Kept in step with ThemeId/ThemeMode in frontend/src/lib/theme.tsx by hand — a
@@ -182,7 +182,9 @@ class BinnedPrincipalRead(BaseModel):
     """
 
     uuid: UUID
-    # `username` for an account, `name` for a group — the label each is known by.
+    # `username` for an account, `display_name` for a group — the label each is known
+    # by. A group's slug is the wrong thing here: the bin exists to be *recognised*,
+    # and what someone recognises is what the People page showed them.
     name: str
     # Email for an account, description for a group. Enough to tell two similar rows
     # apart before restoring one.
@@ -193,7 +195,11 @@ class BinnedPrincipalRead(BaseModel):
 
 
 class UserGroupBase(BaseModel):
-    name: str
+    # A slug, like every other resource's `name`: it is what a batch-user CSV's
+    # `groups` column and an exported `group` cell both name the group by, so it has
+    # to be typeable and stable. `display_name` is the free text shown on screen.
+    name: NameSlug
+    display_name: str
     description: Optional[str] = None
 
 
@@ -202,7 +208,8 @@ class UserGroupCreate(UserGroupBase):
 
 
 class UserGroupUpdate(BaseModel):
-    name: Optional[str] = None
+    name: Optional[NameSlug] = None
+    display_name: Optional[str] = None
     description: Optional[str] = None
     user_uuids: Optional[list[UUID]] = None
 

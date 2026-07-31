@@ -129,7 +129,7 @@ export function PeoplePage() {
 
   function confirmDeleteGroup(group: ApiUserGroup) {
     confirmDialog({
-      message: `Delete group "${group.name}"? Its grants are removed too.`,
+      message: `Delete group "${group.display_name}"? Its grants are removed too.`,
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => removeGroup.mutate(group.uuid),
@@ -353,7 +353,15 @@ export function PeoplePage() {
                       <i className="pi pi-sitemap" />
                     </span>
                     <div className="min-w-0">
-                      <div className="font-medium truncate">{group.name}</div>
+                      <div className="font-medium truncate">
+                        {group.display_name}
+                      </div>
+                      {/* The slug, because this is the page someone comes to when
+                          writing a roster CSV or reading an export — those name a
+                          group by `name`, never by the label above it. */}
+                      <div className="text-xs truncate text-faint">
+                        {group.name}
+                      </div>
                       {group.description && (
                         <div className="text-sm truncate text-muted">
                           {group.description}
@@ -366,14 +374,14 @@ export function PeoplePage() {
                       {
                         key: "edit",
                         icon: "pi pi-pencil",
-                        label: `Edit ${group.name}`,
+                        label: `Edit ${group.display_name}`,
                         visible: canAdminister,
                         onClick: () => setGroupDialog({ open: true, group }),
                       },
                       {
                         key: "delete",
                         icon: "pi pi-trash",
-                        label: `Delete ${group.name}`,
+                        label: `Delete ${group.display_name}`,
                         severity: "danger",
                         visible: canAdminister,
                         onClick: () => confirmDeleteGroup(group),

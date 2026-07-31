@@ -68,13 +68,28 @@ class User(BaseModel):
 # The virtual group every authenticated account implicitly belongs to. Seeded once
 # (see auth/seed.py), never given membership rows: the resolver injects it for every
 # user (see PermissionService._group_ids), so a grant to it means "everyone".
-AUTHENTICATED_USERS_NAME = "Authenticated Users"
+#
+# Two constants because a group carries two identifiers (see below). The slug is what
+# code matches on — the seed, the reserved-name check — and is the one that must never
+# drift; the display is only ever shown to a person.
+AUTHENTICATED_USERS_NAME = "authenticated_users"
+AUTHENTICATED_USERS_DISPLAY_NAME = "Authenticated Users"
 
 
 class UserGroup(BaseModel):
     __tablename__ = "user_groups"
 
-    name: Mapped[str] = mapped_column(sa.String(50), unique=True)
+    # The same split every workspace, list, column, view and form carries: `name` is
+    # the code-facing slug, `display_name` is what a person reads. Groups got it late
+    # because `name` was doing both jobs *and* serving as a wire identifier — the
+    # `groups` column of a batch-user CSV and the exported value of a `group` cell
+    # both resolve against it — so a cosmetic rename silently invalidated saved files.
+    # Now the rename has somewhere to land that no file refers to.
+    name: Mapped[str] = mapped_column(sa.String(63), unique=True)
+    # Not unique, matching lists. Two groups may therefore read alike in a picker,
+    # which is why SharePanel renders the slug beneath the label: choosing the wrong
+    # group there grants access, so the tie-breaker has to be visible.
+    display_name: Mapped[str] = mapped_column(sa.String(255))
     description: Mapped[Optional[str]] = mapped_column(sa.Text)
     # System groups are seeded, not user-created: immutable, undeletable, and their
     # membership is implicit (no rows in user_group_association). Currently just

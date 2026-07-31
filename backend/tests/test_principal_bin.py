@@ -89,7 +89,12 @@ async def alice(client):
 async def editors(client, alice):
     resp = await client.post(
         f"{GROUPS}/",
-        json={"name": "editors", "description": "Can edit", "user_uuids": [alice]},
+        json={
+            "name": "editors",
+            "display_name": "Editors",
+            "description": "Can edit",
+            "user_uuids": [alice],
+        },
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["uuid"]
@@ -144,12 +149,15 @@ async def test_a_deleted_group_turns_up_in_the_bin_and_comes_back(client, editor
     binned = await client.get(f"{GROUPS}/deleted")
     assert binned.status_code == 200, binned.text
     assert binned.headers["X-Total-Count"] == "1"
-    assert binned.json()[0]["name"] == "editors"
+    # The bin exists to be recognised, so a group is listed by the label the People
+    # page showed — its display name, not the slug code addresses it by.
+    assert binned.json()[0]["name"] == "Editors"
     assert binned.json()[0]["detail"] == "Can edit"
 
     restored = await client.post(f"{GROUPS}/{editors}/restore")
     assert restored.status_code == 200, restored.text
     assert restored.json()["name"] == "editors"
+    assert restored.json()["display_name"] == "Editors"
 
 
 async def test_a_restored_account_keeps_its_groups(client, alice, editors):

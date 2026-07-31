@@ -14,6 +14,7 @@ list import, which inserts into one session and commits in batches for speed.
 import secrets
 from uuid import UUID
 
+import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -36,6 +37,10 @@ async def resolve_groups(db: AsyncSession, names: set[str]) -> dict[str, UserGro
 
     This is what parsing the whole upload up front buys: the names are all known
     before the first account is created.
+
+    Keyed on the slug `name`, never the display name. The whole point of the split is
+    that a file names a group by something a cosmetic rename cannot invalidate, so
+    accepting the display name here would hand that back.
     """
     if not names:
         return {}
@@ -45,6 +50,39 @@ async def resolve_groups(db: AsyncSession, names: set[str]) -> dict[str, UserGro
         )
     )
     return {group.name: group for group in result.scalars().all()}
+
+
+async def suggest_slugs(db: AsyncSession, misses: set[str]) -> dict[str, str]:
+    """Display name -> slug, for the values in the file that matched no group.
+
+    Groups were addressed by their display name until the name/display_name split, so
+    the likeliest reason a value misses is that the file predates it. Rather than
+    quietly accepting the old spelling -- which would restore the ambiguity the split
+    removed -- the error names the slug to put in its place.
+
+    Case-insensitive, because a display name is free text and nobody transcribing one
+    into a spreadsheet is thinking about case. One query for the whole file, matching
+    `resolve_groups` above; an empty result just means no suggestion is offered.
+    """
+    if not misses:
+        return {}
+    lowered = {name.lower() for name in misses}
+    result = await db.execute(
+        select(UserGroup).where(
+            sa.func.lower(UserGroup.display_name).in_(lowered),
+            UserGroup.deleted_at.is_(None),
+        )
+    )
+    return {group.display_name.lower(): group.name for group in result.scalars().all()}
+
+
+def _unknown_group_message(unknown: list[str], suggestions: dict[str, str]) -> str:
+    """The per-row error, carrying the right slug when one can be worked out."""
+    named = ", ".join(unknown)
+    hints = [suggestions[name.lower()] for name in unknown if name.lower() in suggestions]
+    if not hints:
+        return f"Unknown group(s): {named}"
+    return f"Unknown group(s): {named}. Did you mean: {', '.join(hints)}?"
 
 
 async def _undo_row(db: AsyncSession, user_uuid: UUID) -> None:
@@ -67,9 +105,12 @@ async def _undo_row(db: AsyncSession, user_uuid: UUID) -> None:
 
 async def import_users(db: AsyncSession, parsed: ParsedFile) -> BatchUserSummary:
     """Create an account per parsed row, reporting the ones that could not be."""
-    groups_by_name = await resolve_groups(
-        db, {name for _, row in parsed.rows for name in row.groups}
-    )
+    wanted = {name for _, row in parsed.rows for name in row.groups}
+    groups_by_name = await resolve_groups(db, wanted)
+    # Resolved once for the file, not once per bad row: a roster written against the
+    # old free-text names misses on *every* row, and that is exactly the file whose
+    # error messages have to be worth reading.
+    suggestions = await suggest_slugs(db, wanted - set(groups_by_name))
 
     created: list[CreatedUser] = []
     errors: list[BatchUserError] = list(parsed.errors)
@@ -80,7 +121,9 @@ async def import_users(db: AsyncSession, parsed: ParsedFile) -> BatchUserSummary
         try:
             unknown = [name for name in row.groups if name not in groups_by_name]
             if unknown:
-                raise UnknownReferenceError(f"Unknown group(s): {', '.join(unknown)}")
+                raise UnknownReferenceError(
+                    _unknown_group_message(unknown, suggestions)
+                )
             user = await UserService.create(
                 db,
                 UserCreate(

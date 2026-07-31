@@ -12,7 +12,10 @@ from httpx import ASGITransport, AsyncClient
 
 from main import create_app
 from src.auth.dependencies import get_current_user
-from src.auth.users.models import AUTHENTICATED_USERS_NAME
+from src.auth.users.models import (
+    AUTHENTICATED_USERS_DISPLAY_NAME,
+    AUTHENTICATED_USERS_NAME,
+)
 from src.auth.users.schemas import UserCreate, UserGroupCreate
 from src.auth.users.services import UserGroupService, UserService
 from src.infrastructure import database as db_module
@@ -120,7 +123,7 @@ async def test_cannot_self_add_to_a_group(make_client, session_factory):
     """Groups are principals in the grant table, so joining one inherits its grants."""
     async with session_factory() as db:
         outsider = await _make_user(db, "outsider")
-        group = await UserGroupService.create(db, UserGroupCreate(name="privileged"))
+        group = await UserGroupService.create(db, UserGroupCreate(name="privileged", display_name="Privileged"))
         group_uuid = str(group.uuid)
         outsider_uuid = str(outsider.uuid)
 
@@ -130,7 +133,7 @@ async def test_cannot_self_add_to_a_group(make_client, session_factory):
         )
         assert resp.status_code == 403
 
-        assert (await client.post("/api/auth/groups/", json={"name": "mine"})).status_code == 403
+        assert (await client.post("/api/auth/groups/", json={"name": "mine", "display_name": "Mine"})).status_code == 403
         assert (await client.delete(f"/api/auth/groups/{group_uuid}")).status_code == 403
 
 
@@ -141,6 +144,10 @@ async def test_system_group_is_immutable(make_client, session_factory):
         await ensure_system_groups(db)
         group = await UserGroupService.get_by_name(db, AUTHENTICATED_USERS_NAME)
         assert group is not None
+        # Seeded with both identifiers: the slug is what the resolver and the
+        # reserved-name check match on, the label is what the People page shows.
+        assert group.name == "authenticated_users"
+        assert group.display_name == AUTHENTICATED_USERS_DISPLAY_NAME
         group_uuid = str(group.uuid)
 
     async with make_client(admin) as client:
@@ -152,6 +159,53 @@ async def test_system_group_is_immutable(make_client, session_factory):
 
         resp = await client.delete(f"/api/auth/groups/{group_uuid}")
         assert resp.status_code == 403
+
+
+async def test_the_system_group_slug_is_reserved(make_client, session_factory):
+    """Reserved on the slug, which is what the resolver and every grant match on.
+    The display name is not reserved — it is only ever read by a person."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "root3", superuser=True)
+        await ensure_system_groups(db)
+
+    async with make_client(admin) as client:
+        resp = await client.post(
+            "/api/auth/groups/",
+            json={
+                "name": AUTHENTICATED_USERS_NAME,
+                "display_name": "Not the real one",
+            },
+        )
+        assert resp.status_code == 403
+
+        resp = await client.post(
+            "/api/auth/groups/",
+            json={
+                "name": "my_everyone",
+                "display_name": AUTHENTICATED_USERS_DISPLAY_NAME,
+            },
+        )
+        assert resp.status_code == 201, resp.text
+
+
+async def test_a_group_name_must_be_a_slug(make_client, session_factory):
+    """`name` is a wire identifier — a CSV's `groups` column and an exported `group`
+    cell both resolve against it — so it is constrained like every other one."""
+    async with session_factory() as db:
+        admin = await _make_user(db, "root4", superuser=True)
+
+    async with make_client(admin) as client:
+        resp = await client.post(
+            "/api/auth/groups/",
+            json={"name": "Year 9", "display_name": "Year 9"},
+        )
+        assert resp.status_code == 422
+
+        resp = await client.post(
+            "/api/auth/groups/",
+            json={"name": "year_9", "display_name": "Year 9"},
+        )
+        assert resp.status_code == 201, resp.text
 
 
 async def test_cannot_promote_self_to_superuser(make_client, session_factory):
@@ -186,7 +240,7 @@ async def test_superuser_administers_users_and_groups(make_client, session_facto
         )
         assert resp.status_code == 201
 
-        resp = await client.post("/api/auth/groups/", json={"name": "team"})
+        resp = await client.post("/api/auth/groups/", json={"name": "team", "display_name": "Team"})
         assert resp.status_code == 201
         group_uuid = resp.json()["uuid"]
 
@@ -245,7 +299,7 @@ async def test_reads_stay_open_so_sharing_still_works(make_client, session_facto
     """The Share dialog lists users and groups to grant to, so reads must not be gated."""
     async with session_factory() as db:
         user = await _make_user(db, "sharer")
-        await UserGroupService.create(db, UserGroupCreate(name="team"))
+        await UserGroupService.create(db, UserGroupCreate(name="team", display_name="Team"))
 
     async with make_client(user) as client:
         assert (await client.get("/api/auth/users/")).status_code == 200

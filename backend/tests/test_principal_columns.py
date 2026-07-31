@@ -26,7 +26,7 @@ async def alice(session_factory):
 async def editors(session_factory, alice):
     async with session_factory() as db:
         group = await UserGroupService.create(
-            db, UserGroupCreate(name="editors", user_uuids=[alice["uuid"]])
+            db, UserGroupCreate(name="editors", display_name="Editors", user_uuids=[alice["uuid"]])
         )
         return {"uuid": str(group.uuid), "name": group.name}
 
@@ -210,6 +210,67 @@ async def test_export_writes_names_and_import_reads_them_back(
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert [i["data"][col] for i in items] == [alice["uuid"], alice["uuid"]]
+
+
+async def test_a_group_cell_exports_the_slug_and_imports_back(
+    client, list_uuid, session_factory
+):
+    """The slug, not the display name. An exported file has to re-import, and only
+    the slug is unique — plus it is what the header row and a `user` cell already
+    use, so the file stays one format rather than two."""
+    async with session_factory() as db:
+        group = await UserGroupService.create(
+            db,
+            UserGroupCreate(name="registrar", display_name="Registrar's Office"),
+        )
+        group_uuid = str(group.uuid)
+
+    col = await _add(client, list_uuid, "group")
+    await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: group_uuid}}
+    )
+
+    export = await client.post(
+        f"/api/lists/{list_uuid}/export", json={"format": "csv"}
+    )
+    assert export.status_code == 200, export.text
+    csv = export.text
+    assert "registrar" in csv
+    assert "Registrar's Office" not in csv
+    assert group_uuid not in csv
+
+    reimport = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", csv, "text/csv")},
+    )
+    assert reimport.status_code == 200, reimport.text
+    assert reimport.json()["created"] == 1
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert [i["data"][col] for i in items] == [group_uuid, group_uuid]
+
+
+async def test_a_group_cell_is_searchable_by_either_name(
+    client, list_uuid, session_factory
+):
+    """The grid renders the display name, so searching for what is on screen has to
+    work — without breaking search for the slug an export taught someone."""
+    async with session_factory() as db:
+        group = await UserGroupService.create(
+            db, UserGroupCreate(name="registrar", display_name="Registrar's Office")
+        )
+        group_uuid = str(group.uuid)
+
+    col = await _add(client, list_uuid, "group")
+    await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: group_uuid}}
+    )
+
+    for term in ("regist", "Office"):
+        found = (
+            await client.get(f"/api/lists/{list_uuid}/items/?q={term}")
+        ).json()
+        assert [i["data"][col] for i in found] == [group_uuid], term
 
 
 async def test_a_blank_value_clears_the_cell(client, list_uuid, alice):

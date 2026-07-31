@@ -294,7 +294,11 @@ Notes:
     list principals — but **person records are private** (owner or superuser only, see §12
     and `src/people`). A cell rendering "Grace Hopper" would leak personal data to every
     viewer of the list. `PrincipalControls.tsx` and the export formatter both resolve to the
-    username.
+    username. A group has two names since `b3f9d47c1a06`, and the two resolvers pick
+    differently on purpose: the screen shows `display_name`, the export writes the slug
+    `name`. The file has to round-trip and only the slug is unique, and the export's header
+    row is already column slugs — so the file stays slugs throughout while the grid stays
+    readable.
   - **Deleting a user or group scrubs the references.** No FK backs them (D4), so
     `UserService.delete` / `UserGroupService.delete` call
     `ListItemService.scrub_principal_references`, which nulls the cell (or drops the entry

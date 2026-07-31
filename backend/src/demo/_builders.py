@@ -135,6 +135,7 @@ async def ensure_group(
     report: Report,
     *,
     name: str,
+    display_name: str,
     description: str,
     members: Sequence[User],
 ) -> UserGroup:
@@ -142,6 +143,10 @@ async def ensure_group(
 
     An existing group keeps whatever membership it has — except an empty one, which
     is what a half-finished run leaves behind and is never what anyone wants.
+
+    Identified by the slug, like every other `ensure_` here: re-running after someone
+    has renamed a demo group in the UI should find that group, not build a second one
+    beside it.
     """
     existing = await UserGroupService.get_by_name(db, name)
     if existing is not None:
@@ -158,6 +163,7 @@ async def ensure_group(
         db,
         UserGroupCreate(
             name=name,
+            display_name=display_name,
             description=description,
             user_uuids=[member.uuid for member in members],
         ),

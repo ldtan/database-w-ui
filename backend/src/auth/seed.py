@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.config import settings
 from src.core.exceptions import ConflictError
-from .users.models import AUTHENTICATED_USERS_NAME, User, UserGroup
+from .users.models import (
+    AUTHENTICATED_USERS_DISPLAY_NAME,
+    AUTHENTICATED_USERS_NAME,
+    User,
+    UserGroup,
+)
 from .users.schemas import UserCreate
 from .users.services import UserService
 
@@ -32,6 +37,7 @@ async def ensure_system_groups(db: AsyncSession) -> None:
     db.add(
         UserGroup(
             name=AUTHENTICATED_USERS_NAME,
+            display_name=AUTHENTICATED_USERS_DISPLAY_NAME,
             description="Everyone signed in. Share with this group to grant all users.",
             is_system=True,
         )

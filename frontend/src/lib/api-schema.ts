@@ -1886,6 +1886,8 @@ export interface components {
             group_uuid?: string | null;
             /** Group Name */
             group_name?: string | null;
+            /** Group Slug */
+            group_slug?: string | null;
             /** Actions */
             actions: components["schemas"]["Action"][];
             /** Expires At */
@@ -2327,6 +2329,8 @@ export interface components {
         UserGroupCreate: {
             /** Name */
             name: string;
+            /** Display Name */
+            display_name: string;
             /** Description */
             description?: string | null;
             /** User Uuids */
@@ -2336,6 +2340,8 @@ export interface components {
         UserGroupRead: {
             /** Name */
             name: string;
+            /** Display Name */
+            display_name: string;
             /** Description */
             description?: string | null;
             /**
@@ -2360,6 +2366,8 @@ export interface components {
         UserGroupUpdate: {
             /** Name */
             name?: string | null;
+            /** Display Name */
+            display_name?: string | null;
             /** Description */
             description?: string | null;
             /** User Uuids */

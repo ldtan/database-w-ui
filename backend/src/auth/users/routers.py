@@ -315,7 +315,7 @@ async def list_deleted_groups(
     return [
         BinnedPrincipalRead(
             uuid=row.uuid,
-            name=row.name,
+            name=row.display_name,
             detail=row.description,
             deleted_at=row.deleted_at,
         )

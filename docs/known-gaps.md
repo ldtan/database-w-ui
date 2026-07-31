@@ -641,7 +641,8 @@ from it.
 
 **Every reference column exports its label, and the two sides must agree on what the label
 is.** `lookup`, `user` and `group` all store a uuid and export the human-readable label
-(row label / username / group name); import resolves it back. The load-bearing detail is
+(row label / username / the group's slug `name`, not its `display_name` — only the slug is
+unique, so only the slug re-imports); import resolves it back. The load-bearing detail is
 that export and import both call `display_column_key` to decide *which* column of the target
 list supplies a row's label — if they ever picked differently, a file this app exported would
 not import back into it. A label matching two rows is rejected rather than guessed (row
