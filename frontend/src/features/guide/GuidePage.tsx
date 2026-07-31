@@ -31,6 +31,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "list", title: "Step 2 · Make a list" },
   { id: "columns", title: "Step 3 · Add columns" },
   { id: "column-types", title: "The column types, explained" },
+  { id: "change-type", title: "Changing a column’s type, and copying a column" },
   { id: "records", title: "Step 4 · Add records" },
   { id: "nested-lookups", title: "Linked columns that narrow each other" },
   { id: "formulas", title: "Calculated columns: writing a formula" },
@@ -456,12 +457,16 @@ export function GuidePage() {
           <a href="#forms" style={{ color: "var(--brand)" }}>Forms</a>) if you’d like
           people to see them while editing.
         </Callout>
-        <Callout tone="warn" title="A type is forever">
-          You can rename a column and change its other settings any time, but you{" "}
-          <strong>cannot change its type</strong> once it exists, because your records
-          already hold values in that shape. If you need a different type, add a new
-          column instead. And deleting a column doesn’t erase what records held — the
-          old values are simply hidden.
+        <Callout tone="tip" title="Changing your mind later">
+          You can rename a column and change its settings any time. Changing its{" "}
+          <strong>type</strong> is a bigger job — every record already holds values in
+          the old shape — so it has its own button and its own safety net, described
+          in{" "}
+          <a href="#change-type" style={{ color: "var(--brand)" }}>
+            Changing a column’s type
+          </a>
+          . And deleting a column doesn’t erase what records held — the old values are
+          simply hidden.
         </Callout>
       </Section>
 
@@ -490,6 +495,77 @@ export function GuidePage() {
           </a>
           , and{" "}
           <a href="#formulas" style={{ color: "var(--brand)" }}>formulas</a>.
+        </Callout>
+      </Section>
+
+      <Section
+        id="change-type"
+        title="Changing a column’s type, and copying a column"
+      >
+        <p>
+          Stored a year as <Ui>Text</Ui> and now want to total it? Typed dates by
+          hand and want a real date picker? You don’t have to start over. In{" "}
+          <Ui>Settings</Ui> → <Ui>Columns</Ui>, each column has two buttons beside
+          the pencil:
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Ui>Change type</Ui> (the arrows icon) — converts this column, keeping
+            its name and everything that points at it.
+          </li>
+          <li>
+            <Ui>Duplicate</Ui> (the copy icon) — makes a <em>second</em> column from
+            this one and leaves the original alone. It can keep the same type (a
+            straight copy) or take a new one.
+          </li>
+        </ul>
+
+        <h3 className="font-semibold pt-1">Nothing changes until you say so</h3>
+        <p>
+          Both work the same way, and it’s worth knowing why: the app converts your
+          values into a hidden column <em>first</em>, then shows you exactly what did
+          and didn’t work. While you’re reading that report your list is untouched —
+          every view, filter and form still sees the old column, working normally.
+          Only when you click <Ui>Apply</Ui> (or <Ui>Add column</Ui>, for a copy) does
+          anything actually change. <Ui>Discard</Ui> costs you nothing.
+        </p>
+        <p>
+          If some values can’t be converted — a <em>“n/a”</em> sitting in a column
+          you’re turning into <Ui>Number</Ui> — the report names them. Those cells end
+          up <strong>empty</strong>. You can discard, fix them, and try again.
+        </p>
+
+        <h3 className="font-semibold pt-1">Which types can become which</h3>
+        <p>
+          <Ui>Text</Ui> is the go-between. Anything can become text, and text can
+          become almost anything, so a swap the menu greys out is simply one that
+          takes two steps: convert to <Ui>Text</Ui> first, then on to what you wanted.
+          Going from <Ui>Date</Ui> to <Ui>Date &amp; time</Ui> (or back) works
+          directly. <Ui>Calculated</Ui> columns can’t take part at all — they store
+          nothing of their own, being worked out fresh each time you look.
+        </p>
+        <p>
+          Turning <Ui>Text</Ui> into <Ui>Choice</Ui> is the clever one: leave the
+          options blank and the app reads your records and offers one option per
+          distinct value it finds. Type the options yourself instead and anything
+          outside your list is reported as a failure rather than quietly added.
+        </p>
+
+        <Callout tone="tip" title="Your old values are kept">
+          Converting doesn’t throw the originals away. They’re moved into a deleted
+          column named something like <em>price__before_conversion</em>, which you can
+          bring back from{" "}
+          <a href="#bin" style={{ color: "var(--brand)" }}>Deleted columns</a> if the
+          conversion wasn’t what you hoped. Duplicating displaces nothing at all, so
+          there’s nothing to recover.
+        </Callout>
+        <Callout tone="warn" title="Required and Unique are checked at the end">
+          A report can come back with no failures and the change still be refused —
+          because <Ui>Required</Ui> and <Ui>Unique</Ui> are judged on the finished
+          column, not cell by cell. If some records would be left empty in a required
+          column, or two would end up sharing a value in a unique one, you’ll be told
+          then. Your conversion stays waiting, so you can untick the setting or fix
+          the records and apply again.
         </Callout>
       </Section>
 
