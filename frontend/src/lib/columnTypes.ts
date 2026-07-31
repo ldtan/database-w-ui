@@ -46,3 +46,16 @@ export function conversionTargets(from: ColumnType) {
     disabled: !canConvert(from, o.value),
   }));
 }
+
+/** The types a *copy* of this column could have.
+ *
+ *  Same list as a conversion's, plus the source's own type — which `canConvert`
+ *  excludes as a no-op and which is the commonest thing to want from a duplicate:
+ *  the same column again. The backend's `is_supported` already treats a same-type
+ *  pair as a straight copy. */
+export function duplicateTargets(from: ColumnType) {
+  return COLUMN_TYPE_OPTIONS.map((o) => ({
+    ...o,
+    disabled: o.value !== from && !canConvert(from, o.value),
+  }));
+}

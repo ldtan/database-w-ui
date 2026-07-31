@@ -20,7 +20,11 @@ import {
 } from "../../components/Field";
 import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
-import { COLUMN_TYPE_OPTIONS, conversionTargets } from "../../lib/columnTypes";
+import {
+  COLUMN_TYPE_OPTIONS,
+  conversionTargets,
+  duplicateTargets,
+} from "../../lib/columnTypes";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type {
@@ -66,8 +70,9 @@ interface Props {
   onHide: () => void;
   /** "convert" turns this into the first step of a type conversion: the type is
    *  chosen rather than locked, the identity fields are gone, and submitting
-   *  starts a conversion instead of saving. */
-  mode?: "edit" | "convert";
+   *  starts a conversion instead of saving. "duplicate" is the same machinery with
+   *  the other ending — it keeps the name fields, because the copy needs its own. */
+  mode?: "edit" | "convert" | "duplicate";
   /** Convert mode only — the backfill report, for the caller to review. */
   onConverted?: (report: ConversionReport) => void;
 }
@@ -97,7 +102,10 @@ export function ColumnDialog({
   const queryClient = useQueryClient();
   const toast = useToast();
   const converting = mode === "convert" && column !== null;
-  const editing = column !== null && !converting;
+  const duplicating = mode === "duplicate" && column !== null;
+  // Both post to the same endpoint; the presence of a name is what picks the ending.
+  const copying = converting || duplicating;
+  const editing = column !== null && !copying;
 
   const [displayName, setDisplayName] = useState("");
   const [name, setName] = useState("");
@@ -259,7 +267,15 @@ export function ColumnDialog({
     if (column.type === "user" && def === "current_user")
       setDefaultUser("current_user");
     if (typeof config.onupdate === "string") setOnUpdate(config.onupdate);
-  }, [visible, column, workspaceUuid, converting]);
+
+    // A duplicate keeps the source's settings — that is what makes it a copy —
+    // but must not keep its name, which is taken. `_copy` matches how cloning a
+    // list names its result.
+    if (duplicating) {
+      setName(`${column.name}_copy`.slice(0, 120));
+      setDisplayName(`${column.display_name} (copy)`);
+    }
+  }, [visible, column, workspaceUuid, converting, duplicating]);
 
   // The workspaces the user owns, plus a "Shared with me" bucket — the scopes a
   // lookup target may be drawn from.
@@ -471,13 +487,16 @@ export function ColumnDialog({
         config.onupdate = onUpdate || null;
       }
 
-      if (converting) {
-        // No name or display name: a conversion keeps the column's identity, so
-        // there is nothing to rename. Nothing about the list changes here either —
-        // this fills a hidden column and reports on it.
+      if (copying) {
+        // Same endpoint for both; sending a name is what makes the server keep the
+        // source and put the new column beside it. A conversion sends none, because
+        // it keeps the column's identity and so has nothing to rename. Either way
+        // nothing about the list changes here — this fills a hidden column.
         return api.post<ConversionReport>(
           `/lists/${listUuid}/columns/${column.uuid}/convert`,
-          { type, config },
+          duplicating
+            ? { type, config, name, display_name: displayName }
+            : { type, config },
         );
       }
       if (editing) {
@@ -495,7 +514,7 @@ export function ColumnDialog({
       });
     },
     onSuccess: (saved) => {
-      if (converting) {
+      if (copying) {
         // Deliberately no cache invalidation: the list is unchanged until the
         // conversion is applied, and refetching here would suggest otherwise.
         onConverted?.(saved as ConversionReport);
@@ -549,9 +568,11 @@ export function ColumnDialog({
       header={
         converting
           ? `Convert “${column.display_name}”`
-          : editing
-            ? `Edit “${column.display_name}”`
-            : "Add column"
+          : duplicating
+            ? `Duplicate “${column.display_name}”`
+            : editing
+              ? `Edit “${column.display_name}”`
+              : "Add column"
       }
       visible={visible}
       onHide={onHide}
@@ -560,18 +581,29 @@ export function ColumnDialog({
         <>
           <Button label="Cancel" text onClick={onHide} />
           <Button
-            label={converting ? "Convert" : editing ? "Save" : "Add column"}
+            label={
+              converting
+                ? "Convert"
+                : duplicating
+                  ? "Duplicate"
+                  : editing
+                    ? "Save"
+                    : "Add column"
+            }
             icon={
               converting
                 ? "pi pi-sync"
-                : editing
-                  ? "pi pi-check"
-                  : "pi pi-plus"
+                : duplicating
+                  ? "pi pi-copy"
+                  : editing
+                    ? "pi pi-check"
+                    : "pi pi-plus"
             }
             onClick={onSave}
             loading={save.isPending}
             disabled={
               // Identity is not editable in a conversion, so it cannot be invalid.
+              // A duplicate names a new column, so it is checked as usual.
               (!converting && (!displayName.trim() || !isValidName(name))) ||
               (type === "lookup" && !targetListUuid) ||
               // A half-configured nesting: the pairing is set together or not at all.
@@ -587,15 +619,18 @@ export function ColumnDialog({
           <Message severity="error" text={save.error.message} />
         )}
 
-        {converting && (
+        {copying && (
           <Message
             severity="info"
             className="w-full"
             content={
               <span className="text-sm">
-                Nothing changes yet. The values are converted into a hidden column
+                Nothing changes yet. The values are copied into a hidden column
                 first, and you get to read what did and did not convert before
-                deciding whether to apply it.
+                deciding whether to keep it.
+                {duplicating
+                  ? ` “${column.display_name}” is left exactly as it is.`
+                  : ""}
               </span>
             }
           />
@@ -618,12 +653,12 @@ export function ColumnDialog({
             />
           )}
           <Field
-            label={converting ? "New type" : "Type"}
+            label={converting ? "New type" : duplicating ? "Type of the copy" : "Type"}
             htmlFor="col-type"
             hint={
               editing
                 ? "A column's type cannot change: existing records already hold values in its shape."
-                : converting
+                : copying
                   ? "Greyed-out types need two steps — convert to Text first, then to the type you want."
                   : undefined
             }
@@ -632,7 +667,11 @@ export function ColumnDialog({
               inputId="col-type"
               value={type}
               options={
-                converting ? conversionTargets(column.type) : COLUMN_TYPE_OPTIONS
+                converting
+                  ? conversionTargets(column.type)
+                  : duplicating
+                    ? duplicateTargets(column.type)
+                    : COLUMN_TYPE_OPTIONS
               }
               optionDisabled="disabled"
               onChange={(e) => {

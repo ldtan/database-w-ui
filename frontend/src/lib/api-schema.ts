@@ -723,15 +723,22 @@ export interface paths {
         put?: never;
         /**
          * Start Conversion
-         * @description Convert this column's values into a new column of another type.
+         * @description Convert this column's values into a new column of another type — or copy them.
          *
          *     Changes **nothing** about the list. The converted values land in a hidden column
          *     that no view, filter, form or formula can see, and the report says what did and
          *     did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
          *     away with `DELETE` — the column keeps working normally either way until then.
          *
-         *     A conversion is only converted *in place* in the sense that committing retypes
-         *     this column and keeps its uuid, so nothing referring to it needs changing.
+         *     Two endings, chosen here by whether a `name` is supplied:
+         *
+         *     - **Without a name — a conversion.** Committing retypes *this* column, keeping
+         *       its uuid, so nothing referring to it needs changing, and the original values
+         *       go to the bin.
+         *     - **With a name — a duplicate.** Committing makes the new column live beside
+         *       this one and leaves this one untouched. Since the values already sit under the
+         *       new column's own key, that commit rewrites no records at all. The type may be
+         *       the same as the source's, which is a straight copy.
          */
         post: operations["start_conversion_api_lists__list_uuid__columns__uuid__convert_post"];
         delete?: never;
@@ -751,15 +758,17 @@ export interface paths {
         put?: never;
         /**
          * Commit Conversion
-         * @description Swap the converted values in. The point of no return.
+         * @description Make the converted values real. The point of no return.
          *
-         *     `required` and `unique` are checked here rather than during the backfill — per
-         *     cell they are the wrong question, since a blank source cell is ordinary and a
-         *     duplicate only matters once the column is real. A failure here leaves the
-         *     conversion in progress, so it can be fixed and committed again.
+         *     For a conversion this swaps them in and retypes the column; the original values
+         *     are not destroyed but land in a binned column named `<name>__before_conversion`,
+         *     restorable for the usual retention window. For a **duplicate** it only makes the
+         *     new column visible — the source is untouched and no record is rewritten.
          *
-         *     The original values are not destroyed: they land in a binned column named
-         *     `<name>__before_conversion`, restorable for the usual retention window.
+         *     `required` and `unique` are checked here rather than during the backfill, for
+         *     both endings — per cell they are the wrong question, since a blank source cell is
+         *     ordinary and a repeat only matters once the column is real. A failure here leaves
+         *     the conversion in progress, so it can be fixed and committed again.
          */
         post: operations["commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post"];
         /**
@@ -1691,6 +1700,8 @@ export interface components {
              */
             target_uuid: string;
             new_type: components["schemas"]["ColumnType"];
+            /** Duplicate */
+            duplicate: boolean;
             /** Converted */
             converted: number;
             /** Failed */
@@ -1709,10 +1720,20 @@ export interface components {
          *     a `number`, and carrying them over would be carrying over the previous type's
          *     assumptions. For `text` -> `choice`, leaving `options` unset mints one per
          *     distinct value in the source.
+         *
+         *     **Naming it makes it a duplicate.** With a `name`, the new column goes live
+         *     *beside* the source when committed rather than replacing it, and the source is
+         *     left exactly as it was — so this is equally "copy this column" and "copy it,
+         *     converting on the way". Without a `name` it is a conversion, and the column
+         *     keeps the source's identity.
          */
         ConversionStart: {
             type: components["schemas"]["ColumnType"];
             config?: components["schemas"]["ColumnConfig"];
+            /** Name */
+            name?: string | null;
+            /** Display Name */
+            display_name?: string | null;
         };
         /** CreatedUser */
         CreatedUser: {

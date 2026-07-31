@@ -19,16 +19,20 @@ interface Props {
   onDone: () => void;
 }
 
-/** Step two of a conversion: read what happened, then apply it or throw it away.
+/** Step two: read what happened, then keep it or throw it away.
  *
- *  The conversion has already run at this point — into a hidden column that no
- *  view, filter, form or formula can see — so this screen is the whole reason the
- *  feature works the way it does. Until "Apply" the list is exactly as it was, and
- *  "Discard" costs nothing because nothing ever saw the result.
+ *  The work has already run at this point — into a hidden column that no view,
+ *  filter, form or formula can see — so this screen is the whole reason the feature
+ *  works the way it does. Until it is applied the list is exactly as it was, and
+ *  discarding costs nothing because nothing ever saw the result.
  *
- *  Closing the dialog any other way discards too. Leaving a conversion in progress
- *  would block the next one on this column with a 409 that names a scratch column
- *  the person never knew existed. */
+ *  Two endings, and the wording has to be honest about which: a **conversion**
+ *  replaces the column and puts the old values in the bin, while a **duplicate**
+ *  adds a column and displaces nothing. `report.duplicate` says which.
+ *
+ *  Closing the dialog any other way discards too. Leaving one in progress would
+ *  block the next attempt on this column with a 409 that names a scratch column the
+ *  person never knew existed. */
 export function ConversionReportDialog({
   listUuid,
   column,
@@ -40,6 +44,7 @@ export function ConversionReportDialog({
   const toast = useToast();
   const base = `/lists/${listUuid}/columns/${column.uuid}/convert/${report.target_uuid}`;
   const typeLabel = TYPE_LABELS.get(newType) ?? newType;
+  const duplicate = report.duplicate;
 
   const apply = useMutation({
     mutationFn: () => api.post<Column>(base, {}),
@@ -51,8 +56,10 @@ export function ConversionReportDialog({
       queryClient.invalidateQueries({ queryKey: ["lookup-labels"] });
       queryClient.invalidateQueries({ queryKey: ["principal-labels"] });
       toast.success(
-        "Column converted",
-        `“${column.display_name}” is now ${typeLabel}.`,
+        duplicate ? "Column duplicated" : "Column converted",
+        duplicate
+          ? `Copied from “${column.display_name}”.`
+          : `“${column.display_name}” is now ${typeLabel}.`,
       );
       onDone();
     },
@@ -72,16 +79,26 @@ export function ConversionReportDialog({
 
   const busy = apply.isPending || discard.isPending;
 
+  // A duplicate displaces nothing, so it does not need the same warning — it adds
+  // a column and leaves everything else alone. Only the conversion is destructive.
+  const blank =
+    report.failed > 0
+      ? `${report.failed.toLocaleString()} value(s) could not be converted and will be left empty. `
+      : "";
+
   function confirmApply() {
+    if (duplicate && report.failed === 0) {
+      apply.mutate();
+      return;
+    }
     confirmDialog({
-      header: `Convert to ${typeLabel}?`,
+      header: duplicate ? "Add the copy?" : `Convert to ${typeLabel}?`,
       icon: "pi pi-exclamation-triangle",
-      message:
-        report.failed > 0
-          ? `${report.failed.toLocaleString()} value(s) could not be converted and will be left empty. The originals are kept in a deleted column named “${column.name}__before_conversion”, which you can restore from Deleted columns.`
-          : `“${column.display_name}” becomes ${typeLabel}. The original values are kept in a deleted column named “${column.name}__before_conversion”, which you can restore from Deleted columns.`,
-      acceptLabel: "Convert",
-      acceptClassName: report.failed > 0 ? "p-button-danger" : undefined,
+      message: duplicate
+        ? `${blank}“${column.display_name}” itself is not changed.`
+        : `${blank || `“${column.display_name}” becomes ${typeLabel}. `}The original values are kept in a deleted column named “${column.name}__before_conversion”, which you can restore from Deleted columns.`,
+      acceptLabel: duplicate ? "Add column" : "Convert",
+      acceptClassName: !duplicate || report.failed > 0 ? "p-button-danger" : undefined,
       rejectLabel: "Cancel",
       accept: () => apply.mutate(),
     });
@@ -89,7 +106,11 @@ export function ConversionReportDialog({
 
   return (
     <AppDialog
-      header={`Convert “${column.display_name}” to ${typeLabel}`}
+      header={
+        duplicate
+          ? `Duplicate “${column.display_name}” as ${typeLabel}`
+          : `Convert “${column.display_name}” to ${typeLabel}`
+      }
       visible
       onHide={() => {
         if (!busy) discard.mutate();
@@ -105,7 +126,7 @@ export function ConversionReportDialog({
             disabled={apply.isPending}
           />
           <Button
-            label="Apply"
+            label={duplicate ? "Add column" : "Apply"}
             icon="pi pi-check"
             onClick={confirmApply}
             loading={apply.isPending}
@@ -140,7 +161,11 @@ export function ConversionReportDialog({
         {report.failed === 0 ? (
           <Message
             severity="success"
-            text="Every value converted. Nothing has changed yet — apply it to make it so."
+            text={
+              duplicate
+                ? "Every value copied. Nothing has changed yet — add the column to keep it."
+                : "Every value converted. Nothing has changed yet — apply it to make it so."
+            }
           />
         ) : (
           <Message
