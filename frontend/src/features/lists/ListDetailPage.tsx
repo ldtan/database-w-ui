@@ -67,6 +67,23 @@ type SortOrder = 1 | 0 | -1 | null | undefined;
  *  that filters, and being able to look past one is the point. */
 const EMPTY_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
 
+/** How long the grid waits after the last cell commit before asking the server
+ *  what else moved. Long enough that tabbing across a row is one burst, short
+ *  enough that a single edit settles while you are still looking at it. */
+const SETTLE_DELAY_MS = 800;
+
+/** One page with one record replaced, or the page untouched if it is not on it. */
+function withItem(
+  page: Page<ListItem>,
+  uuid: string,
+  next: (item: ListItem) => ListItem,
+): Page<ListItem> {
+  return {
+    ...page,
+    items: page.items.map((item) => (item.uuid === uuid ? next(item) : item)),
+  };
+}
+
 // Split out of the bundle: the decoder it pulls in is ~110 kB gzipped — a quarter
 // of the whole app — for a dialog most sessions never open. It arrives when the
 // scanner does. (`qrFill`, which is small and pure, stays in the main bundle.)
@@ -332,6 +349,25 @@ export function ListDetailPage() {
         err instanceof ApiError ? err.message : undefined,
       ),
   });
+  // A row of cells tabbed across is one edit gesture, not ten. Each write settles
+  // its own record from the response, so what is left for a refetch is everything
+  // a record cannot answer for on its own: whether it still matches the active
+  // filter, where it now sorts, and what the metric cards above it add up to.
+  // Those want one answer after the burst, not one per cell.
+  const settleTimer = useRef<number | null>(null);
+  const scheduleSettle = () => {
+    if (settleTimer.current !== null) window.clearTimeout(settleTimer.current);
+    settleTimer.current = window.setTimeout(() => {
+      settleTimer.current = null;
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+    }, SETTLE_DELAY_MS);
+  };
+  useEffect(
+    () => () => {
+      if (settleTimer.current !== null) window.clearTimeout(settleTimer.current);
+    },
+    [],
+  );
   // One cell, committed on its own. `PATCH /items/{uuid}` merges the keys it is
   // given onto the stored record, so the body is the one column that changed (plus
   // any lookup nested under it, which `cellPatch` clears) rather than the record.
@@ -341,7 +377,7 @@ export function ListDetailPage() {
         data: vars.patch,
       }),
     // Show the value the moment it is committed. Without this the cell falls back
-    // to what it held until the refetch lands — a visible flick back to the old
+    // to what it held until the write lands — a visible flick back to the old
     // value on every edit, which reads as the save having failed.
     //
     // Keyed on the *pages* rather than on `["items", listUuid]`, which is the
@@ -350,32 +386,46 @@ export function ListDetailPage() {
     // object with no `items` throws — inside `onMutate`, which runs before
     // `mutationFn`, so the PATCH would never even be sent.
     onMutate: (vars) => {
+      // Snapshotted before the write so that a refusal can be taken back without
+      // asking the server anything. A refetch cannot do that job: offline there
+      // is nothing to refetch, and the value the server rejected would sit on
+      // screen until the connection came back.
+      const previous = queryClient.getQueriesData<Page<ListItem>>({
+        queryKey: recordPagesKey(listUuid),
+      });
       queryClient.setQueriesData<Page<ListItem>>(
         { queryKey: recordPagesKey(listUuid) },
         (page) =>
-          page && {
-            ...page,
-            items: page.items.map((item) =>
-              item.uuid === vars.uuid
-                ? { ...item, data: { ...item.data, ...vars.patch } }
-                : item,
-            ),
-          },
+          page &&
+          withItem(page, vars.uuid, (item) => ({
+            ...item,
+            data: { ...item.data, ...vars.patch },
+          })),
+      );
+      return { previous };
+    },
+    // The record the PATCH already answered with: the server's own rendering,
+    // calculated columns recomputed and `onupdate` columns stamped. Refetching the
+    // page to ask again would be a slower way to learn less than we already hold.
+    onSuccess: (saved) => {
+      queryClient.setQueriesData<Page<ListItem>>(
+        { queryKey: recordPagesKey(listUuid) },
+        (page) => page && withItem(page, saved.uuid, () => saved),
       );
     },
-    onError: (err) =>
+    onError: (err, _vars, context) => {
+      for (const [key, page] of context?.previous ?? []) {
+        queryClient.setQueryData(key, page);
+      }
       toast.error(
         "Could not save that value",
         err instanceof ApiError ? err.message : undefined,
-      ),
-    // Both outcomes land here, and for the same reason: what is on screen is a
-    // guess. A save that worked may have recomputed a calculated column, restamped
-    // an `onupdate` one, or moved the record out of the filter it no longer
-    // matches; a save that failed left an optimistic value the server never
-    // accepted. Refetching settles it either way, so the rejected edit reverts
-    // itself and the toast explains why.
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] }),
+      );
+    },
+    // What is left after the row has settled itself: whether it still belongs on
+    // this page at all, and the totals above it. Debounced, because that question
+    // has one answer per burst of edits rather than one per cell.
+    onSettled: scheduleSettle,
   });
   const setListInherit = useMutation({
     mutationFn: (value: boolean) =>
