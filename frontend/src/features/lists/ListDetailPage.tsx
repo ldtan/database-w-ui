@@ -1144,6 +1144,8 @@ export function ListDetailPage() {
                     listUuid,
                     principalUuids,
                     lookupUuids,
+                    "compact",
+                    kind === "inline" && canItem(row.uuid, "edit"),
                   );
                   // Rich text and multiline have no cell-sized editor, so the
                   // click goes where their editor lives instead of doing nothing.

@@ -31,6 +31,9 @@ export function renderCell(
   principalUuids: Record<PrincipalType, string[]>,
   lookupUuids: Map<string, string[]>,
   variant: CellVariant = "compact",
+  /** The grid is in edit mode and this cell will open an editor. Defaults to
+   *  false so the card list and the read-only dialog are unaffected. */
+  editing = false,
 ) {
   const value = row.data?.[column.uuid];
   // Reference cells are handed the uuids the *whole page* holds, and resolve them
@@ -67,6 +70,12 @@ export function renderCell(
     const href = safeHref(column, value);
     // A value the scheme check rejects is shown as plain text, never an anchor.
     if (!href) return String(value);
+    // Nor is it an anchor while the cell is an editor. The `stopPropagation`
+    // below exists so that following a link does not also select the row, and in
+    // edit mode it eats the click the cell needs — leaving a cell drawn as
+    // editable that opens a browser tab instead. Edit mode is already a mode
+    // where a click means something else; turning it off makes this a link again.
+    if (editing) return linkLabel(column, href);
     return (
       <a
         href={href}
