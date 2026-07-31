@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Column } from "../../lib/types";
 import { cellPatch, type CellDraft } from "./cellEdit";
+import { deserialize, toStored } from "./recordValues";
 
 function column(over: Partial<Column> = {}): Column {
   return {
@@ -21,21 +22,24 @@ function draft(over: Partial<CellDraft>): CellDraft {
 describe("cellPatch", () => {
   it("sends nothing when the draft was never touched", () => {
     const col = column();
+    // Typing a value and putting it back is the same draft state — CellDraft
+    // carries only the seed and the current value, so the two gestures are
+    // indistinguishable here by construction.
     expect(cellPatch([col], col, draft({ initial: "Ada", value: "Ada" }))).toBeNull();
   });
 
-  // The temporal round trip: `deserialize` turns a stored "14:30" into a Date and
-  // `serialize` writes it back as "14:30:00". Compared against the stored string
-  // that looks like an edit; compared against the seed it is what it is — nothing.
   it("sends nothing when an untouched temporal value fails to round-trip", () => {
     const col = column({ type: "time" });
-    const seeded = new Date(2026, 6, 12, 14, 30, 0);
-    expect(cellPatch([col], col, draft({ initial: seeded, value: seeded }))).toBeNull();
-  });
+    const stored = "14:30";
+    const seeded = deserialize(col, stored);
 
-  it("sends nothing when a typed value is put back the way it was", () => {
-    const col = column();
-    expect(cellPatch([col], col, draft({ initial: "Ada", value: "Ada" }))).toBeNull();
+    // The round trip really is lossy — this is the bug's precondition, and
+    // without it the test below would pass for the wrong reason.
+    expect(toStored(col, seeded)).not.toBe(stored);
+
+    // ...and comparing the draft against its seed absorbs that, rather than
+    // inventing an edit out of the difference.
+    expect(cellPatch([col], col, draft({ initial: seeded, value: seeded }))).toBeNull();
   });
 
   it("sends the new value when it changed", () => {
