@@ -23,6 +23,7 @@ settings.DISABLE_AUTH = True
 import src.infrastructure.model_registry  # noqa: E402,F401
 
 from main import create_app  # noqa: E402
+from src.auth.tokens import throttle  # noqa: E402
 from src.auth.users.schemas import UserCreate  # noqa: E402
 from src.auth.users.services import UserService  # noqa: E402
 from src.infrastructure import database as db_module  # noqa: E402
@@ -55,6 +56,17 @@ async def _ensure_database() -> None:
             await admin.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
     finally:
         await admin.close()
+
+
+@pytest.fixture(autouse=True)
+def _clean_login_throttle():
+    """Login failure counters live in the process, not in the database, so the
+    per-test database teardown does not touch them. Without this a test that
+    guesses passwords would leave a locked-out username behind for the next
+    one — and the order tests run in would start to matter."""
+    throttle.reset()
+    yield
+    throttle.reset()
 
 
 @pytest_asyncio.fixture

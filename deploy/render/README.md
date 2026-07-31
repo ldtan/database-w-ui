@@ -67,6 +67,18 @@ a name is taken, and a wrong host in that rewrite 404s every request in the app.
 ever has to go, the fallback is a `VITE_API_BASE` env var in the client plus `ALLOWED_ORIGINS`
 set to the site's URL.
 
+**The API is on a public URL, and that is not a misconfiguration.** `dbui-api.onrender.com`
+answers anyone — the rewrite above is a convenience, not a shield, and it proxies to that same
+public hostname. Nor could it be otherwise: the SPA runs in each visitor's browser, so any
+request the app makes, `curl` makes identically. What protects it is the bearer token every
+route requires (`401` without one), plus the failure limits on login, which is the only route
+that has to answer an unproven caller. `ALLOWED_ORIGINS` is not part of that: CORS governs
+what other browser pages may read, and scripts ignore it. The unauthenticated surface is
+`/health`, `/docs`, `/redoc`, `/openapi.json` and the three `…/auth/tokens` routes — worth
+re-checking with an unauthenticated `curl` after any change to how routers are mounted, since
+the token requirement is declared per router (`dependencies=[Depends(get_current_user)]`) and
+a new router added without it would be open.
+
 **No container.** The app needs Python 3.14 (every entity's public id comes from `uuid.uuid7`,
 `src/core/mixins.py`), and Render's native runtime installs any released version, so
 `backend/.python-version` is enough. A Dockerfile would only add build time.

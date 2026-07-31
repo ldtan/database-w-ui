@@ -7,11 +7,14 @@ permissions entirely -- or add themselves to a group and inherit its grants.
 """
 from contextlib import asynccontextmanager
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from pydantic import ValidationError
 
 from main import create_app
 from src.auth.dependencies import get_current_user
+from src.core.config import Settings
 from src.auth.users.models import (
     AUTHENTICATED_USERS_DISPLAY_NAME,
     AUTHENTICATED_USERS_NAME,
@@ -293,6 +296,30 @@ async def test_the_last_superuser_cannot_be_removed(make_client, session_factory
             f"/api/auth/users/{admin_uuid}", json={"is_superuser": False}
         )
         assert resp.status_code == 200
+
+
+def test_auth_cannot_be_disabled_outside_debug():
+    """DISABLE_AUTH does not just skip the token check — it resolves every
+    caller to the first row of the users table, which is the superuser. One
+    mistyped environment variable on a public deployment would hand the whole
+    app to anyone who can reach the URL, so it must not be reachable by
+    accident. Refusing to construct beats refusing per request: the maintenance
+    jobs and the demo seeder read this object too, and never see create_app.
+    """
+    required = {
+        "SECRET_KEY": "s",
+        "AUTH_SALT": "a",
+        "RSA_PRIVATE_KEY_PATH": "./keys/private.pem",
+        "RSA_PUBLIC_KEY_PATH": "./keys/public.pem",
+        "DATABASE_URI": "postgresql+asyncpg://u:p@localhost:5432/db",
+    }
+    # _env_file=None so this tests the guard, not whatever the local .env says.
+    with pytest.raises(ValidationError, match="DISABLE_AUTH"):
+        Settings(_env_file=None, DISABLE_AUTH=True, DEBUG=False, **required)
+
+    # The two legitimate combinations still build.
+    assert Settings(_env_file=None, DISABLE_AUTH=True, DEBUG=True, **required)
+    assert Settings(_env_file=None, DISABLE_AUTH=False, DEBUG=False, **required)
 
 
 async def test_reads_stay_open_so_sharing_still_works(make_client, session_factory):
