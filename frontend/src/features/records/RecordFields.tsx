@@ -22,7 +22,7 @@ import { InputTextarea } from "primereact/inputtextarea";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
-import { nestedDescendants, type ResolvedField } from "./recordValues";
+import { clearedNested, type ResolvedField } from "./recordValues";
 
 /**
  * The rich text toolbar, spelled out rather than left to Quill's default.
@@ -285,13 +285,13 @@ export function RecordFields({
             column={column}
             value={values[column.uuid]}
             disabled={!enabled}
-            onChange={(v) => {
-              const next = { ...values, [column.uuid]: v };
-              for (const uuid of nestedDescendants(columns, column.uuid)) {
-                next[uuid] = null;
-              }
-              onChange(next);
-            }}
+            onChange={(v) =>
+              onChange({
+                ...values,
+                [column.uuid]: v,
+                ...clearedNested(columns, column.uuid),
+              })
+            }
             columns={columns}
             values={values}
           />

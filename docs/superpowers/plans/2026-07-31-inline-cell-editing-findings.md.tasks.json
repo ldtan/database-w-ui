@@ -1,0 +1,129 @@
+{
+  "planPath": "docs/superpowers/plans/2026-07-31-inline-cell-editing-findings.md",
+  "tasks": [
+    {
+      "id": 0,
+      "subject": "Task 1: Add the vitest harness",
+      "status": "pending",
+      "description": "**Goal:** `npm test` runs pure-logic tests in a node environment, proven by a real test of the namespace split that fixed #1.\n\n**Files:**\n- Modify: `frontend/package.json`\n- Modify: `frontend/vite.config.ts`\n- Create: `frontend/src/features/records/recordKeys.test.ts`\n\n**Acceptance Criteria:**\n- [ ] `npm test` runs and reports 2 passing tests\n- [ ] The test environment is node — no jsdom in `package.json`\n- [ ] Test globals are imported explicitly, so `tsconfig.json` needs no `types` entry\n- [ ] `npx tsc --noEmit` stays clean with the new `.test.ts` file under `src`\n\n**Verify:** `cd frontend && npm test` → `Test Files 1 passed (1)` / `Tests 2 passed (2)`\n\nFull steps with code in `docs/superpowers/plans/2026-07-31-inline-cell-editing-findings.md` → Task 1. Branch `fix/cell-write-recovery-and-duplication` is created in this task's final step.\n\n```json:metadata\n{\"files\": [\"frontend/package.json\", \"frontend/vite.config.ts\", \"frontend/src/features/records/recordKeys.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"npm test reports 2 passing tests\", \"environment is node, no jsdom\", \"globals imported explicitly, no tsconfig types entry\", \"tsc --noEmit clean\"], \"modelTier\": \"mechanical\"}\n```"
+    },
+    {
+      "id": 1,
+      "subject": "Task 2: Split pure cell rules out, de-duplicate them",
+      "status": "pending",
+      "description": "**Goal:** `cellPatch` and friends live in a module a node test can import, and the two rules they duplicated from the dialog have one home each (#13).\n\n**Files:**\n- Create: `frontend/src/features/records/cellEdit.ts`\n- Create: `frontend/src/features/records/cellEdit.test.ts`\n- Create: `frontend/src/features/records/recordValues.test.ts`\n- Modify: `frontend/src/features/records/recordValues.ts` (add `toStored`, `clearedNested`; rewrite `buildRecordData`'s editing branch)\n- Modify: `frontend/src/features/records/inlineEdit.tsx` (remove everything but `InlineCellEditor`)\n- Modify: `frontend/src/features/records/RecordFields.tsx:288-293`\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:39-45` (imports)\n\n**Acceptance Criteria:**\n- [ ] `cellEdit.ts` exports `CellEditKind`, `cellEditKinds`, `cellEditKind`, `CellDraft`, `cellPatch` and imports no React\n- [ ] `inlineEdit.tsx` exports only `InlineCellEditor`\n- [ ] `toSend` is deleted, not aliased\n- [ ] `recordValues.ts` exports `toStored` and `clearedNested`; `buildRecordData` and `cellPatch` both use `toStored`; `RecordFields` and `cellPatch` both use `clearedNested`\n- [ ] An untouched draft produces `null`, including for a `time` column holding `\"14:30\"`\n\n**Verify:** `cd frontend && npm test` → `Tests 11 passed (11)`\n\nFull steps with code in the plan doc → Task 2.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/cellEdit.ts\", \"frontend/src/features/records/cellEdit.test.ts\", \"frontend/src/features/records/recordValues.ts\", \"frontend/src/features/records/recordValues.test.ts\", \"frontend/src/features/records/inlineEdit.tsx\", \"frontend/src/features/records/RecordFields.tsx\", \"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"cellEdit.ts imports no React\", \"inlineEdit.tsx exports only InlineCellEditor\", \"toSend deleted not aliased\", \"toStored and clearedNested each have one home and two callers\", \"untouched draft returns null including the 14:30 temporal case\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "subject": "Task 3: Trust the draft over the event's row (#4)",
+      "status": "pending",
+      "description": "**Goal:** A cell edit survives the grid repaging underneath it, instead of being discarded without a word (#4).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:505-527` (`commitCell`)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:1135` (`onCellEditComplete`)\n\n**Acceptance Criteria:**\n- [ ] `commitCell` takes no arguments and reads the record and the column from the draft\n- [ ] The only bail-out besides \"no draft\" is a column that no longer exists\n- [ ] `onCellEditComplete` is `() => commitCell()`\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm test` → no output, then `Tests 11 passed (11)`\n\nFull steps with code in the plan doc → Task 3.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test\", \"acceptanceCriteria\": [\"commitCell takes no arguments\", \"record and column both resolved from the draft\", \"only remaining bail is a deleted column\", \"onCellEditComplete is () => commitCell()\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        1
+      ]
+    },
+    {
+      "id": 3,
+      "subject": "Task 4: Roll back on error, keep the returned record (#7)",
+      "status": "pending",
+      "description": "**Goal:** A refused cell write leaves nothing behind even offline, and a burst of writes costs one refetch rather than one each (#7).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:338-379` (`saveCell`)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (module scope: `SETTLE_DELAY_MS`, `withItem`)\n\n**Acceptance Criteria:**\n- [ ] `onMutate` snapshots with `getQueriesData` and returns `{ previous }`\n- [ ] `onError` restores the snapshot before showing the toast\n- [ ] `onSuccess` writes the returned `ListItem` into the cached pages\n- [ ] `onSettled` schedules a debounced invalidate; the timer is cleared on unmount\n- [ ] Ten commits in quick succession produce one invalidate\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no typecheck output, then `✓ built`\n\nFull steps with code in the plan doc → Task 4.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"onMutate returns { previous } from getQueriesData\", \"onError restores the snapshot before the toast\", \"onSuccess writes the returned ListItem into cached pages\", \"onSettled debounced and cleared on unmount\", \"a burst of commits produces one invalidate\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        2
+      ]
+    },
+    {
+      "id": 4,
+      "subject": "Task 5: Ship PR 1",
+      "status": "pending",
+      "description": "**Goal:** PR 1 is merged into `main` and `main` is synced locally.\n\n**Files:** none — git and `gh` only.\n\n**Acceptance Criteria:**\n- [ ] `npx tsc --noEmit`, `npm test` and `npm run build` all pass on the branch tip\n- [ ] PR body names the findings closed (#4, #7, #13) and the structural split\n- [ ] PR merged, local `main` fast-forwarded, tree clean\n\n**Verify:** `gh pr view <n> --json state` → `{\"state\":\"MERGED\"}`\n\nFull commands and PR body in the plan doc → Task 5. No AI attribution in the commit or PR. If `git pull` fails with `Recv failure: Connection was reset`, retry once — TLS interception here makes that intermittent.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view --json state\", \"acceptanceCriteria\": [\"tsc, npm test and build all pass on branch tip\", \"PR body names #4, #7, #13 and the cellEdit.ts split\", \"PR merged and local main fast-forwarded clean\"], \"modelTier\": \"mechanical\"}\n```",
+      "blockedBy": [
+        3
+      ]
+    },
+    {
+      "id": 5,
+      "subject": "Task 6: One vocabulary for text modes (#12)",
+      "status": "pending",
+      "description": "**Goal:** The `rich` / `multiline` / everything-else rule is stated once and read by all three surfaces that branch on it (#12).\n\n**Files:**\n- Modify: `frontend/src/features/records/recordValues.ts` (add `TextMode`, `textMode`, `needsFullEditor`)\n- Modify: `frontend/src/features/records/cellEdit.ts:cellEditKinds`\n- Modify: `frontend/src/features/records/RecordFields.tsx:94-121`\n- Modify: `frontend/src/features/records/renderCell.tsx:86-111`\n- Modify: `frontend/src/features/records/recordValues.test.ts`\n- Modify: `frontend/src/features/records/cellEdit.test.ts`\n\n**Acceptance Criteria:**\n- [ ] `textMode` returns `\"single\"` for a non-text column, an unset mode, and an unrecognised mode\n- [ ] `cellEditKinds`, `RecordFields` and `renderCell` all call `textMode`; none of them reads `config.text_mode` directly\n- [ ] `cellEditKinds` returns `\"dialog\"` for rich and multiline, `\"inline\"` otherwise, `\"locked\"` when disabled\n\n**Verify:** `cd frontend && npm test` → `Tests 18 passed (18)`\n\nFull steps with code in the plan doc → Task 6. Branch `fix/cell-affordance-and-keyboard-reach` is created in this task's final step.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/recordValues.ts\", \"frontend/src/features/records/cellEdit.ts\", \"frontend/src/features/records/RecordFields.tsx\", \"frontend/src/features/records/renderCell.tsx\", \"frontend/src/features/records/recordValues.test.ts\", \"frontend/src/features/records/cellEdit.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"textMode returns single for non-text, unset and unrecognised\", \"no surface reads config.text_mode directly any more\", \"cellEditKinds maps rich/multiline to dialog, else inline, disabled to locked\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        4
+      ]
+    },
+    {
+      "id": 6,
+      "subject": "Task 7: A link cell in edit mode opens its editor (#5)",
+      "status": "pending",
+      "description": "**Goal:** A link column stops advertising an editor it will not open (#5).\n\n**Files:**\n- Modify: `frontend/src/features/records/renderCell.tsx:26-33` (signature) and `:65-81` (link branch)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the column `body`)\n\n**Acceptance Criteria:**\n- [ ] `renderCell` takes `editing = false` as its last parameter\n- [ ] `RecordCards` and `RecordViewDialog` are untouched and get the default\n- [ ] With the mode on and the row editable, a link cell renders `linkLabel(...)` as text, no `<a>`\n- [ ] With the mode off, the anchor is back\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 7.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/renderCell.tsx\", \"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"renderCell takes editing = false as its last parameter\", \"RecordCards and RecordViewDialog untouched\", \"link cell renders plain label in edit mode on an editable row\", \"anchor returns when the mode is off\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        5
+      ]
+    },
+    {
+      "id": 7,
+      "subject": "Task 8: Escape closes the panel, not the cell edit (#10)",
+      "status": "pending",
+      "description": "**Goal:** Dismissing a dropdown's overlay with Escape stops throwing away the option just chosen (#10).\n\n**Files:**\n- Modify: `frontend/src/features/records/inlineEdit.tsx` (`InlineCellEditor`'s wrapper)\n\n**Acceptance Criteria:**\n- [ ] `onKeyDownCapture` records whether `[data-pr-is-overlay]` is in the document when Escape is pressed\n- [ ] `onKeyDown` on the same element stops propagation only when that ref is set, and resets it\n- [ ] Escape on a cell with no overlay open still cancels the edit\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 8. Do NOT key this off `event.defaultPrevented`: `dropdown.cjs.js:1187-1190` calls `preventDefault()` whether or not a panel is open, so that flag is set on every Escape in a dropdown and swallowing it would break cancel outright.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/inlineEdit.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"capture handler samples [data-pr-is-overlay] on Escape\", \"bubble handler stops propagation only when the ref is set, and resets it\", \"Escape with no overlay open still cancels the cell edit\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        6
+      ]
+    },
+    {
+      "id": 8,
+      "subject": "Task 9: Keyboard reach for record-opening cells (#11)",
+      "status": "pending",
+      "description": "**Goal:** Rich-text and multiline columns stop being mouse-only in edit mode (#11).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `kind === \"dialog\"` branch of the column `body`)\n\n**Acceptance Criteria:**\n- [ ] The span has `role=\"button\"`, `tabIndex={0}` and an `aria-label` naming the column\n- [ ] Enter and Space open the record dialog; Space does not scroll the page\n- [ ] The existing `title` is kept\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 9.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"span has role=button, tabIndex=0 and an aria-label naming the column\", \"Enter and Space open the dialog and Space does not scroll\", \"existing title preserved\"], \"modelTier\": \"mechanical\"}\n```",
+      "blockedBy": [
+        7
+      ]
+    },
+    {
+      "id": 9,
+      "subject": "Task 10: Ship PR 2",
+      "status": "pending",
+      "description": "**Goal:** PR 2 is merged into `main` and `main` is synced locally.\n\n**Files:** none — git and `gh` only.\n\n**Acceptance Criteria:**\n- [ ] `npx tsc --noEmit`, `npm test` and `npm run build` all pass on the branch tip\n- [ ] PR body names the findings closed (#5, #10, #11, #12) and cites the PrimeReact lines behind #10\n- [ ] PR merged, local `main` fast-forwarded, tree clean\n\n**Verify:** `gh pr view <n> --json state` → `{\"state\":\"MERGED\"}`\n\nFull commands and PR body in the plan doc → Task 10. No AI attribution in the commit or PR.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view --json state\", \"acceptanceCriteria\": [\"tsc, npm test and build all pass on branch tip\", \"PR body names #5, #10, #11, #12 and cites dropdown.cjs.js:1187-1190 and datatable.cjs.js:1232-1238\", \"PR merged and local main fast-forwarded clean\"], \"modelTier\": \"mechanical\"}\n```",
+      "blockedBy": [
+        8
+      ]
+    },
+    {
+      "id": 10,
+      "subject": "Task 11: A stamped column is shown, not typed into (#9)",
+      "status": "pending",
+      "description": "**Goal:** A column with `config.onupdate` comes back read-only from `resolveFields`, so neither the grid nor the dialog offers an input the server will overwrite (#9).\n\n**Files:**\n- Modify: `frontend/src/features/records/recordValues.ts:40-74` (`resolveFields`)\n- Modify: `frontend/src/features/records/recordValues.test.ts`\n\n**Acceptance Criteria:**\n- [ ] A column with `config.onupdate` set comes back `enabled: false` from all three branches of `resolveFields` — configured, appended, and the no-config default\n- [ ] It comes back `enabled: false` even when the form config says `enabled: true`\n- [ ] It is still *present* in the result — not filtered out — so `RecordViewDialog` and `RecordFormDialog` still show it\n- [ ] A column without `onupdate` is unaffected\n\n**Verify:** `cd frontend && npm test` → `Tests 22 passed (22)`\n\nFull steps with code in the plan doc → Task 11. Branch `fix/cell-permission-gating` is created in this task's final step.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/recordValues.ts\", \"frontend/src/features/records/recordValues.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"onupdate column is enabled: false in all three resolveFields branches\", \"stays disabled even when the form config enables it\", \"still present in the result, not filtered out\", \"a column without onupdate is unaffected\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        9
+      ]
+    },
+    {
+      "id": 11,
+      "subject": "Task 12: One editability answer per column (#14)",
+      "status": "pending",
+      "description": "**Goal:** The class, the body and the edit gate cannot disagree about the same cell (#14).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `visibleCols.map` block)\n- Modify: `frontend/src/features/records/cellEdit.ts` (delete `cellEditKind`)\n\n**Acceptance Criteria:**\n- [ ] One `isEditable(row)` per column drives `bodyClassName`, `body` and `onBeforeCellEditShow`\n- [ ] `cellEditKind` is deleted and its `?? \"locked\"` folded into the map read\n- [ ] Behaviour is unchanged: a locked column, and a row the caller cannot edit, still render flat and still refuse the editor\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no output, then `✓ built`\n\nFull steps with code in the plan doc → Task 12.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\", \"frontend/src/features/records/cellEdit.ts\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"one isEditable(row) per column drives all three callbacks\", \"cellEditKind deleted and its default folded into the map read\", \"locked columns and non-editable rows behave as before\"], \"modelTier\": \"standard\"}\n```",
+      "blockedBy": [
+        10
+      ]
+    },
+    {
+      "id": 12,
+      "subject": "Task 13: Break the stale permission closure (#8)",
+      "status": "pending",
+      "description": "**Goal:** Cells that become editable after the permission query resolves actually become editable (#8) — with the render cost measured before the approach is locked in.\n\n> **USER-ORDERED GATE — NON-SKIPPABLE.** This task was requested by the user in the current conversation. It MUST NOT be closed by walking around it, by declaring it \"verified inline\", or by substituting a cheaper check. Close only after every item in `acceptanceCriteria` has been re-validated independently, with output captured.\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `<DataTable>` element)\n- Modify (fallback branch only): `frontend/src/features/permissions/useEffectiveActions.ts`\n\n**Acceptance Criteria:**\n- [ ] `cellMemo={false}` is set on the `<DataTable>` with a comment naming why the memo cannot be narrowed\n- [ ] The grid is exercised on a real list with the permission map resolving late, and the affordance appears on rows the caller may edit\n- [ ] Interaction cost is observed on a full page and reported with what was measured and how\n- [ ] If the cost is judged unacceptable, `cellMemo={false}` is reverted and `editMode` is instead gated on the effective-actions query settling — and the narrower hole (a mid-session Share change) is stated in the commit message\n\n**Verify:** Run the app (`uvicorn main:create_app --factory` on :5000, `npm run dev`, open `http://localhost:5173` — not 127.0.0.1, vite binds IPv6 here), load a list seeded by `uv run --system-certs python -m src.demo.school`, toggle \"Edit cells\", and exercise the grid. Capture what was measured.\n\nFull steps, including the complete fallback code for `ActionsMap`, in the plan doc → Task 13.\n\n```json:metadata\n{\"userGate\": true, \"tags\": [\"user-gate\"], \"requiresUserSpecification\": true, \"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\", \"frontend/src/features/permissions/useEffectiveActions.ts\"], \"verifyCommand\": \"cd frontend && npm run dev  # then exercise the grid by hand on the school demo list\", \"acceptanceCriteria\": [\"cellMemo={false} set with a comment naming why the memo cannot be narrowed\", \"affordance appears on rows whose permissions resolved after first paint\", \"interaction cost observed on a full page and reported with method\", \"if cost unacceptable, reverted to gating editMode and the narrower hole stated\"], \"modelTier\": \"frontier\"}\n```",
+      "blockedBy": [
+        11
+      ]
+    },
+    {
+      "id": 13,
+      "subject": "Task 14: Ship PR 3",
+      "status": "pending",
+      "description": "**Goal:** PR 3 is merged into `main`, closing the last of the fourteen review findings.\n\n**Files:** none — git and `gh` only.\n\n**Acceptance Criteria:**\n- [ ] `npx tsc --noEmit`, `npm test` and `npm run build` all pass on the branch tip\n- [ ] PR body names the findings closed (#8, #9, #14) and reports Task 13's measurement\n- [ ] PR merged, local `main` fast-forwarded, tree clean\n- [ ] All fourteen findings from the original review are accounted for\n\n**Verify:** `gh pr view <n> --json state` → `{\"state\":\"MERGED\"}`\n\nFull commands and PR body in the plan doc → Task 14. The PR body carries a slot for Task 13's measurement — fill it with what was actually observed, do not leave the placeholder. No AI attribution in the commit or PR.\n\nFinal accounting: #1, #2, #3, #6 in PRs #42/#43; #4, #7, #13 in PR 1; #5, #10, #11, #12 in PR 2; #8, #9, #14 in PR 3.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view --json state\", \"acceptanceCriteria\": [\"tsc, npm test and build all pass on branch tip\", \"PR body names #8, #9, #14 and reports the Task 13 measurement with no placeholder left\", \"PR merged and local main fast-forwarded clean\", \"all fourteen original findings accounted for\"], \"modelTier\": \"mechanical\"}\n```",
+      "blockedBy": [
+        12
+      ]
+    }
+  ],
+  "lastUpdated": "2026-07-31T11:41:32.436925+08:00"
+}
