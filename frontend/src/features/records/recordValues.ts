@@ -204,12 +204,6 @@ export function clearedNested(
  * surfaces branch on it and must not drift: which editor the dialog renders, how
  * the value displays in a cell or a dialog, and whether a grid cell can hold an
  * editor at all.
- *
- * One reader is deliberately not among them: `lib/display.ts` asks the narrower
- * question "is this value HTML?" and still reads the config key itself. It cannot
- * call this without `lib` importing from `features`, which is the wrong way round
- * — folding it in means moving this accessor down beside `TextMode` in
- * `lib/types.ts`, which is a bigger move than one rule is worth today.
  */
 export function textMode(column: Column): TextMode {
   if (column.type !== "text") return "single";

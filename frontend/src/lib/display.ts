@@ -1,5 +1,3 @@
-import type { Column } from "./types";
-
 /**
  * The visible words of a rich text cell, with the markup taken out.
  *
@@ -20,16 +18,4 @@ export function stripHtml(value: string): string {
     .querySelectorAll("p, div, li, h1, h2, h3, h4, h5, h6, blockquote, pre, br, tr")
     .forEach((el) => el.after(doc.createTextNode(" ")));
   return (doc.body.textContent ?? "").replace(/\s+/g, " ").trim();
-}
-
-// Plain-text rendering of a cell value, used where JSX is not wanted (e.g. the
-// label of a lookup option). Lookup columns are resolved elsewhere.
-export function displayText(column: Column, value: unknown): string {
-  if (value === null || value === undefined || value === "") return "";
-  if (column.type === "checkbox") return value ? "✓" : "✗";
-  if (column.type === "text" && column.config.text_mode === "rich") {
-    return stripHtml(String(value));
-  }
-  // A choice cell stores the option itself, so the default path covers it.
-  return String(value);
 }
