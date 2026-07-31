@@ -17,6 +17,7 @@ import { RowActions } from "../../components/RowActions";
 import { SearchInput } from "../../components/SearchInput";
 import { SkeletonRows } from "../../components/Skeleton";
 import { UserAvatar } from "../../components/UserAvatar";
+import { BatchUserDialog } from "./BatchUserDialog";
 import { DeletedPrincipalsDialog } from "./DeletedPrincipalsDialog";
 import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
@@ -110,6 +111,8 @@ export function PeoplePage() {
   // authority as editing its membership.
   const [showDeletedUsers, setShowDeletedUsers] = useState(false);
   const [showDeletedGroups, setShowDeletedGroups] = useState(false);
+  // Creating accounts from a file, rather than one at a time in UserDialog.
+  const [showBatchUsers, setShowBatchUsers] = useState(false);
 
   const removeGroup = useMutation({
     mutationFn: (uuid: string) => api.del(`/auth/groups/${uuid}`),
@@ -172,6 +175,12 @@ export function PeoplePage() {
                 icon="pi pi-trash"
                 text
                 onClick={() => setShowDeletedUsers(true)}
+              />
+              <Button
+                label="Import users"
+                icon="pi pi-upload"
+                text
+                onClick={() => setShowBatchUsers(true)}
               />
               <Button
                 label="Add user"
@@ -418,6 +427,10 @@ export function PeoplePage() {
         visible={groupDialog.open}
         onHide={() => setGroupDialog({ open: false, group: null })}
         group={groupDialog.group}
+      />
+      <BatchUserDialog
+        visible={showBatchUsers}
+        onHide={() => setShowBatchUsers(false)}
       />
       <DeletedPrincipalsDialog
         kind="users"
