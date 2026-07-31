@@ -791,8 +791,7 @@ UPDATE takes ~1.4s over 100k rows and **~25s over 1M**, holding row locks on eve
 one transaction, inside a web request. So the toggle stays O(1) and the data is allowed to lag
 the setting that shaped it.
 
-What makes that safe is that the mismatch is absorbed in exactly **three** places, and nowhere
-else has to know:
+The mismatch is absorbed in **four** places, and nowhere else has to know:
 
 - **Reads** — `coerce_shape` is applied as records leave `ListItemService` (and in the export,
   which streams raw JSONB and bypasses that path). A single column returns the array's first
@@ -807,6 +806,23 @@ else has to know:
   from the column's *current* `multiple`, so after a toggle it matched nothing and left the
   deleted user's uuid sitting in the record. Nothing to keep in step, so nothing to get out of
   step.
+- **Filters and sorts** — `_field` in `items/filtering.py` reproduces `coerce_shape`'s rule *in
+  SQL*, because this is the one reader whose comparison happens in Postgres rather than in Python:
+  `CASE WHEN jsonb_typeof(data -> key) = 'array' THEN data -> key ->> 0 ELSE data ->> key END`.
+  This edge was **missed for a long time**, and the cost was severe precisely because it was
+  silent — a view filtered on a freshly-toggled column returned *no* un-converged records at all.
+  `->>` on a JSONB array yields its serialized text, so a cell holding `["Annex"]` compared as
+  `["Annex"]` and matched nothing; an empty `[]`, which every other reader calls blank, compared
+  as the string `[]` and so was invisible to `is_empty`. Sorting ranked the leading `[` rather
+  than the value behind it, though how visibly depends on the server's collation — punctuation
+  sorts ahead of letters under `English_United States.1252` and is largely ignored under a glibc
+  `en_US.UTF-8`, so the same data ordered differently on a developer's machine and the server.
+  Note the fix keys off `jsonb_typeof`, **not** the column's `multiple`: asking the column would
+  be wrong for exactly the rows that disagree with it, which is the same trap `_SCRUB_SQL` was
+  written to avoid. A column that genuinely declares `multiple` is left comparing against the
+  serialized array, since `contains` searching the whole array is the nearest thing the filter
+  language has to element-wise matching — giving multi-valued columns real per-element operators
+  is separate work, and not done.
 
 `src/maintenance/reconcile_shapes.py` converges the stored data afterwards (chunked, committed
 per batch, idempotent, killable — run it from cron). **Nothing depends on it having run**: it
