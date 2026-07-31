@@ -151,3 +151,131 @@ async def test_a_row_failing_after_its_account_exists_leaves_nothing_live(db, mo
     assert summary.created == []
     assert "disk on fire" in summary.errors[0].message
     assert await UserService.get_by_username(db, "ada") is None
+
+
+# ---------------------------------------------------------------- endpoint
+
+from contextlib import asynccontextmanager  # noqa: E402
+
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+
+from main import create_app  # noqa: E402
+from src.auth.dependencies import get_current_user  # noqa: E402
+from src.infrastructure import database as db_module  # noqa: E402
+
+
+@pytest_asyncio.fixture
+def make_client(engine, session_factory):
+    """A client acting as a specific user.
+
+    conftest's `client` runs with DISABLE_AUTH, which resolves to the first account
+    in the table -- not a superuser, so it cannot reach this endpoint at all. Same
+    approach as test_people.py.
+    """
+
+    @asynccontextmanager
+    async def _make(user):
+        orig_engine, orig_factory = db_module.engine, db_module.SessionLocal
+        db_module.engine = engine
+        db_module.SessionLocal = session_factory
+        app = create_app()
+
+        async def _current_user():
+            return user
+
+        app.dependency_overrides[get_current_user] = _current_user
+        transport = ASGITransport(app=app)
+        try:
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                headers={"Authorization": "Bearer test"},
+            ) as client:
+                yield client
+        finally:
+            db_module.engine, db_module.SessionLocal = orig_engine, orig_factory
+
+    return _make
+
+
+async def _admin(session_factory):
+    async with session_factory() as db:
+        user = await UserService.create(
+            db,
+            UserCreate(username="root2", email="root2@example.com", password="pw12345"),
+        )
+        user.is_superuser = True
+        await db.commit()
+        return user
+
+
+def _upload(text: str):
+    return {"file": ("users.csv", text, "text/csv")}
+
+
+async def test_endpoint_creates_users(session_factory, make_client):
+    admin = await _admin(session_factory)
+    async with make_client(admin) as client:
+        resp = await client.post(
+            "/api/auth/users/import",
+            files=_upload("username,email\nada,ada@example.com\n"),
+        )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"][0]["username"] == "ada"
+    assert body["created"][0]["generated_password"]
+    assert body["errors"] == []
+    assert body["superusers_created"] == 0
+
+
+async def test_endpoint_is_superuser_only(session_factory, make_client):
+    async with session_factory() as db:
+        plain = await UserService.create(
+            db,
+            UserCreate(username="plain", email="plain@example.com", password="pw12345"),
+        )
+    async with make_client(plain) as client:
+        resp = await client.post(
+            "/api/auth/users/import",
+            files=_upload("username,email\nsneaky,sneaky@example.com\n"),
+        )
+    assert resp.status_code == 403
+    async with session_factory() as db:
+        assert await UserService.get_by_username(db, "sneaky") is None
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "username,email,frist_name\nada,ada@example.com,Ada\n",  # unknown header
+        "email\nada@example.com\n",                              # missing required
+    ],
+)
+async def test_endpoint_rejects_a_malformed_file(session_factory, make_client, text):
+    admin = await _admin(session_factory)
+    async with make_client(admin) as client:
+        resp = await client.post("/api/auth/users/import", files=_upload(text))
+    assert resp.status_code == 400, resp.text
+
+
+async def test_endpoint_rejects_an_over_cap_file(session_factory, make_client):
+    from src.auth.users.batch.parsing import MAX_ROWS
+
+    admin = await _admin(session_factory)
+    body = "".join(f"u{i},u{i}@example.com\n" for i in range(MAX_ROWS + 1))
+    async with make_client(admin) as client:
+        resp = await client.post(
+            "/api/auth/users/import", files=_upload(f"username,email\n{body}")
+        )
+    assert resp.status_code == 400
+    assert str(MAX_ROWS) in resp.json()["detail"]
+
+
+async def test_endpoint_rejects_a_file_that_is_not_utf8(session_factory, make_client):
+    admin = await _admin(session_factory)
+    async with make_client(admin) as client:
+        resp = await client.post(
+            "/api/auth/users/import",
+            files={"file": ("users.csv", b"\xff\xfe\x00bad", "text/csv")},
+        )
+    assert resp.status_code == 400
