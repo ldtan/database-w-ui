@@ -1275,17 +1275,18 @@ export function GuidePage() {
             <Ui>Limit</Ui>, a <Ui>Sort</Ui>, and even <Ui>Filters (optional)</Ui> so
             only some rows come out.
           </li>
-          <li>
-            Click <Ui>Export records</Ui> to download the file. Or click{" "}
-            <Ui>Download template</Ui> to get an empty file with just the headings,
-            ready to fill in.
-          </li>
+          <li>Click <Ui>Export records</Ui> to download the file.</li>
         </ol>
         <p>
-          <strong>To bring data in:</strong> under <Ui>Import records</Ui>, click{" "}
+          <strong>To bring data in:</strong> under <Ui>Import</Ui>, click{" "}
           <Ui>Choose file</Ui> and pick a <em>.csv</em> or <em>.json</em> file. After
           it uploads you’ll see how many records were added and, if any rows were
           skipped, the reason for each.
+        </p>
+        <p>
+          Starting from nothing? Pick a <Ui>Template format</Ui> and click{" "}
+          <Ui>Download template</Ui> on that same tab: you get an empty file with one
+          heading per column, ready to fill in and upload straight back.
         </p>
         <Callout tone="warn" title="Match the headings">
           Your file’s column headings must match your list’s underlying column names
