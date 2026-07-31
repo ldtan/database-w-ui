@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.core.utils import coerce_uuid
 
-from ..columns.models import Column
+from ..columns.models import Column, in_shape
 from ..models import List
 from .models import Form
 from .schemas import FormConfig, FormCreate, FormUpdate
@@ -127,7 +127,7 @@ class FormService:
             select(Column.uuid).where(
                 Column.list_id == list_id,
                 Column.uuid.in_(referenced),
-                Column.deleted_at.is_(None),
+                in_shape(),
             )
         )
         found = set(result.scalars().all())

@@ -15,7 +15,7 @@ from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 from ..items.models import ListItem
 from ..models import List
 from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
-from .models import Column
+from .models import Column, in_shape
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
     ONUPDATE_TYPES,
@@ -34,9 +34,7 @@ _OPTIONS_PAGE = 25
 class ColumnService:
     @staticmethod
     def _select(list_id: int):
-        return select(Column).where(
-            Column.deleted_at.is_(None), Column.list_id == list_id
-        )
+        return select(Column).where(in_shape(), Column.list_id == list_id)
 
     @classmethod
     async def get_by_uuid(
@@ -46,6 +44,27 @@ class ColumnService:
         if parsed is None:
             return None
         result = await db.execute(cls._select(list_id).where(Column.uuid == parsed))
+        return result.scalars().first()
+
+    @classmethod
+    async def get_including_hidden(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[Column]:
+        """A column whether or not it is in the list's shape.
+
+        Only the conversion machinery wants this — it has to read and write the
+        scratch column it is filling, which by design no ordinary reader can see.
+        """
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            select(Column).where(
+                Column.deleted_at.is_(None),
+                Column.list_id == list_id,
+                Column.uuid == parsed,
+            )
+        )
         return result.scalars().first()
 
     @classmethod

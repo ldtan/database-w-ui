@@ -2,8 +2,8 @@
 
 Nine capabilities that have been asked for. Each section says what it is, what already
 exists to build on, the load-bearing implementation details, and the decisions still
-open. Most are now **implemented** — the heading says which; only §1 (column type
-conversion) and §2 (column data migration) remain unbuilt.
+open. All nine are now **implemented** — the heading says so, and where a section shipped
+narrower than it was scoped, it says what was left out.
 
 These share two roots in the existing model, so read them once here rather than nine times below:
 
@@ -19,7 +19,7 @@ Cross-references: [data model](data-model-design.md) · [known gaps](known-gaps.
 
 ---
 
-## 1. Column type conversion
+## 1. Column type conversion — **implemented**
 
 Change a column's `type` after it has records — `text` → `number`, `choice` → `text`,
 `date` → `datetime`, and so on.
@@ -106,23 +106,66 @@ infrastructure the 512MB instance pays for and no reachable list needs.
 **Note the storage cost:** mid-conversion every record holds both the old and the new value, so
 the list's JSONB roughly doubles. Worth a size check before starting on a 1GB database.
 
-**Still open:**
-- **Which pairs ship in v1** — conservative (text hub + `date` ↔ `datetime`) or the full matrix.
-- **What happens to cells that fail** — blank them, or block the swap until the user fixes them.
-  The new-column model makes "show the report and let them choose" cheap, which it would not have
-  been in place.
-- **Swap mechanics** — the clean version gives the new column the old one's uuid and name at
-  cutover so views, forms and formulas never need repointing, at the cost of one chunked SQL
-  rekey of the record data (pure byte-moving, no conversion in it). The alternative is the
-  old→new uuid remap already built for clone.
-- **`Column` has no `hidden` flag**, so a scratch column would show in the grid mid-conversion.
-  Either add one (small migration, honest semantics) or create it soft-deleted — `deleted_at`
-  already hides a column from every reader while preserving its record values, but a stalled
-  conversion could have its scratch column taken by the purge job.
+### What shipped
+
+`src/lists/columns/conversion.py` (the cell engine) and `conversion_service.py` (build,
+backfill, cut over), behind three routes: `POST /columns/{uuid}/convert` returns a report,
+`POST /columns/{uuid}/convert/{target_uuid}` commits it, `DELETE` on the same path abandons
+it. Tests in `tests/test_column_conversion.py`.
+
+**The v1 matrix is the text hub plus one direct pair.** Every type converts *to* `text`
+and `text` converts to every type, so the matrix is 2N rules rather than N². `date` ↔
+`datetime` is direct, so widening and truncating do not take a text round trip. A pair with
+`text` on neither side is **refused with a message naming the two hops**, not chained
+automatically — X → text → Y is two conversions, each with its own report and its own
+chance to stop, and hiding both behind one action defeats the point of verifying first.
+Anything involving `calculated` is out in both directions: it stores no value, so
+converting away from it means evaluating a formula per row and converting to it means
+discarding values, and neither is a cell conversion.
+
+**Almost none of it is new code, and that was the point.** Rendering to text is the
+export's `_LabelResolver`. Parsing from text is `_parse_cell` followed by the target
+column's own `_validate_value` — which already accepts a username, a group name or a row
+label and stores the uuid, because that is the CSV round-trip contract. So `text` →
+reference, which had been scoped out as expensive, turned out to be free. The one genuinely
+new transform is `text` → `choice`, which mints an option per distinct value (capped at
+`MAX_MINTED_OPTIONS`; a column with more distinct values than that is free text). Supplied
+options are never widened — a value outside them fails that cell.
+
+**The cutover keeps the column's identity, which is simpler than the swap that was
+scoped.** Rather than moving uuids between two column rows, the *source row itself* is
+retyped: same uuid, same name, same position. Views, forms, formulas and
+`primary_column_id` need no repointing at all, because nothing they point at moved. Only the
+record values move, and only between two keys. This is the one place in the service that
+mutates `Column.type`, which is otherwise immutable.
+
+**The original values survive in the bin.** The cutover *swaps* the two keys rather than
+overwriting one, so the scratch column ends up holding the original data with the original
+type and is soft-deleted as `<name>__before_conversion`. Restoring it within the retention
+window is a real undo, after the point of no return.
+
+**`required` and `unique` are cutover gates, not per-cell rules.** During a backfill they
+are the wrong question — a blank source cell is ordinary, and a duplicate only matters once
+the column is real — so a backfill that leaves holes still reports cleanly, and the commit
+is what refuses. A failed gate leaves the conversion in progress to be fixed and retried.
+
+**A reference → `text` conversion is refused outright when the caller cannot read the
+target.** The export writes uuids in that case, which is right for an export — it shows one
+caller what that caller may see — but a conversion writes the answer down permanently and
+for everyone, so baking uuid strings into a text column is not an acceptable fallback.
+
+**`Column.hidden` was added** (migration `a1c4e97b2f38`) rather than reusing `deleted_at`,
+which would have let the purge job collect a stalled conversion's work. Its counterpart is
+`Column.in_shape()` — the predicate for "part of the list's shape", which every reader that
+answers *what fields does a record have* now filters on. Two readers deliberately do not:
+the reference scrub and the shape reconcile, because being invisible does not exempt a
+column's stored uuids from cleanup.
+
+**Not built:** a UI. The whole feature is API-only so far.
 
 ---
 
-## 2. Column data migration (copy one column's data into another)
+## 2. Column data migration (copy one column's data into another) — **implemented**
 
 Bulk-populate a target column from a source column across every record in a list — the
 "add a column, move the data over, delete the old one" workflow, and the safe delivery

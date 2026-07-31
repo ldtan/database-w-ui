@@ -19,7 +19,7 @@ from src.workspaces.models import Workspace
 from src.workspaces.services import WorkspaceService
 
 from .columns.enums import ColumnType
-from .columns.models import Column
+from .columns.models import Column, in_shape
 from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
@@ -488,7 +488,9 @@ class ListService:
         source_columns = (
             await db.execute(
                 select(Column)
-                .where(Column.list_id == source.id, Column.deleted_at.is_(None))
+                # `in_shape`: a conversion in flight on the source is not part of
+                # what the list *is*, so a clone does not inherit half of it.
+                .where(Column.list_id == source.id, in_shape())
                 .order_by(Column.position, Column.id)
             )
         ).scalars().all()
@@ -1026,7 +1028,9 @@ class ListService:
             select(Column.id).where(
                 Column.uuid == column_uuid,
                 Column.list_id == list_id,
-                Column.deleted_at.is_(None),
+                # A conversion's scratch column is not a field of the list yet, so
+                # it cannot be chosen as the one that labels a row.
+                in_shape(),
             )
         )
         column_id = result.scalars().first()

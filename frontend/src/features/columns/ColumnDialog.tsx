@@ -20,12 +20,13 @@ import {
 } from "../../components/Field";
 import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
-import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
+import { COLUMN_TYPE_OPTIONS, conversionTargets } from "../../lib/columnTypes";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type {
   Column,
   ColumnType,
+  ConversionReport,
   ListRead,
   TextMode,
   Workspace,
@@ -63,21 +64,40 @@ interface Props {
   column: Column | null;
   visible: boolean;
   onHide: () => void;
+  /** "convert" turns this into the first step of a type conversion: the type is
+   *  chosen rather than locked, the identity fields are gone, and submitting
+   *  starts a conversion instead of saving. */
+  mode?: "edit" | "convert";
+  /** Convert mode only — the backfill report, for the caller to review. */
+  onConverted?: (report: ConversionReport) => void;
 }
 
-/** Add or modify a column. The two are one dialog because they take the same
- *  settings — with one exception the API enforces: a column's **type is immutable**
- *  once records hold values shaped by it, so it is shown but locked when editing. */
+/** Add, modify, or convert a column.
+ *
+ *  Three jobs in one dialog because they take the same settings. A column's type is
+ *  immutable through a normal edit — records already hold values in its shape — so
+ *  changing it goes through a **conversion**, which is why the type dropdown is
+ *  locked in edit mode and open in convert mode.
+ *
+ *  Convert mode reuses every config control here deliberately. The target type's
+ *  settings are exactly a column's settings, and the conversion validates its config
+ *  from scratch against the new type, so there is nothing type-specific about the
+ *  conversion form that this dialog did not already know how to draw. What it drops
+ *  is the identity: a conversion keeps the column's name and uuid, so there is
+ *  nothing to name. */
 export function ColumnDialog({
   listUuid,
   workspaceUuid,
   column,
   visible,
   onHide,
+  mode = "edit",
+  onConverted,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const editing = column !== null;
+  const converting = mode === "convert" && column !== null;
+  const editing = column !== null && !converting;
 
   const [displayName, setDisplayName] = useState("");
   const [name, setName] = useState("");
@@ -133,6 +153,39 @@ export function ColumnDialog({
   // time the dialog opens.
   useEffect(() => {
     if (!visible) return;
+    // A conversion builds a *new* column's config from scratch — the old type's
+    // keys mean nothing to the new one, and the server validates the new config
+    // without merging — so it starts blank rather than from what is stored. The
+    // one thing it inherits is `required`/`unique`, which are about the field
+    // rather than the type, and which the person converting most likely wants kept.
+    if (converting) {
+      const config = column.config ?? {};
+      setDisplayName(column.display_name);
+      setName(column.name);
+      // The first type this column can actually become — "text" would be wrong
+      // for a text column, which is the one case it is not a legal target.
+      setType(
+        conversionTargets(column.type).find((o) => !o.disabled)?.value ?? "text",
+      );
+      setRequired(!!config.required);
+      setUnique(!!config.unique);
+      setMaxLength(null);
+      setMin(null);
+      setMax(null);
+      setIntegerOnly(false);
+      setChoices("");
+      setLinkText("");
+      setTargetWorkspace(workspaceUuid);
+      setTargetListUuid(null);
+      setDisplayColumnUuid(null);
+      setParentColumnUuid(null);
+      setTargetFilterColumnUuid(null);
+      setMultiple(false);
+      setFormula("");
+      setTextMode("single");
+      resetDefaults();
+      return;
+    }
     if (!column) {
       setDisplayName("");
       setName("");
@@ -206,7 +259,7 @@ export function ColumnDialog({
     if (column.type === "user" && def === "current_user")
       setDefaultUser("current_user");
     if (typeof config.onupdate === "string") setOnUpdate(config.onupdate);
-  }, [visible, column, workspaceUuid]);
+  }, [visible, column, workspaceUuid, converting]);
 
   // The workspaces the user owns, plus a "Shared with me" bucket — the scopes a
   // lookup target may be drawn from.
@@ -353,7 +406,9 @@ export function ColumnDialog({
     .map((s) => s.trim())
     .filter(Boolean);
 
-  const save = useMutation({
+  // One mutation, two response shapes: saving returns the column, converting
+  // returns a report on a column nobody can see yet.
+  const save = useMutation<Column | ConversionReport>({
     mutationFn: () => {
       // `unique` is always sent, never omitted: a config PATCH merges onto the
       // stored one, so leaving it out would preserve a `true` this dialog is
@@ -416,6 +471,15 @@ export function ColumnDialog({
         config.onupdate = onUpdate || null;
       }
 
+      if (converting) {
+        // No name or display name: a conversion keeps the column's identity, so
+        // there is nothing to rename. Nothing about the list changes here either —
+        // this fills a hidden column and reports on it.
+        return api.post<ConversionReport>(
+          `/lists/${listUuid}/columns/${column.uuid}/convert`,
+          { type, config },
+        );
+      }
       if (editing) {
         return api.patch<Column>(`/lists/${listUuid}/columns/${column.uuid}`, {
           name,
@@ -431,13 +495,21 @@ export function ColumnDialog({
       });
     },
     onSuccess: (saved) => {
+      if (converting) {
+        // Deliberately no cache invalidation: the list is unchanged until the
+        // conversion is applied, and refetching here would suggest otherwise.
+        onConverted?.(saved as ConversionReport);
+        onHide();
+        return;
+      }
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       // Turning `multiple` off rewrites records, and the labels a lookup/user cell
       // renders are keyed on the values it holds.
       queryClient.invalidateQueries({ queryKey: ["lookup-labels"] });
       queryClient.invalidateQueries({ queryKey: ["principal-labels"] });
-      toast.success(editing ? "Column updated" : "Column added", saved.display_name);
+      const column_ = saved as Column;
+      toast.success(editing ? "Column updated" : "Column added", column_.display_name);
       onHide();
     },
   });
@@ -474,7 +546,13 @@ export function ColumnDialog({
 
   return (
     <AppDialog
-      header={editing ? `Edit “${column.display_name}”` : "Add column"}
+      header={
+        converting
+          ? `Convert “${column.display_name}”`
+          : editing
+            ? `Edit “${column.display_name}”`
+            : "Add column"
+      }
       visible={visible}
       onHide={onHide}
       style={{ width: 540 }}
@@ -482,13 +560,19 @@ export function ColumnDialog({
         <>
           <Button label="Cancel" text onClick={onHide} />
           <Button
-            label={editing ? "Save" : "Add column"}
-            icon={editing ? "pi pi-check" : "pi pi-plus"}
+            label={converting ? "Convert" : editing ? "Save" : "Add column"}
+            icon={
+              converting
+                ? "pi pi-sync"
+                : editing
+                  ? "pi pi-check"
+                  : "pi pi-plus"
+            }
             onClick={onSave}
             loading={save.isPending}
             disabled={
-              !displayName.trim() ||
-              !isValidName(name) ||
+              // Identity is not editable in a conversion, so it cannot be invalid.
+              (!converting && (!displayName.trim() || !isValidName(name))) ||
               (type === "lookup" && !targetListUuid) ||
               // A half-configured nesting: the pairing is set together or not at all.
               (type === "lookup" && !!parentColumnUuid && !targetFilterColumnUuid) ||
@@ -503,31 +587,54 @@ export function ColumnDialog({
           <Message severity="error" text={save.error.message} />
         )}
 
-        <FormSection title="Basics">
-          <NameFields
-            key={`${column?.uuid ?? "new"}:${visible}`}
-            idPrefix="col"
-            value={{ displayName, name }}
-            onChange={(next) => {
-              setDisplayName(next.displayName);
-              setName(next.name);
-            }}
-            linked={!editing}
-            autoFocus
+        {converting && (
+          <Message
+            severity="info"
+            className="w-full"
+            content={
+              <span className="text-sm">
+                Nothing changes yet. The values are converted into a hidden column
+                first, and you get to read what did and did not convert before
+                deciding whether to apply it.
+              </span>
+            }
           />
+        )}
+
+        <FormSection title={converting ? "Convert to" : "Basics"}>
+          {/* No name fields when converting: the column keeps its name, its uuid
+              and everything pointing at it — that is what makes the cutover safe. */}
+          {!converting && (
+            <NameFields
+              key={`${column?.uuid ?? "new"}:${visible}`}
+              idPrefix="col"
+              value={{ displayName, name }}
+              onChange={(next) => {
+                setDisplayName(next.displayName);
+                setName(next.name);
+              }}
+              linked={!editing}
+              autoFocus
+            />
+          )}
           <Field
-            label="Type"
+            label={converting ? "New type" : "Type"}
             htmlFor="col-type"
             hint={
               editing
                 ? "A column's type cannot change: existing records already hold values in its shape."
-                : undefined
+                : converting
+                  ? "Greyed-out types need two steps — convert to Text first, then to the type you want."
+                  : undefined
             }
           >
             <Dropdown
               inputId="col-type"
               value={type}
-              options={COLUMN_TYPE_OPTIONS}
+              options={
+                converting ? conversionTargets(column.type) : COLUMN_TYPE_OPTIONS
+              }
+              optionDisabled="disabled"
               onChange={(e) => {
                 setType(e.value as ColumnType);
                 // The default/on-update controls are type-specific.

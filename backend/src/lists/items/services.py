@@ -23,7 +23,7 @@ from ..columns.enums import (
     ColumnType,
 )
 from ..columns.formula import Formula, column_refs, evaluate, parse
-from ..columns.models import Column
+from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
@@ -64,9 +64,7 @@ async def display_column_key(
     )
     if primary_id is not None:
         key = await db.scalar(
-            select(Column.uuid).where(
-                Column.id == primary_id, Column.deleted_at.is_(None)
-            )
+            select(Column.uuid).where(Column.id == primary_id, in_shape())
         )
         if key is not None:
             return str(key)
@@ -75,7 +73,7 @@ async def display_column_key(
     # first — matching what the UI did before this moved server-side.
     first = await db.scalar(
         select(Column.uuid)
-        .where(Column.list_id == target_list_id, Column.deleted_at.is_(None))
+        .where(Column.list_id == target_list_id, in_shape())
         .order_by(Column.position, Column.id)
         .limit(1)
     )
@@ -790,10 +788,15 @@ class ListItemService:
 
     @staticmethod
     async def _columns_by_key(db: AsyncSession, list_id: int) -> dict[str, Column]:
+        """The list's fields, as every read and write sees them.
+
+        `in_shape` rather than `deleted_at` alone: a conversion's scratch column is
+        live but not a field of the list, and letting it through here would both leak
+        its half-converted values into every record payload (`shape_values` emits
+        whatever is in this dict) and apply its `required`/`default` on writes.
+        """
         result = await db.execute(
-            select(Column).where(
-                Column.list_id == list_id, Column.deleted_at.is_(None)
-            )
+            select(Column).where(Column.list_id == list_id, in_shape())
         )
         return {str(column.uuid): column for column in result.scalars().all()}
 

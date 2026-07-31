@@ -11,7 +11,7 @@ from src.core.exceptions import ConflictError, ValidationError
 from src.core.utils import coerce_uuid
 
 from ..columns.enums import ColumnType
-from ..columns.models import Column
+from ..columns.models import Column, in_shape
 from ..items.models import ListItem
 from ..items.services import ListItemService, computed_columns, shape_values
 from ..models import List
@@ -147,7 +147,7 @@ class MetricService:
         columns = (
             await db.execute(
                 select(Column).where(
-                    Column.list_id == list_id, Column.deleted_at.is_(None)
+                    Column.list_id == list_id, in_shape()
                 )
             )
         ).scalars().all()

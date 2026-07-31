@@ -16,10 +16,13 @@ from ..bin.schemas import BinnedChildRead
 from ..dependencies import get_list_or_404
 from ..models import List
 from .models import Column
+from .conversion_service import ConversionService
 from .schemas import (
     ColumnCreate,
     ColumnRead,
     ColumnUpdate,
+    ConversionReport,
+    ConversionStart,
     LookupOption,
     RestoredColumnRead,
 )
@@ -144,6 +147,98 @@ async def lookup_options(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+async def _column_or_404(db, lst: List, uuid: UUID) -> Column:
+    column = await ColumnService.get_by_uuid(db, lst.id, uuid)
+    if column is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
+    return column
+
+
+@router.post("/{uuid}/convert", response_model=ConversionReport)
+async def start_conversion(
+    uuid: UUID,
+    payload: ConversionStart,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Convert this column's values into a new column of another type.
+
+    Changes **nothing** about the list. The converted values land in a hidden column
+    that no view, filter, form or formula can see, and the report says what did and
+    did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
+    away with `DELETE` — the column keeps working normally either way until then.
+
+    A conversion is only converted *in place* in the sense that committing retypes
+    this column and keeps its uuid, so nothing referring to it needs changing.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    column = await _column_or_404(db, lst, uuid)
+    try:
+        return await ConversionService.start(
+            db, lst, column, payload.type, payload.config, current_user
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValidationError, UnknownReferenceError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/{uuid}/convert/{target_uuid}", response_model=ColumnRead)
+async def commit_conversion(
+    uuid: UUID,
+    target_uuid: UUID,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Swap the converted values in. The point of no return.
+
+    `required` and `unique` are checked here rather than during the backfill — per
+    cell they are the wrong question, since a blank source cell is ordinary and a
+    duplicate only matters once the column is real. A failure here leaves the
+    conversion in progress, so it can be fixed and committed again.
+
+    The original values are not destroyed: they land in a binned column named
+    `<name>__before_conversion`, restorable for the usual retention window.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    column = await _column_or_404(db, lst, uuid)
+    try:
+        return await ConversionService.commit(db, lst, column, target_uuid)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.delete("/{uuid}/convert/{target_uuid}", status_code=status.HTTP_204_NO_CONTENT)
+async def abandon_conversion(
+    uuid: UUID,
+    target_uuid: UUID,
+    lst: List = Depends(get_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Throw an in-progress conversion away, values and all.
+
+    A hard delete rather than the bin: nothing ever saw this column, so there is
+    nothing worth restoring.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.configure
+    )
+    column = await _column_or_404(db, lst, uuid)
+    if not await ConversionService.abandon(db, lst, column, target_uuid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No such conversion"
+        )
 
 
 @router.patch("/{uuid}", response_model=ColumnRead)

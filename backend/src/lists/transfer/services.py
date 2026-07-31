@@ -20,7 +20,7 @@ from src.core.utils import coerce_uuid
 from src.infrastructure import database as db_module
 
 from ..columns.enums import COMPUTED_TYPES, PRINCIPAL_TYPES, ColumnType
-from ..columns.models import Column
+from ..columns.models import Column, in_shape
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
 from ..items.services import ListItemService, coerce_shape, display_column_key
@@ -43,7 +43,7 @@ async def _ordered_columns(
 ) -> list[Column]:
     result = await db.execute(
         select(Column)
-        .where(Column.list_id == list_id, Column.deleted_at.is_(None))
+        .where(Column.list_id == list_id, in_shape())
         .order_by(Column.position, Column.id)
     )
     cols = list(result.scalars().all())
@@ -224,6 +224,15 @@ class _LabelResolver:
         excess = len(known) - _LABEL_CACHE_MAX
         for uuid in [*known][:excess]:
             del known[uuid]
+
+    def resolves(self, column: Column) -> bool:
+        """Whether this column's uuids can be turned into labels at all.
+
+        False when the target is gone, has no display column, or the caller may not
+        read it. An export shrugs and writes uuids; a *conversion* must not, because
+        it writes the result down permanently and for everyone — so it asks first.
+        """
+        return self._scope_of.get(str(column.uuid)) is not None
 
     def cell(self, column: Column, value: object) -> object:
         """The value to write: the label if we have one, else the uuid — which for a

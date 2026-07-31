@@ -188,9 +188,10 @@ Defines one field on a list. This is the schema.
 | `list_id`     | FK → `lists.id`   | Owner list. |
 | `name`        | `str(120)`        | Code-facing slug (D6). Unique **per list** (ignoring soft-deleted). |
 | `display_name`| `str(255)`        | UI label (D6). Not unique. |
-| `type`        | `enum` (`ColumnType`) | See §5. Immutable after creation. |
+| `type`        | `enum` (`ColumnType`) | See §5. Immutable through `PATCH`; changed only by a **conversion** ([planned features §1](planned-features.md)), which retypes the column at cutover so its `uuid` and every reference to it survive. |
 | `position`    | `int`             | Ordering within the list's schema. |
 | `config`      | `JSONB` default `{}` | Type-specific settings — see §5. |
+| `hidden`      | `bool` default `false` | Live, but **not part of the list's shape**: the grid, records, export, metrics, forms and the primary column all skip it. Today only a conversion's target column while it is being backfilled. Use `Column.in_shape()` rather than testing it by hand. |
 
 `config` is where every per-type detail lives (options, precision, defaults,
 required flag, lookup target). Keeping it in one JSONB blob means adding a new

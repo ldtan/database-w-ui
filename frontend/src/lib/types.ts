@@ -82,6 +82,8 @@ export type BatchUserSummary = Omit<
 > & { created: CreatedUser[]; errors: BatchUserError[] };
 
 export type ColumnType = Schemas["ColumnType"];
+export type ConversionReport = Response<Schemas["ConversionReport"]>;
+export type ConversionFailure = Response<Schemas["ConversionFailure"]>;
 export type FormType = Schemas["FormType"];
 export type ResourceType = Schemas["ResourceType"];
 /** The backend calls it `Action`; in the UI it is always an action *on* something. */
