@@ -163,13 +163,16 @@ export function PeoplePage() {
 
       {/* ---------------------------------------------------------- Users */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        {/* Wraps rather than squeezes, the same as PageHeader — three buttons and a
+            heading do not fit a narrow window on one line, and a flex row that
+            cannot wrap resolves that by running off the right edge. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-lg font-semibold">Users</h2>
             {userTotal > 0 && <span className="badge">{userTotal}</span>}
           </div>
           {canAdminister && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 label="Deleted"
                 icon="pi pi-trash"
@@ -287,13 +290,16 @@ export function PeoplePage() {
 
       {/* --------------------------------------------------------- Groups */}
       <section className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
+        {/* Same treatment as Users above. Two buttons rather than three, so this
+            one is not overflowing today — but it is the same row at a narrower
+            window, and having the two sections behave differently is its own bug. */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <h2 className="text-lg font-semibold">Groups</h2>
             {groupTotal > 0 && <span className="badge">{groupTotal}</span>}
           </div>
           {canAdminister && (
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button
                 label="Deleted"
                 icon="pi pi-trash"
