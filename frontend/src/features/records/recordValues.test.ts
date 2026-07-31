@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import type { Column } from "../../lib/types";
-import { clearedNested, needsFullEditor, textMode, toStored } from "./recordValues";
+import type { Column, Form } from "../../lib/types";
+import {
+  clearedNested,
+  needsFullEditor,
+  resolveFields,
+  textMode,
+  toStored,
+} from "./recordValues";
 
 function column(over: Partial<Column> = {}): Column {
   return {
@@ -73,5 +79,42 @@ describe("needsFullEditor", () => {
     expect(needsFullEditor(column({ config: { text_mode: "multiline" } }))).toBe(true);
     expect(needsFullEditor(column())).toBe(false);
     expect(needsFullEditor(column({ type: "link" }))).toBe(false);
+  });
+});
+
+describe("resolveFields and server-stamped columns", () => {
+  const name = column({ uuid: "name" });
+  const stamped = column({ uuid: "updated", config: { onupdate: "now" } });
+
+  it("marks an onupdate column read-only with no form config", () => {
+    const fields = resolveFields([name, stamped], null);
+    expect(fields.map((f) => [f.column.uuid, f.enabled])).toEqual([
+      ["name", true],
+      ["updated", false],
+    ]);
+  });
+
+  it("keeps it read-only even when the form config enables it", () => {
+    const form = {
+      config: {
+        fields: [
+          { column_uuid: "name", included: true, enabled: true, order: 0 },
+          { column_uuid: "updated", included: true, enabled: true, order: 1 },
+        ],
+      },
+    } as unknown as Form;
+    const fields = resolveFields([name, stamped], form);
+    expect(fields.find((f) => f.column.uuid === "updated")?.enabled).toBe(false);
+  });
+
+  // Read-only, not absent: a stamp is exactly the sort of thing you want to see
+  // on a record you are editing.
+  it("still returns the column so a form can show it", () => {
+    const fields = resolveFields([name, stamped], null);
+    expect(fields.map((f) => f.column.uuid)).toContain("updated");
+  });
+
+  it("leaves an ordinary column alone", () => {
+    expect(resolveFields([name], null)[0].enabled).toBe(true);
   });
 });

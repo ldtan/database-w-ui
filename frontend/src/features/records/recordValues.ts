@@ -18,6 +18,20 @@ export interface ResolvedField {
 }
 
 /**
+ * A column the server writes for you cannot be an input, whatever a form config
+ * says: `config.onupdate` is stamped over anything sent on every accepted write
+ * (`ListItemService._validate_data`). Read-only rather than absent, because a
+ * "last modified" is exactly the sort of thing you want to *see* on a record —
+ * which is what `enabled: false` already means everywhere it is read.
+ *
+ * The same reasoning `resolveFields` applies to calculated columns, one step
+ * short of it: those store nothing at all, so they are dropped rather than shown.
+ */
+function writable(column: Column): boolean {
+  return !column.config.onupdate;
+}
+
+/**
  * Apply the form's config: only included fields, in order, with enabled and
  * label overrides. An empty/absent config means "all columns in schema order".
  *
@@ -56,7 +70,7 @@ export function resolveFields(
         if (!column) return null;
         return {
           column,
-          enabled: f.enabled !== false,
+          enabled: f.enabled !== false && writable(column),
           label:
             (f.label_override && f.label_override.trim()) || column.display_name,
         };
@@ -67,10 +81,14 @@ export function resolveFields(
     const known = new Set(form.config.fields.map((f) => f.column_uuid));
     const appended = eligible
       .filter((c) => !known.has(c.uuid))
-      .map((c) => ({ column: c, enabled: true, label: c.display_name }));
+      .map((c) => ({ column: c, enabled: writable(c), label: c.display_name }));
     return [...configured, ...appended];
   }
-  return eligible.map((c) => ({ column: c, enabled: true, label: c.display_name }));
+  return eligible.map((c) => ({
+    column: c,
+    enabled: writable(c),
+    label: c.display_name,
+  }));
 }
 
 export function serialize(column: Column, value: unknown): unknown {

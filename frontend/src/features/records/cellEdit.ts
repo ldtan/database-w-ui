@@ -36,13 +36,6 @@ export function cellEditKinds(fields: ResolvedField[]): Map<string, CellEditKind
   return kinds;
 }
 
-export function cellEditKind(
-  kinds: Map<string, CellEditKind>,
-  columnUuid: string,
-): CellEditKind {
-  return kinds.get(columnUuid) ?? "locked";
-}
-
 /** The cell an editor is currently open on, and what has been typed into it. */
 export interface CellDraft {
   rowUuid: string;
