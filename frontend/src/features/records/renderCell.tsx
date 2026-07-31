@@ -4,6 +4,7 @@ import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
 import { LookupCell } from "../lookups/LookupControls";
 import { PrincipalCell, type PrincipalType } from "../principals/PrincipalControls";
+import { textMode } from "./recordValues";
 
 /**
  * One record's value for one column, as the UI shows it.
@@ -30,6 +31,9 @@ export function renderCell(
   principalUuids: Record<PrincipalType, string[]>,
   lookupUuids: Map<string, string[]>,
   variant: CellVariant = "compact",
+  /** The grid is in edit mode and this cell will open an editor. Defaults to
+   *  false so the card list and the read-only dialog are unaffected. */
+  editing = false,
 ) {
   const value = row.data?.[column.uuid];
   // Reference cells are handed the uuids the *whole page* holds, and resolve them
@@ -66,6 +70,12 @@ export function renderCell(
     const href = safeHref(column, value);
     // A value the scheme check rejects is shown as plain text, never an anchor.
     if (!href) return String(value);
+    // Nor is it an anchor while the cell is an editor. The `stopPropagation`
+    // below exists so that following a link does not also select the row, and in
+    // edit mode it eats the click the cell needs — leaving a cell drawn as
+    // editable that opens a browser tab instead. Edit mode is already a mode
+    // where a click means something else; turning it off makes this a link again.
+    if (editing) return linkLabel(column, href);
     return (
       <a
         href={href}
@@ -83,31 +93,29 @@ export function renderCell(
   if (isTemporal(column.type)) {
     return displayTemporal(column.type, value);
   }
-  if (column.type === "text") {
-    const mode = column.config.text_mode;
-    if (mode === "rich") {
-      // Rendered as markup only where there is room for it. Safe because the
-      // backend sanitises every write (columns/richtext.py) — this is why that
-      // sits on the write path and not in the editor: a value could equally
-      // have arrived by API or CSV import, and it lands here just the same.
-      if (variant === "full") {
-        return (
-          <span
-            className="rich-text-cell"
-            dangerouslySetInnerHTML={{ __html: String(value) }}
-          />
-        );
-      }
-      // In a row, the formatting is noise and the headings would set the row
-      // height. The words are what identifies the record.
-      return stripHtml(String(value));
+  const mode = textMode(column);
+  if (mode === "rich") {
+    // Rendered as markup only where there is room for it. Safe because the
+    // backend sanitises every write (columns/richtext.py) — this is why that
+    // sits on the write path and not in the editor: a value could equally
+    // have arrived by API or CSV import, and it lands here just the same.
+    if (variant === "full") {
+      return (
+        <span
+          className="rich-text-cell"
+          dangerouslySetInnerHTML={{ __html: String(value) }}
+        />
+      );
     }
-    // A multiline column's line breaks are content, and collapsing them was the
-    // one thing `long_text` never got right. Honoured only where there is room:
-    // in the grid the value keeps its single line.
-    if (variant === "full" && mode === "multiline") {
-      return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
-    }
+    // In a row, the formatting is noise and the headings would set the row
+    // height. The words are what identifies the record.
+    return stripHtml(String(value));
+  }
+  // A multiline column's line breaks are content, and collapsing them was the
+  // one thing `long_text` never got right. Honoured only where there is room:
+  // in the grid the value keeps its single line.
+  if (mode === "multiline" && variant === "full") {
+    return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
   }
   return String(value);
 }

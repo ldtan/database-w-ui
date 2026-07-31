@@ -1144,14 +1144,31 @@ export function ListDetailPage() {
                     listUuid,
                     principalUuids,
                     lookupUuids,
+                    "compact",
+                    kind === "inline" && canItem(row.uuid, "edit"),
                   );
                   // Rich text and multiline have no cell-sized editor, so the
                   // click goes where their editor lives instead of doing nothing.
+                  // A real button, not a bare span: the column deliberately has no
+                  // `editor`, so PrimeReact renders no tab stop for it, and the row
+                  // click is off while the mode is on — leaving this the only route
+                  // to those columns, and until now a mouse-only one.
                   if (kind !== "dialog" || !canItem(row.uuid, "edit")) return cell;
+                  const openRecord = () => setRecordDialog({ open: true, item: row });
+                  const hint = `Edit ${col.display_name} in the record's own form`;
                   return (
                     <span
-                      title={`Edit ${col.display_name} in the record's own form`}
-                      onClick={() => setRecordDialog({ open: true, item: row })}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={hint}
+                      title={hint}
+                      onClick={openRecord}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault(); // Space would scroll the grid
+                          openRecord();
+                        }
+                      }}
                     >
                       {cell}
                     </span>

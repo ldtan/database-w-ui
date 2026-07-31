@@ -9,7 +9,7 @@
  * serialized), so the answers live here rather than inside the dialog.
  */
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
-import type { Column, Form } from "../../lib/types";
+import type { Column, Form, TextMode } from "../../lib/types";
 
 export interface ResolvedField {
   column: Column;
@@ -175,4 +175,35 @@ export function clearedNested(
   return Object.fromEntries(
     nestedDescendants(columns, changedUuid).map((uuid) => [uuid, null]),
   );
+}
+
+/**
+ * How a text column's value is written and shown.
+ *
+ * A text column's editor comes from its config rather than its type — "single"
+ * and "multiline" used to be the `text` and `long_text` types — and anything
+ * unrecognised, including unset, is a single line. Stated once here because three
+ * surfaces branch on it and must not drift: which editor the dialog renders, how
+ * the value displays in a cell or a dialog, and whether a grid cell can hold an
+ * editor at all.
+ *
+ * One reader is deliberately not among them: `lib/display.ts` asks the narrower
+ * question "is this value HTML?" and still reads the config key itself. It cannot
+ * call this without `lib` importing from `features`, which is the wrong way round
+ * — folding it in means moving this accessor down beside `TextMode` in
+ * `lib/types.ts`, which is a bigger move than one rule is worth today.
+ */
+export function textMode(column: Column): TextMode {
+  if (column.type !== "text") return "single";
+  const mode = column.config.text_mode;
+  return mode === "rich" || mode === "multiline" ? mode : "single";
+}
+
+/**
+ * A column whose editor needs more room than a table row has. A rich text editor
+ * is a toolbar and a 200px box; a multiline value's line breaks are its content.
+ * Shrinking either into a row would be a worse editor than the one that exists.
+ */
+export function needsFullEditor(column: Column): boolean {
+  return textMode(column) !== "single";
 }

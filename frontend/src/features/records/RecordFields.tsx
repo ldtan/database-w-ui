@@ -22,7 +22,7 @@ import { InputTextarea } from "primereact/inputtextarea";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
-import { clearedNested, type ResolvedField } from "./recordValues";
+import { clearedNested, textMode, type ResolvedField } from "./recordValues";
 
 /**
  * The rich text toolbar, spelled out rather than left to Quill's default.
@@ -92,7 +92,7 @@ export function RecordField({
     // "multiline" used to be the `text` and `long_text` types. Anything
     // unrecognised, including unset, is a single line.
     case "text": {
-      const mode = column.config.text_mode;
+      const mode = textMode(column);
       if (mode === "rich") {
         return (
           <Editor
@@ -108,16 +108,18 @@ export function RecordField({
           />
         );
       }
-      if (mode !== "multiline") break;
-      return (
-        <InputTextarea
-          id={id}
-          value={(value as string) ?? ""}
-          onChange={(e) => onChange(e.target.value)}
-          rows={3}
-          disabled={disabled}
-        />
-      );
+      if (mode === "multiline") {
+        return (
+          <InputTextarea
+            id={id}
+            value={(value as string) ?? ""}
+            onChange={(e) => onChange(e.target.value)}
+            rows={3}
+            disabled={disabled}
+          />
+        );
+      }
+      break;
     }
     case "number":
       return (

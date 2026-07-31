@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Column } from "../../lib/types";
-import { cellPatch, type CellDraft } from "./cellEdit";
+import { cellEditKinds, cellPatch, type CellDraft } from "./cellEdit";
 import { deserialize, toStored } from "./recordValues";
 
 function column(over: Partial<Column> = {}): Column {
@@ -63,5 +63,26 @@ describe("cellPatch", () => {
     expect(
       cellPatch(columns, country, draft({ columnUuid: "country", initial: "fr", value: "de" })),
     ).toEqual({ country: "de", city: null });
+  });
+});
+
+describe("cellEditKinds", () => {
+  const field = (col: Column, enabled = true) => ({
+    column: col,
+    enabled,
+    label: col.display_name,
+  });
+
+  it("sends a rich-text column to the dialog", () => {
+    const col = column({ config: { text_mode: "rich" } });
+    expect(cellEditKinds([field(col)]).get("c1")).toBe("dialog");
+  });
+
+  it("opens an ordinary column in place", () => {
+    expect(cellEditKinds([field(column())]).get("c1")).toBe("inline");
+  });
+
+  it("locks a field the form marks read-only", () => {
+    expect(cellEditKinds([field(column(), false)]).get("c1")).toBe("locked");
   });
 });

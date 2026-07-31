@@ -6,7 +6,7 @@
  * about what counts as a changed value should not need a DOM to check.
  */
 import type { Column } from "../../lib/types";
-import { clearedNested, toStored } from "./recordValues";
+import { clearedNested, needsFullEditor, toStored } from "./recordValues";
 import type { ResolvedField } from "./recordValues";
 
 /**
@@ -28,14 +28,9 @@ export type CellEditKind = "inline" | "dialog" | "locked";
 export function cellEditKinds(fields: ResolvedField[]): Map<string, CellEditKind> {
   const kinds = new Map<string, CellEditKind>();
   for (const { column, enabled } of fields) {
-    const mode = column.config.text_mode;
     kinds.set(
       column.uuid,
-      !enabled
-        ? "locked"
-        : column.type === "text" && (mode === "rich" || mode === "multiline")
-          ? "dialog"
-          : "inline",
+      !enabled ? "locked" : needsFullEditor(column) ? "dialog" : "inline",
     );
   }
   return kinds;

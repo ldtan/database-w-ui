@@ -93,8 +93,39 @@ export function InlineCellEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Escape means two things in the same place. PrimeReact's overlay components
+  // close their panel on it and call `preventDefault()` but never
+  // `stopPropagation()` (dropdown.cjs.js:1187-1190; Calendar is the same), so the
+  // keypress carries on to the `<td>`, which reads it as "cancel this cell" and
+  // throws away the option that was just picked.
+  //
+  // Sampled at capture because by the time it bubbles back the panel has been
+  // hidden and the evidence is gone. `data-pr-is-overlay` is the library's own
+  // marker rather than a guessed class: datatable.cjs.js:1232-1238 uses exactly it
+  // to stop an outside click *inside* a dropdown from closing the cell, which is
+  // the same distinction being drawn here.
+  //
+  // Note this cannot key off `event.defaultPrevented`: `onEscapeKey` calls
+  // `preventDefault()` whether or not a panel is open, so that flag is set on
+  // every Escape in a dropdown and swallowing it would break cancel outright.
+  const dismissedOverlay = useRef(false);
+
   return (
-    <div className="cell-editor">
+    <div
+      className="cell-editor"
+      onKeyDownCapture={(e) => {
+        if (e.key === "Escape") {
+          dismissedOverlay.current =
+            document.querySelector("[data-pr-is-overlay]") !== null;
+        }
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && dismissedOverlay.current) {
+          dismissedOverlay.current = false;
+          e.stopPropagation();
+        }
+      }}
+    >
       <RecordField
         listUuid={listUuid}
         column={column}

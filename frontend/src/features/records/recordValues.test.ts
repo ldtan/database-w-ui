@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Column } from "../../lib/types";
-import { clearedNested, toStored } from "./recordValues";
+import { clearedNested, needsFullEditor, textMode, toStored } from "./recordValues";
 
 function column(over: Partial<Column> = {}): Column {
   return {
@@ -51,5 +51,27 @@ describe("clearedNested", () => {
 
   it("clears nothing for a column with no children", () => {
     expect(clearedNested(columns, "unrelated")).toEqual({});
+  });
+});
+
+describe("textMode", () => {
+  it.each([
+    [{ type: "text", config: { text_mode: "rich" } }, "rich"],
+    [{ type: "text", config: { text_mode: "multiline" } }, "multiline"],
+    [{ type: "text", config: { text_mode: "single" } }, "single"],
+    [{ type: "text", config: {} }, "single"],
+    [{ type: "text", config: { text_mode: "typo" } }, "single"],
+    [{ type: "number", config: { text_mode: "rich" } }, "single"],
+  ])("reads %j as %s", (over, expected) => {
+    expect(textMode(column(over as Partial<Column>))).toBe(expected);
+  });
+});
+
+describe("needsFullEditor", () => {
+  it("is true only for rich and multiline text", () => {
+    expect(needsFullEditor(column({ config: { text_mode: "rich" } }))).toBe(true);
+    expect(needsFullEditor(column({ config: { text_mode: "multiline" } }))).toBe(true);
+    expect(needsFullEditor(column())).toBe(false);
+    expect(needsFullEditor(column({ type: "link" }))).toBe(false);
   });
 });
