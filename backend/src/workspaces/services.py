@@ -64,18 +64,28 @@ class WorkspaceService:
         return result.scalars().all()
 
     @staticmethod
-    def _apply_search(stmt, q: Optional[str]):
+    def _apply_filters(stmt, q: Optional[str], shared: Optional[bool], user_id: int):
         """Shared by list_visible() and count_visible() so the page and its total
         cannot drift."""
-        if not (q and q.strip()):
-            return stmt
-        pattern = like_pattern(q.strip())
-        return stmt.where(
-            or_(
-                Workspace.display_name.ilike(pattern, escape=LIKE_ESCAPE),
-                Workspace.name.ilike(pattern, escape=LIKE_ESCAPE),
+        if shared is not None:
+            # Ownership, not the grant: a workspace you own is never "shared with
+            # you", and one you do not own is in this listing only because a grant
+            # put it there (see PermissionService.workspace_view_filter). So the
+            # owner check alone splits the listing cleanly in two.
+            stmt = stmt.where(
+                Workspace.owner_id != user_id
+                if shared
+                else Workspace.owner_id == user_id
             )
-        )
+        if q and q.strip():
+            pattern = like_pattern(q.strip())
+            stmt = stmt.where(
+                or_(
+                    Workspace.display_name.ilike(pattern, escape=LIKE_ESCAPE),
+                    Workspace.name.ilike(pattern, escape=LIKE_ESCAPE),
+                )
+            )
+        return stmt
 
     @classmethod
     async def list_visible(
@@ -85,14 +95,24 @@ class WorkspaceService:
         skip: int = 0,
         limit: int = 100,
         q: Optional[str] = None,
+        shared: Optional[bool] = None,
     ) -> Sequence[Workspace]:
         """Workspaces the user owns or has a workspace-level grant on, matched
-        server-side by ``q`` so a search finds one past the first page."""
+        server-side by ``q`` so a search finds one past the first page.
+
+        ``shared`` splits that set by ownership: True is the workspaces someone else
+        handed over whole, False the caller's own. The UI shows them as separate
+        sections, because a workspace shared with you and one you own afford
+        different things — and mixing them was why every list inside a shared
+        workspace also appeared, flattened, under "Shared with me"."""
         from src.permissions.services import PermissionService
 
         condition = await PermissionService.workspace_view_filter(db, user)
-        stmt = cls._apply_search(
-            select(Workspace).where(Workspace.deleted_at.is_(None), condition), q
+        stmt = cls._apply_filters(
+            select(Workspace).where(Workspace.deleted_at.is_(None), condition),
+            q,
+            shared,
+            user.id,
         )
         result = await db.execute(
             stmt.order_by(Workspace.id).offset(skip).limit(limit)
@@ -101,17 +121,23 @@ class WorkspaceService:
 
     @classmethod
     async def count_visible(
-        cls, db: AsyncSession, user, q: Optional[str] = None
+        cls,
+        db: AsyncSession,
+        user,
+        q: Optional[str] = None,
+        shared: Optional[bool] = None,
     ) -> int:
         """Total visible workspaces, ignoring skip/limit — what the paginator needs."""
         from src.permissions.services import PermissionService
 
         condition = await PermissionService.workspace_view_filter(db, user)
-        stmt = cls._apply_search(
+        stmt = cls._apply_filters(
             select(func.count(Workspace.id))
             .select_from(Workspace)
             .where(Workspace.deleted_at.is_(None), condition),
             q,
+            shared,
+            user.id,
         )
         return await db.scalar(stmt) or 0
 

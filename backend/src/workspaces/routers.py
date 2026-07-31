@@ -46,16 +46,26 @@ async def list_workspaces(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
     q: Optional[str] = Query(None, description="Match name or display name"),
+    shared: Optional[bool] = Query(
+        None,
+        description=(
+            "True for workspaces shared with the caller, False for the ones they "
+            "own. Omit for both."
+        ),
+    ),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """Searching and paging server-side; the total match count (ignoring skip/limit)
-    comes back in X-Total-Count for the paginator, leaving the body a plain array."""
+    comes back in X-Total-Count for the paginator, leaving the body a plain array.
+
+    ``shared`` is omitted by default, so a caller that does not ask keeps getting
+    owned and shared workspaces together, as this endpoint always has."""
     response.headers["X-Total-Count"] = str(
-        await WorkspaceService.count_visible(db, current_user, q=q)
+        await WorkspaceService.count_visible(db, current_user, q=q, shared=shared)
     )
     return await WorkspaceService.list_visible(
-        db, current_user, skip=skip, limit=limit, q=q
+        db, current_user, skip=skip, limit=limit, q=q, shared=shared
     )
 
 
