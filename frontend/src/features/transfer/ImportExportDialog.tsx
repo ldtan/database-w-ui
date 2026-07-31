@@ -68,6 +68,10 @@ export function ImportExportDialog({
   // 0 = Export, 1 = Import. Only ever 0 when the caller may not import.
   const [tab, setTab] = useState(0);
   const [format, setFormat] = useState<Format>("csv");
+  // The template is an import aid, so it has its own format rather than
+  // following the export half's: which file you want to *fill in* has nothing
+  // to do with which one you last took data out in.
+  const [templateFormat, setTemplateFormat] = useState<Format>("csv");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportResult | null>(null);
@@ -125,9 +129,13 @@ export function ImportExportDialog({
     }
   }
 
+  // Every column, not the export tab's ticked subset: a template answers "what
+  // shape does a file for this list have?", and the answer is the whole list.
+  // Columns you have nothing to say about can be deleted from the file — import
+  // only sets the ones it finds.
   function handleTemplate() {
-    if (format === "json") {
-      const sample = Object.fromEntries(chosen.map((c) => [c.name, ""]));
+    if (templateFormat === "json") {
+      const sample = Object.fromEntries(columns.map((c) => [c.name, ""]));
       downloadFile(
         `${listName}-template.json`,
         JSON.stringify([sample], null, 2),
@@ -136,7 +144,7 @@ export function ImportExportDialog({
     } else {
       downloadFile(
         `${listName}-template.csv`,
-        toCsv(chosen.map((c) => c.name), []),
+        toCsv(columns.map((c) => c.name), []),
         "text/csv",
       );
     }
@@ -199,24 +207,24 @@ export function ImportExportDialog({
       contentStyle={{ padding: 0 }}
       footer={
         exporting ? (
+          <Button
+            label="Export records"
+            icon="pi pi-download"
+            onClick={handleExport}
+            loading={busy}
+            disabled={chosen.length === 0}
+          />
+        ) : (
           <>
             <Button
               label="Download template"
               icon="pi pi-file"
               text
               onClick={handleTemplate}
-              disabled={chosen.length === 0}
+              disabled={columns.length === 0}
             />
-            <Button
-              label="Export records"
-              icon="pi pi-download"
-              onClick={handleExport}
-              loading={busy}
-              disabled={chosen.length === 0}
-            />
+            <Button label="Close" text onClick={onHide} />
           </>
-        ) : (
-          <Button label="Close" text onClick={onHide} />
         )
       }
     >
@@ -336,8 +344,21 @@ export function ImportExportDialog({
               <p className="field-hint">
                 Upload a .csv or .json file whose headers/keys are column names.
                 Unknown columns are ignored; each row is validated on the server.
-                Not sure of the shape? Download the template from the Export tab.
+                Not sure of the shape? Download the template.
               </p>
+              <Field
+                label="Template format"
+                hint="An empty file with one heading per column, ready to fill in."
+              >
+                <SelectButton
+                  value={templateFormat}
+                  onChange={(e) => e.value && setTemplateFormat(e.value)}
+                  options={[
+                    { label: "CSV", value: "csv" },
+                    { label: "JSON", value: "json" },
+                  ]}
+                />
+              </Field>
               <FileUpload
                 mode="basic"
                 customUpload
