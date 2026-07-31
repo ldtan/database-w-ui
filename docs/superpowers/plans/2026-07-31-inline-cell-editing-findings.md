@@ -222,7 +222,7 @@ EOF
 - [ ] `recordValues.ts` exports `toStored` and `clearedNested`; `buildRecordData` and `cellPatch` both use `toStored`; `RecordFields` and `cellPatch` both use `clearedNested`
 - [ ] An untouched draft produces `null`, including for a `time` column holding `"14:30"`
 
-**Verify:** `cd frontend && npm test` → `Tests 11 passed (11)`
+**Verify:** `cd frontend && npm test` → `Tests 15 passed (15)`
 
 **Steps:**
 
@@ -498,6 +498,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Column } from "../../lib/types";
 import { cellPatch, type CellDraft } from "./cellEdit";
+import { deserialize, toStored } from "./recordValues";
 
 function column(over: Partial<Column> = {}): Column {
   return {
@@ -517,21 +518,26 @@ function draft(over: Partial<CellDraft>): CellDraft {
 describe("cellPatch", () => {
   it("sends nothing when the draft was never touched", () => {
     const col = column();
+    // Typing a value and putting it back is the same draft state — CellDraft
+    // carries only the seed and the current value, so the two gestures are
+    // indistinguishable here by construction.
     expect(cellPatch([col], col, draft({ initial: "Ada", value: "Ada" }))).toBeNull();
   });
 
-  // The temporal round trip: `deserialize` turns a stored "14:30" into a Date and
-  // `serialize` writes it back as "14:30:00". Compared against the stored string
-  // that looks like an edit; compared against the seed it is what it is — nothing.
   it("sends nothing when an untouched temporal value fails to round-trip", () => {
     const col = column({ type: "time" });
-    const seeded = new Date(2026, 6, 12, 14, 30, 0);
-    expect(cellPatch([col], col, draft({ initial: seeded, value: seeded }))).toBeNull();
-  });
+    const stored = "14:30";
+    const seeded = deserialize(col, stored);
 
-  it("sends nothing when a typed value is put back the way it was", () => {
-    const col = column();
-    expect(cellPatch([col], col, draft({ initial: "Ada", value: "Ada" }))).toBeNull();
+    // The round trip really is lossy — `deserialize` turns a stored "14:30" into
+    // a Date and `serialize` writes it back as "14:30:00". This is the bug's
+    // precondition, and without asserting it the test below would pass for the
+    // wrong reason: comparing any value to itself is trivially stable.
+    expect(toStored(col, seeded)).not.toBe(stored);
+
+    // ...and comparing the draft against its seed absorbs that, rather than
+    // inventing an edit out of the difference.
+    expect(cellPatch([col], col, draft({ initial: seeded, value: seeded }))).toBeNull();
   });
 
   it("sends the new value when it changed", () => {
@@ -565,7 +571,7 @@ describe("cellPatch", () => {
 cd C:/Users/Asus/Projects/database-w-ui/frontend && npm test && npx tsc --noEmit
 ```
 
-Expected: `Tests 11 passed (11)`, then no typecheck output.
+Expected: `Tests 15 passed (15)`, then no typecheck output.
 
 - [ ] **Step 9: Commit**
 
@@ -607,7 +613,7 @@ EOF
 - [ ] The only bail-out besides "no draft" is a column that no longer exists
 - [ ] `onCellEditComplete` is `() => commitCell()`
 
-**Verify:** `cd frontend && npx tsc --noEmit && npm test` → no output, then `Tests 11 passed (11)`
+**Verify:** `cd frontend && npx tsc --noEmit && npm test` → no output, then `Tests 15 passed (15)`
 
 **Steps:**
 
@@ -657,7 +663,7 @@ At `ListDetailPage.tsx` in the `visibleCols.map` block:
 cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test
 ```
 
-Expected: no typecheck output; `Tests 11 passed (11)`.
+Expected: no typecheck output; `Tests 15 passed (15)`.
 
 - [ ] **Step 4: Commit**
 
@@ -823,7 +829,7 @@ Immediately above `const saveCell = useMutation({`:
 cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test && npm run build
 ```
 
-Expected: no typecheck output, `Tests 11 passed (11)`, `✓ built`.
+Expected: no typecheck output, `Tests 15 passed (15)`, `✓ built`.
 
 - [ ] **Step 5: Commit**
 
@@ -899,7 +905,7 @@ PrimeReact keys body cells by row index, so a poll that repages the grid leaves 
 The pure rules are split out of \`inlineEdit.tsx\`, which reaches PrimeReact through \`RecordField\` — importing \`cellPatch\` imported a UI toolkit. This is what makes them testable at all.
 
 ## Harness
-vitest, node environment, no jsdom. 11 tests covering \`recordPagesKey\`, \`toStored\`, \`clearedNested\` and \`cellPatch\` — including the temporal round-trip case that used to leak a no-op PATCH.
+vitest, node environment, no jsdom. 15 tests covering \`recordPagesKey\`, \`toStored\`, \`clearedNested\` and \`cellPatch\` — including the temporal round-trip case that used to leak a no-op PATCH.
 
 \`tsc --noEmit\`, \`npm test\` and \`vite build\` all clean."
 ```
@@ -938,7 +944,7 @@ Branch: `fix/cell-affordance-and-keyboard-reach`
 - [ ] `cellEditKinds`, `RecordFields` and `renderCell` all call `textMode`; none of them reads `config.text_mode` directly
 - [ ] `cellEditKinds` returns `"dialog"` for rich and multiline, `"inline"` otherwise, `"locked"` when disabled
 
-**Verify:** `cd frontend && npm test` → `Tests 18 passed (18)`
+**Verify:** `cd frontend && npm test` → `Tests 25 passed (25)`
 
 **Steps:**
 
@@ -1033,7 +1039,11 @@ Add `textMode` to its `./recordValues` import.
 
 - [ ] **Step 4: Use it in `renderCell.tsx`**
 
-Replace the `column.type === "text"` block at lines 86-111:
+Replace the `column.type === "text"` block at lines 86-112 — through the
+function's trailing `return String(value);`, which the replacement carries.
+The type guard goes because `textMode` already answers `"single"` for a non-text
+column, and that lands on the same fallthrough it landed on before; leaving line
+112 in place would strand a second, unreachable `return`.
 
 ```tsx
   const mode = textMode(column);
@@ -1128,7 +1138,7 @@ Add `cellEditKinds` to that file's import from `./cellEdit`.
 cd C:/Users/Asus/Projects/database-w-ui/frontend && npm test && npx tsc --noEmit
 ```
 
-Expected: `Tests 18 passed (18)`, then no typecheck output.
+Expected: `Tests 25 passed (25)`, then no typecheck output.
 
 - [ ] **Step 7: Branch and commit**
 
@@ -1482,7 +1492,7 @@ Keying off \`event.defaultPrevented\` was tried and rejected: \`onEscapeKey\` ca
 ## #11 — keyboard reach
 The span that opens the record for rich-text and multiline columns gains \`role=\"button\"\`, \`tabIndex\`, an aria-label and an Enter/Space handler. It was the only route to those columns in edit mode and it was mouse-only.
 
-\`tsc --noEmit\`, \`npm test\` (18) and \`vite build\` all clean."
+\`tsc --noEmit\`, \`npm test\` (25) and \`vite build\` all clean."
 ```
 
 - [ ] **Step 3: Merge and sync**
@@ -1513,7 +1523,7 @@ Branch: `fix/cell-permission-gating`
 - [ ] It is still *present* in the result — not filtered out — so `RecordViewDialog` and `RecordFormDialog` still show it
 - [ ] A column without `onupdate` is unaffected
 
-**Verify:** `cd frontend && npm test` → `Tests 22 passed (22)`
+**Verify:** `cd frontend && npm test` → `Tests 29 passed (29)`
 
 **Steps:**
 
@@ -1617,7 +1627,7 @@ Add `resolveFields` to the import from `./recordValues`, and `import type { Colu
 cd C:/Users/Asus/Projects/database-w-ui/frontend && npm test && npx tsc --noEmit
 ```
 
-Expected: `Tests 22 passed (22)`, then no typecheck output.
+Expected: `Tests 29 passed (29)`, then no typecheck output.
 
 - [ ] **Step 5: Branch and commit**
 
@@ -1936,7 +1946,7 @@ Narrowing the memo does not work: adding \`column\` to \`cellMemoProps\` compare
 ## #14 — one editability answer per column
 \`bodyClassName\`, \`body\` and \`onBeforeCellEditShow\` each resolved editability separately. One predicate per column now answers for all three. \`cellEditKind\` — a one-line \`?? \"locked\"\` wrapper whose only caller restated the default anyway — is deleted.
 
-\`tsc --noEmit\`, \`npm test\` (22) and \`vite build\` all clean."
+\`tsc --noEmit\`, \`npm test\` (29) and \`vite build\` all clean."
 ```
 
 - [ ] **Step 3: Merge and sync**

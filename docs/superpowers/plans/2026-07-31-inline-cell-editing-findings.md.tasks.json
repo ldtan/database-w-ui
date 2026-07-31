@@ -4,13 +4,13 @@
     {
       "id": 0,
       "subject": "Task 1: Add the vitest harness",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** `npm test` runs pure-logic tests in a node environment, proven by a real test of the namespace split that fixed #1.\n\n**Files:**\n- Modify: `frontend/package.json`\n- Modify: `frontend/vite.config.ts`\n- Create: `frontend/src/features/records/recordKeys.test.ts`\n\n**Acceptance Criteria:**\n- [ ] `npm test` runs and reports 2 passing tests\n- [ ] The test environment is node — no jsdom in `package.json`\n- [ ] Test globals are imported explicitly, so `tsconfig.json` needs no `types` entry\n- [ ] `npx tsc --noEmit` stays clean with the new `.test.ts` file under `src`\n\n**Verify:** `cd frontend && npm test` → `Test Files 1 passed (1)` / `Tests 2 passed (2)`\n\nFull steps with code in `docs/superpowers/plans/2026-07-31-inline-cell-editing-findings.md` → Task 1. Branch `fix/cell-write-recovery-and-duplication` is created in this task's final step.\n\n```json:metadata\n{\"files\": [\"frontend/package.json\", \"frontend/vite.config.ts\", \"frontend/src/features/records/recordKeys.test.ts\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"npm test reports 2 passing tests\", \"environment is node, no jsdom\", \"globals imported explicitly, no tsconfig types entry\", \"tsc --noEmit clean\"], \"modelTier\": \"mechanical\"}\n```"
     },
     {
       "id": 1,
       "subject": "Task 2: Split pure cell rules out, de-duplicate them",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** `cellPatch` and friends live in a module a node test can import, and the two rules they duplicated from the dialog have one home each (#13).\n\n**Files:**\n- Create: `frontend/src/features/records/cellEdit.ts`\n- Create: `frontend/src/features/records/cellEdit.test.ts`\n- Create: `frontend/src/features/records/recordValues.test.ts`\n- Modify: `frontend/src/features/records/recordValues.ts` (add `toStored`, `clearedNested`; rewrite `buildRecordData`'s editing branch)\n- Modify: `frontend/src/features/records/inlineEdit.tsx` (remove everything but `InlineCellEditor`)\n- Modify: `frontend/src/features/records/RecordFields.tsx:288-293`\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:39-45` (imports)\n\n**Acceptance Criteria:**\n- [ ] `cellEdit.ts` exports `CellEditKind`, `cellEditKinds`, `cellEditKind`, `CellDraft`, `cellPatch` and imports no React\n- [ ] `inlineEdit.tsx` exports only `InlineCellEditor`\n- [ ] `toSend` is deleted, not aliased\n- [ ] `recordValues.ts` exports `toStored` and `clearedNested`; `buildRecordData` and `cellPatch` both use `toStored`; `RecordFields` and `cellPatch` both use `clearedNested`\n- [ ] An untouched draft produces `null`, including for a `time` column holding `\"14:30\"`\n\n**Verify:** `cd frontend && npm test` → `Tests 11 passed (11)`\n\nFull steps with code in the plan doc → Task 2.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/records/cellEdit.ts\", \"frontend/src/features/records/cellEdit.test.ts\", \"frontend/src/features/records/recordValues.ts\", \"frontend/src/features/records/recordValues.test.ts\", \"frontend/src/features/records/inlineEdit.tsx\", \"frontend/src/features/records/RecordFields.tsx\", \"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npm test && npx tsc --noEmit\", \"acceptanceCriteria\": [\"cellEdit.ts imports no React\", \"inlineEdit.tsx exports only InlineCellEditor\", \"toSend deleted not aliased\", \"toStored and clearedNested each have one home and two callers\", \"untouched draft returns null including the 14:30 temporal case\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         0
@@ -19,7 +19,7 @@
     {
       "id": 2,
       "subject": "Task 3: Trust the draft over the event's row (#4)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A cell edit survives the grid repaging underneath it, instead of being discarded without a word (#4).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:505-527` (`commitCell`)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:1135` (`onCellEditComplete`)\n\n**Acceptance Criteria:**\n- [ ] `commitCell` takes no arguments and reads the record and the column from the draft\n- [ ] The only bail-out besides \"no draft\" is a column that no longer exists\n- [ ] `onCellEditComplete` is `() => commitCell()`\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm test` → no output, then `Tests 11 passed (11)`\n\nFull steps with code in the plan doc → Task 3.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test\", \"acceptanceCriteria\": [\"commitCell takes no arguments\", \"record and column both resolved from the draft\", \"only remaining bail is a deleted column\", \"onCellEditComplete is () => commitCell()\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         1
@@ -28,7 +28,7 @@
     {
       "id": 3,
       "subject": "Task 4: Roll back on error, keep the returned record (#7)",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** A refused cell write leaves nothing behind even offline, and a burst of writes costs one refetch rather than one each (#7).\n\n**Files:**\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx:338-379` (`saveCell`)\n- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (module scope: `SETTLE_DELAY_MS`, `withItem`)\n\n**Acceptance Criteria:**\n- [ ] `onMutate` snapshots with `getQueriesData` and returns `{ previous }`\n- [ ] `onError` restores the snapshot before showing the toast\n- [ ] `onSuccess` writes the returned `ListItem` into the cached pages\n- [ ] `onSettled` schedules a debounced invalidate; the timer is cleared on unmount\n- [ ] Ten commits in quick succession produce one invalidate\n\n**Verify:** `cd frontend && npx tsc --noEmit && npm run build` → no typecheck output, then `✓ built`\n\nFull steps with code in the plan doc → Task 4.\n\n```json:metadata\n{\"files\": [\"frontend/src/features/lists/ListDetailPage.tsx\"], \"verifyCommand\": \"cd frontend && npx tsc --noEmit && npm test && npm run build\", \"acceptanceCriteria\": [\"onMutate returns { previous } from getQueriesData\", \"onError restores the snapshot before the toast\", \"onSuccess writes the returned ListItem into cached pages\", \"onSettled debounced and cleared on unmount\", \"a burst of commits produces one invalidate\"], \"modelTier\": \"standard\"}\n```",
       "blockedBy": [
         2
@@ -37,7 +37,7 @@
     {
       "id": 4,
       "subject": "Task 5: Ship PR 1",
-      "status": "pending",
+      "status": "completed",
       "description": "**Goal:** PR 1 is merged into `main` and `main` is synced locally.\n\n**Files:** none — git and `gh` only.\n\n**Acceptance Criteria:**\n- [ ] `npx tsc --noEmit`, `npm test` and `npm run build` all pass on the branch tip\n- [ ] PR body names the findings closed (#4, #7, #13) and the structural split\n- [ ] PR merged, local `main` fast-forwarded, tree clean\n\n**Verify:** `gh pr view <n> --json state` → `{\"state\":\"MERGED\"}`\n\nFull commands and PR body in the plan doc → Task 5. No AI attribution in the commit or PR. If `git pull` fails with `Recv failure: Connection was reset`, retry once — TLS interception here makes that intermittent.\n\n```json:metadata\n{\"files\": [], \"verifyCommand\": \"gh pr view --json state\", \"acceptanceCriteria\": [\"tsc, npm test and build all pass on branch tip\", \"PR body names #4, #7, #13 and the cellEdit.ts split\", \"PR merged and local main fast-forwarded clean\"], \"modelTier\": \"mechanical\"}\n```",
       "blockedBy": [
         3
