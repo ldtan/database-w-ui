@@ -15,7 +15,7 @@ from src.core.exceptions import (
 )
 from src.workspaces.services import WorkspaceService
 
-from ..helpers import get_password_hash, verify_password
+from ..helpers import get_password_hash_async, verify_password_async
 from .models import (
     AUTHENTICATED_USERS_DISPLAY_NAME,
     AUTHENTICATED_USERS_NAME,
@@ -154,7 +154,7 @@ class UserService:
         user = User(
             username=payload.username,
             email=payload.email,
-            password=get_password_hash(payload.password),
+            password=await get_password_hash_async(payload.password),
             is_active=payload.is_active,
         )
         db.add(user)
@@ -195,10 +195,10 @@ class UserService:
             # and not someone who merely got hold of a token.
             if verify_current_password and (
                 current_password is None
-                or not verify_password(current_password, user.password)
+                or not await verify_password_async(current_password, user.password)
             ):
                 raise PermissionDeniedError("current_password is incorrect")
-            user.password = get_password_hash(password)
+            user.password = await get_password_hash_async(password)
 
         if data.get("is_superuser") is False and user.is_superuser:
             await cls._guard_last_superuser(db, user)

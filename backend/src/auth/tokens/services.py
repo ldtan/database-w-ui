@@ -7,10 +7,12 @@ from ..helpers import (
     PUBLIC_KEY,
     create_access_token,
     create_refresh_token,
+    get_password_hash_async,
+    needs_rehash,
     revoke_refresh_token,
     store_refresh_token,
     validate_refresh_token,
-    verify_password,
+    verify_password_async,
 )
 from src.core.exceptions import (
     InactiveUserError,
@@ -31,10 +33,23 @@ class TokenService:
     @staticmethod
     async def authenticate(db: AsyncSession, username: str, password: str) -> User:
         user = await UserService.get_by_username(db, username)
-        if user is None or not verify_password(password, user.password):
+        if user is None or not await verify_password_async(password, user.password):
             raise InvalidCredentialsError("Incorrect username or password")
         if not user.is_active:
             raise InactiveUserError("Inactive user")
+
+        # A sign-in is the only moment the plaintext exists, so it is the only moment a
+        # stored hash can be upgraded to the current argon2 parameters. Without this the
+        # cheaper parameters set on `ph` would only ever apply to new accounts, and every
+        # existing password would keep costing the old price for the life of the account.
+        #
+        # After the credentials are accepted, deliberately: re-hashing a password that
+        # turned out to be wrong would spend the cost on an attacker's guess. Failing to
+        # upgrade is also not worth failing a valid login over, so this is the last thing
+        # that happens and it does not gate the return.
+        if needs_rehash(user.password):
+            user.password = await get_password_hash_async(password)
+            await db.commit()
         return user
 
     @staticmethod
