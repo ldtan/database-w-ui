@@ -131,6 +131,12 @@ autogenerate caveats.
 - Interactive docs: `http://localhost:5000/docs`
 - ReDoc: `http://localhost:5000/redoc`
 
+Both, and the `/openapi.json` they read, are served only while `DEBUG` is true — so they
+are there locally and absent from a deployment, where they would publish the whole route
+inventory to anyone with the URL. A deployed `/docs` answers `404`, not `401`: the route is
+not registered at all. Refreshing the frontend's types does not go through them (see
+"API types are generated" in `../frontend/README.md`), so nothing needs them to be reachable.
+
 ## Configuration reference
 
 All settings are read from `.env` (see `src/core/config.py`).
@@ -147,7 +153,7 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `API_PREFIX` | `/api` | Prefix for all routes. |
 | `DATABASE_URI` | — (required) | Async SQLAlchemy URL (`postgresql+asyncpg://…`). |
 | `ALLOWED_ORIGINS` | `""` | Comma-separated CORS origins. |
-| `DEBUG` | `false` | Debug mode. |
+| `DEBUG` | `false` | Debug mode. Also the switch for `/docs`, `/redoc` and `/openapi.json`, which are served only when it is true, and the flag `DISABLE_AUTH` must be paired with. |
 | `DISABLE_AUTH` | `false` | Dev-only: bypass auth and act as the first user. Requires `DEBUG=true` — the app refuses to start otherwise, because on a reachable URL it hands every route to anyone, as the superuser, with no token. |
 | `LOGIN_THROTTLE_WINDOW_MINUTES` | `15` | How long a failed sign-in is counted for. |
 | `LOGIN_MAX_FAILURES_PER_USERNAME` | `10` | Failed sign-ins per username per window before login answers `429`. A success clears the tally. |
@@ -165,9 +171,10 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 The API is public by design and protected by that token, not by its network position: the
 SPA runs in a browser, so anything it can call, any HTTP client can call. `ALLOWED_ORIGINS`
 is not an access control — CORS only governs what other *browser pages* may read, and is
-ignored entirely by scripts. The unauthenticated surface is exactly `/health`, `/docs`,
-`/redoc`, `/openapi.json`, and the three routes under `…/auth/tokens`; everything else is
-`401` without a token.
+ignored entirely by scripts. The unauthenticated surface is exactly `/health` and the three
+routes under `…/auth/tokens`; everything else is `401` without a token. `/docs`, `/redoc`
+and `/openapi.json` join that list when `DEBUG` is true, which is a development machine and
+not a deployment.
 
 Login is therefore the one route an attacker can reach, and it is rate-limited on failures —
 per username, and per source address — returning `429` with a `Retry-After` header once a

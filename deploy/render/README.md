@@ -74,10 +74,18 @@ request the app makes, `curl` makes identically. What protects it is the bearer 
 route requires (`401` without one), plus the failure limits on login, which is the only route
 that has to answer an unproven caller. `ALLOWED_ORIGINS` is not part of that: CORS governs
 what other browser pages may read, and scripts ignore it. The unauthenticated surface is
-`/health`, `/docs`, `/redoc`, `/openapi.json` and the three `…/auth/tokens` routes — worth
-re-checking with an unauthenticated `curl` after any change to how routers are mounted, since
-the token requirement is declared per router (`dependencies=[Depends(get_current_user)]`) and
-a new router added without it would be open.
+`/health` and the three `…/auth/tokens` routes — worth re-checking with an unauthenticated
+`curl` after any change to how routers are mounted, since the token requirement is declared
+per router (`dependencies=[Depends(get_current_user)]`) and a new router added without it
+would be open.
+
+`/docs`, `/redoc` and `/openapi.json` are **not** on that list here: `main.py` serves them
+only while `DEBUG` is true, and `DEBUG` is `False` below, so they answer `404` on Render.
+They were never an authentication hole — the token requirement applies to a request from
+Swagger UI like any other — but they published the full route inventory and every payload
+shape, which is free reconnaissance for anyone holding the URL. Note that this rides on the
+same flag as `DISABLE_AUTH`: turning `DEBUG` on here would bring the docs back along with
+much worse.
 
 **No container.** The app needs Python 3.14 (every entity's public id comes from `uuid.uuid7`,
 `src/core/mixins.py`), and Render's native runtime installs any released version, so

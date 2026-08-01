@@ -31,12 +31,29 @@ async def lifespan(app: FastAPI):
     # Shutdown logic (if any) would go here
 
 def create_app() -> FastAPI:
+    # Swagger UI, ReDoc, and the schema document they both read, are development
+    # tools and are not served anywhere else. They are not a hole on their own —
+    # every router declares its bearer token and answers 401 to an unproven
+    # caller either way — but they hand a stranger the complete route inventory
+    # and every payload shape, including the routes the SPA never calls. Off in
+    # production, that costs an attacker the work of reading the bundle.
+    #
+    # All three have to be None together: dropping only docs_url and redoc_url
+    # leaves /openapi.json serving the same document without the viewer.
+    #
+    # This does not affect `npm run gen:api`. The frontend's types come from
+    # create_app().openapi() in-process (src/infrastructure/export_openapi.py);
+    # openapi_url decides whether the schema is *routed*, not whether it can be
+    # built. Nor does it affect local work, where DEBUG is true.
+    docs_enabled = settings.DEBUG
+
     app = FastAPI(
         title="Database w/ UI",
         description="This app lets you create lists and add records.",
         version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if docs_enabled else None,
+        redoc_url="/redoc" if docs_enabled else None,
+        openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
 
