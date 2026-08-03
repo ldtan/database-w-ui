@@ -5,6 +5,7 @@ import { Button } from "primereact/button";
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useOnboarding } from "../onboarding/OnboardingProvider";
+import { Figure } from "./Figure";
 
 /**
  * A plain-language, start-to-finish guide to the app, written for people with no
@@ -20,6 +21,12 @@ import { useOnboarding } from "../onboarding/OnboardingProvider";
  * `onboarding/tours.ts` have been re-read; see "Gotchas for whoever edits this
  * next" in `docs/known-gaps.md`. `COLUMN_TYPE_OPTIONS` below is the pattern
  * where it can be avoided: the type list is generated rather than retyped.
+ *
+ * The `<Figure>`s are the other half of that pattern, and the stronger half:
+ * each is a screenshot taken by `scripts/capture-guide.mjs` driving the real app,
+ * so `npm run capture:guide` fails on a control that has been renamed instead of
+ * leaving a paragraph confidently describing one that is gone. Re-run it after a
+ * UI change; the pictures are committed, and are what a reader sees.
  */
 
 const SECTIONS: { id: string; title: string }[] = [
@@ -273,6 +280,7 @@ export function GuidePage() {
           sign-in screen, type them in and click <Ui>Sign in</Ui>. That’s it — you
           land on your home page.
         </p>
+        <Figure name="sign-in" />
         <p>
           If you don’t have an account yet, ask whoever runs this app for one (see{" "}
           <a href="#people" style={{ color: "var(--brand)" }}>
@@ -287,6 +295,7 @@ export function GuidePage() {
           Once you’re in, the strip down the left-hand side is your map. It stays
           there while you work, so you can always see everything you have:
         </p>
+        <Figure name="shell" />
         <ul className="flex flex-col gap-2">
           <li>
             The name at the top (<Ui>Database w/ UI</Ui>) always takes you back to
@@ -326,6 +335,7 @@ export function GuidePage() {
             link back to this guide, and the <strong>tours</strong> — see below.
           </li>
         </ul>
+        <Figure name="nav-tree" />
         <Callout tone="tip" title="Rather be shown than read?">
           A tour dims the page and points at one thing at a time, in the app
           itself. <Ui>Show me around</Ui> is the general one — the rail, your
@@ -369,6 +379,7 @@ export function GuidePage() {
           </li>
           <li>Click the card to open it.</li>
         </ol>
+        <Figure name="workspaces" />
         <Callout tone="tip" title="Two names, one thing">
           Each workspace (and list) has an everyday <Ui>Name</Ui> and a shorter{" "}
           <Ui>API name</Ui>. You only ever need the everyday name — the app fills in
@@ -388,6 +399,7 @@ export function GuidePage() {
           </li>
           <li>Click the list’s card to open it.</li>
         </ol>
+        <Figure name="lists" />
         <p>
           A brand-new list has no records and none of your own columns yet — so the
           next step is to decide what details each contact should have.
@@ -414,6 +426,8 @@ export function GuidePage() {
             <Ui>Add</Ui>.
           </li>
         </ol>
+        <Figure name="columns" />
+        <Figure name="add-column" />
         <p>For our Contacts list, you might add:</p>
         <ul className="flex flex-col gap-1">
           <li>
@@ -529,6 +543,7 @@ export function GuidePage() {
           Only when you click <Ui>Apply</Ui> (or <Ui>Add column</Ui>, for a copy) does
           anything actually change. <Ui>Discard</Ui> costs you nothing.
         </p>
+        <Figure name="change-type" />
         <p>
           If some values can’t be converted — a <em>“n/a”</em> sitting in a column
           you’re turning into <Ui>Number</Ui> — the report names them. Those cells end
@@ -583,6 +598,8 @@ export function GuidePage() {
             Click <Ui>Add</Ui>. Your new record shows up in the table.
           </li>
         </ol>
+        <Figure name="add-record" />
+        <Figure name="records" />
         <p>To change a contact later, open it, edit the fields, and click <Ui>Save</Ui>.</p>
         <ul className="flex flex-col gap-1">
           <li>An empty field shows as a dash (—).</li>
@@ -654,6 +671,7 @@ export function GuidePage() {
           suggesting only that country’s cities. Change the country later and the
           city clears itself — the old city belonged to the old country.
         </p>
+        <Figure name="nested-lookup" />
         <p>
           <strong>Longer chains work too.</strong> Nest <em>Country</em> under{" "}
           <em>Continent</em> and <em>City</em> under <em>Country</em>, and the
@@ -701,6 +719,7 @@ export function GuidePage() {
           pick the type, and type the formula into the <Ui>Formula</Ui> box. The
           dialog lists, underneath, the columns you’re allowed to name.
         </p>
+        <Figure name="formula" />
 
         <h3 className="font-semibold pt-1">Naming your columns</h3>
         <p>
@@ -870,6 +889,7 @@ export function GuidePage() {
             pick a saved picture of the code instead.
           </li>
         </ol>
+        <Figure name="qr-menu" />
         <ul className="flex flex-col gap-1">
           <li>
             The code has to hold the record’s fields (by their column names) and
@@ -930,6 +950,7 @@ export function GuidePage() {
           As a list grows, four tools help you find what you need. They live in the
           bar above your records.
         </p>
+        <Figure name="toolbar" />
         <ul className="flex flex-col gap-2">
           <li>
             <strong>Search</strong> — type in <Ui>Search records…</Ui> to narrow to
@@ -966,6 +987,7 @@ export function GuidePage() {
           </li>
           <li>Click <Ui>Apply</Ui>.</li>
         </ol>
+        <Figure name="filter" />
         <p style={{ color: "var(--text-muted)" }}>
           The value box adapts to the column: numbers get a number box, dates get a
           calendar, and choice/people/linked columns give you a picker. Comparisons
@@ -1000,6 +1022,7 @@ export function GuidePage() {
             arrangement. If you don’t see it, there is nothing to save.
           </li>
         </ol>
+        <Figure name="views" />
         <ul className="flex flex-col gap-1">
           <li>
             Use <Ui>Columns</Ui> to tick which columns appear, and{" "}
@@ -1035,6 +1058,7 @@ export function GuidePage() {
           </li>
           <li>Click <Ui>Save</Ui> to apply. New fields start out shown and editable.</li>
         </ul>
+        <Figure name="forms" />
         <p style={{ color: "var(--text-muted)" }}>
           The four automatic columns — <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
           <Ui>Created by</Ui>, <Ui>Updated by</Ui> — are the exception: they start
@@ -1063,6 +1087,7 @@ export function GuidePage() {
           open a list — working out a total means reading every record, so it is
           not something the app does over your shoulder.
         </p>
+        <Figure name="metrics" />
 
         <h3 className="font-semibold pt-1">Writing the formula</h3>
         <p>
@@ -1145,6 +1170,7 @@ export function GuidePage() {
             itself. Then click <Ui>Add</Ui>.
           </li>
         </ol>
+        <Figure name="sharing" />
         <p>The individual actions mean:</p>
         <ul className="flex flex-col gap-1">
           <li><strong>View</strong> — see the item and its records.</li>
@@ -1206,6 +1232,7 @@ export function GuidePage() {
           lists; each one has a <Ui>Move or transfer</Ui> button (the paper-plane
           icon), alongside Share, Rename, and Delete.
         </p>
+        <Figure name="transfer" />
         <p>
           <strong>Move it to another workspace.</strong> Choose{" "}
           <Ui>Move to workspace</Ui>, pick one of your other workspaces, and click{" "}
@@ -1264,6 +1291,7 @@ export function GuidePage() {
             like <em>contacts_copy</em>, which you can rename afterward.
           </li>
         </ol>
+        <Figure name="duplicate" />
         <ul className="flex flex-col gap-1">
           <li>
             The copy is entirely your own and starts <strong>private</strong> — none of
@@ -1288,6 +1316,7 @@ export function GuidePage() {
           Anyone can look; only an <strong>administrator</strong> (a “superuser”) can
           add or change accounts.
         </p>
+        <Figure name="people" />
         <ul className="flex flex-col gap-1">
           <li>
             Administrators can <Ui>Add user</Ui> (username, email, password), reset
@@ -1361,6 +1390,7 @@ export function GuidePage() {
           </li>
           <li>Click <Ui>Export records</Ui> to download the file.</li>
         </ol>
+        <Figure name="import-export" />
         <p>
           <strong>To bring data in:</strong> under <Ui>Import</Ui>, click{" "}
           <Ui>Choose file</Ui> and pick a <em>.csv</em> or <em>.json</em> file. After
@@ -1429,6 +1459,7 @@ export function GuidePage() {
           gone now rather than at the end of its window — it asks you to confirm,
           and there is no undo.
         </p>
+        <Figure name="bin" />
         <Callout tone="warn" title="There’s a time limit">
           Deleted things are only kept for a while (a retention window). Once that
           passes they’re gone for good and can’t be restored — so recover anything
@@ -1466,6 +1497,7 @@ export function GuidePage() {
           whatever is easiest on your eyes. On a narrow window they sit at the top
           right instead.
         </p>
+        <Figure name="appearance" />
         <p>
           Your choice is saved to your account, not to the browser, so signing in on
           another computer or phone brings it with you. Changing it anywhere changes

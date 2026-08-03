@@ -2451,6 +2451,57 @@ a {
   animation-name: tour-fade;
 }
 
+/* ============================================================
+   The guide's screenshots.
+
+   A figure is a button wrapping an image: clicking it opens the same picture at
+   full size, so a reader on a laptop can actually read the labels in a shot of a
+   1400px-wide app. A <button> rather than an <img> with a click handler, because
+   the thing is operable and the keyboard has to reach it.
+   ============================================================ */
+.guide-figure-frame {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  overflow: hidden;
+  cursor: zoom-in;
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+}
+.guide-figure-frame:hover,
+.guide-figure-frame:focus-visible {
+  border-color: var(--brand);
+  box-shadow: var(--shadow-md);
+}
+.guide-figure-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* The affordance. Only on hover and focus: twenty of these sitting permanently
+   on top of twenty screenshots is twenty things in the way of reading them. */
+.guide-figure-zoom {
+  position: absolute;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--text) 70%, transparent);
+  color: var(--surface);
+  opacity: 0;
+  transition: opacity 0.15s var(--ease);
+}
+.guide-figure-frame:hover .guide-figure-zoom,
+.guide-figure-frame:focus-visible .guide-figure-zoom {
+  opacity: 1;
+}
+
 /* Scrollbars, so the sidebar and the grid do not each grow a slab of default
    Windows chrome in the middle of a themed panel. */
 * {

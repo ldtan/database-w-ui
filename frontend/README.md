@@ -31,9 +31,10 @@ user (`FIRST_SUPERUSER_USERNAME` / `FIRST_SUPERUSER_PASSWORD`).
 Other scripts:
 
 ```bash
-npm run build    # typecheck (tsc --noEmit) + production build
-npm run preview  # serve the production build
-npm run gen:api  # regenerate src/lib/api-schema.ts from the backend's OpenAPI document
+npm run build          # typecheck (tsc --noEmit) + production build
+npm run preview        # serve the production build
+npm run gen:api        # regenerate src/lib/api-schema.ts from the backend's OpenAPI document
+npm run capture:guide  # re-photograph the guide's screenshots from the running app
 ```
 
 ## API types are generated
@@ -95,6 +96,33 @@ src/
 A column's `type` and `config` drive everything about it: `renderCell` picks how it
 displays, `RecordFormDialog` picks its input, `FilterConditionsEditor` picks its filter
 control. Adding a column type means teaching those three, not writing per-list code.
+
+## The guide's screenshots are taken from the running app
+
+`features/guide/GuidePage.tsx` is a written walkthrough of the whole app, and the pictures
+in it are real: `scripts/capture-guide.mjs` drives a Playwright browser through the app and
+writes one PNG per screen into `public/guide/`, twice — once light, once dark, since the
+guide is read in whichever mode the account chose. `<Figure name="…">` picks between them
+and opens the full-size copy on click.
+
+```bash
+cd ../backend && uv run python -m src.demo.guide   # the Sales/Contacts tenant it photographs
+npm run dev                                        # with the backend on :5000
+npm run capture:guide                              # or `… capture:guide records filter` for two
+```
+
+Two things follow from it that are worth knowing:
+
+- **The captions live in `features/guide/figures.ts`, which is generated.** The capture
+  script writes it from the same list that took the pictures, so a caption cannot come
+  loose from its image. Edit `SHOTS` in the script, not that file.
+- **It is the only check on prose the guide has.** Each shot clicks controls by the labels
+  the guide's own sentences quote, so a renamed button fails the run instead of leaving the
+  page confidently describing something that is gone. Re-run it after any UI change —
+  `docs/known-gaps.md` has the longer version of why.
+
+The images and the manifest are committed: the guide has to render for anyone who checks
+the repo out, and rebuilding them needs a database.
 
 ## Adding a record from a QR code
 
