@@ -13,6 +13,7 @@ these drive HTTP as a chosen user via a get_current_user override.
 """
 from contextlib import asynccontextmanager
 
+import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
@@ -376,3 +377,146 @@ async def test_clone_requires_configure_on_workspace(make_client, session_factor
             f"/api/lists/{list_uuid}/clone", json={"with_records": False}
         )
         assert resp.status_code == 403, resp.text
+
+
+# -- copying the records without holding them all ---------------------------
+#
+# These shrink `_CLONE_CHUNK` rather than creating thousands of records, the same
+# way test_purge_record_draining.py does: what is being pinned is that the walk
+# runs more than once and still finishes with everything, not the number it runs
+# at. A single-chunk clone would pass every one of these by doing nothing.
+
+
+async def test_clone_copies_every_record_across_several_chunks(
+    make_client, session_factory, monkeypatch
+):
+    from src.lists import services as list_services
+
+    monkeypatch.setattr(list_services, "_CLONE_CHUNK", 2)
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        col = await _add_column(client, list_uuid, "title")
+        for i in range(7):  # three full chunks and a short one
+            await client.post(
+                f"/api/lists/{list_uuid}/items/", json={"data": {col: f"row {i}"}}
+            )
+
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": True}
+        )
+        assert resp.status_code == 201, resp.text
+        clone_uuid = resp.json()["uuid"]
+
+        clone_cols = (await client.get(f"/api/lists/{clone_uuid}/columns/")).json()
+        clone_col = _column_named(clone_cols, "title")["uuid"]
+        items = (
+            await client.get(f"/api/lists/{clone_uuid}/items/?limit=100")
+        ).json()
+
+        assert sorted(i["data"][clone_col] for i in items) == [
+            f"row {i}" for i in range(7)
+        ]
+
+
+async def test_the_chunked_walk_does_not_copy_records_from_the_bin(
+    make_client, session_factory, monkeypatch
+):
+    """The keyset walk skips deleted rows, which means it also skips their ids —
+    so `after` has to come from the last row *returned*, not from a count."""
+    from src.lists import services as list_services
+
+    monkeypatch.setattr(list_services, "_CLONE_CHUNK", 2)
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        col = await _add_column(client, list_uuid, "title")
+        uuids = []
+        for i in range(6):
+            created = await client.post(
+                f"/api/lists/{list_uuid}/items/", json={"data": {col: f"row {i}"}}
+            )
+            uuids.append(created.json()["uuid"])
+        # Delete two, one of them the last row, so the final chunk comes back empty
+        # of live rows rather than short.
+        for i in (1, 5):
+            assert (
+                await client.delete(f"/api/lists/{list_uuid}/items/{uuids[i]}")
+            ).status_code in (200, 204)
+
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": True}
+        )
+        assert resp.status_code == 201, resp.text
+        clone_uuid = resp.json()["uuid"]
+
+        clone_cols = (await client.get(f"/api/lists/{clone_uuid}/columns/")).json()
+        clone_col = _column_named(clone_cols, "title")["uuid"]
+        items = (
+            await client.get(f"/api/lists/{clone_uuid}/items/?limit=100")
+        ).json()
+
+        assert sorted(i["data"][clone_col] for i in items) == [
+            "row 0", "row 2", "row 3", "row 4",
+        ]
+        # And the clone's bin is empty: a deleted record is not copied as deleted.
+        binned = (
+            await client.get(f"/api/lists/{clone_uuid}/items/deleted")
+        ).json()
+        assert binned == []
+
+
+async def test_a_clone_that_dies_before_the_commit_leaves_nothing_behind(
+    make_client, session_factory, monkeypatch
+):
+    """Records are flushed chunk by chunk but committed once, and this is why.
+
+    Every chunk has reached the database by the time this blows up — three of
+    them, at a chunk size of two. None of it survives, because a clone is one
+    thing appearing: a run that died would otherwise leave a half-copied list
+    sitting under a name its owner cannot reuse.
+    """
+    from src.lists import services as list_services
+
+    monkeypatch.setattr(list_services, "_CLONE_CHUNK", 2)
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        col = await _add_column(client, list_uuid, "title")
+        for i in range(6):
+            await client.post(
+                f"/api/lists/{list_uuid}/items/", json={"data": {col: f"row {i}"}}
+            )
+
+        real = list_services.ListService._clone_records
+
+        async def _die_after_a_chunk(db, source_id, clone_id, col_map):
+            await real(db, source_id, clone_id, col_map)
+            raise RuntimeError("boom")
+
+        monkeypatch.setattr(
+            list_services.ListService,
+            "_clone_records",
+            staticmethod(_die_after_a_chunk),
+        )
+
+        with pytest.raises(RuntimeError):
+            await client.post(
+                f"/api/lists/{list_uuid}/clone", json={"with_records": True}
+            )
+
+    monkeypatch.undo()
+    async with make_client(owner) as client:
+        lists = (await client.get("/api/lists/")).json()
+        # The copy's own row went with its records: the session is closed without
+        # a commit, and everything flushed inside it goes back.
+        assert [entry["uuid"] for entry in lists] == [list_uuid]

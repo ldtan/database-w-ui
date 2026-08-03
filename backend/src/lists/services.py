@@ -33,6 +33,11 @@ from .views.schemas import ViewConfig
 # Everything scoped under a list; soft-deleted together when the list goes.
 _LIST_CHILD_MODELS = (Column, ListItem, View, Form, Metric)
 
+# Records copied per round trip when cloning a list's data. Same size as the
+# conversion backfill's and the import's, and for the same reason: large enough
+# that the round trips disappear, small enough that a chunk is nothing to hold.
+_CLONE_CHUNK = 500
+
 
 class ListService:
     @staticmethod
@@ -444,6 +449,63 @@ class ListService:
                 )
         return cfg
 
+    @staticmethod
+    async def _clone_records(
+        db: AsyncSession, source_id: int, clone_id: int, col_map: dict[str, str]
+    ) -> None:
+        """Copy every live record of one list onto another, a chunk at a time.
+
+        Chunked because it used to select the entire table into the session and
+        then hold a second ORM object per row waiting to be flushed — two copies
+        of a list's data resident at once, in the request that asked for a copy.
+        Here the read is keyset-paginated by `id` (the same walk the conversion
+        backfill does) and asks only for the two fields it uses, so the source
+        rows never become entities at all, and each chunk's new rows are flushed
+        and expunged before the next is read. Memory is then a chunk, whatever the
+        list's size.
+
+        Flushed per chunk but deliberately **not committed** per chunk, unlike the
+        backfill: a clone is one thing appearing, and a run that died halfway would
+        otherwise leave a half-copied list sitting under a name the caller cannot
+        reuse. Holding the transaction open costs little here because every row in
+        it is new and belongs to a list nobody else can see yet — there is no
+        existing row locked against anyone.
+        """
+        after = 0
+        while True:
+            rows = (
+                await db.execute(
+                    select(ListItem.id, ListItem.data)
+                    .where(
+                        ListItem.list_id == source_id,
+                        ListItem.deleted_at.is_(None),
+                        ListItem.id > after,
+                    )
+                    .order_by(ListItem.id)
+                    .limit(_CLONE_CHUNK)
+                )
+            ).all()
+            if not rows:
+                break
+            after = rows[-1].id
+
+            copies = [
+                ListItem(
+                    list_id=clone_id,
+                    data={
+                        col_map.get(key, key): value
+                        for key, value in (row.data or {}).items()
+                    },
+                )
+                for row in rows
+            ]
+            db.add_all(copies)
+            await db.flush()
+            # Out of the identity map, but still in the transaction: the INSERTs
+            # have gone to Postgres and will stand or fall with the commit below.
+            for copy in copies:
+                db.expunge(copy)
+
     @classmethod
     async def clone(
         cls,
@@ -469,6 +531,11 @@ class ListService:
         duplicate them. Grants are not copied and no inherit flags are carried over:
         the clone is a fresh list the cloner owns, private like any newly created list.
         The router enforces 'view' on the source and 'configure' on its workspace.
+
+        Structure is copied whole — a list has tens of columns, not thousands — while
+        records go through ``_clone_records`` a chunk at a time, so the memory this
+        costs does not grow with the list. The whole thing is still one transaction:
+        a clone either appears or does not.
         """
         source = await cls.get_any_by_uuid(db, uuid)
         if source is None:
@@ -594,25 +661,12 @@ class ListService:
                 )
             )
 
-        if with_records:
-            source_items = (
-                await db.execute(
-                    select(ListItem)
-                    .where(
-                        ListItem.list_id == source.id,
-                        ListItem.deleted_at.is_(None),
-                    )
-                    .order_by(ListItem.id)
-                )
-            ).scalars().all()
-            for item in source_items:
-                data = {
-                    col_map.get(key, key): value
-                    for key, value in (item.data or {}).items()
-                }
-                db.add(ListItem(list_id=clone.id, data=data))
-
         try:
+            # Inside the try, because copying records now flushes as it goes and
+            # an IntegrityError raised by one of those flushes deserves the same
+            # rollback as one raised by the last.
+            if with_records:
+                await cls._clone_records(db, source.id, clone.id, col_map)
             await db.flush()
             new_uuid = clone.uuid
             await db.commit()

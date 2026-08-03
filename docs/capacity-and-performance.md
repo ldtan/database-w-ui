@@ -198,6 +198,38 @@ millisecond to a few, which lands a row nearer 15–25 ms. That number is the wh
 and the interesting part is not the wait but what a timeout leaves behind, since rows are
 committed every 500. See known-gaps §12.
 
+**An import does not block anybody else, and it is worth knowing why.** The same
+experiment as the login one above — a cheap unrelated read driven in a loop, once against
+an idle app and once alongside a 2,000-row import, both on the one event loop:
+
+| | p50 | p95 | max |
+|---|---|---|---|
+| Idle | 8.2 ms | 11.9 ms | 16.2 ms |
+| During a 2,000-row import | **10.6 ms** | 16.2 ms | 108.6 ms |
+
+The import took 16.5 s and the unrelated request was served **1,457 times** while it ran.
+That is the opposite of what a login used to do (34 ms → 459 ms on one concurrent sign-in),
+and for a structural reason: argon2 was synchronous CPU sitting on the loop with no second
+thread behind it, whereas every import row awaits a database round trip, so the loop yields
+thousands of times a second and everything interleaves. The 108 ms outlier is a batch
+commit. Nor does it starve the pool — one connection out of 5 plus 10 overflow — or hold
+locks, since it commits every 500 rows.
+
+Read the 1.3× as a floor rather than a forecast. This machine has cores to spare, so the
+import's CPU barely competes; on a shared 0.1 CPU there is one small allowance and an
+import wants effectively all of it for its whole duration, so co-running requests lose
+roughly the share the import takes. That is degradation spread evenly and ending when the
+import does, not the head-of-line stall the login had — which is why the import cap is
+about the *importer's* wait and what a timeout leaves behind, and not about protecting
+everyone else.
+
+**Cloning a list with its records costs ~0.93 ms per record** and, since the walk was
+chunked, a flat amount of memory: 5,000 records peaked at **4.0 MB** of Python allocation
+against **30.6 MB** before, and the old figure was ~6 kB per record with nothing bounding
+it. That is the one that mattered — 50,000 records would have been ~300 MB on an instance
+that idles at 146 MB with 512 MB to spend. The time is not capped; see known-gaps under
+cloning for why not.
+
 ## Data volume is not a constraint and probably never will be
 
 Records are ~**1.9 kB each** including indexes (the JSONB `data` column itself averages
