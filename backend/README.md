@@ -403,6 +403,18 @@ The scenario's own docstring is the place to read *why* it is shaped as it is â€
 particular why one user owns four of the five workspaces, which is a constraint the app
 imposes on lookups rather than a story about the school.
 
+There is a second, much smaller scenario:
+
+```bash
+uv run python -m src.demo.guide                       # ~40 records, two accounts
+```
+
+`src/demo/guide.py` builds the *Sales* workspace and *Contacts* list that the frontend's
+guide page walks a reader through, because that page's screenshots are photographs of it
+(`npm run capture:guide` in `frontend/`). Its nouns are load-bearing: the capture script
+clicks "Contacts" and "Customers only" by name, so renaming something here breaks that run.
+Both scenarios can live in one database â€” they share no names.
+
 ## Notes & roadmap
 
 The schema deliberately trades database-enforced record constraints for a fully dynamic,

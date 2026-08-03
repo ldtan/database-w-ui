@@ -938,8 +938,23 @@ those are re-read.** Concretely:
   `basics`. `pageTourFor` matches on the route; adding an entry there and a `Tour` object is
   the whole of it.
 
-Nothing here is enforceable by a test, which is why it is written down. Treat the guide and
-the tours as part of the UI's surface area rather than as documentation about it.
+The guide's **screenshots are the one part of this that does tell you.**
+`frontend/scripts/capture-guide.mjs` drives the real app with Playwright and photographs
+twenty-two screens into `public/guide/`; each shot clicks controls by the labels the guide's
+own prose quotes, so a renamed button fails the capture run with the id of the shot that
+named it. That is an alarm the prose has never had — but only when someone runs it, so:
+
+- **`npm run capture:guide` after any UI change**, alongside re-reading the two prose files.
+  It needs the backend, the dev server, and `uv run python -m src.demo.guide` (the seeded
+  Sales/Contacts tenant the guide describes, which is why the pictures match the words).
+- **The images and `src/features/guide/figures.ts` are committed.** They are build inputs,
+  not outputs: the guide has to render for someone who has never run the capture, and
+  running it needs a database.
+- **A failing shot is a finding, not a flake.** Fix the shot, then ask whether the paragraph
+  beside it still describes the same control.
+
+Nothing else here is enforceable by a test, which is why it is written down. Treat the guide
+and the tours as part of the UI's surface area rather than as documentation about it.
 
 **The batch-import template's headings are duplicated across the language boundary.**
 `HEADERS` in `features/people/BatchUserDialog.tsx` lists the twelve CSV columns the template

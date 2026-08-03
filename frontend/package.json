@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "capture:guide": "node scripts/capture-guide.mjs",
     "gen:api": "npm run gen:api:spec && openapi-typescript openapi.json -o src/lib/api-schema.ts",
     "gen:api:spec": "cd ../backend && uv run python -m src.infrastructure.export_openapi > ../frontend/openapi.json"
   },
@@ -28,6 +29,7 @@
     "zod": "^3.24.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
