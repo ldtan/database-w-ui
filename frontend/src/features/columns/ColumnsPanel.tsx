@@ -94,6 +94,18 @@ export function ColumnsPanel({
               {TYPE_LABELS.get(column.type) ?? column.type}
               {column.config?.required ? " · required" : ""}
             </small>
+            {/* Said here as well as on the grid, because this is where somebody who
+                just changed a formula is standing, and where they would otherwise
+                change it again on top of a recompute that never finished. */}
+            {column.recompute_pending && (
+              <small
+                className="block"
+                style={{ color: "var(--warn, #b45309)" }}
+                title="A recompute is running, or one did not finish. Reload in a moment; if it stays, the stored values need repairing."
+              >
+                <i className="pi pi-exclamation-triangle" /> values catching up
+              </small>
+            )}
           </div>
           {canConfigure && (
             <>
@@ -106,8 +118,8 @@ export function ColumnsPanel({
               />
               {/* Separate from Edit because it is a different kind of change: a
                   conversion rewrites every record's value and cannot be undone by
-                  editing back. A calculated column stores nothing, so there is
-                  nothing to convert. */}
+                  editing back. A calculated column's values belong to its formula,
+                  so there is no cell for a conversion to act on. */}
               {column.type !== "calculated" && (
                 <>
                   <Button
@@ -119,8 +131,8 @@ export function ColumnsPanel({
                     onClick={() => setConverting(column)}
                   />
                   {/* Same engine as Change type, opposite ending: this one adds a
-                      column and leaves the original alone. A calculated column
-                      stores nothing, so there is nothing to copy. */}
+                      column and leaves the original alone. A calculated column is
+                      copied by writing its formula again, not by copying cells. */}
                   <Button
                     icon="pi pi-copy"
                     text

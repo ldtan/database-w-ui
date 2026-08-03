@@ -22,13 +22,15 @@ registrar therefore owns the four workspaces whose lists reference each other, a
 access is expressed the way the permission model intends: with grants.
 `staff_directory.department` is the visible scar; see the note at that column.
 
-**Nothing links to a calculated column.** A calculated cell is derived on read and
-stores nothing, so a lookup pointing at one resolves to a blank label and a sort on
-one does nothing. Every list that is linked to therefore has a *stored* primary
-column, and the calculated columns here are the derived-for-display fields they are
-meant to be — including two (`students.honour_points`, `enrollments.pass_points`)
-that exist to be totalled, since a metric may aggregate a calculated column and
-that is the cleanest way to ask "how many of these passed?".
+**Nothing links to a calculated column.** Its value is stored and sortable now, so a
+lookup pointing at one would resolve and sort correctly — but a formula's answer is
+not an identity, and a label that silently rewrites itself when someone edits the
+formula is the wrong thing to hang a relationship on. Every list that is linked to
+therefore has a *stored, typed* primary column, and the calculated columns here are
+the derived-for-display fields they are meant to be — including two
+(`students.honour_points`, `enrollments.pass_points`) that exist to be totalled,
+since a metric may aggregate a calculated column and that is the cleanest way to ask
+"how many of these passed?".
 
 **Generation runs even when writing is skipped.** Every record here is generated
 from one seeded RNG, so two runs produce the same school; the generators are

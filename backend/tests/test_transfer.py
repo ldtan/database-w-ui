@@ -273,3 +273,53 @@ async def test_export_larger_than_a_batch_resolves_labels_mid_stream(
     lines = export.text.strip().splitlines()
     assert len(lines) == 1201  # header + every row
     assert all(line.startswith("School ") for line in lines[1:])  # no uuid leaked
+
+
+async def test_export_includes_calculated_columns_and_import_round_trips(
+    client, list_uuid, add_column
+):
+    """A calculated column is exported like any other, and re-imports cleanly.
+
+    Both halves matter and they pull in opposite directions. Exporting it is right
+    because the value is a real stored cell now — a spreadsheet of orders without the
+    line totals is not the export anyone asked for. *Importing* it back is still
+    ignored, because the formula is the only correct source for that cell; the file's
+    copy could have been edited, and the row's own values are what the column means.
+    """
+    qty = await add_column(list_uuid, name="qty", display_name="Qty", type="number")
+    price = await add_column(
+        list_uuid, name="price", display_name="Price", type="number"
+    )
+    await add_column(
+        list_uuid,
+        name="total",
+        display_name="Total",
+        type="calculated",
+        config={"formula": "qty * price"},
+    )
+    await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {qty: 3, price: 10}}
+    )
+
+    exported = await client.post(
+        f"/api/lists/{list_uuid}/export",
+        json={"format": "csv", "columns": ["qty", "price", "total"]},
+    )
+    assert exported.status_code == 200, exported.text
+    lines = exported.text.strip().splitlines()
+    assert lines[0] == "qty,price,total"
+    assert lines[1] == "3,10,30"
+
+    # Re-import the same file, with the total deliberately wrong. The formula wins.
+    tampered = "qty,price,total\n4,10,999\n"
+    imported = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", tampered, "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    assert imported.json()["created"] == 1
+
+    cols = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    total_key = next(c["uuid"] for c in cols if c["name"] == "total")
+    rows = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert sorted(r["data"][total_key] for r in rows) == [30, 40]

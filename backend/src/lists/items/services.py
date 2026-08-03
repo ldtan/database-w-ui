@@ -22,7 +22,7 @@ from ..columns.enums import (
     REFERENCE_TYPES,
     ColumnType,
 )
-from ..columns.formula import Formula, column_refs, evaluate, parse
+from ..columns.chain import apply_formulas, build_chain
 from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
@@ -116,44 +116,19 @@ def coerce_shape(column: Column, value):
     return value
 
 
-def computed_columns(
-    columns: dict[str, Column],
-) -> tuple[list[tuple[str, Column, Formula]], dict[str, str]]:
-    """The calculated columns to inject, and the column name -> key map they need.
-
-    Parsed once for a whole batch rather than once per record, and paired with
-    the name map because a formula is written in column *names* while records are
-    keyed by uuid.
-
-    A stored formula that no longer parses is skipped rather than raised: the
-    language's bounds can tighten (they have), and a column saved under the old
-    ones must cost its own cell, not the whole read — the same rule `evaluate`
-    follows for a row it cannot compute.
-    """
-    computed: list[tuple[str, Column, Formula]] = []
-    for key, column in columns.items():
-        if column.type not in COMPUTED_TYPES or not (column.config or {}).get("formula"):
-            continue
-        try:
-            computed.append((key, column, parse(column.config["formula"])))
-        except ValidationError:
-            continue
-    return computed, {column.name: key for key, column in columns.items()}
-
-
-def shape_values(
-    columns: dict[str, Column],
-    computed: list[tuple[str, Column, Formula]],
-    key_of_name: dict[str, str],
-    data: dict,
-) -> dict:
+def shape_values(columns: dict[str, Column], data: dict) -> dict:
     """One record's stored `data` as a reader should see it.
 
     Values are coerced to the shape their column currently declares (see
-    `coerce_shape`) and calculated columns get their value computed and injected
-    under their own key. Kept separate from `_shape_for_read` so a caller holding
-    plain dicts — a metric scan reads `data` alone rather than hydrating whole
-    records — shapes them exactly as the grid does.
+    `coerce_shape`). Kept separate from `_shape_for_read` so a caller holding plain
+    dicts — a metric scan reads `data` alone rather than hydrating whole records —
+    shapes them exactly as the grid does.
+
+    **Nothing is computed here.** A calculated cell is written by `_validate_data` on
+    create and on every update and stored under its own key like any other value, so a
+    reader simply reads it. That is what lets a formula be searched, filtered, sorted
+    and grouped in SQL — none of which a read-time injection could ever be — and it is
+    why this function no longer needs the formulas at all.
 
     **A key with no live column is dropped.** Deleting a column leaves its values in
     every record — that is what makes the restore a real undo — and this used to pass
@@ -168,19 +143,11 @@ def shape_values(
     values stay until `DELETE /columns/{uuid}/permanent` or the purge job removes them,
     which remain the only things that do.
     """
-    shaped = {
+    return {
         key: coerce_shape(columns[key], value)
         for key, value in data.items()
         if key in columns
     }
-    for key, _column, formula in computed:
-        inputs = {
-            name: shaped.get(key_of_name[name])
-            for name in column_refs(formula)
-            if name in key_of_name
-        }
-        shaped[key] = evaluate(formula, inputs)
-    return shaped
 
 
 class ListItemService:
@@ -230,22 +197,20 @@ class ListItemService:
     def _shape_for_read(columns: dict[str, Column], items: Sequence[ListItem]) -> None:
         """Present each record in its columns' declared shape.
 
-        Two things happen here: stored values are coerced to the shape their column
-        currently declares (see `coerce_shape`), and calculated columns — which
-        store nothing — have their value computed and injected under their own key.
-        Both are `shape_values`, which anything reading records shares so that a
-        record means the same thing wherever it is read from.
+        Stored values are coerced to the shape their column currently declares (see
+        `coerce_shape`) and keys with no live column are dropped — both are
+        `shape_values`, which anything reading records shares so that a record means
+        the same thing wherever it is read from. A calculated cell is already in the
+        record, written when the record was, so there is nothing to compute here.
 
         `set_committed_value`, not a plain assignment: this is a *presentation* fix,
         and marking the instance dirty would have the next flush write the coercion
-        (and the computed values, which must never be persisted) back to the
-        database — turning every read into a silent migration, inside whatever
-        transaction happened to be open.
+        back to the database — turning every read into a silent migration, inside
+        whatever transaction happened to be open.
         """
-        computed, key_of_name = computed_columns(columns)
         for item in items:
             data = item.data or {}
-            shaped = shape_values(columns, computed, key_of_name, data)
+            shaped = shape_values(columns, data)
             if shaped != data:
                 set_committed_value(item, "data", shaped)
 
@@ -822,10 +787,10 @@ class ListItemService:
             if column is None:
                 raise ValidationError(f"Unknown column '{key}' for this list")
             if column.type in COMPUTED_TYPES:
-                # A calculated cell is derived on read and stores nothing, so there
-                # is nothing to set. Reject rather than silently drop it, so a client
-                # sending one learns it is not editable instead of wondering why its
-                # value vanished.
+                # A calculated cell is stored, but the formula is the only thing that
+                # writes it — anything a client sent would be overwritten a few lines
+                # below. Reject rather than silently drop it, so they learn it is not
+                # editable instead of wondering why their value vanished.
                 raise ValidationError(
                     f"Column '{column.name}' is calculated and cannot be set"
                 )
@@ -871,7 +836,10 @@ class ListItemService:
         # shape (a `multiple` user column stores ["<uuid>"], not "<uuid>").
         for key, column in columns.items():
             if column.type in COMPUTED_TYPES:
-                # No stored value, so no default to apply and nothing to require.
+                # Its value is about to be written from its formula, so a default has
+                # nothing to fill in and `required` has nothing to ask of an editor —
+                # a blank calculated cell means the formula could not answer, which is
+                # not something the person saving the record can fix here.
                 continue
             config = column.config or {}
             onupdate = config.get("onupdate")
@@ -894,6 +862,15 @@ class ListItemService:
         # merged record rather than per column — whichever order the cells
         # arrived in, parent and child are both settled by now.
         await cls._enforce_nested_lookups(db, lst, columns, result, incoming, existing)
+
+        # Last, over the finished record: a formula reads the values as they will be
+        # stored, which means after the merge, after defaults, and after every
+        # `onupdate` stamp — a calculated column over a "last edited" field would
+        # otherwise compute against the previous edit's timestamp. Chained calculated
+        # columns are ordered by `build_chain`, so each reads this write's value of the
+        # one before it rather than the record's previous one.
+        plan, key_of_name = build_chain(columns)
+        apply_formulas(plan, key_of_name, result)
 
         return result
 

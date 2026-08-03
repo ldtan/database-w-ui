@@ -28,7 +28,8 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
  *  Text is the hub: everything converts to text and text converts to everything, so
  *  a pair with text on neither side is two conversions rather than one. `date` and
  *  `datetime` convert directly so widening and truncating skip the round trip.
- *  `calculated` stores no value at all, so it is out in both directions. */
+ *  `calculated` is out in both directions: its formula owns its values, so there is
+ *  no cell for a conversion to act on. */
 export function canConvert(from: ColumnType, to: ColumnType): boolean {
   if (from === "calculated" || to === "calculated") return false;
   if (from === to) return false; // nothing to do, rather than unsupported

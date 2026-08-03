@@ -13,7 +13,7 @@ from src.core.utils import coerce_uuid
 from ..columns.enums import ColumnType
 from ..columns.models import Column, in_shape
 from ..items.models import ListItem
-from ..items.services import ListItemService, computed_columns, shape_values
+from ..items.services import ListItemService, shape_values
 from ..models import List
 from . import aggregate
 from .models import Metric
@@ -23,6 +23,8 @@ from .schemas import MetricConfig, MetricCreate, MetricUpdate, MetricValue, Metr
 # referenceable set; `calculated` is added because a metric is a **leaf** —
 # nothing derives from a metric, so there is no cycle to detect, and totalling a
 # per-record formula (`SUM(line_total)`) is one of the things people most want.
+# The calculated cell it reads is a stored value like any other, so a metric costs
+# nothing extra to aggregate.
 # The remaining types store ids or ISO strings whose text form would surprise.
 REFERENCEABLE_TYPES = frozenset(
     {ColumnType.number, ColumnType.text, ColumnType.calculated}
@@ -217,9 +219,9 @@ class MetricService:
 
         if usable:
             evaluator = aggregate.MetricEvaluator(usable)
-            computed, key_of_name = computed_columns(columns)
             # Only the keys the formulas actually read, resolved once rather than
             # per record.
+            key_of_name = {column.name: key for key, column in columns.items()}
             wanted = {
                 name: key_of_name[name]
                 for name in evaluator.column_names
@@ -235,7 +237,7 @@ class MetricService:
             stmt = stmt.with_only_columns(ListItem.data).order_by(ListItem.id)
             result = await db.stream(stmt.execution_options(yield_per=_SCAN_BATCH))
             async for (data,) in result:
-                shaped = shape_values(columns, computed, key_of_name, data or {})
+                shaped = shape_values(columns, data or {})
                 evaluator.add_row({name: shaped.get(key) for name, key in wanted.items()})
                 row_count += 1
                 if row_count >= METRIC_ROW_LIMIT:

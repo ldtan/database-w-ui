@@ -226,6 +226,7 @@ Common `config` keys (all optional unless noted):
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
 | `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | `min?`, `max?` (ISO time); `default: "now"` |
 | `datetime`    | ISO-8601 date-time `string`                | `min?`, `max?` (ISO date-time); `default: "now"` |
+| `calculated`  | `number` **or** `string`, written from the formula | `formula` (required), `compute_order?` |
 
 Common keys on **every** type: `required`, `default`, `unique`, `help_text`, plus the
 UI-only hints `placeholder` and `read_only` (stored, not enforced by the API).
@@ -240,6 +241,17 @@ Notes:
   number range and `integer_only`, temporal range, and choice membership. Config is also
   validated when the column is created/updated (e.g. `min` ≤ `max`, well-formed dates and
   regex, a `default` that is itself a valid value).
+- **A `calculated` cell is stored, and its formula is the only thing that writes it.** The
+  value is computed from the record's other columns by `_validate_data` on create and on every
+  update, so it filters, sorts, groups, searches and exports exactly like a typed value; a
+  client that sends one is rejected rather than silently overwritten. A formula may reference
+  `number`, `text` and other `calculated` columns by name — that last one is a **chain**,
+  ordered by `compute_order` and computed in one pass (`columns/chain.py`), with loops refused
+  at save time. `compute_order` is derived from the dependency graph and maintained by the
+  service; setting it by hand raises a column's place in the chain but can never contradict a
+  dependency. A schema change that moves what a formula answers triggers a list backfill
+  (`columns/backfill.py`); see known-gaps §5 for what that costs. The column has **no fixed
+  output type** — the formula decides per column, and per row it may be blank.
 - **`unique` is enforced:** on write, no other non-deleted record in the list may hold the
   same value for that column (checked with a JSONB `@>` containment query). Violations
   return `409`. Empty and multi-valued (list) values are skipped. The check and the insert
@@ -494,8 +506,8 @@ and whether each is enabled. Field layout is JSONB (D5).
 **`view` forms are display-only, and two rules follow from it.** A view form lays a
 record out for *reading* — it exists so a grid view can stay narrow (a dozen columns is
 a dozen slivers) while every field stays one click away. So it **may include
-`calculated` columns**, which `create`/`update` may not: a calculated value is computed
-on read (§5, known-gaps §5) and rejected on write, so it is never an input but is
+`calculated` columns**, which `create`/`update` may not: a calculated value is written by
+its own formula (§5, known-gaps §5) and rejected on write, so it is never an input but is
 exactly what someone opens a record to see. And its fields' **`enabled` flag means
 nothing** — nothing on it is editable. `resolveFields`
 (`frontend/src/features/records/recordValues.ts`) takes an `includeCalculated` option
@@ -519,10 +531,10 @@ views and forms: list-scoped, named (D6), ordered, behaviour in a JSONB `config`
 | `description` | `text`        | Optional; shown as the card's tooltip. |
 | `config`    | `JSONB`         | `formula` (required), plus `precision?`, `prefix?`, `suffix?`. |
 
-**A metric stores the question, never the answer.** The value is computed per request
-and never persisted — the same compute-on-read bargain `calculated` columns make (§5),
-for the same reason: editing a record, a formula or a filter is reflected on the next
-read with nothing to backfill.
+**A metric stores the question, never the answer.** The value is computed per request and
+never persisted — the bargain `calculated` columns used to make and no longer do (§5). It is
+still right here, because a metric's answer depends on *which records are in scope*, and that
+is a per-request question (permissions, the view, the search) no stored number could hold.
 
 **The formula language is the row language with one level on top**
 (`metrics/aggregate.py` over `columns/formula.py`):
@@ -543,9 +555,9 @@ function picking between the values written there (nothing is lost, because a on
 row `MIN` is its own argument).
 
 Notes:
-- **A metric may aggregate a `calculated` column**, which a calculated column may not
-  reference (§5, "no calc-on-calc"). A metric is a **leaf** — nothing derives from one —
-  so there is no cycle to detect.
+- **A metric may aggregate a `calculated` column**, and reads its stored cell like any
+  other. A metric is a **leaf** — nothing derives from one, and it cannot appear in a column
+  formula — so unlike a calculated chain it has no cycle to detect.
 - **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
   The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
 - **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in

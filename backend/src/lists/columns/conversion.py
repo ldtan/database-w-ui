@@ -55,10 +55,12 @@ _JOIN = ";"
 def is_supported(source: ColumnType, target: ColumnType) -> bool:
     """Whether v1 converts this pair directly."""
     if source in COMPUTED_TYPES or target in COMPUTED_TYPES:
-        # `calculated` stores no value at all. Converting away from it means
-        # evaluating a formula per row and persisting the result; converting to it
-        # means discarding stored values and adding a formula. Both are real
-        # operations, neither is a cell conversion, and neither is in v1.
+        # Not for want of values — a calculated column stores them now — but because
+        # neither direction is a *cell* conversion. Converting one to a number means
+        # freezing it: cutting the formula away and keeping the last answer, which is
+        # a decision about the column, not about its cells. Converting *to* calculated
+        # means throwing every stored value away in favour of a formula. Both are real
+        # operations; neither is this one, and neither is in v1.
         return False
     if source == target:
         return True  # a straight copy — feature 2 with matching types
@@ -72,8 +74,8 @@ def check_supported(source: Column, target: Column) -> None:
         return
     if source.type in COMPUTED_TYPES or target.type in COMPUTED_TYPES:
         raise ValidationError(
-            "A calculated column cannot take part in a conversion: it stores no "
-            "value of its own"
+            "A calculated column cannot take part in a conversion: its formula owns "
+            "its values, so there is no cell for a conversion to act on"
         )
     raise ValidationError(
         f"Cannot convert {source.type.value} to {target.type.value} directly. "

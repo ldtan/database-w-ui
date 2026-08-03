@@ -60,9 +60,17 @@ class ColumnConfig(BaseModel):
     # Set and unset together; the service validates the pairing.
     parent_column_uuid: Optional[UUID] = None
     target_filter_column_uuid: Optional[UUID] = None
-    # calculated — an expression over other columns of this list, by name. The
-    # column stores nothing; the value is computed on read. See columns/formula.py.
+    # calculated — an expression over other columns of this list, by name, including
+    # other calculated columns. The value is computed on every write and *stored* like
+    # any other cell, which is what lets it be searched, filtered and sorted. See
+    # columns/formula.py for the language and columns/chain.py for the ordering.
     formula: Optional[str] = None
+    # Where this column sits in the chain: lower is computed first. Maintained by the
+    # service, which derives it from the formula's dependencies and keeps it consistent
+    # — you may set it, and an explicit value is honoured as a floor, so raising it
+    # pins the order among columns that do not reference each other. A value that
+    # contradicts a real dependency is refused rather than silently ignored.
+    compute_order: Optional[int] = None
 
     model_config = ConfigDict(extra="forbid")
 
@@ -168,6 +176,18 @@ class ColumnRead(BaseModel):
     position: int
     description: Optional[str] = None
     config: dict
+
+    # `calculated` only, and always False for every other type: this column's stored
+    # values are not known to match its formula as the schema stands now. Derived per
+    # response from `backfill.pending_keys` rather than stored, so it cannot get stuck
+    # on or be cleared while a second backfill is still running — see that function for
+    # why the answer is deliberately pessimistic.
+    #
+    # It means "a recompute is running, or one did not finish", which are worth telling
+    # apart but are not: the values are equally untrustworthy either way, and the
+    # remedy — wait, reload, and run the maintenance script if it persists — is the
+    # same. What it never means is that the *formula* is wrong.
+    recompute_pending: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

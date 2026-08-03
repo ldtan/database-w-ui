@@ -17,7 +17,8 @@
  *   reason that component lives apart from the dialog.
  * - Which columns may be written is `resolveFields(columns, updateForm)` — the
  *   *update form's* answer, not a new one. A field the form marks read-only, and
- *   a calculated column that stores nothing, are not editable here either.
+ *   a calculated column, whose formula is its only writer, are not editable here
+ *   either.
  *
  * What this file does **not** do is decide whether the caller may edit the
  * record: that is per-record (`canItem(uuid, "edit")`) and belongs to the page,

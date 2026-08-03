@@ -4,9 +4,10 @@ What this app costs to run, measured rather than guessed, and what that means fo
 deployment described in `deploy/render/README.md`.
 
 Measured 2026-08-01 against the seeded school demo (`src.demo.school`: 9 lists, ~740
-records, 16 users) on an AMD Ryzen 7 5700U. That core is roughly a cloud vCPU and
-probably a little faster, so **treat every number here as a best case** — the same code
-on Render is likely 10–30% worse.
+records, 16 users) on an AMD Ryzen 7 5700U, and extended 2026-08-03 with the one operation
+the demo is too small to time (see "Changing a formula" below). That core is roughly a cloud
+vCPU and probably a little faster, so **treat every number here as a best case** — the same
+code on Render is likely 10–30% worse.
 
 ## Why CPU-time, and not latency
 
@@ -58,6 +59,62 @@ The 717 ms breaks into three parts:
 The second one also charged every **token refresh**, which each active user does every
 `ACCESS_TOKEN_EXPIRE_MINUTES` (15). So a logged-in user who never touched anything still
 cost ~290 ms of CPU per quarter hour.
+
+## Changing a formula is the one request whose cost is the list's size
+
+Every operation above costs roughly the same whatever the data looks like — a page is a
+page. Editing a `calculated` column's formula is the exception: its values are stored in
+each record (data-model §5), so the edit has to rewrite every one of them, in the request
+that made it. It is the most expensive thing the app does, and the only thing that gets
+worse as a list grows rather than as traffic grows.
+
+**Measured at ~0.11 ms of app CPU per record** — 20,000 records of ~600 bytes cost 2,172 ms
+of CPU and 3.2 s of wall clock. Taken 2026-08-03 on the same machine as everything above, but
+against a synthetic list rather than the school demo: at ~740 records the whole job finishes
+in under a tenth of a second, which is the answer this section exists to put in context, not
+one you can time. Since a 0.1-CPU instance delivers 100 ms of CPU per wall second:
+
+| records | chunks | app CPU | PATCH duration, free (0.1 CPU) | Starter (0.5) | Standard (1) |
+|---|---|---|---|---|---|
+| 300 | 1 | 33 ms | ~0.3 s | ~0.07 s | ~0.03 s |
+| 5,000 | 10 | 0.55 s | ~5 s | ~1 s | ~0.6 s |
+| 20,000 | 40 | 2.2 s | ~22 s | ~4 s | ~2 s |
+| 100,000 | 200 | 11 s | ~110 s | ~22 s | ~11 s |
+
+**What the 500-row chunking bounds, and what it does not.** It bounds *memory* — peak Python
+allocation is flat at ~3 MB whatever the list size, because a batch is read, rewritten and
+released — and it bounds *lock duration*, since each batch commits on its own rather than
+holding row locks across the job. It does **not** bound the total, because the batches run
+one after another inside one request, and nothing else does either: there is deliberately no
+row ceiling (known-gaps §5), so a big list makes a slow request rather than a refused one.
+
+What it also buys is responsiveness. Every batch awaits the database, so the event loop is
+never blocked for more than one batch's Python — **41 ms measured, ~0.4 s at 0.1 CPU** — which
+is comfortably inside the health check. This is the one place where failure mode 1 below would
+otherwise repeat itself at a much larger scale: a 22-second synchronous rewrite would fail
+`/health` and have Render restart the instance out from under a half-finished backfill.
+
+**The two shapes this takes.** The config is committed *before* the rewrite starts, so between
+those two moments the column is live with a new formula and the records still hold the old
+formula's answers. On a few hundred records that window is a third of a second and nobody is
+inside it: the response returns with `recompute_pending: false` and the edit is
+indistinguishable from renaming a column. Past a few thousand it becomes visible — the editor's
+PATCH sits there, and every other viewer's columns query (which rides the live-refresh
+interval) reports `recompute_pending: true`, so the grid warns and the columns panel marks the
+column while rows update in waves of 500.
+
+**If it never finishes** — a redeploy, an instance restart, a cancelled request — committed
+chunks stay, no stamp is written, and the column reports pending indefinitely. That is what the
+flag is for; nothing else would say so. Recovery is
+`uv run python -m src.maintenance.recompute_calculated` (`--dry-run` to size it first,
+`--list <uuid>` to narrow it), which resumes rather than restarts: rows that already agree are
+not rewritten.
+
+**The remaining unbounded cost is impatience.** Each formula PATCH starts its own complete
+scan and they overlap rather than queue. They stay correct — each pass re-checks a schema
+signature and goes again if it moved — but three re-edits on a 20k list is three full scans
+contending for the same 0.1 CPU. A per-list lock is the small change that would make them
+queue instead.
 
 ## Two failure modes that arrive before you run out of CPU
 

@@ -52,6 +52,7 @@ from src.core.exceptions import (
 
 from ..items.models import ListItem
 from ..models import List
+from . import backfill
 from .conversion import CellConverter, check_supported, mint_choice_options
 from .enums import ColumnType
 from .models import Column
@@ -334,6 +335,7 @@ class ConversionService:
             }
             await db.commit()
             await db.refresh(target)
+            await cls._resettle_formulas(db, lst, target)
             return target
 
         skey, tkey = str(source.uuid), str(target.uuid)
@@ -360,7 +362,23 @@ class ConversionService:
 
         await db.commit()
         await db.refresh(source)
+        await cls._resettle_formulas(db, lst, source)
         return source
+
+    @staticmethod
+    async def _resettle_formulas(db: AsyncSession, lst: List, column: Column) -> None:
+        """Recompute the list's calculated cells if a formula was reading this column.
+
+        A cutover replaces every value in the column at once, which is precisely the
+        case a per-record write cannot cover: nothing goes through `_validate_data`, so
+        a `total` over a just-converted `price` would keep answering from the values the
+        column held before. A duplicate needs it too — the new column shares its name
+        with nothing, but going live can complete a formula that was left dangling by
+        an earlier rename.
+        """
+        columns = await backfill.list_columns(db, lst.id)
+        if backfill.references_a_formula(columns, column.name):
+            await backfill.recompute_records(db, lst.id)
 
     @classmethod
     async def _check_gates(cls, db: AsyncSession, lst: List, target: Column) -> None:

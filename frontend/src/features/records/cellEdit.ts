@@ -20,7 +20,7 @@ import type { ResolvedField } from "./recordValues";
  *
  * "locked" is every other reason a cell will not open: the update form marks the
  * field read-only, or the column is calculated (`resolveFields` drops those, and
- * the backend refuses to store one anyway).
+ * the backend refuses a value for one — its formula writes it).
  */
 export type CellEditKind = "inline" | "dialog" | "locked";
 
