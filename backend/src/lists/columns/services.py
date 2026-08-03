@@ -14,9 +14,10 @@ from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from ..items.models import ListItem
 from ..models import List
-from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
+from . import backfill
+from .enums import COMPUTED_TYPES, PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column, in_shape
-from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
+from .schemas import ColumnConfig, ColumnCreate, ColumnRead, ColumnUpdate
 from .validation import (
     ONUPDATE_TYPES,
     dynamic_tokens,
@@ -74,12 +75,43 @@ class ColumnService:
         )
         return result.scalars().all()
 
+    # -- rendering ----------------------------------------------------------
+    #
+    # `recompute_pending` is the one field of `ColumnRead` that is not a property of
+    # the column row: it is a question about the *list* — do this column's stored
+    # values match the schema its formulas are read against — so it cannot be answered
+    # by `model_validate` on one row. These two are the seam every response goes
+    # through, so an endpoint cannot accidentally return the field's default and
+    # quietly report a stale column as fresh.
+
+    @staticmethod
+    def _read(column: Column, pending: set[str]) -> ColumnRead:
+        read = ColumnRead.model_validate(column)
+        read.recompute_pending = str(column.uuid) in pending
+        return read
+
+    @classmethod
+    def read_all(cls, columns: Sequence[Column]) -> list[ColumnRead]:
+        """Render the list's whole shape. Costs no extra query, because these columns
+        *are* the shape the staleness check needs."""
+        pending = backfill.pending_keys({str(c.uuid): c for c in columns})
+        return [cls._read(column, pending) for column in columns]
+
+    @classmethod
+    async def read_one(
+        cls, db: AsyncSession, list_id: int, column: Column
+    ) -> ColumnRead:
+        """Render one column, fetching the shape around it — a single column cannot
+        answer the staleness question on its own."""
+        pending = backfill.pending_keys(await backfill.list_columns(db, list_id))
+        return cls._read(column, pending)
+
     @classmethod
     async def create(
         cls, db: AsyncSession, lst: List, payload: ColumnCreate, user
     ) -> Column:
         config = await cls._validate_config(
-            db, lst, payload.type, payload.config, user
+            db, lst, payload.type, payload.config, user, name=payload.name
         )
         column = Column(
             list_id=lst.id,
@@ -100,6 +132,13 @@ class ColumnService:
                 "A column with this name already exists on the list"
             ) from exc
 
+        # A new calculated column has no values in any record yet, so it would read
+        # blank on every existing row until each was next saved. Fill them in now —
+        # they are stored values, and a column that only works for records created
+        # after it is not a column anyone can filter or sort by.
+        if payload.type in COMPUTED_TYPES:
+            await backfill.recompute_records(db, lst.id)
+
         return await cls.get_by_uuid(db, lst.id, new_uuid)
 
     @classmethod
@@ -116,6 +155,11 @@ class ColumnService:
             return None
 
         data = payload.model_dump(exclude_unset=True)
+        # Captured before anything is applied: the two questions a recompute turns on
+        # are "did the formula change" and "did a name a formula reads change", and
+        # both need the before picture.
+        old_name = column.name
+        old_config = dict(column.config or {})
 
         if "config" in data:
             old_target = (column.config or {}).get("target_list_uuid")
@@ -157,6 +201,14 @@ class ColumnService:
                 "A column with this name already exists on the list"
             ) from exc
 
+        await cls._resettle_formulas(
+            db,
+            lst,
+            touched=column,
+            renamed_from=old_name if column.name != old_name else None,
+            formula_changed=old_config.get("formula")
+            != (column.config or {}).get("formula"),
+        )
         return await cls.get_by_uuid(db, lst.id, target_uuid)
 
     @classmethod
@@ -174,7 +226,64 @@ class ColumnService:
         # Nor a nested lookup pointing at a deleted parent or filter column.
         await cls._clear_dependent_nesting(db, column)
         await db.commit()
+        # A formula that read this column can no longer answer, so the cells it fed
+        # have to go blank — leaving the last computed value would leave a number that
+        # reads as current sitting in a filterable, sortable column.
+        await cls._resettle_formulas(db, lst, touched=column, gone=True)
         return True
+
+    @classmethod
+    async def resettle_after_restore(
+        cls, db: AsyncSession, lst: List, column: Column
+    ) -> None:
+        """`_resettle_formulas` for a column coming back out of the bin.
+
+        A restore is the mirror of a delete and needs the same treatment: `gone` says
+        "this column's presence in the list just changed", which is as true of arriving
+        as of leaving.
+        """
+        await cls._resettle_formulas(db, lst, touched=column, gone=True)
+
+    @classmethod
+    async def _resettle_formulas(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        *,
+        touched: Column,
+        renamed_from: Optional[str] = None,
+        formula_changed: bool = False,
+        gone: bool = False,
+    ) -> None:
+        """Put the list's stored calculated values back in step after a schema change.
+
+        The one place that decides whether a column edit was the kind a formula cares
+        about, so the answer cannot differ between create, update, delete and restore.
+        Three things can move a stored calculated value: the formula itself changed,
+        the column *is* calculated and just appeared or disappeared, or a column some
+        formula reads by name was renamed or removed out from under it.
+
+        Deliberately narrow. A backfill rewrites the whole list, so running it on every
+        column PATCH would make an unrelated edit — widening a text column's
+        `max_length`, say — cost a full table scan.
+        """
+        calculated = touched.type in COMPUTED_TYPES
+        if not (calculated or renamed_from or gone):
+            return
+        if calculated and not (formula_changed or gone or renamed_from):
+            # A calculated column whose formula did not move: only `compute_order` and
+            # cosmetics can have changed, and neither alters a single cell.
+            await backfill.sync_orders(db, lst.id)
+            return
+
+        columns = await backfill.list_columns(db, lst.id)
+        if not calculated and not backfill.references_a_formula(
+            columns, touched.name, renamed_from
+        ):
+            return  # nothing reads it; nothing to redo
+
+        await backfill.sync_orders(db, lst.id)
+        await backfill.recompute_records(db, lst.id)
 
     @classmethod
     async def lookup_options(
@@ -297,6 +406,7 @@ class ColumnService:
         user,
         existing: Optional[dict] = None,
         current_uuid: Optional[UUID] = None,
+        name: Optional[str] = None,
     ) -> dict:
         """Validate type-specific settings and return the JSON-ready dict to store.
 
@@ -306,10 +416,18 @@ class ColumnService:
         keep settings the caller did not resend (choice options included).
         ``current_uuid`` is the column being updated (absent on create), needed
         to refuse a nested lookup nesting under itself or its own descendants.
+        ``name`` is the column's name on create, where there is no row to read it
+        from yet and a formula's dependency graph still needs to know what to call
+        the node it is about to add.
         """
         # Only the keys the caller explicitly set on this request, so that on
         # update the merge below preserves stored settings left unspecified.
         data = config.model_dump(mode="json", exclude_unset=True)
+        # What the caller actually sent, before the merge below folds the stored
+        # config in. `compute_order` needs the distinction: a value this request asked
+        # for is a choice to honour or refuse, while the same number arriving from
+        # storage is only where the column happened to sit last time.
+        sent = set(data)
 
         if type_ == ColumnType.choice:
             options = resolve_choice_options(data, existing)
@@ -393,38 +511,7 @@ class ColumnService:
             )
 
         if type_ == ColumnType.calculated:
-            from .formula import column_refs, parse
-
-            formula = parse(data.get("formula"))
-            # Every referenced name must be an existing number column of this list.
-            # A calculated column referencing itself, or another calculated column,
-            # is caught here too: on update it is among these siblings and is not a
-            # `number`; on create its name is not present at all.
-            siblings = (
-                await db.execute(
-                    select(Column).where(
-                        Column.list_id == lst.id, Column.deleted_at.is_(None)
-                    )
-                )
-            ).scalars().all()
-            by_name = {c.name: c for c in siblings}
-            referenceable = {
-                ColumnType.number,
-                ColumnType.text,
-            }
-            for name in sorted(column_refs(formula)):
-                target = by_name.get(name)
-                if target is None:
-                    raise ValidationError(
-                        f"Formula references unknown column '{name}'"
-                    )
-                if target.type not in referenceable:
-                    raise ValidationError(
-                        f"Formula can only reference number or text columns; "
-                        f"'{name}' is {target.type.value}"
-                    )
-            if data.get("default") is not None:
-                raise ValidationError("A calculated column cannot have a default")
+            await cls._validate_formula(db, lst, data, name, current_uuid, sent)
 
         if type_ in PRINCIPAL_TYPES and data.get("default") is not None:
             # A user column may default to the acting user — a dynamic token resolved
@@ -479,6 +566,98 @@ class ColumnService:
             validate_scalar(type_, data, "default", default)
 
         return data
+
+    @classmethod
+    async def _validate_formula(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        data: dict,
+        name: Optional[str],
+        current_uuid: Optional[UUID],
+        sent: set[str],
+    ) -> None:
+        """Check a calculated column's formula, its chain, and its `compute_order`.
+
+        Runs after the config merge, so a PATCH that resends only `compute_order` is
+        checked against the stored formula rather than against nothing.
+
+        A formula may reference another calculated column — that is the chain — so what
+        used to be enforced by the referenceable *types* (self-reference and
+        calc-on-calc were both simply "not a number column") is now enforced by the
+        graph instead: the only thing refused is a loop, including the one-step loop of
+        a column naming itself.
+        """
+        from .chain import check_order, derive_order, find_cycle, formula_edges
+        from .formula import column_refs, parse
+
+        formula = parse(data.get("formula"))
+        if data.get("default") is not None:
+            raise ValidationError("A calculated column cannot have a default")
+
+        siblings = (
+            await db.execute(
+                select(Column).where(
+                    Column.list_id == lst.id, Column.deleted_at.is_(None)
+                )
+            )
+        ).scalars().all()
+        by_name = {c.name: c for c in siblings}
+
+        # The name this column will be known by. On update the row already exists and
+        # its stored name is authoritative — a rename in the same PATCH is applied
+        # after this, and renaming a column that others read is a separate hazard the
+        # caller is warned about rather than one the graph can resolve here.
+        current = next(
+            (c for c in siblings if current_uuid is not None and c.uuid == current_uuid),
+            None,
+        )
+        own_name = current.name if current is not None else name
+
+        referenceable = {ColumnType.number, ColumnType.text, ColumnType.calculated}
+        refs = column_refs(formula)
+        for ref in sorted(refs):
+            target = by_name.get(ref)
+            if target is None:
+                raise ValidationError(f"Formula references unknown column '{ref}'")
+            if target.type not in referenceable:
+                raise ValidationError(
+                    f"Formula can only reference number, text or calculated columns; "
+                    f"'{ref}' is {target.type.value}"
+                )
+
+        # The graph as it will be *after* this save: every other calculated column with
+        # its stored formula, plus this one with the formula being saved. Built by name
+        # because that is what a formula and an error message both speak. The siblings
+        # are passed whole — including this column, whose entry is then overwritten —
+        # so that *their* references to it are still recognised as edges.
+        calculated_refs = {
+            ref for ref in refs if by_name[ref].type == ColumnType.calculated
+        }
+        edges = formula_edges(
+            list(siblings), frozenset({own_name}) if own_name else frozenset()
+        )
+        if own_name is not None:
+            edges[own_name] = calculated_refs
+            loop = find_cycle(edges, own_name)
+            if loop is not None:
+                raise ValidationError(
+                    "That formula would make a loop: "
+                    + " → ".join(loop)
+                    + ". A calculated column may build on another, but the chain has "
+                    "to end somewhere."
+                )
+
+        # `compute_order` last, once the dependencies it has to agree with are known.
+        # An explicit value is refused when it contradicts the graph; a stored one is
+        # only a floor, so adding a dependency further down the chain lifts the column
+        # past it instead of 400ing an edit nobody made about a number nobody typed.
+        explicit = data.get("compute_order")
+        if explicit is not None and "compute_order" in sent:
+            if not isinstance(explicit, int) or explicit < 0:
+                raise ValidationError("compute_order must be a whole number, 0 or more")
+            check_order(own_name or "this column", calculated_refs, by_name, explicit)
+        data["compute_order"] = derive_order(calculated_refs, by_name, explicit)
 
     @staticmethod
     async def _validate_nesting(

@@ -890,7 +890,7 @@ async def test_the_dialogs_choices_shorthand_is_not_overwritten_by_minting(
     [
         ("choice", "number", {}, "Convert to text first"),
         ("date", "time", {}, "Convert to text first"),
-        ("calculated", "text", {}, "stores no value"),
+        ("calculated", "text", {}, "its formula owns its values"),
     ],
 )
 async def test_an_unsupported_pair_is_refused_with_the_way_round_it(
@@ -913,4 +913,4 @@ async def test_converting_to_calculated_is_refused(client, list_uuid, add_column
         client, list_uuid, col, type="calculated", config={"formula": "1 + 1"}
     )
     assert resp.status_code == 400
-    assert "stores no value" in resp.json()["detail"]
+    assert "its formula owns its values" in resp.json()["detail"]

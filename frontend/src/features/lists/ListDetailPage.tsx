@@ -197,14 +197,21 @@ export function ListDetailPage() {
     queryKey: ["list", listUuid],
     queryFn: () => api.get<ListRead>(`/lists/${listUuid}`),
   });
-  const columns = useQuery({
-    queryKey: ["columns", listUuid],
-    queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
-  });
   // Live records: keep this list current as other people add/edit/remove rows.
   // Spread first so the query's own keys/fn win; today it supplies a polling
   // `refetchInterval`, later an SSE subscription (see useLiveList).
   const live = useLiveList(listUuid);
+  // Columns ride the same signal, which they did not used to. The schema barely
+  // changes, but `recompute_pending` does — it goes true the moment somebody else
+  // starts editing a formula on this list and false when their backfill lands, and a
+  // warning about values you are looking at right now is worthless if it only appears
+  // when you happen to reload. Cheap enough to be worth it: one indexed SELECT, on the
+  // same interval that already pauses when the tab is hidden or the reader idle.
+  const columns = useQuery({
+    ...live,
+    queryKey: ["columns", listUuid],
+    queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
+  });
   const items = useQuery({
     ...live,
     // Everything that decides *which* records come back is part of the key, because
@@ -538,7 +545,7 @@ export function ListDetailPage() {
   // Editing a cell is editing a record, so the update form decides which columns
   // may be written and which are read-only — the same answer the Edit dialog
   // gets, from the same place. A list with no update form gets the default: every
-  // column except the calculated ones, which store nothing.
+  // column except the calculated ones, which only their formula may write.
   const updateForm = formList.find((f) => f.type === "update") ?? null;
   const editKinds = useMemo(
     () => cellEditKinds(resolveFields(cols, updateForm)),
@@ -959,6 +966,20 @@ export function ListDetailPage() {
         </div>
       </div>
 
+      {cols.some((c) => c.recompute_pending) && (
+        <Message
+          severity="warn"
+          text={
+            `Some formula columns (${cols
+              .filter((c) => c.recompute_pending)
+              .map((c) => c.display_name)
+              .join(", ")}) are being worked out again after a change. ` +
+            "Until that finishes, their values — and anything you filter or sort by " +
+            "them — may be out of date for some records."
+          }
+        />
+      )}
+
       {cols.length === 0 && !columns.isLoading && (
         <Message
           severity="info"
@@ -1145,12 +1166,12 @@ export function ListDetailPage() {
               <DataColumn
                 key={col.uuid}
                 field={`data.${col.uuid}`}
-                // A calculated column stores nothing — its value is computed per row
-                // as the records are read — so there is no column in the database to
-                // order the whole list by, and a header that sorted only the page on
-                // screen would be the bug this page just lost. Not offered, rather
-                // than offered and quietly wrong.
-                sortable={!groupColumn && col.type !== "calculated"}
+                // Calculated columns included: their values are stored with the
+                // record now, so the server can order the whole list by one — which
+                // it does numerically for a numeric formula. This header used to be
+                // withheld precisely because it could only have sorted the page on
+                // screen.
+                sortable={!groupColumn}
                 // Deleting a column moved into List settings: a trash button on every
                 // header crowded out the thing the grid is for.
                 header={col.display_name}

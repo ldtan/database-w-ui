@@ -165,7 +165,7 @@ const TYPE_HELP: Record<string, string> = {
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
   lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
-  calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
+  calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it, but it is saved with the record like anything else, so you can search, filter and sort by it — see “Calculated columns: writing a formula” below.",
 };
 
 export function GuidePage() {
@@ -709,10 +709,11 @@ export function GuidePage() {
       <Section id="formulas" title="Calculated columns: writing a formula">
         <p>
           A <Ui>Calculated (formula)</Ui> column doesn’t hold anything you type. It
-          holds a <strong>formula</strong>, and its value is worked out from the
-          other columns of the same record every time you look at it. Change a{" "}
-          <em>Quantity</em>, and the <em>Total</em> beside it is already right —
-          there is nothing to refresh and nothing to keep in step.
+          holds a <strong>formula</strong>, and the app works the answer out from the
+          other columns of the same record and saves it there with them. Change a{" "}
+          <em>Quantity</em>, and the <em>Total</em> beside it is right again the
+          moment you save — and because the answer is saved too, you can search,
+          filter, sort and group by it exactly like a column you typed.
         </p>
         <p>
           Add one under <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Add column</Ui>,
@@ -725,11 +726,36 @@ export function GuidePage() {
         <p>
           A formula refers to a column by its <strong>short name</strong> — the one
           shown in brackets beside it in the columns list, like{" "}
-          <Code>unit_price</Code> — not by its pretty display name. Only three kinds
-          of column can be named: <strong>Number</strong> and{" "}
-          <strong>Text</strong> (either input style). Dates,
-          choices, tick boxes, people, and linked columns can’t be used in a
-          formula yet, and neither can another calculated column.
+          <Code>unit_price</Code> — not by its pretty display name. Three kinds of
+          column can be named: <strong>Number</strong>, <strong>Text</strong>{" "}
+          (either input style), and <strong>another calculated column</strong>.
+          Dates, choices, tick boxes, people, and linked columns can’t be used in a
+          formula yet.
+        </p>
+
+        <h3 className="font-semibold pt-1">Building on another formula</h3>
+        <p>
+          A calculated column can use another one, which lets you write a long sum
+          as a few short ones. A <Code>subtotal</Code> of <Code>qty * price</Code>,
+          a <Code>tax</Code> of <Code>subtotal * 0.1</Code>, and a{" "}
+          <Code>grand_total</Code> of <Code>subtotal + tax</Code> read far better
+          than one formula with all of it in brackets — and if the tax rate
+          changes, you edit one small formula.
+        </p>
+        <p>
+          The app works out the order for you: anything a formula uses is
+          calculated first. You’ll see this as <Ui>Computes at step</Ui> on the
+          column — <Code>subtotal</Code> at step 0, <Code>tax</Code> at 1,{" "}
+          <Code>grand_total</Code> at 2. You can raise a step yourself if you want
+          to pin the order between two formulas that <em>don’t</em> use each other,
+          but you can never set one earlier than something it reads — that’s
+          refused, because it couldn’t work.
+        </p>
+        <p>
+          A <strong>circle</strong> is refused too: if <Code>a</Code> uses{" "}
+          <Code>b</Code>, then <Code>b</Code> can’t use <Code>a</Code>, and neither
+          can anything further along the chain come back round to the start. The
+          message names the loop it found, so you can see where to break it.
         </p>
 
         <h3 className="font-semibold pt-1">Doing sums</h3>
@@ -831,17 +857,15 @@ export function GuidePage() {
         <Callout tone="warn" title="What a calculated column can’t do">
           <ul className="flex flex-col gap-1 m-0">
             <li>
-              It has no stored value, so you can’t type into it, give it a{" "}
-              <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> or{" "}
-              <Ui>Unique</Ui>.
+              Only its formula writes it, so you can’t type into it or give it a{" "}
+              <Ui>Default value</Ui>. <Ui>Required</Ui> means nothing on one either:
+              a blank cell there means the formula had nothing to work with, which
+              isn’t something the person saving the record can fix.
             </li>
             <li>
-              You can’t sort, filter, or search on it — those work on saved values,
-              and this one is worked out fresh each time.
-            </li>
-            <li>
-              Exports leave it out, and a value for it in an imported file is
-              ignored, so a file this app writes always imports cleanly back in.
+              A value for it in an imported file is ignored — the formula works the
+              cell out from the rest of the row instead, which is the only answer
+              that can be right. Exports <em>do</em> include it.
             </li>
             <li>
               It has to stay a sensible size. A formula can be up to 1,000
@@ -864,9 +888,40 @@ export function GuidePage() {
         </Callout>
         <Callout tone="warn" title="Renaming breaks a formula quietly">
           Formulas find columns by their short name. If you rename a column a
-          formula uses, the formula stops finding it and those cells simply go
-          blank — no error. After renaming, open the calculated column and update
-          the formula to match.
+          formula uses, the formula stops finding it and those cells go blank
+          across the whole list — no error, and no warning first. Renaming it back
+          brings them back; otherwise open the calculated column and update the
+          formula to match. Deleting a column a formula uses does the same thing,
+          and restoring it from the bin undoes that too.
+        </Callout>
+        <Callout tone="tip" title="Editing a formula updates every record">
+          Because the answers are saved with each record, changing a formula
+          rewrites them all. Records you added before you created the column are
+          filled in too, so you never have to go back and re-save anything.
+        </Callout>
+        <Callout tone="tip" title="On a big list, saving takes a while — let it">
+          On a few hundred records the rewrite is instant and you will never notice
+          it. On tens of thousands it can take several seconds, and the{" "}
+          <Ui>Save</Ui> button stays busy for the whole time. That is the work
+          happening, not a hang.
+          <p className="pt-2 m-0">
+            The one thing to avoid is editing the formula again because it feels
+            stuck. Each save starts its own rewrite of the whole list, and three
+            impatient saves means three rewrites competing for the same server. You
+            will get the right answer either way — the app makes sure the last
+            formula you saved is the one that wins — but everything else in the app
+            is slower while they run.
+          </p>
+        </Callout>
+        <Callout tone="warn" title="“Values catching up”">
+          While that rewrite is running — or if it was interrupted, say by someone
+          closing the tab on a very large list — the column is marked{" "}
+          <Ui>values catching up</Ui> in <Ui>Settings</Ui> → <Ui>Columns</Ui>, and a
+          note appears above the records. It means some rows may still show the
+          answer from before the change, so a filter or sort on that column can be
+          out of date too. It usually clears on its own within a few seconds; if it
+          stays, tell whoever looks after the app — the values need repairing, and
+          there is a maintenance command for exactly that.
         </Callout>
       </Section>
 
@@ -1550,12 +1605,14 @@ export function GuidePage() {
             <a href="#formulas" style={{ color: "var(--brand)" }}>formula</a> reads
             is empty on that record — which shows as blank on purpose. If{" "}
             <em>every</em> record went blank at once, a column the formula names was
-            probably renamed; update the formula to the new short name.
+            renamed or deleted; rename it back, restore it from the bin, or update
+            the formula to the new short name.
           </li>
           <li>
-            <strong>I can’t sort or filter by my formula column.</strong> Calculated
-            values aren’t stored, they’re worked out as you look — so there’s
-            nothing for sorting, filtering, or search to match on.
+            <strong>The app won’t let me set “Computes at step”.</strong> You can
+            only move a formula <em>later</em> than the ones it reads, never
+            earlier — a formula can’t be worked out before its own ingredients. The
+            message names the column that’s in the way.
           </li>
         </ul>
         <p className="pt-2">

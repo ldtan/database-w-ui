@@ -801,6 +801,12 @@ export interface paths {
          *     `primary_column_id` if it pointed here, and the nesting pairing on any lookup that
          *     referenced this column. `RestoredColumnRead` explains which of those the response
          *     can speak to.
+         *
+         *     Calculated values *are* put back in step, because a restore is exactly the kind of
+         *     change a stored formula cannot notice on its own: it either revives a formula that
+         *     was blanked when this column went (a name coming back is as good as a rename) or
+         *     brings back a calculated column whose own values stopped being maintained while it
+         *     sat in the bin.
          */
         post: operations["restore_column_api_lists__list_uuid__columns__uuid__restore_post"];
         delete?: never;
@@ -1620,6 +1626,8 @@ export interface components {
             target_filter_column_uuid?: string | null;
             /** Formula */
             formula?: string | null;
+            /** Compute Order */
+            compute_order?: number | null;
         };
         /** ColumnCreate */
         ColumnCreate: {
@@ -1657,6 +1665,11 @@ export interface components {
             config: {
                 [key: string]: unknown;
             };
+            /**
+             * Recompute Pending
+             * @default false
+             */
+            recompute_pending: boolean;
         };
         /**
          * ColumnType
@@ -2414,6 +2427,11 @@ export interface components {
             config: {
                 [key: string]: unknown;
             };
+            /**
+             * Recompute Pending
+             * @default false
+             */
+            recompute_pending: boolean;
             /** List Has No Primary Column */
             list_has_no_primary_column: boolean;
         };

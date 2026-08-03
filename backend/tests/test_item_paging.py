@@ -170,14 +170,15 @@ async def test_total_respects_the_search(client, list_uuid, add_column):
     assert res.headers["X-Total-Count"] == "2"
 
 
-async def test_sort_by_calculated_column_falls_back_rather_than_emptying(
+async def test_sort_by_calculated_column_orders_by_the_stored_value(
     client, list_uuid, add_column
 ):
-    """A calculated column stores nothing, so there is no field to order by.
+    """A calculated column is sortable like any other, because its value is stored.
 
-    The grid does not offer the header, but the query parameter is public. It must
-    degrade to the stable default order rather than ordering every row by NULL and
-    handing back an arbitrary page.
+    This used to be the case that had to *degrade*: the value existed only while a
+    response was being shaped, so `data ->> key` was NULL for every row and ordering by
+    it was dropped rather than emitted. Now there is a real field, and the numbers sort
+    as numbers rather than as text — `10` after `9`, not before it.
     """
     score = await add_column(
         list_uuid, name="score", display_name="Score", type="number"
@@ -189,7 +190,7 @@ async def test_sort_by_calculated_column_falls_back_rather_than_emptying(
         type="calculated",
         config={"formula": "score * 2"},
     )
-    for value in (1, 2, 3):
+    for value in (5, 50, 9):
         await client.post(
             f"/api/lists/{list_uuid}/items/", json={"data": {score: value}}
         )
@@ -199,8 +200,7 @@ async def test_sort_by_calculated_column_falls_back_rather_than_emptying(
     )
 
     assert res.status_code == 200
-    assert [r["data"][score] for r in res.json()] == [1, 2, 3]  # insertion order
-    assert [r["data"][doubled] for r in res.json()] == [2, 4, 6]  # still computed
+    assert [r["data"][doubled] for r in res.json()] == [100, 18, 10]
 
 
 async def test_sort_dir_is_validated(client, list_uuid, add_column):

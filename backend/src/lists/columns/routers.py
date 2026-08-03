@@ -43,7 +43,8 @@ async def create_column(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     try:
-        return await ColumnService.create(db, lst, payload, current_user)
+        created = await ColumnService.create(db, lst, payload, current_user)
+        return await ColumnService.read_one(db, lst.id, created)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
@@ -55,7 +56,7 @@ async def list_columns(
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
 ):
-    return await ColumnService.list(db, lst.id)
+    return ColumnService.read_all(await ColumnService.list(db, lst.id))
 
 
 # Declared before `/{uuid}`: FastAPI matches on path shape and validates afterwards,
@@ -89,7 +90,7 @@ async def get_column(
     column = await ColumnService.get_by_uuid(db, lst.id, uuid)
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
-    return column
+    return await ColumnService.read_one(db, lst.id, column)
 
 
 # The path `uuid` is this column; the query `uuid` (bound to `row_uuid` below) is the
@@ -227,7 +228,8 @@ async def commit_conversion(
     )
     column = await _column_or_404(db, lst, uuid)
     try:
-        return await ConversionService.commit(db, lst, column, target_uuid)
+        committed = await ConversionService.commit(db, lst, column, target_uuid)
+        return await ColumnService.read_one(db, lst.id, committed)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValidationError as exc:
@@ -280,7 +282,7 @@ async def update_column(
 
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
-    return column
+    return await ColumnService.read_one(db, lst.id, column)
 
 
 @router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
@@ -311,6 +313,12 @@ async def restore_column(
     `primary_column_id` if it pointed here, and the nesting pairing on any lookup that
     referenced this column. `RestoredColumnRead` explains which of those the response
     can speak to.
+
+    Calculated values *are* put back in step, because a restore is exactly the kind of
+    change a stored formula cannot notice on its own: it either revives a formula that
+    was blanked when this column went (a name coming back is as good as a rename) or
+    brings back a calculated column whose own values stopped being maintained while it
+    sat in the bin.
     """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
@@ -323,11 +331,12 @@ async def restore_column(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
         )
+    await ColumnService.resettle_after_restore(db, lst, restored)
     # Read off the list as it stands rather than off what this column used to be: a
     # primary chosen while this sat in the bin is not something to flag.
     await db.refresh(lst)
     return RestoredColumnRead(
-        **ColumnRead.model_validate(restored).model_dump(),
+        **(await ColumnService.read_one(db, lst.id, restored)).model_dump(),
         list_has_no_primary_column=lst.primary_column_id is None,
     )
 

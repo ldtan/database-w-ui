@@ -132,6 +132,9 @@ export function ColumnDialog({
   >(null);
   const [multiple, setMultiple] = useState(false);
   const [formula, setFormula] = useState("");
+  // null means "let the server derive it from the formula's dependencies", which is
+  // what almost every calculated column wants; a number pins the step by hand.
+  const [computeOrder, setComputeOrder] = useState<number | null>(null);
   const [textMode, setTextMode] = useState<TextMode>("single");
   // Default value — one piece of state per family of column type; only the one
   // matching `type` is read when the config is built.
@@ -240,6 +243,9 @@ export function ColumnDialog({
     );
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
+    setComputeOrder(
+      typeof config.compute_order === "number" ? config.compute_order : null,
+    );
     // Unset is single line — the shape every text column had before text_mode.
     setTextMode(
       config.text_mode === "multiline" || config.text_mode === "rich"
@@ -366,12 +372,26 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
     enabled: type === "calculated" || type === "lookup",
   });
+  // `calculated` is in the list: a formula may build on another formula, which is
+  // what makes a chain. The column being edited is left out — it cannot read itself,
+  // and the server refuses the loop anyway.
   const referenceableNames = (ownColumns.data ?? [])
     .filter(
       (c) =>
-        (c.type === "number" || c.type === "text") && c.uuid !== column?.uuid,
+        (c.type === "number" || c.type === "text" || c.type === "calculated") &&
+        c.uuid !== column?.uuid,
     )
     .map((c) => c.name);
+  // The calculated columns this one could be ordered against, with where they sit.
+  // Shown rather than explained, because "which of these computes first" is the
+  // only question the order setting answers.
+  const chainSiblings = (ownColumns.data ?? [])
+    .filter((c) => c.type === "calculated" && c.uuid !== column?.uuid)
+    .map((c) => ({
+      name: c.name,
+      order: (c.config.compute_order as number | undefined) ?? 0,
+    }))
+    .sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
 
   // Nested lookup candidates. A sibling lookup qualifies as a parent when the
   // target list has at least one lookup column pointing back at the sibling's
@@ -430,7 +450,13 @@ export function ColumnDialog({
       // stored one, so leaving it out would preserve a `true` this dialog is
       // currently hiding — a constraint still enforced but no longer visible.
       const config: Record<string, unknown> = isCalculated
-        ? { formula: formula.trim() }
+        ? {
+            formula: formula.trim(),
+            // Only when pinned by hand. Omitted rather than sent as null, because
+            // the merge treats a sent value as a deliberate floor and the server
+            // derives a good one from the formula whenever this is absent.
+            ...(computeOrder === null ? {} : { compute_order: computeOrder }),
+          }
         : {
             required,
             unique: multiValued ? false : unique,
@@ -948,34 +974,67 @@ export function ColumnDialog({
             )}
 
             {isCalculated && (
-              <Field
-                label="Formula"
-                htmlFor="col-formula"
-                hint={
-                  <>
-                    Computed from other columns each time a record is read; it
-                    has no stored value of its own. Numbers: <code>+ - * /</code>
-                    , parentheses, <code>MIN</code>, <code>MAX</code>,{" "}
-                    <code>ROUND</code>, <code>ABS</code>. Text:{" "}
-                    <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
-                    <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
-                    <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
-                    <code>IF(cond, a, b)</code>.
-                    {referenceableNames.length > 0
-                      ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
-                      : " Add a number or text column first — a formula references those."}
-                  </>
-                }
-              >
-                <InputTextarea
-                  id="col-formula"
-                  value={formula}
-                  onChange={(e) => setFormula(e.target.value)}
-                  rows={2}
-                  placeholder="qty * price"
-                  style={{ fontFamily: "monospace" }}
-                />
-              </Field>
+              <>
+                <Field
+                  label="Formula"
+                  htmlFor="col-formula"
+                  hint={
+                    <>
+                      Worked out from other columns and saved with the record, so
+                      you can search, filter and sort by it like any other column.
+                      Numbers: <code>+ - * /</code>, parentheses, <code>MIN</code>,{" "}
+                      <code>MAX</code>, <code>ROUND</code>, <code>ABS</code>. Text:{" "}
+                      <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
+                      <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
+                      <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
+                      <code>IF(cond, a, b)</code>.
+                      {referenceableNames.length > 0
+                        ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
+                        : " Add a number or text column first — a formula references those."}
+                    </>
+                  }
+                >
+                  <InputTextarea
+                    id="col-formula"
+                    value={formula}
+                    onChange={(e) => setFormula(e.target.value)}
+                    rows={2}
+                    placeholder="qty * price"
+                    style={{ fontFamily: "monospace" }}
+                  />
+                </Field>
+                <Field
+                  label="Computes at step"
+                  htmlFor="col-compute-order"
+                  hint={
+                    <>
+                      Lower numbers are worked out first. A formula that reads
+                      another formula is placed after it automatically, so you only
+                      need this to settle the order between formulas that
+                      don’t read each other.
+                      {chainSiblings.length > 0 && (
+                        <>
+                          {" "}
+                          Right now:{" "}
+                          {chainSiblings
+                            .map((c) => `${c.name} (${c.order})`)
+                            .join(", ")}
+                          .
+                        </>
+                      )}
+                    </>
+                  }
+                >
+                  <InputNumber
+                    inputId="col-compute-order"
+                    value={computeOrder}
+                    onValueChange={(e) => setComputeOrder(e.value ?? null)}
+                    min={0}
+                    showButtons
+                    placeholder="Chosen for me"
+                  />
+                </Field>
+              </>
             )}
           </FormSection>
         )}

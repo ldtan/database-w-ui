@@ -25,8 +25,8 @@ interface Props {
 
 /** What a metric may aggregate — the backend refuses the rest, so offering them
  *  here would only be a way to get a 400. `calculated` is included on purpose: a
- *  metric is a leaf, so totalling a per-record formula has no cycle to worry
- *  about the way a calculated column referencing another would. */
+ *  metric is a leaf, so it cannot take part in a formula chain, and the value it
+ *  totals is a stored cell like any other. */
 const AGGREGATABLE = ["number", "text", "calculated"];
 
 export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
