@@ -35,17 +35,22 @@ call `reconcile_shapes` makes about shapes.
 """
 import hashlib
 import json
-from typing import Optional
+import logging
+from typing import Optional, Protocol
 
 import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.core.config import settings
 
 from ..items.models import ListItem
 from .chain import apply_formulas, build_chain, derive_order, formula_edges, order_of
 from .enums import COMPUTED_TYPES
 from .formula import column_refs
 from .models import Column, in_shape
+
+logger = logging.getLogger(__name__)
 
 # Records read, recomputed and written per transaction. Matches the conversion
 # backfill's: every row costs Python work, so the transaction stays short.
@@ -175,13 +180,6 @@ def pending_keys(columns: dict[str, Column]) -> set[str]:
     }
 
 
-# How many times a single call will re-scan after finding the schema moved underneath
-# it. Two concurrent edits need one extra pass; a burst of them is better served by
-# giving up and letting the *next* edit's backfill (or the maintenance script) settle
-# it than by looping in a request for as long as somebody keeps typing.
-MAX_PASSES = 5
-
-
 async def recompute_records(db: AsyncSession, list_id: int, *, commit: bool = True) -> int:
     """Rewrite every record's calculated cells from the current formulas.
 
@@ -190,89 +188,186 @@ async def recompute_records(db: AsyncSession, list_id: int, *, commit: bool = Tr
     moves one column on some of the rows, and rewriting the whole list's JSONB to
     restate what it already says is the expensive half of this job.
 
-    **A pass repeats if the schema moved while it ran.** Two formula edits overlap more
-    easily than they sound like they would — the second PATCH arrives while the first is
-    still scanning — and a pass captures its plan once at the start, so without this the
-    older edit would carry on writing its own answers into rows the newer one had
-    already passed. The result was not an error but something worse: a list quietly
-    holding two formulas' answers at once, in a column that now filters and sorts.
+    **It stops the moment it is superseded.** Two formula edits overlap more easily
+    than they sound like they would — the second PATCH arrives while the first is still
+    scanning — and a pass captures its plan once at the start. Left alone, the older
+    edit would carry on writing its own answers into rows the newer one had already
+    passed: not an error, but a list quietly holding two formulas' answers at once, in
+    a column that now filters and sorts.
 
-    Re-checking the signature at the end of a pass is enough to converge, and costs one
-    small query. Each edit's own backfill always scans the whole list from the start
-    with the config it committed, so a stale pass only has to notice it was stale and go
-    again. Bounded by `MAX_PASSES`; past that the next write or
-    `src/maintenance/recompute_calculated.py` settles it.
+    The check gates the **commit**, not the computation, and that distinction is the
+    whole of its correctness. Checking before writing leaves a window — the schema can
+    move between the check and the write, and that chunk lands stale — whereas a chunk
+    whose signature no longer matches is rolled back and never existed. So no
+    superseded write is ever visible, rather than merely unlikely.
 
-    **A settled pass stamps `COMPUTED_FOR` on every calculated column**, which is what
-    lets a reader tell current values from stale ones (`pending_keys`). Only a settled
-    one: a run that exhausts `MAX_PASSES` without the schema holding still has no
-    version to claim, and a run that dies partway never gets here — both of which leave
-    the columns reading as pending, which is exactly what they are.
+    Stopping is safe because every schema change routes through
+    `ColumnService._resettle_formulas`, so whatever moved the signature is already
+    running its own backfill over the whole list from row 1. If that one dies too, no
+    stamp is written, the columns stay `recompute_pending`, and
+    `src/maintenance/recompute_calculated.py` is the backstop. There is deliberately no
+    retry loop here: retrying would duplicate the work the superseding run is already
+    doing, which on a large list is the expensive mistake this exists to avoid.
+
+    **A completed pass stamps `COMPUTED_FOR` on every calculated column**, which is what
+    lets a reader tell current values from stale ones (`pending_keys`). Only a completed
+    one: a superseded pass has no version to claim, and a run that dies partway never
+    gets here — both of which leave the columns reading as pending, which is exactly
+    what they are.
     """
     # Deferred: `items.services` imports this package's modules, so a module-level
     # import here would close the loop.
     from ..items.services import shape_values
 
+    columns = await list_columns(db, list_id)
+    started_as = schema_signature(columns)
+    plan, key_of_name = build_chain(columns)
+    if not plan:
+        return 0
+
+    keys = [key for key, _column, _formula in plan]
     changed = 0
-    settled: Optional[tuple[dict[str, Column], str]] = None
-    for _pass in range(MAX_PASSES):
-        columns = await list_columns(db, list_id)
-        started_as = schema_signature(columns)
-        plan, key_of_name = build_chain(columns)
-        if not plan:
+    after = 0
+    while True:
+        rows = (
+            await db.execute(
+                select(ListItem.id, ListItem.data)
+                .where(ListItem.list_id == list_id, ListItem.id > after)
+                .order_by(ListItem.id)
+                .limit(CHUNK)
+            )
+        ).all()
+        if not rows:
+            break
+        after = rows[-1].id
+
+        writes = []
+        for row in rows:
+            data = row.data or {}
+            values = apply_formulas(plan, key_of_name, shape_values(columns, data))
+            patch = {key: values[key] for key in keys if values[key] != data.get(key)}
+            if patch:
+                writes.append({"row_id": row.id, "patch": json.dumps(patch)})
+
+        if writes:
+            # `data || patch` rather than a whole-row assignment: this job owns the
+            # calculated keys and nothing else, so merging leaves a concurrent write
+            # to some other column of the same record alone.
+            await db.execute(_WRITE, writes)
+
+        # Between the write and the commit, deliberately. The read sees other sessions'
+        # committed config (READ COMMITTED), so a formula edit that landed while this
+        # chunk was being computed is visible here — and rolling back discards the
+        # chunk rather than publishing answers from a formula that no longer exists.
+        if schema_signature(await list_columns(db, list_id)) != started_as:
+            if commit:
+                await db.rollback()
             return changed
 
-        keys = [key for key, _column, _formula in plan]
-        after = 0
-        while True:
-            rows = (
-                await db.execute(
-                    select(ListItem.id, ListItem.data)
-                    .where(ListItem.list_id == list_id, ListItem.id > after)
-                    .order_by(ListItem.id)
-                    .limit(CHUNK)
-                )
-            ).all()
-            if not rows:
-                break
-            after = rows[-1].id
-
-            writes = []
-            for row in rows:
-                data = row.data or {}
-                values = apply_formulas(plan, key_of_name, shape_values(columns, data))
-                patch = {key: values[key] for key in keys if values[key] != data.get(key)}
-                if patch:
-                    writes.append({"row_id": row.id, "patch": json.dumps(patch)})
-
-            if writes:
-                # `data || patch` rather than a whole-row assignment: this job owns the
-                # calculated keys and nothing else, so merging leaves a concurrent write
-                # to some other column of the same record alone.
-                await db.execute(_WRITE, writes)
-                changed += len(writes)
-            if commit:
-                await db.commit()
-
-        latest = await list_columns(db, list_id)
-        if schema_signature(latest) == started_as:
-            settled = (latest, started_as)
-            break
-
-    if settled is not None:
-        columns, signature = settled
-        stamped = False
-        for key, column in columns.items():
-            if column.type not in COMPUTED_TYPES:
-                continue
-            if (column.config or {}).get(COMPUTED_FOR) != signature:
-                # Reassign rather than mutate, so SQLAlchemy sees the JSONB change.
-                column.config = {**(column.config or {}), COMPUTED_FOR: signature}
-                stamped = True
-        if stamped and commit:
+        changed += len(writes)
+        if commit:
             await db.commit()
 
+    # Nothing was written since the last chunk's check, but the schema can still have
+    # moved after it — and stamping then would claim a version these values do not have.
+    if schema_signature(await list_columns(db, list_id)) != started_as:
+        return changed
+
+    stamped = False
+    for key, column in columns.items():
+        if column.type not in COMPUTED_TYPES:
+            continue
+        if (column.config or {}).get(COMPUTED_FOR) != started_as:
+            # Reassign rather than mutate, so SQLAlchemy sees the JSONB change.
+            column.config = {**(column.config or {}), COMPUTED_FOR: started_as}
+            stamped = True
+    if stamped and commit:
+        await db.commit()
+
     return changed
+
+
+class Deferrer(Protocol):
+    """Something that will run a coroutine after the response has been sent.
+
+    Structurally a FastAPI/Starlette `BackgroundTasks`, but typed as a protocol so the
+    service layer does not import the web framework to describe "later".
+    """
+
+    def add_task(self, func, /, *args, **kwargs) -> None: ...
+
+
+async def _run_deferred(list_id: int) -> None:
+    """A deferred backfill, on its own session.
+
+    Its **own**, and that is not a style choice: FastAPI runs a `yield` dependency's
+    teardown *before* background tasks (since 0.106), so the request's session is
+    already closed by the time this runs. Closing over it would fail on the first
+    query, after the response had gone out reporting success.
+
+    Nothing is raised out of here — there is no caller left to catch it. A failure has
+    to be logged and then left to the flag, which is already true: no stamp means the
+    columns keep reporting `recompute_pending`, and the daily maintenance run finishes
+    what this could not.
+    """
+    from src.infrastructure.database import SessionLocal
+
+    try:
+        async with SessionLocal() as db:
+            await recompute_records(db, list_id)
+    except Exception:
+        logger.exception(
+            "deferred calculated backfill failed for list_id=%s; the columns stay "
+            "pending until the maintenance job runs",
+            list_id,
+        )
+
+
+async def record_count(db: AsyncSession, list_id: int) -> int:
+    """How many records the backfill would have to walk.
+
+    Soft-deleted rows included, because the backfill visits them too — a record that
+    comes back out of the bin should not come back holding an answer from a formula
+    that no longer exists.
+    """
+    return (
+        await db.scalar(
+            select(sa.func.count()).select_from(ListItem).where(
+                ListItem.list_id == list_id
+            )
+        )
+        or 0
+    )
+
+
+async def resettle(
+    db: AsyncSession, list_id: int, *, defer: Optional[Deferrer] = None
+) -> bool:
+    """Bring the list's calculated values back in step. Returns True if deferred.
+
+    The one decision point for "is anyone waiting for this?". Under
+    `FORMULA_INLINE_MAX_RECORDS` the work happens here, in the request, and the caller's
+    response is already correct when it goes out — which is the behaviour every list in
+    a small deployment gets, and the reason the pending flag never flickers on them.
+
+    Over it, the work is handed to `defer` and the response returns immediately. Note
+    what is *not* capped: the deferred run still does the whole list. Stopping partway
+    would leave the column holding two formulas' answers at once, which filters and
+    sorts incoherently — strictly worse than a column that is uniformly one version
+    behind and says so.
+
+    With no `defer` — the maintenance script, a test, any non-request caller — size is
+    irrelevant and the work is simply done. There is nowhere to defer *to*, and nobody
+    waiting.
+    """
+    await sync_orders(db, list_id)
+    if defer is not None and await record_count(db, list_id) > (
+        settings.FORMULA_INLINE_MAX_RECORDS
+    ):
+        defer.add_task(_run_deferred, list_id)
+        return True
+    await recompute_records(db, list_id)
+    return False
 
 
 async def sync_orders(db: AsyncSession, list_id: int, *, commit: bool = True) -> int:

@@ -23,6 +23,20 @@ class Settings(BaseSettings):
     # decision, not a tuning knob. 0 means "purge as soon as the job runs".
     PURGE_DELETED_AFTER_DAYS: int = 30
 
+    # The largest list whose calculated columns are recomputed *inside* the request
+    # that changed a formula. Above this the work is handed to a background task and
+    # the columns report `recompute_pending` until it lands (see
+    # src/lists/columns/backfill.py).
+    #
+    # A tuning knob, not a policy one, and the number to move is the one on the left
+    # of "is anyone waiting for this?". At ~0.11 ms of app CPU per record, 5,000 is
+    # about 5 s of PATCH on a 0.1-CPU instance and ~1 s on a 0.5. Raise it and more
+    # edits finish before the response, at the cost of a longer save; lower it and
+    # saves are quicker but the "values catching up" warning shows up on smaller
+    # lists. It deliberately does not cap the *work* — a deferred backfill still does
+    # the whole list, because a half-updated column holds two formulas' answers at
+    # once and is worse than a uniformly stale one.
+    FORMULA_INLINE_MAX_RECORDS: int = 5_000
     # Login throttling — see src/auth/tokens/throttle.py for what these buy and
     # for the single-instance assumption underneath them. Failures only: a
     # caller typing the right password is never turned away, and a success

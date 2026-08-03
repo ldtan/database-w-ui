@@ -273,6 +273,7 @@ systemd timer. All take `--dry-run`, which reports without changing anything.
 
 ```bash
 uv run python -m src.maintenance.reconcile_shapes            # value shapes -> column config
+uv run python -m src.maintenance.recompute_calculated        # finish interrupted formula backfills
 uv run python -m src.maintenance.purge_deleted_workspaces    # workspaces past the window, and all under them
 uv run python -m src.maintenance.purge_deleted_lists         # lists past the window, and all under them
 uv run python -m src.maintenance.purge_deleted_items         # empty the bin past the window
@@ -303,6 +304,19 @@ one transaction.
 (on a large list that rewrite is a multi-minute lock inside a web request), so the service
 tolerates both shapes and this job converges the stored data afterwards. Nothing depends on it
 having run: records in the old shape read, write, export and scrub correctly either way.
+
+**`recompute_calculated`** — a `calculated` column's values are stored, and the app keeps them
+current: a record write recomputes its own row, and a schema change that moves what a formula
+answers backfills the list (in the request under `FORMULA_INLINE_MAX_RECORDS`, in a background
+task above it). This is the backstop for the runs that did not get there — a redeploy mid-
+backfill, a cancelled request, an instance restart. It is the one job here with a caller behind
+it, and it is still true that nothing *breaks* without it: the affected columns report
+`recompute_pending` and the app warns on screen until something finishes them.
+
+Cheap enough to schedule because it skips a list whose stamp already matches its schema without
+reading a single record, so on a healthy database it is a handful of queries. `--force` rescans
+regardless of the stamps, for value-level damage that left the schema alone; `--list <uuid>`
+narrows it to one list.
 
 **`purge_deleted_items`** — deleting a record only sets `deleted_at`, so it can be recovered
 and nothing that pointed at it breaks. This destroys records deleted longer ago than

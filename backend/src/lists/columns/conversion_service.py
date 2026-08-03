@@ -310,7 +310,12 @@ class ConversionService:
 
     @classmethod
     async def commit(
-        cls, db: AsyncSession, lst: List, source: Column, target_uuid: Union[str, UUID]
+        cls,
+        db: AsyncSession,
+        lst: List,
+        source: Column,
+        target_uuid: Union[str, UUID],
+        defer: Optional[backfill.Deferrer] = None,
     ) -> Column:
         """Swap the converted values in and retype the column. The point of no return."""
         target = await ColumnService.get_including_hidden(db, lst.id, target_uuid)
@@ -335,7 +340,7 @@ class ConversionService:
             }
             await db.commit()
             await db.refresh(target)
-            await cls._resettle_formulas(db, lst, target)
+            await cls._resettle_formulas(db, lst, target, defer)
             return target
 
         skey, tkey = str(source.uuid), str(target.uuid)
@@ -362,11 +367,16 @@ class ConversionService:
 
         await db.commit()
         await db.refresh(source)
-        await cls._resettle_formulas(db, lst, source)
+        await cls._resettle_formulas(db, lst, source, defer)
         return source
 
     @staticmethod
-    async def _resettle_formulas(db: AsyncSession, lst: List, column: Column) -> None:
+    async def _resettle_formulas(
+        db: AsyncSession,
+        lst: List,
+        column: Column,
+        defer: Optional[backfill.Deferrer] = None,
+    ) -> None:
         """Recompute the list's calculated cells if a formula was reading this column.
 
         A cutover replaces every value in the column at once, which is precisely the
@@ -378,7 +388,7 @@ class ConversionService:
         """
         columns = await backfill.list_columns(db, lst.id)
         if backfill.references_a_formula(columns, column.name):
-            await backfill.recompute_records(db, lst.id)
+            await backfill.resettle(db, lst.id, defer=defer)
 
     @classmethod
     async def _check_gates(cls, db: AsyncSession, lst: List, target: Column) -> None:
