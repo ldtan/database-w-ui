@@ -1,4 +1,5 @@
 """Streaming export and bulk import of records."""
+import json
 
 
 async def _seed(client, list_uuid, add_column):
@@ -323,3 +324,96 @@ async def test_export_includes_calculated_columns_and_import_round_trips(
     total_key = next(c["uuid"] for c in cols if c["name"] == "total")
     rows = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert sorted(r["data"][total_key] for r in rows) == [30, 40]
+
+
+# -- the two limits on a file ---------------------------------------------
+#
+# Both refuse the file *whole*. That is the property worth pinning, and it is not
+# free: rows are committed in batches, so a cap noticed while importing would
+# leave a list holding part of a file its owner was told had been rejected. Each
+# test below therefore checks the record count as well as the status.
+
+
+async def _count(client, list_uuid) -> int:
+    return len((await client.get(f"/api/lists/{list_uuid}/items/")).json())
+
+
+async def test_a_file_over_the_row_cap_imports_nothing_at_all(
+    client, list_uuid, add_column, monkeypatch
+):
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 5)
+    await _seed(client, list_uuid, add_column)
+
+    body = "name,age\n" + "".join(f"P{i},{i}\n" for i in range(6))
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "more than 5 rows" in resp.json()["detail"]
+    assert await _count(client, list_uuid) == 0
+
+
+async def test_a_file_of_exactly_the_row_cap_is_imported(
+    client, list_uuid, add_column, monkeypatch
+):
+    """The cap is the most you may send, not one less than it."""
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 5)
+    await _seed(client, list_uuid, add_column)
+
+    body = "name,age\n" + "".join(f"P{i},{i}\n" for i in range(5))
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] == 5
+
+
+async def test_the_row_cap_counts_json_elements_too(
+    client, list_uuid, add_column, monkeypatch
+):
+    """A JSON array is a different reader, and would be a different cap if the
+    check lived in the parsing branch rather than after it."""
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 2)
+    await _seed(client, list_uuid, add_column)
+
+    body = json.dumps([{"name": f"P{i}", "age": i} for i in range(3)])
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.json", body, "application/json")},
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "more than 2 rows" in resp.json()["detail"]
+    assert await _count(client, list_uuid) == 0
+
+
+async def test_a_file_over_the_size_cap_is_refused_before_its_rows_are_looked_at(
+    client, list_uuid, add_column, monkeypatch
+):
+    """Size is checked first, and on its own terms.
+
+    This file is two rows — well inside any row cap — and still refused, because
+    the guard it trips is about how much of the process one upload may occupy,
+    not about how much work it would be.
+    """
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_BYTES", 64)
+    await _seed(client, list_uuid, add_column)
+
+    body = "name,age\n" + "".join(f"{'P' * 60}{i},{i}\n" for i in range(2))
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+
+    assert resp.status_code == 400, resp.text
+    assert "larger than" in resp.json()["detail"]
+    assert await _count(client, list_uuid) == 0

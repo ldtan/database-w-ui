@@ -200,7 +200,7 @@ const list: Tour = {
     {
       anchor: "list-more",
       title: "The occasional things",
-      body: "Import brings a CSV or JSON file in, matching your columns by their short names; export takes records out, filtered and sorted however you like. Deleted records is this list's own bin.",
+      body: "Import brings a CSV or JSON file in, matching your columns by their short names — up to 2,000 rows a file, and a bigger one is turned away whole rather than half done. Export takes records out, filtered and sorted however you like. Deleted records is this list's own bin.",
     },
   ],
 };

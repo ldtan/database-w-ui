@@ -38,6 +38,40 @@ class Settings(BaseSettings):
     # once and is worse than a uniformly stale one.
     FORMULA_INLINE_MAX_RECORDS: int = 5_000
 
+    # The largest upload any /import endpoint will read. A memory guard rather
+    # than a row one: the cap below decides how much work an import may be, this
+    # decides how much of the process a single POST may occupy before anyone has
+    # looked at what is in it. See src/core/uploads.py for why it cannot be left
+    # to Content-Length.
+    #
+    # Sized so it is never the limit a legitimate import meets first: a wide row
+    # measures ~124 bytes, so IMPORT_MAX_ROWS of them is well under a megabyte,
+    # and 10 MB still admits a file of long rich-text cells. Anything past it is
+    # a file that was going to be refused by row count anyway, or was never a
+    # spreadsheet — and "too many rows, split it" is a far more useful sentence
+    # than "too big", so the row cap should be the one people actually see.
+    IMPORT_MAX_BYTES: int = 10 * 1024 * 1024
+
+    # The most records one import request may create. Refused before the first
+    # insert, so a file over the cap changes nothing at all.
+    #
+    # A tuning knob bounded by "does this finish inside one HTTP request", which
+    # is the only thing holding it down — the work itself is chunked and would
+    # happily run all day. Measured at 2.4–4.1 ms per row against a local
+    # Postgres (plain columns cheapest; a `unique` column dearest, at a SELECT
+    # per row). The free instance is ~0.1 CPU with its database over the network,
+    # which puts a row nearer 15–25 ms, so 2,000 rows is 30–50 s and 5,000 would
+    # be past two minutes — long enough that a proxy or an impatient person ends
+    # the request first, and the rows already committed by then stay committed
+    # with nobody holding the summary that says which.
+    #
+    # Raising it is a promise about how long a request may run, so raise it with
+    # the deployment, not with the size of the file somebody happens to have. The
+    # change that lifts it properly is handing a large import to a background
+    # task the way a large formula backfill already is (FORMULA_INLINE_MAX_RECORDS
+    # above), at which point this stops being about time at all.
+    IMPORT_MAX_ROWS: int = 2_000
+
     # Whether a column's values may be converted — both endings, retyping the
     # column in place and duplicating it into a new one. Off, because the cutover
     # loses writes: the backfill copies each cell into a hidden column, and the

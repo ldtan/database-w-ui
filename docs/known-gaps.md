@@ -590,6 +590,46 @@ buys and what it costs are both worth knowing before extending it.
   always creates its target, so that needs a target parameter and a decision the planned-features
   doc still lists as open: overwrite the target, or only fill cells where it is empty.
 
+## 12. An import is capped at one request's worth of work
+
+Both `/import` endpoints — records (`lists/transfer/routers.py`) and accounts
+(`auth/users/batch/routers.py`) — do the whole job inside the request that uploaded the
+file. Three limits follow from that, and all three refuse the file *whole*, before
+anything is created.
+
+- **`IMPORT_MAX_BYTES` (10 MB)**, shared by both. A memory guard: `await file.read()` is
+  the entire upload in one object, and nothing in front of the app disagrees — the Render
+  blueprint sets no proxy body limit, and `Content-Length` is a claim by the caller, absent
+  under chunked encoding. `src/core/uploads.py` therefore counts bytes as it reads them and
+  stops one chunk past the cap, so refusing a 500 MB file costs 64 KB.
+- **`IMPORT_MAX_ROWS` (2,000)** on records. A time guard. Measured at 2.4–4.1 ms per row
+  against a local Postgres — cheapest with plain columns, dearest with a `unique` one, which
+  is a SELECT per row — which puts a row nearer 15–25 ms on a 0.1-CPU instance with its
+  database over the network. 2,000 rows is 30–50 s there; 5,000 would be past two minutes.
+- **`parsing.MAX_ROWS` (1,000)** on accounts, lower and separate, because a row there mints
+  a password and argon2 costs ~44 ms of CPU on purpose.
+
+**Why whole-file refusal is the load-bearing part.** `import_records` commits every
+`_IMPORT_BATCH` (500) rows, so a cap noticed *during* the import would leave the list
+holding part of a file whose owner was told it had been rejected. The row check therefore
+reads one row past the limit and refuses before the first insert (`_bounded`), which also
+bounds what is held in memory to the limit itself. Tests pin the record count at zero after
+each refusal, not just the status code.
+
+**The known cost.** A person with a 5,000-row spreadsheet has to split it, and splitting is
+not free when rows reference each other or a `unique` column spans the parts. **The fix** is
+to hand a large import to a background task the way a large formula backfill already is
+(`FORMULA_INLINE_MAX_RECORDS`, `columns/backfill.py`), reporting progress and a summary
+afterwards rather than in the response. That would make the row cap a scheduling decision
+instead of a promise about how long a request may run. Until then, raise `IMPORT_MAX_ROWS`
+with the deployment, not with the size of the file somebody happens to have.
+
+**The frontend states both limits and pre-checks the size** (`lib/config.ts`), which means
+the numbers are written down twice. They are copies, like `canConvert` is a copy of
+`is_supported`: being wrong there is not dangerous, since the server still refuses, but a
+stated limit that does not match the enforced one is worse than no stated limit — so a
+deployment that overrides either setting has to rebuild the frontend with it.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

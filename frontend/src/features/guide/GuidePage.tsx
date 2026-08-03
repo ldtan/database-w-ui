@@ -1362,7 +1362,10 @@ export function GuidePage() {
             leave them empty and they don’t. The <Ui>groups</Ui> column wants each
             group’s <Ui>API name</Ui> — the short one shown under the group on the{" "}
             <Ui>People</Ui> page — separated by semicolons. Get one wrong and the app
-            tells you which name to use instead.
+            tells you which name to use instead. Up to 1,000 accounts per file, and a
+            file over that is refused whole rather than half done — setting up a
+            password properly is slow work, and a thousand of them is already a
+            patient wait.
           </li>
           <li>
             They can also create groups (<Ui>New group</Ui>) and choose their members —
@@ -1438,6 +1441,14 @@ export function GuidePage() {
           ignored, and a bad row is skipped while the good rows still import — nothing
           all-or-nothing.
         </Callout>
+        <p>
+          <strong>One file, up to 2,000 rows.</strong> An import runs while you wait
+          for it, so it has to be a wait rather than an afternoon. A file with more
+          rows than that is refused as a whole and nothing in it is imported — so you
+          get one message rather than a half-filled list — and you can split it and
+          send each part in turn. There is a 10 MB size limit alongside it, which an
+          ordinary spreadsheet of that many rows is nowhere near.
+        </p>
         <p>
           This is for the <em>records inside a list</em>. Setting up a lot of{" "}
           <em>people</em> is a separate thing in a separate place — see{" "}
