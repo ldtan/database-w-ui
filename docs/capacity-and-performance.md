@@ -175,6 +175,29 @@ meant **3.6 minutes** during which the app served nobody. After the fixes below 
 burst costs 2.0 s of CPU — about **20 seconds** on the free tier, and nobody else's
 requests queue behind it. That single change is worth more than either paid upgrade.
 
+## Importing is the other request whose cost is a file's size
+
+Measured on the same machine as the table above, against a local Postgres, per record:
+
+| Import shape | Per row |
+|---|---|
+| Text + number | 2.53 ms |
+| Ten text columns | 2.43 ms |
+| One lookup column (a label resolved per cell) | 3.60 ms |
+| One `unique` column | **4.06 ms** |
+
+Two things worth reading off it. **Width is nearly free** — ten columns cost less per row
+than two, because the per-row overhead is the savepoint and the insert, not the cells.
+**A `unique` column is the expensive one**, at +60%: `_enforce_unique` is a SELECT per row,
+and it is the one cost that grows with the list rather than with the file.
+
+None of that is app CPU alone; it is app plus a round trip on the same box. On the free
+instance the CPU part multiplies by ~10 and each round trip goes from tenths of a
+millisecond to a few, which lands a row nearer 15–25 ms. That number is the whole reason
+`IMPORT_MAX_ROWS` is 2,000 rather than 5,000: at 5,000 the request runs past two minutes,
+and the interesting part is not the wait but what a timeout leaves behind, since rows are
+committed every 500. See known-gaps §12.
+
 ## Data volume is not a constraint and probably never will be
 
 Records are ~**1.9 kB each** including indexes (the JSONB `data` column itself averages

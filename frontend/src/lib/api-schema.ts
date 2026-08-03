@@ -92,10 +92,14 @@ export interface paths {
          *     sit *underneath* the permission model, so whoever can mint them can route around
          *     it.
          *
-         *     Two kinds of failure, deliberately kept apart. A problem with the *file* -- wrong
-         *     columns, too many rows, not text -- is a 400, because nothing in it can be
-         *     trusted and nothing has been created. A problem with a *row* comes back inside
-         *     the summary, because the rows around it were fine and are already saved.
+         *     Two kinds of failure, deliberately kept apart. A problem with the *file* -- too
+         *     large, wrong columns, too many rows, not text -- is a 400, because nothing in it
+         *     can be trusted and nothing has been created. A problem with a *row* comes back
+         *     inside the summary, because the rows around it were fine and are already saved.
+         *
+         *     The size limit is `IMPORT_MAX_BYTES`, shared with record import; the row limit is
+         *     `parsing.MAX_ROWS`, which is its own and much lower, because a row here mints a
+         *     password and argon2 is deliberately expensive.
          *
          *     **The response carries generated passwords in plaintext.** It is the only place
          *     they exist; nothing stores them and there is no way to ask again. Do not log it.
@@ -1300,7 +1304,15 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Import List */
+        /**
+         * Import List
+         * @description Create records from an uploaded CSV or JSON file.
+         *
+         *     Two file-level limits, both refusing before a single record exists:
+         *     `IMPORT_MAX_BYTES` on the upload and `IMPORT_MAX_ROWS` on what is in it. A
+         *     problem with one *row* is not one of these — it comes back inside the summary,
+         *     because the rows around it are fine and are already saved.
+         */
         post: operations["import_list_api_lists__list_uuid__import_post"];
         delete?: never;
         options?: never;

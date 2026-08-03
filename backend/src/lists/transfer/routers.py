@@ -1,7 +1,8 @@
 import csv
 import io
 import json
-from typing import Optional
+from itertools import islice
+from typing import Iterator, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
@@ -9,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
+from src.core.config import settings
+from src.core.exceptions import ValidationError
+from src.core.uploads import read_upload_text
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
@@ -62,6 +66,23 @@ def _infer_format(filename: Optional[str], override: Optional[str]) -> str:
     return "csv"
 
 
+def _bounded(rows: Iterator[tuple], limit: int) -> list:
+    """The file's rows as a list, or a refusal if there are more than `limit`.
+
+    Materialised rather than streamed into the import, which is the point: rows
+    are committed in batches, so a cap noticed part-way through would leave the
+    list holding some of a file the caller was told was rejected. Reading one row
+    past the limit is enough to know, and bounds what is held to the limit itself.
+    """
+    taken = list(islice(rows, limit + 1))
+    if len(taken) > limit:
+        raise ValidationError(
+            f"This file has more than {limit} rows; split it and import each "
+            "part separately. Nothing has been imported."
+        )
+    return taken
+
+
 @router.post("/import", response_model=ImportSummary)
 async def import_list(
     lst: List = Depends(get_list_or_404),
@@ -70,6 +91,13 @@ async def import_list(
     file: UploadFile = File(...),
     format: Optional[str] = Form(None),
 ):
+    """Create records from an uploaded CSV or JSON file.
+
+    Two file-level limits, both refusing before a single record exists:
+    `IMPORT_MAX_BYTES` on the upload and `IMPORT_MAX_ROWS` on what is in it. A
+    problem with one *row* is not one of these — it comes back inside the summary,
+    because the rows around it are fine and are already saved.
+    """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.create
     )
@@ -77,25 +105,27 @@ async def import_list(
         db, current_user, ResourceType.list, lst.id, Action.edit
     )
     fmt = _infer_format(file.filename, format)
-    if fmt == "json":
-        raw = await file.read()
-        try:
-            parsed = json.loads(raw.decode("utf-8-sig"))
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid JSON file: {exc}",
-            ) from exc
-        elements = parsed if isinstance(parsed, list) else [parsed]
-        # Number JSON rows by their 1-based position in the array.
-        rows = ((i, element) for i, element in enumerate(elements, start=1))
-        summary = await import_records(db, lst, rows, user=current_user)
-    else:
-        raw = await file.read()
-        text = raw.decode("utf-8-sig")
-        reader = csv.DictReader(io.StringIO(text))
-        # reader.line_num is the actual source line of the row just read, so
-        # reported rows stay accurate even when the file has blank lines.
-        rows = ((reader.line_num, row) for row in reader)
-        summary = await import_records(db, lst, rows, user=current_user)
-    return summary
+    try:
+        text = await read_upload_text(file, settings.IMPORT_MAX_BYTES)
+        if fmt == "json":
+            try:
+                parsed = json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Invalid JSON file: {exc}",
+                ) from exc
+            elements = parsed if isinstance(parsed, list) else [parsed]
+            # Number JSON rows by their 1-based position in the array.
+            rows = ((i, element) for i, element in enumerate(elements, start=1))
+        else:
+            reader = csv.DictReader(io.StringIO(text))
+            # reader.line_num is the actual source line of the row just read, so
+            # reported rows stay accurate even when the file has blank lines.
+            rows = ((reader.line_num, row) for row in reader)
+        bounded = _bounded(rows, settings.IMPORT_MAX_ROWS)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return await import_records(db, lst, bounded, user=current_user)

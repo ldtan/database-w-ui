@@ -325,3 +325,28 @@ async def test_endpoint_rejects_a_file_that_is_not_utf8(session_factory, make_cl
             files={"file": ("users.csv", b"\xff\xfe\x00bad", "text/csv")},
         )
     assert resp.status_code == 400
+
+
+async def test_endpoint_rejects_an_oversize_file(
+    session_factory, make_client, monkeypatch
+):
+    """The size cap is shared with record import and applies before parsing.
+
+    Well under MAX_ROWS, so it is the bytes being refused rather than the rows —
+    this endpoint reads the upload the same way and needs the same guard, since a
+    file nobody has parsed yet is a file whose size nobody has checked.
+    """
+    from src.core.config import settings
+
+    monkeypatch.setattr(settings, "IMPORT_MAX_BYTES", 64)
+    admin = await _admin(session_factory)
+    body = "username,email\n" + "".join(
+        f"{'u' * 40}{i},u{i}@example.com\n" for i in range(2)
+    )
+    async with make_client(admin) as client:
+        resp = await client.post("/api/auth/users/import", files=_upload(body))
+
+    assert resp.status_code == 400, resp.text
+    assert "larger than" in resp.json()["detail"]
+    async with session_factory() as db:
+        assert await UserService.get_by_username(db, "u" * 40 + "0") is None

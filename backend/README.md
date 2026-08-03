@@ -162,6 +162,8 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `FIRST_SUPERUSER_EMAIL` | `admin@example.com` | Bootstrap user email. |
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
 | `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. |
+| `IMPORT_MAX_BYTES` | `10485760` | Largest upload any `/import` endpoint will read, counted as it reads rather than trusted from `Content-Length`. |
+| `IMPORT_MAX_ROWS` | `2000` | Most records one import may create. Refused before the first insert, so an over-cap file imports nothing. Bounded by what finishes inside one request — raise it with the deployment, not the file. See docs/known-gaps.md §12. |
 
 ## API overview
 

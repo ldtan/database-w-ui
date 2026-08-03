@@ -14,6 +14,7 @@ import {
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { IMPORT_MAX_BYTES, IMPORT_MAX_ROWS } from "../../lib/config";
 import { Field, FieldRow, FormSection } from "../../components/Field";
 import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
@@ -154,8 +155,25 @@ export function ImportExportDialog({
     const file = event.files?.[0];
     event.options.clear();
     if (!file) return;
-    setBusy(true);
     setResult(null);
+    // Checked here as well as on the server, because this one is knowable without
+    // sending anything: an oversize file would otherwise be uploaded in full,
+    // over whatever connection this is, only to be refused on arrival.
+    if (file.size > IMPORT_MAX_BYTES) {
+      setResult({
+        created: 0,
+        errors: [
+          {
+            row: 0,
+            message: `This file is ${(file.size / (1024 * 1024)).toFixed(1)} MB, over the ${
+              IMPORT_MAX_BYTES / (1024 * 1024)
+            } MB limit. Split it and import each part separately.`,
+          },
+        ],
+      });
+      return;
+    }
+    setBusy(true);
     try {
       // The server parses and bulk-inserts, validating each row and reporting
       // per-row errors.
@@ -345,6 +363,12 @@ export function ImportExportDialog({
                 Upload a .csv or .json file whose headers/keys are column names.
                 Unknown columns are ignored; each row is validated on the server.
                 Not sure of the shape? Download the template.
+              </p>
+              <p className="field-hint">
+                Up to {IMPORT_MAX_ROWS.toLocaleString()} rows and{" "}
+                {IMPORT_MAX_BYTES / (1024 * 1024)} MB per file, so that an import
+                finishes while you wait. A bigger file is turned away whole —
+                nothing from it is imported — so split it and send each part.
               </p>
               <Field
                 label="Template format"

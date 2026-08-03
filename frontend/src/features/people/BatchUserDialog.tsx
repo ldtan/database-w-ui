@@ -6,6 +6,7 @@ import { Message } from "primereact/message";
 
 import { AppDialog } from "../../components/AppDialog";
 import { api, ApiError } from "../../lib/api";
+import { IMPORT_MAX_BYTES } from "../../lib/config";
 import { toCsv } from "../../lib/csv";
 import { downloadFile } from "../../lib/download";
 import { useToast } from "../../lib/toast";
@@ -91,9 +92,20 @@ export function BatchUserDialog({ visible, onHide }: Props) {
     const file = event.files?.[0];
     event.options.clear();
     if (!file) return;
-    setBusy(true);
     setResult(null);
     setFileError(null);
+    // The server enforces this too (IMPORT_MAX_BYTES); refusing here saves
+    // uploading a file that was never going to be read. Same check, same words,
+    // as the record import dialog.
+    if (file.size > IMPORT_MAX_BYTES) {
+      setFileError(
+        `This file is ${(file.size / (1024 * 1024)).toFixed(1)} MB, over the ${
+          IMPORT_MAX_BYTES / (1024 * 1024)
+        } MB limit. Split it and import each part separately.`,
+      );
+      return;
+    }
+    setBusy(true);
     try {
       const form = new FormData();
       form.append("file", file);
@@ -155,6 +167,11 @@ export function BatchUserDialog({ visible, onHide }: Props) {
           <code>year_9</code>, not the label <q>Year 9</q> — separated by semicolons.
           Each row is validated on the server and a bad one is skipped, not fatal. Not
           sure of the shape? Download the template.
+        </p>
+        <p className="field-hint">
+          Up to 1,000 accounts and {IMPORT_MAX_BYTES / (1024 * 1024)} MB per file.
+          A bigger file is turned away whole — no accounts are created — so split it
+          and send each part.
         </p>
 
         <FileUpload
