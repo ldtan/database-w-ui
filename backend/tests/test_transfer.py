@@ -273,3 +273,56 @@ async def test_export_larger_than_a_batch_resolves_labels_mid_stream(
     lines = export.text.strip().splitlines()
     assert len(lines) == 1201  # header + every row
     assert all(line.startswith("School ") for line in lines[1:])  # no uuid leaked
+
+
+async def _seed_calculated(client, list_uuid, add_column):
+    """`qty` and `price`, plus a `total` computed from them."""
+    qty = await add_column(list_uuid, name="qty", display_name="Qty", type="number")
+    price = await add_column(
+        list_uuid, name="price", display_name="Price", type="number"
+    )
+    total = await add_column(
+        list_uuid,
+        name="total",
+        display_name="Total",
+        type="calculated",
+        config={"formula": "qty * price"},
+    )
+    return qty, price, total
+
+
+async def test_export_leaves_a_calculated_column_out(client, list_uuid, add_column):
+    """A calculated column stores nothing, so exporting it would write a blank
+    heading — and a re-import of that file would carry a column the list refuses
+    to be told about. It is dropped even when named explicitly."""
+    qty, price, _ = await _seed_calculated(client, list_uuid, add_column)
+    await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {qty: 3, price: 10}}
+    )
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/export",
+        json={"format": "json", "columns": ["qty", "price", "total"]},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = resp.json()
+    assert list(rows[0]) == ["qty", "price"]  # no "total" key at all
+
+
+async def test_import_ignores_a_value_for_a_calculated_column(
+    client, list_uuid, add_column
+):
+    """A hand-made file may still carry the column. Its value is dropped rather
+    than written or raised: the formula decides what `total` is, and one stray
+    heading must not fail an otherwise good row."""
+    _, _, total = await _seed_calculated(client, list_uuid, add_column)
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", "qty,price,total\n3,10,999\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"created": 1, "errors": []}
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert items[0]["data"][total] == 30  # the formula's answer, not the file's 999

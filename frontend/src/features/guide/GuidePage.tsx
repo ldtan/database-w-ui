@@ -1400,7 +1400,10 @@ export function GuidePage() {
         <p>
           Starting from nothing? Pick a <Ui>Template format</Ui> and click{" "}
           <Ui>Download template</Ui> on that same tab: you get an empty file with one
-          heading per column, ready to fill in and upload straight back.
+          heading per column, ready to fill in and upload straight back. Calculated
+          columns aren’t in it, and aren’t on the export list either — they work
+          themselves out from your other columns, so there is nothing to fill in and
+          nothing to bring back.
         </p>
         <Callout tone="warn" title="Match the headings">
           Your file’s column headings must match your list’s underlying column names
