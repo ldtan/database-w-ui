@@ -55,7 +55,7 @@ interface ImportResult {
  * list, since a file can do both; it reports per-row errors rather than failing the
  * whole file.
  *
- * Calculated columns are absent from both halves — see `transferable` below.
+ * Calculated columns are absent from every control here — see `stored` below.
  */
 export function ImportExportDialog({
   listUuid,
@@ -85,13 +85,20 @@ export function ImportExportDialog({
   const [conjunction, setConjunction] = useState<"and" | "or">("and");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
-  // The columns a file can carry. A calculated column is derived from the others
-  // when a record is read and stores nothing of its own, so it is read-only on the
-  // way in and `export_rows` already drops it on the way out. Offering one here is
-  // a lie either way round: a template heading you are invited to fill in whose
-  // values the import then discards, or a ticked export column that never reaches
-  // the file.
-  const transferable = useMemo(
+  // The columns that store a value of their own. A calculated column does not — it
+  // is a formula over its neighbours, worked out when a record is read — and every
+  // control on this tab turns out to want the distinction, for the same underlying
+  // reason each time: there is no cell to read, write, or order by.
+  //
+  //  * the template would offer a heading to fill in whose values import discards;
+  //  * a ticked export column never reaches the file, because `export_rows` drops
+  //    it before the header is written;
+  //  * "Sort by" would name a column `_order_term` refuses to order by, since
+  //    `data ->> uuid` is NULL for every row — so the sort silently does nothing.
+  //
+  // In all three the server is already right and only the UI was offering the
+  // choice, which is the worst arrangement: it looks like it worked.
+  const stored = useMemo(
     () => columns.filter((c) => c.type !== "calculated"),
     [columns],
   );
@@ -99,13 +106,13 @@ export function ImportExportDialog({
   // Default to all columns selected whenever the dialog opens.
   useEffect(() => {
     if (visible) {
-      setSelected(new Set(transferable.map((c) => c.uuid)));
+      setSelected(new Set(stored.map((c) => c.uuid)));
       setResult(null);
       setExportError(null);
     }
-  }, [visible, transferable]);
+  }, [visible, stored]);
 
-  const chosen = transferable.filter((c) => selected.has(c.uuid));
+  const chosen = stored.filter((c) => selected.has(c.uuid));
 
   function toggle(uuid: string, on: boolean) {
     setSelected((prev) => {
@@ -148,7 +155,7 @@ export function ImportExportDialog({
   // deleted from the file — import only sets the ones it finds.
   function handleTemplate() {
     if (templateFormat === "json") {
-      const sample = Object.fromEntries(transferable.map((c) => [c.name, ""]));
+      const sample = Object.fromEntries(stored.map((c) => [c.name, ""]));
       downloadFile(
         `${listName}-template.json`,
         JSON.stringify([sample], null, 2),
@@ -157,7 +164,7 @@ export function ImportExportDialog({
     } else {
       downloadFile(
         `${listName}-template.csv`,
-        toCsv(transferable.map((c) => c.name), []),
+        toCsv(stored.map((c) => c.name), []),
         "text/csv",
       );
     }
@@ -234,7 +241,7 @@ export function ImportExportDialog({
               icon="pi pi-file"
               text
               onClick={handleTemplate}
-              disabled={transferable.length === 0}
+              disabled={stored.length === 0}
             />
             <Button label="Close" text onClick={onHide} />
           </>
@@ -259,7 +266,7 @@ export function ImportExportDialog({
 
             <FormSection
               title="Columns"
-              description={`Headers use the column name. ${chosen.length} of ${transferable.length} selected.`}
+              description={`Headers use the column name. ${chosen.length} of ${stored.length} selected.`}
             >
               <div className="flex items-center gap-1 -mt-1">
                 <Button
@@ -267,7 +274,7 @@ export function ImportExportDialog({
                   text
                   size="small"
                   onClick={() =>
-                    transferable.forEach((c) => toggle(c.uuid, true))
+                    stored.forEach((c) => toggle(c.uuid, true))
                   }
                 />
                 <Button
@@ -275,12 +282,12 @@ export function ImportExportDialog({
                   text
                   size="small"
                   onClick={() =>
-                    transferable.forEach((c) => toggle(c.uuid, false))
+                    stored.forEach((c) => toggle(c.uuid, false))
                   }
                 />
               </div>
               <div className="flex flex-col gap-1 max-h-48 overflow-auto">
-                {transferable.map((col) => (
+                {stored.map((col) => (
                   <div key={col.uuid} className="flex items-center gap-2">
                     <Checkbox
                       inputId={`io-${col.uuid}`}
@@ -315,7 +322,7 @@ export function ImportExportDialog({
                   <Dropdown
                     inputId="io-sort"
                     value={sortColumn}
-                    options={columns.map((c) => ({
+                    options={stored.map((c) => ({
                       label: c.display_name,
                       value: c.uuid,
                     }))}
