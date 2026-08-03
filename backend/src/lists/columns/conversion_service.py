@@ -33,6 +33,24 @@ they point at moved. Only the record values move, and only between two keys.
 overwriting one, so the scratch column ends up holding the *original* data with
 the *original* type, and is then soft-deleted. Restoring it from the bin within
 the retention window is a real undo.
+
+**This whole service is switched off** (`settings.COLUMN_CONVERSION_ENABLED`), both
+endings, because the scratch column goes stale between the backfill and the commit.
+`_backfill` copies each cell across and nothing keeps the copy current: writes go
+through `_validate_data`, which cannot see a hidden column.
+
+For a conversion that loses data outright. `_swap_values` exchanges the two keys
+*unconditionally*, so a record edited in between reverts to its pre-edit value, and
+a record created in between has its cell nulled — the swap reads a scratch key the
+backfill never wrote, and a missing key becomes JSON `null`. Neither is reported,
+because the code cannot tell those rows from the cells the report already said
+would be dropped. For a duplicate nothing is lost, since the commit only unhides,
+but the new column silently misses those same edits.
+
+The fix for both is the same: `commit` re-runs the converter over rows whose
+`updated_at` is later than the backfill before doing anything else, and refuses
+with a fresh report rather than nulling what will not convert. See known-gaps.md
+§11.
 """
 import json
 from datetime import datetime, timezone
@@ -44,8 +62,10 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.core.config import settings
 from src.core.exceptions import (
     ConflictError,
+    FeatureDisabledError,
     UnknownReferenceError,
     ValidationError,
 )
@@ -87,9 +107,25 @@ KEEP_SOURCE = "_keep_source"
 
 _SUFFIX = "__converting"
 
+_DISABLED = (
+    "Converting a column's values is switched off, for changing its type and for "
+    "duplicating it alike: a record edited or added while the report is open is "
+    "not carried into what gets applied."
+)
+
 
 class ConversionService:
     # -- helpers ---------------------------------------------------------
+
+    @staticmethod
+    def _require_enabled() -> None:
+        """Refuse both endings while the two-step flow can lose writes.
+
+        Read at call time rather than at import, so a test (or a maintenance run
+        on a list nobody is touching) can turn it on for the duration.
+        """
+        if not settings.COLUMN_CONVERSION_ENABLED:
+            raise FeatureDisabledError(_DISABLED)
 
     @staticmethod
     def _scratch_name(source: Column) -> str:
@@ -143,6 +179,8 @@ class ConversionService:
         the unique index for the whole run — a backfill that succeeds and then
         cannot be named would be a maddening way to lose the work.
         """
+        # First, so a refused conversion does no work and leaves nothing behind.
+        cls._require_enabled()
         duplicate = name is not None
         if await cls._find_scratch(db, lst, source) is not None:
             raise ConflictError(
@@ -325,6 +363,11 @@ class ConversionService:
             raise ValidationError(
                 f"That conversion does not belong to '{source.name}'"
             )
+
+        # Checked again here, not only in `start`: one begun before the switch was
+        # thrown is still sitting there waiting, and committing is the half that
+        # publishes the stale values. `abandon` stays open so it can be cleared away.
+        cls._require_enabled()
 
         await cls._check_gates(db, lst, target)
 

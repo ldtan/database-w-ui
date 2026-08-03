@@ -725,10 +725,16 @@ export interface paths {
          * Start Conversion
          * @description Convert this column's values into a new column of another type — or copy them.
          *
-         *     Changes **nothing** about the list. The converted values land in a hidden column
-         *     that no view, filter, form or formula can see, and the report says what did and
-         *     did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
-         *     away with `DELETE` — the column keeps working normally either way until then.
+         *     **Currently disabled: this answers 503.** The hidden column the values are
+         *     converted into is never updated again, so anything written to the source while
+         *     the report is being read is missing from what gets applied — and for the
+         *     retyping ending the unconditional key swap turns that into outright data loss.
+         *     See known-gaps.md §11.
+         *
+         *     What it does when on: changes **nothing** about the list. The converted values
+         *     land in a hidden column that no view, filter, form or formula can see, and the
+         *     report says what did and did not convert. Commit it with `POST` to the returned
+         *     `target_uuid`, or throw it away with `DELETE`.
          *
          *     Two endings, chosen here by whether a `name` is supplied:
          *
@@ -760,15 +766,21 @@ export interface paths {
          * Commit Conversion
          * @description Make the converted values real. The point of no return.
          *
-         *     For a conversion this swaps them in and retypes the column; the original values
-         *     are not destroyed but land in a binned column named `<name>__before_conversion`,
-         *     restorable for the usual retention window. For a **duplicate** it only makes the
-         *     new column visible — the source is untouched and no record is rewritten.
+         *     **Currently disabled: this answers 503**, including for work started before the
+         *     switch was thrown, since this is the half that publishes values the source has
+         *     since moved on from. `DELETE` still works, so anything left open can be cleared
+         *     away. See known-gaps.md §11.
+         *
+         *     What it does when on: for a conversion this swaps the values in and retypes the
+         *     column; the original values are not destroyed but land in a binned column named
+         *     `<name>__before_conversion`, restorable for the usual retention window. For a
+         *     **duplicate** it only makes the new column visible — the source is untouched and
+         *     no record is rewritten.
          *
          *     `required` and `unique` are checked here rather than during the backfill, for
          *     both endings — per cell they are the wrong question, since a blank source cell is
          *     ordinary and a repeat only matters once the column is real. A failure here leaves
-         *     the conversion in progress, so it can be fixed and committed again.
+         *     the work in progress, so it can be fixed and committed again.
          */
         post: operations["commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post"];
         /**
@@ -776,7 +788,8 @@ export interface paths {
          * @description Throw an in-progress conversion away, values and all.
          *
          *     A hard delete rather than the bin: nothing ever saw this column, so there is
-         *     nothing worth restoring.
+         *     nothing worth restoring. Stays available while the feature itself is disabled —
+         *     it is the escape hatch for work that was already open, and it only removes.
          */
         delete: operations["abandon_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__delete"];
         options?: never;
@@ -1739,6 +1752,8 @@ export interface components {
          *     left exactly as it was — so this is equally "copy this column" and "copy it,
          *     converting on the way". Without a `name` it is a conversion, and the column
          *     keeps the source's identity.
+         *
+         *     Both endings are switched off for now; the route answers 503 either way.
          */
         ConversionStart: {
             type: components["schemas"]["ColumnType"];

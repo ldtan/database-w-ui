@@ -398,21 +398,6 @@ const SHOTS = [
     },
   },
   {
-    id: "change-type",
-    section: "change-type",
-    alt: "The Convert dialog for a column, offering the type to convert it into.",
-    caption:
-      "Converting a column. Nothing changes until you read the report and click Apply.",
-    async run(ctx) {
-      const dialog = await ctx.settings("Columns");
-      await dialog
-        .getByRole("button", { name: /^Convert column Deal value/ })
-        .click();
-      await ctx.settle();
-      return ctx.page.getByRole("dialog").last();
-    },
-  },
-  {
     id: "formula",
     section: "formulas",
     alt: "The Add column dialog with Calculated chosen, showing the Formula box and the columns it may name.",

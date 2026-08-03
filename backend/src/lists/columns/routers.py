@@ -14,7 +14,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
-from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
+from src.core.exceptions import (
+    ConflictError,
+    FeatureDisabledError,
+    UnknownReferenceError,
+    ValidationError,
+)
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
@@ -178,10 +183,16 @@ async def start_conversion(
 ):
     """Convert this column's values into a new column of another type — or copy them.
 
-    Changes **nothing** about the list. The converted values land in a hidden column
-    that no view, filter, form or formula can see, and the report says what did and
-    did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
-    away with `DELETE` — the column keeps working normally either way until then.
+    **Currently disabled: this answers 503.** The hidden column the values are
+    converted into is never updated again, so anything written to the source while
+    the report is being read is missing from what gets applied — and for the
+    retyping ending the unconditional key swap turns that into outright data loss.
+    See known-gaps.md §11.
+
+    What it does when on: changes **nothing** about the list. The converted values
+    land in a hidden column that no view, filter, form or formula can see, and the
+    report says what did and did not convert. Commit it with `POST` to the returned
+    `target_uuid`, or throw it away with `DELETE`.
 
     Two endings, chosen here by whether a `name` is supplied:
 
@@ -208,6 +219,10 @@ async def start_conversion(
             name=payload.name,
             display_name=payload.display_name,
         )
+    except FeatureDisabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
@@ -225,15 +240,21 @@ async def commit_conversion(
 ):
     """Make the converted values real. The point of no return.
 
-    For a conversion this swaps them in and retypes the column; the original values
-    are not destroyed but land in a binned column named `<name>__before_conversion`,
-    restorable for the usual retention window. For a **duplicate** it only makes the
-    new column visible — the source is untouched and no record is rewritten.
+    **Currently disabled: this answers 503**, including for work started before the
+    switch was thrown, since this is the half that publishes values the source has
+    since moved on from. `DELETE` still works, so anything left open can be cleared
+    away. See known-gaps.md §11.
+
+    What it does when on: for a conversion this swaps the values in and retypes the
+    column; the original values are not destroyed but land in a binned column named
+    `<name>__before_conversion`, restorable for the usual retention window. For a
+    **duplicate** it only makes the new column visible — the source is untouched and
+    no record is rewritten.
 
     `required` and `unique` are checked here rather than during the backfill, for
     both endings — per cell they are the wrong question, since a blank source cell is
     ordinary and a repeat only matters once the column is real. A failure here leaves
-    the conversion in progress, so it can be fixed and committed again.
+    the work in progress, so it can be fixed and committed again.
     """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
@@ -244,6 +265,10 @@ async def commit_conversion(
             db, lst, column, target_uuid, defer=background_tasks
         )
         return await ColumnService.read_one(db, lst.id, committed)
+    except FeatureDisabledError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)
+        ) from exc
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except ValidationError as exc:
@@ -261,7 +286,8 @@ async def abandon_conversion(
     """Throw an in-progress conversion away, values and all.
 
     A hard delete rather than the bin: nothing ever saw this column, so there is
-    nothing worth restoring.
+    nothing worth restoring. Stays available while the feature itself is disabled —
+    it is the escape hatch for work that was already open, and it only removes.
     """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure

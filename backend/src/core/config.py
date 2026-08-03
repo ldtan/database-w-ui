@@ -37,6 +37,26 @@ class Settings(BaseSettings):
     # the whole list, because a half-updated column holds two formulas' answers at
     # once and is worse than a uniformly stale one.
     FORMULA_INLINE_MAX_RECORDS: int = 5_000
+
+    # Whether a column's values may be converted — both endings, retyping the
+    # column in place and duplicating it into a new one. Off, because the cutover
+    # loses writes: the backfill copies each cell into a hidden column, and the
+    # commit swaps the two keys back unconditionally, so a record edited between
+    # the two reverts to its pre-edit value and a record *created* between them
+    # has its cell nulled, since the swap reads a key the backfill never wrote.
+    # The window is not a race but the whole interval a person spends reading the
+    # report, which is the feature's entire selling point. See known-gaps.md §11.
+    #
+    # A duplicate does not swap, so it cannot lose a source value — but it is the
+    # same two-step flow through the same stale scratch column, so a copy made
+    # while the report was open silently misses those same edits. One switch
+    # rather than two: they are one feature to the person using them, and half of
+    # it working is harder to explain than none of it.
+    #
+    # A policy switch, not a tuning knob: turn it back on when the commit catches
+    # up records touched since the backfill (`list_items.updated_at` is already
+    # there for it), not because a particular list looks quiet.
+    COLUMN_CONVERSION_ENABLED: bool = False
     # Login throttling — see src/auth/tokens/throttle.py for what these buy and
     # for the single-instance assumption underneath them. Failures only: a
     # caller typing the right password is never turned away, and a success

@@ -173,7 +173,7 @@ const list: Tour = {
       body: "Settings is where the list is shaped rather than filled. Columns comes first — a list with none cannot take records yet.",
       points: [
         "Columns — add Text, Number, Date, Choice, a link to another list, or a formula.",
-        "A column's type is not final. Change type converts it and Duplicate copies it, both showing you what converted before anything is applied.",
+        "Pick a column's type carefully — changing it later is turned off for now, so a column with the wrong type has to be added again and refilled.",
         "Forms — choose which fields appear when someone adds a record, and in what order.",
         "Metrics — a total, average or count across the whole list. Add them here; the Metrics button on the toolbar shows and hides them.",
         "Permissions — who can see this list, and what they may do to it.",
@@ -228,7 +228,7 @@ export function tipsFor(pathname: string): PageTip[] {
   if (/^\/lists\/[^/]+$/.test(pathname)) {
     return [
       { icon: "pi pi-cog", text: "No columns yet? Settings → Columns. A list cannot take records without at least one." },
-      { icon: "pi pi-sync", text: "Picked the wrong column type? Settings → Columns → Change type converts it, and shows you what did and did not convert before anything changes." },
+      { icon: "pi pi-cog", text: "A column's type is fixed once it exists — changing and copying columns are switched off while a fault is fixed. Add a new column and move the values by hand if you need to." },
       { icon: "pi pi-filter", text: "Search, sort and filter change only your view — click Save view to keep an arrangement." },
       { icon: "pi pi-lock", text: "A button you cannot see is one you are not allowed to use. Ask the list's owner." },
     ];
