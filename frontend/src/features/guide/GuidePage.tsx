@@ -472,15 +472,14 @@ export function GuidePage() {
           people to see them while editing.
         </Callout>
         <Callout tone="tip" title="Changing your mind later">
-          You can rename a column and change its settings any time. Changing its{" "}
-          <strong>type</strong> is a bigger job — every record already holds values in
-          the old shape — so it has its own button and its own safety net, described
-          in{" "}
+          You can rename a column and change its settings any time. Its{" "}
+          <strong>type</strong> is the one thing you can’t change — every record
+          already holds values in the old shape — and the tool that used to do it is{" "}
           <a href="#change-type" style={{ color: "var(--brand)" }}>
-            Changing a column’s type
+            turned off for now
           </a>
-          . And deleting a column doesn’t erase what records held — the old values are
-          simply hidden.
+          , so pick the type with a little care. Deleting a column doesn’t erase what
+          records held — the old values are simply hidden.
         </Callout>
       </Section>
 
@@ -516,72 +515,43 @@ export function GuidePage() {
         id="change-type"
         title="Changing a column’s type, and copying a column"
       >
-        <p>
-          Stored a year as <Ui>Text</Ui> and now want to total it? Typed dates by
-          hand and want a real date picker? You don’t have to start over. In{" "}
-          <Ui>Settings</Ui> → <Ui>Columns</Ui>, each column has two buttons beside
-          the pencil:
-        </p>
-        <ul className="flex flex-col gap-1">
-          <li>
-            <Ui>Change type</Ui> (the arrows icon) — converts this column, keeping
-            its name and everything that points at it.
-          </li>
-          <li>
-            <Ui>Duplicate</Ui> (the copy icon) — makes a <em>second</em> column from
-            this one and leaves the original alone. It can keep the same type (a
-            straight copy) or take a new one.
-          </li>
-        </ul>
-
-        <h3 className="font-semibold pt-1">Nothing changes until you say so</h3>
-        <p>
-          Both work the same way, and it’s worth knowing why: the app converts your
-          values into a hidden column <em>first</em>, then shows you exactly what did
-          and didn’t work. While you’re reading that report your list is untouched —
-          every view, filter and form still sees the old column, working normally.
-          Only when you click <Ui>Apply</Ui> (or <Ui>Add column</Ui>, for a copy) does
-          anything actually change. <Ui>Discard</Ui> costs you nothing.
-        </p>
-        <Figure name="change-type" />
-        <p>
-          If some values can’t be converted — a <em>“n/a”</em> sitting in a column
-          you’re turning into <Ui>Number</Ui> — the report names them. Those cells end
-          up <strong>empty</strong>. You can discard, fix them, and try again.
-        </p>
-
-        <h3 className="font-semibold pt-1">Which types can become which</h3>
-        <p>
-          <Ui>Text</Ui> is the go-between. Anything can become text, and text can
-          become almost anything, so a swap the menu greys out is simply one that
-          takes two steps: convert to <Ui>Text</Ui> first, then on to what you wanted.
-          Going from <Ui>Date</Ui> to <Ui>Date &amp; time</Ui> (or back) works
-          directly. <Ui>Calculated</Ui> columns can’t take part at all — they store
-          nothing of their own, being worked out fresh each time you look.
-        </p>
-        <p>
-          Turning <Ui>Text</Ui> into <Ui>Choice</Ui> is the clever one: leave the
-          options blank and the app reads your records and offers one option per
-          distinct value it finds. Type the options yourself instead and anything
-          outside your list is reported as a failure rather than quietly added.
-        </p>
-
-        <Callout tone="tip" title="Your old values are kept">
-          Converting doesn’t throw the originals away. They’re moved into a deleted
-          column named something like <em>price__before_conversion</em>, which you can
-          bring back from{" "}
-          <a href="#bin" style={{ color: "var(--brand)" }}>Deleted columns</a> if the
-          conversion wasn’t what you hoped. Duplicating displaces nothing at all, so
-          there’s nothing to recover.
+        <Callout tone="warn" title="Both of these are turned off right now">
+          <Ui>Settings</Ui> → <Ui>Columns</Ui> used to offer <Ui>Change type</Ui> and{" "}
+          <Ui>Duplicate</Ui> beside the pencil. Those buttons are gone for the moment,
+          and the guide describes them here so you know what happened to them rather
+          than wondering. They are coming back.
         </Callout>
-        <Callout tone="warn" title="Required and Unique are checked at the end">
-          A report can come back with no failures and the change still be refused —
-          because <Ui>Required</Ui> and <Ui>Unique</Ui> are judged on the finished
-          column, not cell by cell. If some records would be left empty in a required
-          column, or two would end up sharing a value in a unique one, you’ll be told
-          then. Your conversion stays waiting, so you can untick the setting or fix
-          the records and apply again.
-        </Callout>
+
+        <p>
+          <Ui>Change type</Ui> converted a column in place — a year stored as{" "}
+          <Ui>Text</Ui> becoming a real <Ui>Number</Ui> you could total, dates typed by
+          hand becoming dates the app understands. <Ui>Duplicate</Ui> did the same
+          conversion into a <em>second</em> column and left the original alone.
+        </p>
+        <p>
+          Both worked by converting your values into a hidden column first and showing
+          you a report of what did and didn’t convert, so you could look before
+          committing to anything. That waiting-and-looking step is exactly where the
+          fault is: while the report was on screen, the hidden copy stopped keeping up
+          with your list. Anyone editing a record or adding one in that window — a
+          colleague, another tab, you — was writing somewhere the report couldn’t see.
+          Applying the change then published the copy on top, so those edits vanished
+          without a word, and a record added in the window came out blank.
+        </p>
+        <p>
+          The values were never in danger while you were only <em>looking</em> at a
+          report; it is applying that did the damage. Nothing on your lists is
+          affected by this — the feature is switched off, not mid-flight.
+        </p>
+
+        <h3 className="font-semibold pt-1">What to do meanwhile</h3>
+        <p>
+          If a column has the wrong type, the way through is by hand: add a new column
+          of the type you want, copy the values across, then delete the old one. For a
+          long list that is a chore, and it is the honest answer until the fix lands.
+          Picking the right type when you create a column is worth an extra moment
+          today more than it usually would be.
+        </p>
       </Section>
 
       <Section id="records" title="Step 4 · Add records">

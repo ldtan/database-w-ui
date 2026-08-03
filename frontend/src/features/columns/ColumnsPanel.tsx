@@ -5,7 +5,10 @@ import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
-import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
+import {
+  COLUMN_CONVERSION_ENABLED,
+  COLUMN_TYPE_OPTIONS,
+} from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
 import type { Column, ColumnType, ConversionReport } from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
@@ -35,9 +38,11 @@ export function ColumnsPanel({
     open: false,
     column: null,
   });
-  // A conversion is two dialogs: pick the new type, then read the report and
+  // Either ending is two dialogs: pick the new type, then read the report and
   // decide. `converting` drives the first, `review` the second — and the second
   // needs the type that was chosen, which the report itself does not carry.
+  // All three are inert while COLUMN_CONVERSION_ENABLED is false, and kept wired
+  // up so turning the flag back on is the whole change.
   const [converting, setConverting] = useState<Column | null>(null);
   const [duplicating, setDuplicating] = useState<Column | null>(null);
   const [review, setReview] = useState<{
@@ -116,11 +121,12 @@ export function ColumnsPanel({
                 aria-label={`Edit column ${column.display_name}`}
                 onClick={() => setEditing({ open: true, column })}
               />
-              {/* Separate from Edit because it is a different kind of change: a
-                  conversion rewrites every record's value and cannot be undone by
-                  editing back. A calculated column's values belong to its formula,
-                  so there is no cell for a conversion to act on. */}
-              {column.type !== "calculated" && (
+              {/* Both are withdrawn, not merely hidden — see
+                  COLUMN_CONVERSION_ENABLED. They are separate from Edit because they
+                  are a different kind of change: they rewrite values rather than
+                  settings. A calculated column's values belong to its formula, so
+                  there is no cell for either to act on. */}
+              {COLUMN_CONVERSION_ENABLED && column.type !== "calculated" && (
                 <>
                   <Button
                     icon="pi pi-sync"
@@ -130,9 +136,9 @@ export function ColumnsPanel({
                     tooltip="Change type"
                     onClick={() => setConverting(column)}
                   />
-                  {/* Same engine as Change type, opposite ending: this one adds a
-                      column and leaves the original alone. A calculated column is
-                      copied by writing its formula again, not by copying cells. */}
+                  {/* Same engine, opposite ending: this one adds a column and leaves
+                      the original alone. A calculated column is copied by writing its
+                      formula again, not by copying cells. */}
                   <Button
                     icon="pi pi-copy"
                     text

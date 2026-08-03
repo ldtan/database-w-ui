@@ -43,10 +43,6 @@ export const FIGURES: Record<string, Figure> = {
     alt: "The Add column dialog: a name, an API name, a type, and that type's settings.",
     caption: "Adding a column. The settings under “Options” change with the type you pick.",
   },
-  "change-type": {
-    alt: "The Convert dialog for a column, offering the type to convert it into.",
-    caption: "Converting a column. Nothing changes until you read the report and click Apply.",
-  },
   "formula": {
     alt: "The Add column dialog with Calculated chosen, showing the Formula box and the columns it may name.",
     caption: "A calculated column holds a formula. The dialog lists the short names you are allowed to use.",

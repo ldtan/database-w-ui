@@ -4,7 +4,9 @@ Nine capabilities that have been asked for. Each section says what it is, what a
 exists to build on, the load-bearing implementation details, and the decisions still
 open. The heading of each says where it stands, and where a section shipped narrower than
 it was scoped, it says what was left out. Only §2 is still partly unbuilt: duplicating a
-column ships, copying into an **already existing** column does not.
+column ships, copying into an **already existing** column does not. **§1 and the built half of
+§2 are switched off** — both convert through a hidden column that stops keeping up with the
+list while the report is being read (known-gaps §11).
 
 These share two roots in the existing model, so read them once here rather than nine times below:
 
@@ -20,10 +22,20 @@ Cross-references: [data model](data-model-design.md) · [known gaps](known-gaps.
 
 ---
 
-## 1. Column type conversion — **implemented**
+## 1. Column type conversion — **implemented, then switched off**
 
 Change a column's `type` after it has records — `text` → `number`, `choice` → `text`,
 `date` → `datetime`, and so on.
+
+> **Disabled since 2026-08-04** (`settings.COLUMN_CONVERSION_ENABLED`, false by default; the
+> frontend hides both actions behind a matching constant). Nothing keeps the hidden scratch
+> column current between the backfill and the commit, so anything written while the report is
+> being read is missing from what gets applied. For a conversion that is data loss — the
+> unconditional key swap reverts a record edited then and nulls a record created then, silently
+> in both cases. **The duplicate ending (§2) is switched off with it**: it loses nothing, but it
+> is the same flow through the same stale copy, and half a feature working is harder to explain
+> than none of it. Everything below describes the feature as built; it is gated, not removed.
+> The fault, and the fix, are written up in known-gaps.md §11.
 
 **Why it's not a config edit.** `type` is **immutable after creation** today (data-model §4,
 §5), and deliberately so. Every record stores a value under the column's uuid whose *shape and
@@ -113,10 +125,14 @@ the list's JSONB roughly doubles. Worth a size check before starting on a 1GB da
 `src/lists/columns/conversion.py` (the cell engine) and `conversion_service.py` (build,
 backfill, cut over), behind three routes: `POST /columns/{uuid}/convert` returns a report,
 `POST /columns/{uuid}/convert/{target_uuid}` commits it, `DELETE` on the same path abandons
-it. Tests in `tests/test_column_conversion.py`.
+it. Tests in `tests/test_column_conversion.py`, which turn the flag on for the duration.
 
 Sending a `name` to the first route makes it a **duplicate** instead — same backfill, same
 report, but the new column goes live beside the source rather than replacing it. See §2.
+
+While the switch is off, the first two routes answer **503** for both endings, including for
+work begun before it was thrown — the commit is the half that publishes stale values. `DELETE`
+stays open so anything left waiting can be cleared away.
 
 **The v1 matrix is the text hub plus one direct pair.** Every type converts *to* `text`
 and `text` converts to every type, so the matrix is 2N rules rather than N². `date` ↔
@@ -170,7 +186,12 @@ column's stored uuids from cleanup.
 
 ---
 
-## 2. Column data migration (copy one column's data into another) — **duplicate shipped; copy-into-existing not**
+## 2. Column data migration (copy one column's data into another) — **duplicate shipped then switched off; copy-into-existing not built**
+
+> Duplicating a column runs through §1's service and is disabled with it
+> (`settings.COLUMN_CONVERSION_ENABLED`). It loses no data of its own — its commit only unhides
+> the new column — but the copy it publishes silently misses records edited or added while the
+> report was open. known-gaps.md §11.
 
 Bulk-populate a target column from a source column across every record in a list — the
 "add a column, move the data over, delete the old one" workflow, and the safe delivery

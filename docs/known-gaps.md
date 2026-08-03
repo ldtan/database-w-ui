@@ -496,7 +496,61 @@ Follow-ups, in the order they will be missed:
   unconditional `tzdata` dependency. If it ever goes missing, `available_timezones()`
   returns empty, every zone looks unknown, writes 422, and `today` quietly reverts to UTC.
 
-## 11. Column type conversion ships narrow, and on purpose
+## 11. Column type conversion is switched off — the scratch column goes stale
+
+**Both endings are disabled** — retyping a column in place *and* duplicating it
+(`settings.COLUMN_CONVERSION_ENABLED`, and `COLUMN_CONVERSION_ENABLED` in
+`frontend/src/lib/columnTypes.ts`; both default to false and have to move together).
+`POST .../convert` and `POST .../convert/<target>` answer **503**; `DELETE` stays open as the
+escape hatch for work left in flight. The frontend hides both buttons rather than letting the
+request fail, since the 503 would arrive only after someone had chosen a type and waited
+through a backfill.
+
+**The fault.** `_backfill` copies each cell into the hidden scratch column and then nothing
+keeps that copy current — writes go through `_validate_data`, whose `_columns_by_key` filters
+by `in_shape()`, so the scratch column is invisible to the write path (deliberately; see the
+note at `items/services.py`). Everything written to the source between the backfill and the
+commit is therefore missing from what gets applied.
+
+For a **duplicate** that is a stale copy: no existing value is touched, but the new column
+quietly misses those edits, and it is presented as a copy of the column rather than a copy of
+the column as it was some minutes ago.
+
+For a **conversion** it is data loss, because `_swap_values` exchanges the two keys over
+*every* record, unconditionally:
+
+- **A record edited in the window reverts.** The edit lands on the source key; the scratch key
+  still holds the pre-edit converted value, which the swap puts back. Worse, the edit ends up
+  in the `__before_conversion` column, so restoring from the bin does not recover the original
+  either — that value is gone.
+- **A record created in the window is emptied.** Its scratch key was never written, and
+  `jsonb_build_object(:skey, data -> :tkey, …)` turns a missing key into JSON `null`.
+- **Neither is reported**, because the swap cannot tell those rows from the cells the report
+  already said would be dropped: a skipped failed conversion leaves the scratch key absent too.
+
+This is not a narrow race. The window is the whole interval between reading the report and
+applying it, which is the feature's entire premise — a person is *supposed* to think about it.
+Nothing warns a writer meanwhile; `_find_scratch` is only used to reject a second conversion.
+`_check_gates` catches a sliver by accident: with `required` set, a record created in the window
+trips the missing-value count and the commit fails instead.
+
+**Why the duplicate went too, when it loses nothing.** It is the same two dialogs, the same
+report and the same Apply button; only the last statement differs. Leaving it on would mean the
+answer to "did my colleague's edit make it in?" depends on which of two adjacent buttons was
+pressed, which is harder to explain than the feature being away for a while. One switch, and it
+comes back with the fix that covers both.
+
+**The fix.** `list_items` already carries `updated_at` from `DatetimeTrackerMixin`, and the raw
+SQL in `_backfill`/`_swap_values` does not touch it, so it stays a clean "last user write".
+Record the backfill's start time; at commit, re-run the converter over rows written since (and
+rows the backfill never saw) *before* applying anything, and refuse with a fresh report rather
+than nulling what will not convert. That fixes the duplicate at the same time — a copy that
+catches up is a copy of the column as it is now. Conversion additionally wants the separate
+cutover-retry fix: a crash mid-`_swap_values` leaves a run that re-swaps rows it already
+swapped, since the swap is its own inverse and always restarts at `after = 0`.
+
+**Everything below this line still describes the feature as built.** It is gated, not removed:
+the service, the cell engine and the tests are intact, and the tests turn the flag on.
 
 `type` is no longer immutable — a conversion changes it (planned features §1). What that
 buys and what it costs are both worth knowing before extending it.

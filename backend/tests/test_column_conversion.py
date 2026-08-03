@@ -4,6 +4,13 @@ The design in one line: convert into a hidden column, let a person read the repo
 then swap. So most of what these tests pin is what *does not* happen — the list is
 unchanged until the commit, and the commit changes nothing except the column's type
 and its values.
+
+**Both endings ship switched off** (known-gaps §11): nothing keeps the hidden column
+current, so a write that lands while the report is being read is missing from what
+gets applied — and for the retyping ending the unconditional swap at the end turns
+that into outright loss. The engine is intact and these tests are what will prove the
+fix, so the whole file runs with the switch thrown — except the last section, which
+pins the switch itself and the fault behind it.
 """
 from contextlib import asynccontextmanager
 
@@ -16,9 +23,26 @@ from main import create_app
 from src.auth.dependencies import get_current_user
 from src.auth.users.schemas import UserCreate
 from src.auth.users.services import UserService
+from src.core.config import settings
 from src.infrastructure import database as db_module
 from src.lists.columns.models import Column
 from src.lists.items.models import ListItem
+
+
+@pytest.fixture(autouse=True)
+def conversion_enabled(monkeypatch):
+    """Every test in this file gets the feature turned on.
+
+    Read at call time by `ConversionService._require_enabled`, so patching the
+    settings object is enough — no app rebuild.
+    """
+    monkeypatch.setattr(settings, "COLUMN_CONVERSION_ENABLED", True)
+
+
+@pytest.fixture
+def conversion_disabled(monkeypatch):
+    """Put it back, for the tests about the switch. Applied after the autouse one."""
+    monkeypatch.setattr(settings, "COLUMN_CONVERSION_ENABLED", False)
 
 
 @pytest_asyncio.fixture
@@ -914,3 +938,148 @@ async def test_converting_to_calculated_is_refused(client, list_uuid, add_column
     )
     assert resp.status_code == 400
     assert "its formula owns its values" in resp.json()["detail"]
+
+
+# -- the switch, and the fault behind it ----------------------------------
+
+@pytest.mark.parametrize("named", [False, True], ids=["conversion", "duplicate"])
+async def test_both_endings_are_refused_while_the_switch_is_off(
+    client, list_uuid, add_column, conversion_disabled, named
+):
+    """Including the duplicate, which loses nothing of its own — it is the same
+    two-step flow through the same stale scratch column."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    extra = {"name": "qty_num", "display_name": "Qty #"} if named else {}
+    resp = await _convert(client, list_uuid, col, type="number", **extra)
+    # 503, not 400: nothing about the request is wrong, and changing it will not help.
+    assert resp.status_code == 503
+    assert "switched off" in resp.json()["detail"]
+    # And the column is exactly as it was.
+    assert (await _rows(client, list_uuid))[0]["data"][col] == "5"
+
+
+async def test_the_switch_leaves_no_scratch_column_behind(
+    client, list_uuid, add_column, session_factory, conversion_disabled
+):
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    assert (await _convert(client, list_uuid, col, type="number")).status_code == 503
+
+    async with session_factory() as db:
+        columns = (await db.execute(select(Column))).scalars().all()
+    assert [c.name for c in columns if c.hidden] == []
+    assert not any(c.name.endswith("__converting") for c in columns)
+
+
+@pytest.mark.parametrize("named", [False, True], ids=["conversion", "duplicate"])
+async def test_work_open_when_the_switch_flips_can_only_be_abandoned(
+    client, list_uuid, add_column, monkeypatch, named
+):
+    """Committing is the half that publishes stale values, so it is refused
+    retroactively. `DELETE` stays open — it only removes, and is the way out for
+    work left waiting when the switch was thrown."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    extra = {"name": "qty_num", "display_name": "Qty #"} if named else {}
+    report = (
+        await _convert(client, list_uuid, col, type="number", **extra)
+    ).json()
+
+    monkeypatch.setattr(settings, "COLUMN_CONVERSION_ENABLED", False)
+
+    commit = await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    assert commit.status_code == 503
+    assert (await _rows(client, list_uuid))[0]["data"][col] == "5"  # still text
+
+    dropped = await client.delete(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    assert dropped.status_code == 204
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "known-gaps §11 — the reason the switch exists. `_swap_values` exchanges the "
+        "two keys over every record unconditionally, so a record edited while the "
+        "report was being read reverts to its pre-edit value, and a record created "
+        "then is nulled (the swap reads a scratch key the backfill never wrote). "
+        "Flips green when `commit` catches up rows written since the backfill."
+    ),
+)
+async def test_writes_made_while_the_report_is_read_survive_the_cutover(
+    client, list_uuid, add_column
+):
+    col = await add_column(list_uuid, name="price", display_name="Price", type="text")
+    await _add_rows(client, list_uuid, col, ["10", "20"])
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    assert (report["converted"], report["failed"]) == (2, 0)
+
+    # Two ordinary things to do while deciding: the column is still `text` and the
+    # list is, by the design's own promise, untouched.
+    edited = [r for r in await _rows(client, list_uuid) if r["data"][col] == "10"][0]
+    patched = await client.patch(
+        f"/api/lists/{list_uuid}/items/{edited['uuid']}", json={"data": {col: "999"}}
+    )
+    assert patched.status_code == 200, patched.text
+    created = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: "777"}}
+        )
+    ).json()
+
+    done = await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    assert done.status_code == 200, done.text
+
+    after = {r["uuid"]: r["data"][col] for r in await _rows(client, list_uuid)}
+    assert after[edited["uuid"]] == 999, "the edit was undone by the swap"
+    assert after[created["uuid"]] == 777, "the new record's cell was nulled"
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "known-gaps §11 — the duplicate's share of the same fault. It loses nothing, "
+        "since its commit only unhides, but nothing refreshes the hidden column "
+        "either, so the copy misses records edited or added while the report was "
+        "open. Flips green with the same catch-up in `commit`."
+    ),
+)
+async def test_a_duplicate_copies_the_column_as_it_is_at_commit(
+    client, list_uuid, add_column
+):
+    col = await add_column(list_uuid, name="price", display_name="Price", type="text")
+    await _add_rows(client, list_uuid, col, ["10", "20"])
+
+    report = (
+        await _convert(
+            client, list_uuid, col, type="number", name="price_num", display_name="P#"
+        )
+    ).json()
+    tkey = report["target_uuid"]
+
+    edited = [r for r in await _rows(client, list_uuid) if r["data"][col] == "10"][0]
+    await client.patch(
+        f"/api/lists/{list_uuid}/items/{edited['uuid']}", json={"data": {col: "999"}}
+    )
+    created = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: "777"}}
+        )
+    ).json()
+
+    done = await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{tkey}"
+    )
+    assert done.status_code == 200, done.text
+
+    copy = {r["uuid"]: r["data"].get(tkey) for r in await _rows(client, list_uuid)}
+    assert copy[edited["uuid"]] == 999, "the copy holds the pre-edit value"
+    assert copy[created["uuid"]] == 777, "the record added meanwhile was not copied"

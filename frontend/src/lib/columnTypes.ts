@@ -18,6 +18,20 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Calculated (formula)", value: "calculated" },
 ];
 
+/** Whether a column's values may be converted — Change type and Duplicate alike.
+ *
+ *  Off, and the server agrees (`settings.COLUMN_CONVERSION_ENABLED`, which answers
+ *  503). Both go through the same two steps: convert into a hidden column, then
+ *  apply what is in it. Nothing keeps that hidden column current, so a record
+ *  edited or added while the report is on screen is not in what gets applied —
+ *  which for Change type means the edit is silently undone, since applying swaps
+ *  the two sets of values over every record.
+ *
+ *  Hidden here rather than left to fail, because the request 503s only after
+ *  someone has chosen a type and waited through a backfill. Flip this and the
+ *  server setting together once the commit catches those records up. */
+export const COLUMN_CONVERSION_ENABLED: boolean = false;
+
 /** Whether a column of `from` can be converted straight to `to`.
  *
  *  Mirrors `is_supported` in `columns/conversion.py`, and has to stay in step with

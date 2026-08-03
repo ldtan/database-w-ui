@@ -122,6 +122,8 @@ class ConversionStart(BaseModel):
     left exactly as it was — so this is equally "copy this column" and "copy it,
     converting on the way". Without a `name` it is a conversion, and the column
     keeps the source's identity.
+
+    Both endings are switched off for now; the route answers 503 either way.
     """
 
     type: ColumnType
