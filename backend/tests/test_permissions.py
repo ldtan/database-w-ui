@@ -620,6 +620,104 @@ async def test_http_export_respects_item_permissions(make_client, session_factor
         assert len(json.loads(resp.text)) == 2
 
 
+async def test_effective_actions_bulk_costs_the_same_for_one_record_or_fifty(
+    engine, session_factory
+):
+    """The whole reason this method exists, pinned by counting round trips.
+
+    It loads the resources in one query per type so the chain walk that follows is
+    served from the identity map. That map holds only **weak** references, though,
+    so without something keeping the loaded objects alive they are collected the
+    moment the result set goes out of scope, and every `db.get` in the walk quietly
+    becomes a query again — one per resource, which is precisely the shape the
+    method was written to replace. Nothing about the returned answers changes when
+    that happens, so only a count can catch it.
+
+    Twice, at two sizes, because the property is that the cost does not follow the
+    batch. An absolute ceiling alone would pass a version that grew slowly.
+    """
+    from sqlalchemy import event
+
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        items = [
+            await ListItemService.create(db, lst, ListItemCreate(data={}))
+            for _ in range(50)
+        ]
+        await db.commit()
+        refs = [(ResourceType.item, item.uuid) for item in items]
+
+    counted = {"n": 0}
+
+    def _count(conn, cursor, statement, params, context, executemany):
+        counted["n"] += 1
+
+    async def _measure(batch):
+        counted["n"] = 0
+        async with session_factory() as db:
+            user = await UserService.get_by_username(db, other.username)
+            event.listen(engine.sync_engine, "before_cursor_execute", _count)
+            try:
+                resolved = await PermissionService.effective_actions_bulk(
+                    db, user, batch
+                )
+            finally:
+                event.remove(engine.sync_engine, "before_cursor_execute", _count)
+        assert len(resolved) == len(batch)
+        return counted["n"]
+
+    one = await _measure(refs[:1])
+    fifty = await _measure(refs)
+    assert fifty <= one + 1, f"{one} round trips for 1, {fifty} for 50"
+    _ = owner
+
+
+async def test_http_bulk_delete_skips_records_the_caller_may_not_delete(
+    make_client, session_factory
+):
+    """A selection routinely mixes rows somebody may delete with rows they may not.
+
+    Refusing the whole request would make bulk delete unusable on any list with
+    per-record permissions, so the ones they may not are passed over in silence and
+    the count says what actually happened — the same treatment an unknown uuid gets.
+    Nothing pinned this before, and the check moved from a loop of `has()` calls to
+    one `effective_actions_bulk`, which is exactly the kind of change that can turn
+    "skipped" into "deleted anyway".
+    """
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        deletable = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        protected = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view, Action.delete],
+            ),
+        )
+        # The second record stands alone, so the list grant no longer reaches it.
+        protected.permissions_inherit = False
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        both = [str(deletable.uuid), str(protected.uuid)]
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": both}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["deleted"] == 1
+
+    # And the protected one is still there, for the owner who can see it.
+    async with make_client(owner) as client:
+        remaining = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+        assert [i["uuid"] for i in remaining] == [both[1]]
+
+
 async def test_http_effective_batch(make_client, session_factory):
     """The batch endpoint backs the UI's per-row control gating: one call must
     return the caller's actions per resource, mixing inherited and direct grants."""

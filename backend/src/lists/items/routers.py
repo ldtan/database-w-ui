@@ -145,17 +145,28 @@ async def bulk_delete_items(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    # Only delete the records the caller is actually allowed to delete; the rest
-    # are silently skipped (like unknown uuids).
-    permitted = []
-    for uuid in payload.uuids:
-        item = await ListItemService.get_by_uuid(db, lst.id, uuid)
-        if item is None:
-            continue
-        if await PermissionService.has(
-            db, current_user, ResourceType.item, item.id, Action.delete
-        ):
-            permitted.append(uuid)
+    """Soft-delete many records at once, skipping the ones the caller may not.
+
+    Records the caller lacks `delete` on are passed over in silence, exactly as
+    unknown uuids are — a selection routinely mixes rows somebody may delete with
+    rows they may not, and refusing the whole request would make a bulk action
+    unusable on any list with per-record permissions. The count says what happened.
+
+    Resolved in one batch rather than a check per uuid: `effective_actions_bulk`
+    loads the records in a single query and warms the identity map, so each chain
+    walk after that is served from memory, and group membership and the grant rows
+    are fetched once for the batch instead of once per record.
+    """
+    refs = [(ResourceType.item, uuid) for uuid in payload.uuids]
+    actions = await PermissionService.effective_actions_bulk(db, current_user, refs)
+    permitted = [
+        resource_uuid
+        for (_, resource_uuid), granted in actions.items()
+        if Action.delete in granted
+    ]
+    # A uuid from another list can survive that filter — the permission batch
+    # resolves records by uuid alone — and is dropped by `bulk_delete`, which
+    # scopes its UPDATE to this list.
     deleted = await ListItemService.bulk_delete(db, lst, permitted)
     return {"deleted": deleted}
 

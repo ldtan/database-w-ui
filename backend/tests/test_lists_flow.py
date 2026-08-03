@@ -1,6 +1,6 @@
 """End-to-end tests over the HTTP API: workspaces, lists, columns, records."""
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid4
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -228,6 +228,93 @@ async def test_bulk_delete_items(client, list_uuid, add_column):
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert [i["data"][col] for i in items] == ["c"]
+
+
+async def test_bulk_delete_counts_each_record_once(client, list_uuid, add_column):
+    """`deleted` is what changed, not what was asked for.
+
+    The UPDATE only matches rows still out of the bin, so a uuid named twice, or
+    named again after it has already gone, adds nothing to the count. Worth pinning
+    because the count is what the UI puts in front of the person: "3 records
+    deleted" when one of them was already gone is a small lie about their data.
+    """
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+
+    async def add(value):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        )
+        return resp.json()["uuid"]
+
+    u1, u2 = await add("a"), await add("b")
+
+    first = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": [u1, u1, u2]}
+    )
+    assert first.json()["deleted"] == 2  # not 3 — u1 named twice is one record
+
+    again = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": [u1, u2]}
+    )
+    assert again.json()["deleted"] == 0  # already in the bin
+
+
+async def test_bulk_delete_will_not_reach_into_another_list(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The uuid is not the authority; the list in the URL is.
+
+    Permissions are resolved for the records by uuid alone, so a record of another
+    list the caller happens to own comes back permitted — the `list_id` term in the
+    UPDATE is the only thing standing between that and a record deleted through the
+    wrong list's endpoint.
+    """
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    mine = (
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: "a"}}
+        )
+    ).json()["uuid"]
+
+    other = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "l2",
+                "display_name": "List 2",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    other_col = await add_column(other, name="n", display_name="N", type="text")
+    stranger = (
+        await client.post(
+            f"/api/lists/{other}/items/", json={"data": {other_col: "b"}}
+        )
+    ).json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete",
+        json={"uuids": [mine, stranger]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 1
+
+    survivors = (await client.get(f"/api/lists/{other}/items/")).json()
+    assert [i["uuid"] for i in survivors] == [stranger]
+
+
+async def test_bulk_delete_refuses_more_uuids_than_a_page_can_hold(
+    client, list_uuid
+):
+    """The cap is on the request's shape, and it is checked before any work."""
+    from src.lists.items.schemas import BULK_DELETE_MAX
+
+    too_many = [str(uuid4()) for _ in range(BULK_DELETE_MAX + 1)]
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": too_many}
+    )
+    assert resp.status_code == 422, resp.text
 
 
 async def test_required_rejected_when_missing(client, list_uuid, add_column):

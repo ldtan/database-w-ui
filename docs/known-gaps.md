@@ -1101,6 +1101,25 @@ surface that renders link cells needs the same call; a raw `href={value}` is sto
 
 **`POST /permissions/effective` is capped at 500 resources per call** (`max_length` on
 `EffectiveActionsQuery.resources`). A page showing more rows than that needs to chunk.
+`POST /lists/{uuid}/items/bulk-delete` is capped at `BULK_DELETE_MAX` (1,000, the same
+ceiling as the item listing's `limit` — a selection is made out of rows on screen, and no
+request puts more than a page of them there).
+
+**SQLAlchemy's identity map holds weak references, and a batch resolver that forgets it does
+nothing.** `effective_actions_bulk` loads its resources in one query per type precisely so
+the chain walk that follows is served from memory — but an object with no referent outside
+the session is collected as soon as its result set goes out of scope, and then every
+`db.get` in that walk is a query again, one per resource. It is invisible from the outside:
+the answers are identical, only the round-trip count differs, and it was wrong from the day
+the method was written. It now keeps a strong reference to the resources *and* to the lists
+and workspaces above them — the objects every chain walk climbs through — which is two extra
+queries instead of two per row. Measured over a 500-record bulk delete: **1,503 round trips
+and 3.89 s, down to 7 and 0.22 s.** Most routes hid the parent half of this by accident,
+because `resolve_list_or_404` holds the list for the length of the request; the batch
+endpoint holds nothing and paid in full. Anything else that loads a set of rows and then
+expects `db.get` to be free needs the same strong reference.
+`test_effective_actions_bulk_costs_the_same_for_one_record_or_fifty` counts round trips at
+two batch sizes, which is the only way to keep this from coming back.
 
 **The onboarding tours and the guide describe the UI by name, and nothing tells them when
 it moves.** Three surfaces name real controls in prose — `features/onboarding/tours.ts`

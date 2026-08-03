@@ -246,7 +246,18 @@ class PermissionService:
             if parsed is not None:
                 by_type.setdefault(ResourceType(resource_type), set()).add(parsed)
 
+        # `loaded` is held for the length of this call on purpose, and it is what
+        # makes the method worth calling. The identity map keeps only **weak**
+        # references, so an object with no other referent is collected the moment
+        # its result set goes out of scope — and then every `db.get` in the chain
+        # walk below is a query again, one per resource, which is the exact shape
+        # this exists to replace. Nothing about the answers changes when that
+        # happens, which is why it went unnoticed; only a round-trip count sees it.
+        # `test_effective_actions_bulk_costs_the_same_for_one_record_or_fifty`
+        # counts.
+        loaded: list = []
         ids: dict[tuple[ResourceType, UUID], int] = {}
+        list_ids: set[int] = set()
         for rt, uuids in by_type.items():
             model = _MODELS.get(rt)
             if model is None:
@@ -257,7 +268,33 @@ class PermissionService:
                 )
             )
             for obj in rows.scalars().all():
+                loaded.append(obj)
                 ids[(rt, obj.uuid)] = obj.id
+                if rt == ResourceType.list:
+                    list_ids.add(obj.id)
+                elif rt in _LIST_CHILDREN:
+                    list_ids.add(obj.list_id)
+
+        # The ancestors, for the same reason and in two more queries rather than
+        # two per resource: every chain walk climbs from its resource to the list
+        # and on to the workspace, so those are the objects `db.get` asks for over
+        # and over. A caller that already holds the list — most routes do, through
+        # `resolve_list_or_404` — keeps them alive by itself and would not have
+        # noticed; the batch endpoint, which holds nothing, paid twice per row.
+        if list_ids:
+            lists = (
+                await db.execute(select(List).where(List.id.in_(list_ids)))
+            ).scalars().all()
+            loaded.extend(lists)
+            workspace_ids = {lst.workspace_id for lst in lists}
+            if workspace_ids:
+                loaded.extend(
+                    (
+                        await db.execute(
+                            select(Workspace).where(Workspace.id.in_(workspace_ids))
+                        )
+                    ).scalars().all()
+                )
 
         contexts: dict[tuple[ResourceType, UUID], tuple[list, int]] = {}
         for ref, resource_id in ids.items():

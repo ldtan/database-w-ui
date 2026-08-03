@@ -230,6 +230,19 @@ it. That is the one that mattered — 50,000 records would have been ~300 MB on 
 that idles at 146 MB with 512 MB to spend. The time is not capped; see known-gaps under
 cloning for why not.
 
+**Bulk-deleting 500 records went from 1,503 round trips and 3.89 s to 7 and 0.22 s**, and
+the 7 no longer grows with the selection. Three things were stacked: the router checked
+permissions with one `has()` per uuid, the service then re-fetched each record before
+setting `deleted_at`, and — the one worth remembering — `effective_actions_bulk` was not
+actually batching, because the identity map it warmed holds weak references and dropped
+everything before the chain walk could use it. That last one also charged
+`POST /permissions/effective`, which the grid calls on every page load to decide which
+per-row buttons to show. See known-gaps under permissions.
+
+The measurement above is the *cheap* path: the caller is the workspace owner, so
+`effective_actions` short-circuits before it looks at grants. A non-owner deleting the same
+selection paid two further queries per record.
+
 ## Data volume is not a constraint and probably never will be
 
 Records are ~**1.9 kB each** including indexes (the JSONB `data` column itself averages

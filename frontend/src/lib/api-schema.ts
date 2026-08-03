@@ -917,7 +917,20 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Bulk Delete Items */
+        /**
+         * Bulk Delete Items
+         * @description Soft-delete many records at once, skipping the ones the caller may not.
+         *
+         *     Records the caller lacks `delete` on are passed over in silence, exactly as
+         *     unknown uuids are — a selection routinely mixes rows somebody may delete with
+         *     rows they may not, and refusing the whole request would make a bulk action
+         *     unusable on any list with per-record permissions. The count says what happened.
+         *
+         *     Resolved in one batch rather than a check per uuid: `effective_actions_bulk`
+         *     loads the records in a single query and warms the identity map, so each chain
+         *     walk after that is served from memory, and group membership and the grant rows
+         *     are fetched once for the batch instead of once per record.
+         */
         post: operations["bulk_delete_items_api_lists__list_uuid__items_bulk_delete_post"];
         delete?: never;
         options?: never;

@@ -3,7 +3,7 @@ from typing import Optional, Sequence, Union
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -545,20 +545,34 @@ class ListItemService:
     async def bulk_delete(
         cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
     ) -> int:
-        """Soft-delete several records in one transaction. Unknown/already-deleted
+        """Soft-delete several records in one statement. Unknown/already-deleted
         uuids are skipped. Returns the number actually deleted. References to these
-        rows survive, as for a single delete."""
-        now = datetime.now(timezone.utc)
-        deleted = 0
-        for uuid in uuids:
-            item = await cls.get_by_uuid(db, lst.id, uuid)
-            if item is None:
-                continue
-            item.deleted_at = now
-            deleted += 1
-        if deleted:
-            await db.commit()
-        return deleted
+        rows survive, as for a single delete.
+
+        One UPDATE rather than a SELECT and a mutation per uuid, which is what this
+        used to be: a thousand selected rows meant a thousand round trips before a
+        single row had been touched. The `list_id` term is what keeps the operation
+        honest — a uuid belonging to another list matches nothing here, however the
+        caller came by it.
+
+        `rowcount` is the count *because* of the `deleted_at` term: a row already in
+        the bin does not match, so it is not counted twice, which is what the caller
+        is told about.
+        """
+        parsed = [p for p in (coerce_uuid(u) for u in uuids) if p is not None]
+        if not parsed:
+            return 0
+        result = await db.execute(
+            update(ListItem)
+            .where(
+                ListItem.list_id == lst.id,
+                ListItem.uuid.in_(parsed),
+                ListItem.deleted_at.is_(None),
+            )
+            .values(deleted_at=datetime.now(timezone.utc))
+        )
+        await db.commit()
+        return result.rowcount
 
     # -- the bin: view and restore soft-deleted records ---------------------
 
