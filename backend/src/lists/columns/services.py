@@ -108,7 +108,12 @@ class ColumnService:
 
     @classmethod
     async def create(
-        cls, db: AsyncSession, lst: List, payload: ColumnCreate, user
+        cls,
+        db: AsyncSession,
+        lst: List,
+        payload: ColumnCreate,
+        user,
+        defer: Optional[backfill.Deferrer] = None,
     ) -> Column:
         config = await cls._validate_config(
             db, lst, payload.type, payload.config, user, name=payload.name
@@ -137,7 +142,7 @@ class ColumnService:
         # they are stored values, and a column that only works for records created
         # after it is not a column anyone can filter or sort by.
         if payload.type in COMPUTED_TYPES:
-            await backfill.recompute_records(db, lst.id)
+            await backfill.resettle(db, lst.id, defer=defer)
 
         return await cls.get_by_uuid(db, lst.id, new_uuid)
 
@@ -149,6 +154,7 @@ class ColumnService:
         uuid: Union[str, UUID],
         payload: ColumnUpdate,
         user,
+        defer: Optional[backfill.Deferrer] = None,
     ) -> Optional[Column]:
         column = await cls.get_by_uuid(db, lst.id, uuid)
         if column is None:
@@ -208,12 +214,17 @@ class ColumnService:
             renamed_from=old_name if column.name != old_name else None,
             formula_changed=old_config.get("formula")
             != (column.config or {}).get("formula"),
+            defer=defer,
         )
         return await cls.get_by_uuid(db, lst.id, target_uuid)
 
     @classmethod
     async def delete(
-        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+        cls,
+        db: AsyncSession,
+        lst: List,
+        uuid: Union[str, UUID],
+        defer: Optional[backfill.Deferrer] = None,
     ) -> bool:
         column = await cls.get_by_uuid(db, lst.id, uuid)
         if column is None:
@@ -229,12 +240,16 @@ class ColumnService:
         # A formula that read this column can no longer answer, so the cells it fed
         # have to go blank — leaving the last computed value would leave a number that
         # reads as current sitting in a filterable, sortable column.
-        await cls._resettle_formulas(db, lst, touched=column, gone=True)
+        await cls._resettle_formulas(db, lst, touched=column, gone=True, defer=defer)
         return True
 
     @classmethod
     async def resettle_after_restore(
-        cls, db: AsyncSession, lst: List, column: Column
+        cls,
+        db: AsyncSession,
+        lst: List,
+        column: Column,
+        defer: Optional[backfill.Deferrer] = None,
     ) -> None:
         """`_resettle_formulas` for a column coming back out of the bin.
 
@@ -242,7 +257,7 @@ class ColumnService:
         "this column's presence in the list just changed", which is as true of arriving
         as of leaving.
         """
-        await cls._resettle_formulas(db, lst, touched=column, gone=True)
+        await cls._resettle_formulas(db, lst, touched=column, gone=True, defer=defer)
 
     @classmethod
     async def _resettle_formulas(
@@ -254,6 +269,7 @@ class ColumnService:
         renamed_from: Optional[str] = None,
         formula_changed: bool = False,
         gone: bool = False,
+        defer: Optional[backfill.Deferrer] = None,
     ) -> None:
         """Put the list's stored calculated values back in step after a schema change.
 
@@ -282,8 +298,7 @@ class ColumnService:
         ):
             return  # nothing reads it; nothing to redo
 
-        await backfill.sync_orders(db, lst.id)
-        await backfill.recompute_records(db, lst.id)
+        await backfill.resettle(db, lst.id, defer=defer)
 
     @classmethod
     async def lookup_options(

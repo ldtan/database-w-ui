@@ -899,18 +899,22 @@ export function GuidePage() {
           rewrites them all. Records you added before you created the column are
           filled in too, so you never have to go back and re-save anything.
         </Callout>
-        <Callout tone="tip" title="On a big list, saving takes a while — let it">
-          On a few hundred records the rewrite is instant and you will never notice
-          it. On tens of thousands it can take several seconds, and the{" "}
-          <Ui>Save</Ui> button stays busy for the whole time. That is the work
-          happening, not a hang.
+        <Callout tone="tip" title="On a big list, the rewrite finishes after you save">
+          On a few thousand records or fewer the rewrite happens while you save, and
+          you will never notice it. On a larger list the save returns straight away
+          and the rewrite carries on in the background — the column is marked{" "}
+          <Ui>values catching up</Ui> until it lands, usually within a minute.
           <p className="pt-2 m-0">
-            The one thing to avoid is editing the formula again because it feels
-            stuck. Each save starts its own rewrite of the whole list, and three
-            impatient saves means three rewrites competing for the same server. You
-            will get the right answer either way — the app makes sure the last
-            formula you saved is the one that wins — but everything else in the app
-            is slower while they run.
+            While it runs, every record still shows the answer from the{" "}
+            <em>old</em> formula — all of them, not some — so a filter or sort on
+            that column still makes sense, it is just one version behind. It
+            switches over in one piece.
+          </p>
+          <p className="pt-2 m-0">
+            The one thing to avoid is saving the formula again because it feels
+            slow. You will get the right answer either way — the last formula you
+            saved is always the one that wins — but each save starts another sweep
+            of the list, and they slow each other down.
           </p>
         </Callout>
         <Callout tone="warn" title="“Values catching up”">

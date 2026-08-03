@@ -1,7 +1,15 @@
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Response,
+    status,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
@@ -35,6 +43,7 @@ router = APIRouter(prefix="/{list_uuid}/columns", tags=["columns"])
 @router.post("/", response_model=ColumnRead, status_code=status.HTTP_201_CREATED)
 async def create_column(
     payload: ColumnCreate,
+    background_tasks: BackgroundTasks,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -43,7 +52,9 @@ async def create_column(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     try:
-        created = await ColumnService.create(db, lst, payload, current_user)
+        created = await ColumnService.create(
+            db, lst, payload, current_user, defer=background_tasks
+        )
         return await ColumnService.read_one(db, lst.id, created)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -207,6 +218,7 @@ async def start_conversion(
 async def commit_conversion(
     uuid: UUID,
     target_uuid: UUID,
+    background_tasks: BackgroundTasks,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -228,7 +240,9 @@ async def commit_conversion(
     )
     column = await _column_or_404(db, lst, uuid)
     try:
-        committed = await ConversionService.commit(db, lst, column, target_uuid)
+        committed = await ConversionService.commit(
+            db, lst, column, target_uuid, defer=background_tasks
+        )
         return await ColumnService.read_one(db, lst.id, committed)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
@@ -263,6 +277,7 @@ async def abandon_conversion(
 async def update_column(
     uuid: UUID,
     payload: ColumnUpdate,
+    background_tasks: BackgroundTasks,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -274,7 +289,9 @@ async def update_column(
     if column is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
     try:
-        column = await ColumnService.update(db, lst, column.uuid, payload, current_user)
+        column = await ColumnService.update(
+            db, lst, column.uuid, payload, current_user, defer=background_tasks
+        )
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
@@ -288,6 +305,7 @@ async def update_column(
 @router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_column(
     uuid: UUID,
+    background_tasks: BackgroundTasks,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -296,13 +314,16 @@ async def delete_column(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     column = await ColumnService.get_by_uuid(db, lst.id, uuid)
-    if column is None or not await ColumnService.delete(db, lst, column.uuid):
+    if column is None or not await ColumnService.delete(
+        db, lst, column.uuid, defer=background_tasks
+    ):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Column not found")
 
 
 @router.post("/{uuid}/restore", response_model=RestoredColumnRead)
 async def restore_column(
     uuid: UUID,
+    background_tasks: BackgroundTasks,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -331,7 +352,9 @@ async def restore_column(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
         )
-    await ColumnService.resettle_after_restore(db, lst, restored)
+    await ColumnService.resettle_after_restore(
+        db, lst, restored, defer=background_tasks
+    )
     # Read off the list as it stands rather than off what this column used to be: a
     # primary chosen while this sat in the bin is not something to flag.
     await db.refresh(lst)

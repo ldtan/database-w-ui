@@ -4,6 +4,13 @@
 # means soft-deleted rows outlive their window and reconciliation waits a day. That is what
 # makes a free scheduler an honest home for them.
 #
+# `recompute_calculated` is the one with a caller behind it, and it is still an honest fit. A
+# formula edit recomputes its list in the request (or in a background task, above
+# FORMULA_INLINE_MAX_RECORDS), so this only ever picks up what a crash or a redeploy
+# interrupted — and until it does, the affected columns report `recompute_pending` and the app
+# says so on screen. A missed night means a warning stays up, not that anything is silently
+# wrong.
+#
 # The order is not arbitrary: converge the record shapes first, then purge what is past its
 # window, then sweep the grants those purges orphaned.
 name: Daily maintenance
@@ -45,6 +52,11 @@ jobs:
 
       - name: Converge record shapes
         run: uv run python -m src.maintenance.reconcile_shapes
+
+      # Before the purges: this reads records, and there is no reason to spend that
+      # reading rows that are about to be destroyed.
+      - name: Finish interrupted calculated backfills
+        run: uv run python -m src.maintenance.recompute_calculated
 
       - name: Purge deleted workspaces
         run: uv run python -m src.maintenance.purge_deleted_workspaces

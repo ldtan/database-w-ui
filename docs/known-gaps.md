@@ -128,8 +128,18 @@ that can move a formula's answer — a formula edited, a calculated column creat
 formula reads renamed, deleted, restored or converted — and `ColumnService._resettle_formulas`
 is the single place that decides whether a given edit was one of those. The remaining edges:
 
-- **A backfill is a full-list rewrite, in the request that triggered it, and there is no row
-  ceiling.** Measured at **~0.11 ms of app CPU per record** (20,000 records ≈ 2.2 s of CPU,
+- **A backfill is a full-list rewrite, and above `FORMULA_INLINE_MAX_RECORDS` (5,000) it
+  happens after the response rather than in it.** Under that, the request does the work and is
+  correct when it answers, which is every list in a small deployment and why the pending flag
+  never shows up on them. Over it, the work goes to a FastAPI background task and the columns
+  report `recompute_pending` until it lands. What the threshold does *not* do is cap the work:
+  a deferred run still does the whole list, because a half-updated column holds two formulas'
+  answers at once and filters incoherently, which is strictly worse than one that is uniformly
+  a version behind and says so. Note that a background task is awaited inside the ASGI response
+  cycle, so uvicorn's graceful shutdown waits for it — a redeploy during one is delayed and
+  then truncated, which is recoverable (chunks commit independently, no stamp is written) but
+  worth knowing.
+- **The cost either way, and there is still no row ceiling.** Measured at **~0.11 ms of app CPU per record** (20,000 records ≈ 2.2 s of CPU,
   ~600-byte rows), which on a 0.1-CPU instance is **~22 s of PATCH** for 20k and ~110 s for
   100k. What it is *not* is a way to fall over: peak Python memory is flat at ~3 MB whatever
   the list size, because a 500-row batch is read, rewritten and released; each batch commits on
@@ -158,16 +168,26 @@ is the single place that decides whether a given edit was one of those. The rema
   the message says both. The grid warns while any visible column is pending and the columns
   panel marks the column; the columns query rides the live-refresh interval so the warning
   appears and clears without a reload.
-- **Repeated edits do not queue, they overlap — and that used to corrupt the column.** Each
-  formula PATCH starts its own full scan, and a pass captures its evaluation plan once at the
-  start, so an edit arriving mid-scan left the older pass writing its answers into rows the
+- **A superseded backfill stops itself, which is where a re-edit used to corrupt the column.**
+  Each formula PATCH starts its own full scan, and a pass captures its evaluation plan once at
+  the start, so an edit arriving mid-scan left the older pass writing its answers into rows the
   newer one had already passed: no error, just a column holding two formulas' answers at once,
-  in something that now filters and sorts. `recompute_records` therefore re-checks a cheap
-  schema signature at the end of every pass and goes round again if it moved (`MAX_PASSES`,
-  5). Since each edit's own backfill always scans the whole list with the config it committed,
-  one extra pass is enough to converge. What is still *not* bounded is how many scans a burst
-  of edits costs: ten edits on a 20k list is ten full scans, and they contend for the same
-  0.1 CPU.
+  in something that now filters and sorts. `recompute_records` therefore re-checks the schema
+  signature every chunk and abandons the run when it has moved.
+
+  The check gates the **commit**, not the computation, and that is the whole of its
+  correctness: checking before writing leaves a window where the schema moves between the check
+  and the write and that chunk lands stale, whereas a chunk whose signature no longer matches is
+  rolled back and never existed. Stopping is safe because whatever moved the signature is
+  already running its own backfill from row 1; if that one dies too, nothing stamps and the
+  maintenance job is the backstop. There is deliberately no retry loop — retrying would
+  duplicate the work the superseding run is doing, which on a large list is the expensive
+  mistake this exists to avoid.
+
+  This is also why FastAPI's `BackgroundTasks` needs no cancellation story, which is just as
+  well: it creates no `asyncio.Task` (it is awaited inline in the response), so there is no
+  handle to cancel. A database fact works across instances and restarts where in-process
+  bookkeeping would not.
 - **Nothing recomputes on a clock.** Every trigger is an edit; there is no drift detector. A
   value can only be stale if something changed the list without going through the column
   service or the item service — a direct database edit, or a killed backfill.

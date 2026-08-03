@@ -678,22 +678,22 @@ async def test_overlapping_formula_edits_converge(client, priced_list, session_f
         )
 
 
-async def test_a_pass_that_ran_on_a_stale_plan_runs_again(
+async def test_a_superseded_pass_stops_without_writing(
     client, priced_list, session_factory, monkeypatch
 ):
-    """The mechanism behind `test_overlapping_formula_edits_converge`, forced.
+    """A backfill that has been overtaken must not land a single row.
 
-    That test asserts the right invariant but cannot currently *fail*: both scans walk
-    rows in `id` order, so the later-starting one trails the earlier one and overwrites
-    it everywhere. The race needs the stale pass to be the one that finishes last, which
-    is a matter of timing rather than something a test can arrange.
+    `test_overlapping_formula_edits_converge` asserts the right invariant but cannot
+    currently *fail*: both scans walk rows in `id` order, so the later-starting one
+    trails the earlier one and overwrites it everywhere. The race needs the stale pass
+    to be the one that finishes last, which is a matter of timing rather than something
+    a test can arrange.
 
     So arrange the state instead. `list_columns` is made to hand out the *old* formula
     the first time it is asked — which is exactly what a pass holds when another session
-    commits an edit a moment after it started — and the truth every time after. A single
-    pass then writes nothing (the records already match the old formula) and the column
-    is left disagreeing with its own config. Only the end-of-pass signature check
-    notices and goes round again.
+    commits an edit a moment after it started — and the truth every time after. The pass
+    must notice at its first commit gate, roll that chunk back, and leave the column
+    pending rather than stamping a version its values do not have.
     """
     from sqlalchemy import select, text
 
@@ -747,12 +747,14 @@ async def test_a_pass_that_ran_on_a_stale_plan_runs_again(
             }
 
         monkeypatch.setattr(backfill, "list_columns", stale_first)
-        await backfill.recompute_records(db, list_id)
+        changed = await backfill.recompute_records(db, list_id)
 
-    assert calls["n"] >= 3, "the stale pass should have triggered a second one"
-    rows = (await client.get(f"/api/lists/{lst_uuid}/items/")).json()
-    for row in rows:
-        assert row["data"][total] == row["data"][qty] * row["data"][price] + 500
+    # Stopped at the first commit gate rather than scanning on.
+    assert calls["n"] == 2
+    assert changed == 0
+    # And claimed nothing: the column still reports its values as not current, so the
+    # superseding run (or the maintenance job) is what will settle it.
+    assert await _pending(client, lst_uuid) == {"total"}
 
 
 # -- "are these values current?" ---------------------------------------------
@@ -881,3 +883,180 @@ async def test_adding_an_unrelated_column_does_not_raise_the_flag(
     )
     assert resp.status_code == 201, resp.text
     assert await _pending(client, lst) == set()
+
+
+# -- deferring the work on a list too big to do in the request ---------------
+
+
+class _FakeDeferrer:
+    """Stands in for FastAPI's `BackgroundTasks`, which is structurally all this is.
+
+    Real background tasks are awaited inside the ASGI response cycle, so through the
+    test client they would have run before `client.patch` even returned — which is
+    exactly the timing this needs to be able to look inside.
+    """
+
+    def __init__(self):
+        self.tasks = []
+
+    def add_task(self, func, /, *args, **kwargs):
+        self.tasks.append((func, args, kwargs))
+
+    async def run(self):
+        for func, args, kwargs in self.tasks:
+            await func(*args, **kwargs)
+
+
+async def _list_id(session_factory, list_uuid):
+    from sqlalchemy import select
+
+    from src.lists.models import List
+
+    async with session_factory() as db:
+        return (
+            await db.execute(select(List.id).where(List.uuid == list_uuid))
+        ).scalar_one()
+
+
+async def test_a_small_list_is_recomputed_in_the_request(
+    client, priced_list, session_factory, monkeypatch
+):
+    """Under the threshold nothing is deferred even though there is somewhere to defer
+    to, which is what keeps the pending flag from flickering on ordinary lists."""
+    from src.core.config import settings
+    from src.lists.columns import backfill
+
+    lst_uuid, qty, price, _total = priced_list.values()
+    await client.post(
+        f"/api/lists/{lst_uuid}/items/", json={"data": {qty: 3, price: 10}}
+    )
+    monkeypatch.setattr(settings, "FORMULA_INLINE_MAX_RECORDS", 5_000)
+
+    deferrer = _FakeDeferrer()
+    list_id = await _list_id(session_factory, lst_uuid)
+    async with session_factory() as db:
+        deferred = await backfill.resettle(db, list_id, defer=deferrer)
+
+    assert deferred is False
+    assert deferrer.tasks == []
+    assert await _pending(client, lst_uuid) == set()
+
+
+async def test_a_big_list_hands_the_backfill_to_the_deferrer(
+    client, priced_list, session_factory, monkeypatch
+):
+    """Over the threshold the request does no record work, and the column says so.
+
+    The values stay on the *old* formula meanwhile -- uniformly, not half rewritten --
+    so a filter or sort over the column still answers coherently while it waits.
+    """
+    from src.core.config import settings
+    from src.lists.columns import backfill
+
+    from sqlalchemy import text
+
+    lst_uuid, qty, price, total = priced_list.values()
+    for q in (2, 5, 9):
+        await client.post(
+            f"/api/lists/{lst_uuid}/items/", json={"data": {qty: q, price: 10}}
+        )
+    # Three records is now "too big", which is the cheapest way to be over a threshold.
+    monkeypatch.setattr(settings, "FORMULA_INLINE_MAX_RECORDS", 1)
+
+    # The formula moves with no backfill behind it — the state `ColumnService.update`
+    # is in between its commit and its call into `resettle`. Going through the API
+    # instead would be no test at all: a real `BackgroundTasks` is awaited inside the
+    # ASGI response, so the work would already be finished before the PATCH returned.
+    list_id = await _list_id(session_factory, lst_uuid)
+    async with session_factory() as db:
+        await db.execute(
+            text(
+                "UPDATE columns SET config = jsonb_set(config, '{formula}', "
+                "'\"qty * price + 7\"') WHERE uuid = CAST(:u AS uuid)"
+            ),
+            {"u": total},
+        )
+        await db.commit()
+
+    deferrer = _FakeDeferrer()
+    async with session_factory() as db:
+        deferred = await backfill.resettle(db, list_id, defer=deferrer)
+
+    assert deferred is True
+    assert len(deferrer.tasks) == 1
+    assert await _pending(client, lst_uuid) == {"total"}
+
+    # Running what was deferred finishes the whole list, not a slice of it.
+    await deferrer.run()
+    assert await _pending(client, lst_uuid) == set()
+    rows = (await client.get(f"/api/lists/{lst_uuid}/items/")).json()
+    assert len(rows) == 3
+    for row in rows:
+        assert row["data"][total] == row["data"][qty] * row["data"][price] + 7
+
+
+async def test_a_deferred_backfill_that_raises_leaves_the_flag_up(
+    client, priced_list, session_factory, monkeypatch
+):
+    """Nothing may escape `_run_deferred` -- there is no caller left to catch it -- and
+    it must not pretend to have succeeded either."""
+    from sqlalchemy import text
+
+    from src.lists.columns import backfill
+
+    lst_uuid, qty, price, total = priced_list.values()
+    await client.post(
+        f"/api/lists/{lst_uuid}/items/", json={"data": {qty: 3, price: 10}}
+    )
+    list_id = await _list_id(session_factory, lst_uuid)
+
+    async with session_factory() as db:
+        await db.execute(
+            text(
+                "UPDATE columns SET config = jsonb_set(config, '{formula}', "
+                "'\"qty * price + 1\"') WHERE uuid = CAST(:u AS uuid)"
+            ),
+            {"u": total},
+        )
+        await db.commit()
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("database went away")
+
+    monkeypatch.setattr(backfill, "recompute_records", boom)
+    await backfill._run_deferred(list_id)  # must not raise
+    monkeypatch.undo()
+
+    assert await _pending(client, lst_uuid) == {"total"}
+
+
+async def test_a_deferred_edit_still_ends_up_correct_over_the_api(
+    client, priced_list, monkeypatch
+):
+    """End to end, with the real `BackgroundTasks` rather than a stand-in.
+
+    Through the test client the task runs inside the ASGI response cycle, so this
+    cannot observe the window where the flag is up — what it does prove is that the
+    deferred path is actually wired to something that runs, and that it does the whole
+    list rather than the slice the threshold names.
+    """
+    from src.core.config import settings
+
+    lst_uuid, qty, price, total = priced_list.values()
+    for q in (2, 5, 9):
+        await client.post(
+            f"/api/lists/{lst_uuid}/items/", json={"data": {qty: q, price: 10}}
+        )
+    monkeypatch.setattr(settings, "FORMULA_INLINE_MAX_RECORDS", 1)
+
+    edited = await client.patch(
+        f"/api/lists/{lst_uuid}/columns/{total}",
+        json={"config": {"formula": "qty * price + 7"}},
+    )
+    assert edited.status_code == 200, edited.text
+
+    rows = (await client.get(f"/api/lists/{lst_uuid}/items/")).json()
+    assert len(rows) == 3
+    for row in rows:
+        assert row["data"][total] == row["data"][qty] * row["data"][price] + 7
+    assert await _pending(client, lst_uuid) == set()

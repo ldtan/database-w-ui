@@ -81,6 +81,13 @@ one you can time. Since a 0.1-CPU instance delivers 100 ms of CPU per wall secon
 | 20,000 | 40 | 2.2 s | ~22 s | ~4 s | ~2 s |
 | 100,000 | 200 | 11 s | ~110 s | ~22 s | ~11 s |
 
+**Above `FORMULA_INLINE_MAX_RECORDS` (5,000) the request stops paying for it.** The table
+above is what the *work* costs; who waits for it is a separate decision. Under the threshold
+the recompute happens in the request and the response is already correct when it goes out.
+Over it, the work is handed to a FastAPI background task, the PATCH returns immediately, and
+the columns report `recompute_pending` until it finishes. The threshold does not cap the work
+— a deferred run still does the whole list — it only decides whether anyone is waiting.
+
 **What the 500-row chunking bounds, and what it does not.** It bounds *memory* — peak Python
 allocation is flat at ~3 MB whatever the list size, because a batch is read, rewritten and
 released — and it bounds *lock duration*, since each batch commits on its own rather than
@@ -96,25 +103,32 @@ otherwise repeat itself at a much larger scale: a 22-second synchronous rewrite 
 
 **The two shapes this takes.** The config is committed *before* the rewrite starts, so between
 those two moments the column is live with a new formula and the records still hold the old
-formula's answers. On a few hundred records that window is a third of a second and nobody is
+formula's answers. Under the threshold that window is a fraction of a second and nobody is
 inside it: the response returns with `recompute_pending: false` and the edit is
-indistinguishable from renaming a column. Past a few thousand it becomes visible — the editor's
-PATCH sits there, and every other viewer's columns query (which rides the live-refresh
-interval) reports `recompute_pending: true`, so the grid warns and the columns panel marks the
-column while rows update in waves of 500.
+indistinguishable from renaming a column. Over it the window is real and deliberate — the PATCH
+returns straight away, the background task works through the list, and every viewer's columns
+query (which rides the live-refresh interval) reports `recompute_pending: true`, so the grid
+warns and the columns panel marks the column while rows update in waves of 500. Either way the
+values are *uniformly* one version behind rather than half rewritten, so a filter or a sort
+over the column keeps answering coherently while it waits.
 
 **If it never finishes** — a redeploy, an instance restart, a cancelled request — committed
-chunks stay, no stamp is written, and the column reports pending indefinitely. That is what the
-flag is for; nothing else would say so. Recovery is
-`uv run python -m src.maintenance.recompute_calculated` (`--dry-run` to size it first,
-`--list <uuid>` to narrow it), which resumes rather than restarts: rows that already agree are
-not rewritten.
+chunks stay, no stamp is written, and the column reports pending until something finishes it.
+That is what the flag is for; nothing else would say so.
 
-**The remaining unbounded cost is impatience.** Each formula PATCH starts its own complete
-scan and they overlap rather than queue. They stay correct — each pass re-checks a schema
-signature and goes again if it moved — but three re-edits on a 20k list is three full scans
-contending for the same 0.1 CPU. A per-list lock is the small change that would make them
-queue instead.
+The nightly maintenance run includes `recompute_calculated` for exactly this, and it is cheap
+to schedule because it skips any list whose stamp already matches its schema *without reading a
+record* — on a healthy database the whole step is a handful of queries. By hand it is
+`uv run python -m src.maintenance.recompute_calculated`, with `--dry-run` to size it first,
+`--list <uuid>` to narrow it, and `--force` to rescan regardless of what the stamps claim. It
+resumes rather than restarts: rows that already agree are not rewritten.
+
+**Re-editing is no longer the expensive mistake it was.** Each formula PATCH starts its own
+complete scan, and they overlap rather than queue — but a scan that has been superseded now
+notices at its next chunk and abandons itself, rather than running to completion writing
+answers that are already wrong. So three impatient re-edits cost roughly one full scan plus
+two partial ones, not three full ones. The scans still overlap for as long as they run, so a
+per-list lock is still the change that would make them strictly queue.
 
 ## Two failure modes that arrive before you run out of CPU
 

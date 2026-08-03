@@ -12,6 +12,7 @@ Run it from cron / a systemd timer, or by hand after an upgrade:
     uv run python -m src.maintenance.recompute_calculated             # every list
     uv run python -m src.maintenance.recompute_calculated --dry-run
     uv run python -m src.maintenance.recompute_calculated --list <uuid>
+    uv run python -m src.maintenance.recompute_calculated --force     # ignore the stamps
 
 Safe to run repeatedly (a second run rewrites nothing), and safe to kill: each chunk
 commits on its own, and the next run picks up whatever is still out of date. Nothing
@@ -87,12 +88,28 @@ async def _stale_count(db: AsyncSession, list_id: int) -> int:
 
 
 async def recompute(
-    dry_run: bool = False, only: Optional[UUID] = None
+    dry_run: bool = False, only: Optional[UUID] = None, force: bool = False
 ) -> dict[str, int]:
-    """Bring every list's calculated cells up to date. Returns {list: records}."""
+    """Bring every list's calculated cells up to date. Returns {list: records}.
+
+    **Lists that report nothing pending are skipped without reading a record.** That is
+    what makes this cheap enough to run on a schedule: the stamp each backfill leaves
+    (`COMPUTED_FOR`) is compared against the list's current schema signature, which is a
+    few small queries, where actually scanning to find out costs ~0.4 s of CPU per
+    20,000 records even when the answer is "nothing". On a healthy database every list
+    skips and the whole job is a handful of queries.
+
+    The skip trusts the stamp, so it cannot see value-level damage that left the schema
+    alone — a hand-edited record, a restore from a backup taken mid-backfill. ``force``
+    is for exactly that: rescan everything and compare, ignoring what the stamps claim.
+    """
     changed: dict[str, int] = {}
     async with db_module.SessionLocal() as db:
         for list_id, list_uuid, list_name in await _lists_with_formulas(db, only):
+            if not force and not backfill.pending_keys(
+                await backfill.list_columns(db, list_id)
+            ):
+                continue
             if dry_run:
                 rows = await _stale_count(db, list_id)
             else:
@@ -119,9 +136,19 @@ async def _main() -> None:
         metavar="UUID",
         help="only this list, rather than every list with a formula",
     )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help=(
+            "rescan every list instead of trusting the stamp each backfill leaves. "
+            "For value-level damage that left the schema alone"
+        ),
+    )
     args = parser.parse_args()
 
-    changed = await recompute(dry_run=args.dry_run, only=args.list)
+    changed = await recompute(
+        dry_run=args.dry_run, only=args.list, force=args.force
+    )
     verb = "would recompute" if args.dry_run else "recomputed"
     if not changed:
         print("Every calculated cell already matches its formula.")
