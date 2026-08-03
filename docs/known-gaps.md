@@ -783,6 +783,30 @@ instead is the deferred alternative. Two easy-to-miss rules: cloning must **not*
 would duplicate them), and it must **not** copy grants (the clone is a new resource the cloner
 owns, private like any new list). `tests/test_list_clone.py` pins the remap.
 
+**Records are copied a chunk at a time; structure is not.** `_clone_records` walks the
+source keyset-paginated by `id` in `_CLONE_CHUNK` (500) batches, selecting only `id` and
+`data` so source rows never become ORM entities, and flushing and expunging each batch of
+copies before reading the next. It used to select the whole table into the session and hold
+a second object per row waiting to be flushed — two copies of a list's data resident at
+once, in the request that asked for a copy. Measured over 5,000 records: **30.6 MB → 4.0 MB**
+of Python allocation, and flat from here on rather than ~6 kB per record, which is what
+turned a large clone into an OOM on a 512 MB instance. Structure is still copied whole, and
+should be: a list has tens of columns, not thousands.
+
+**It is flushed per chunk but committed once**, unlike the conversion backfill, which
+commits per chunk on purpose. The difference is what a dead run leaves: a backfill's
+casualty is a partly-filled *hidden* column that nothing reads, while a clone's would be a
+half-copied list sitting under a name its owner cannot reuse. Holding one transaction open
+costs little here because every row in it is new and belongs to a list nobody can see yet,
+so nothing existing is locked against anyone.
+
+**Time is still uncapped, and unlike import there is no limit on it.** A clone costs
+~0.93 ms per record, so 50,000 records is ~47 s locally and some minutes on the free
+instance. It has not been made a limit because a list that size cannot be built on the free
+tier anyway, and because the caller already owns the data — there is no upload to refuse.
+If clone ever needs a ceiling it wants the same answer as import (§12): a background task,
+not a smaller number.
+
 **The PrimeReact theme hardcodes its colors.** `lara-light-cyan/theme.css` defines
 `--primary-color` / `--surface-*` and then never references them (zero `var(--primary-*)`
 usages in the file), so overriding those variables recolors nothing. Theming works only
