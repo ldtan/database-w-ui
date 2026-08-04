@@ -22,7 +22,7 @@ from ..columns.enums import (
     REFERENCE_TYPES,
     ColumnType,
 )
-from ..columns.formula import Formula, column_refs, evaluate, parse
+from ..columns.chain import ChainStep, apply_formulas, build_chain
 from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
@@ -118,42 +118,48 @@ def coerce_shape(column: Column, value):
 
 def computed_columns(
     columns: dict[str, Column],
-) -> tuple[list[tuple[str, Column, Formula]], dict[str, str]]:
-    """The calculated columns to inject, and the column name -> key map they need.
+) -> tuple[list[ChainStep], dict[str, str]]:
+    """The calculated columns to recompute, in chain order, and the name -> key map.
 
-    Parsed once for a whole batch rather than once per record, and paired with
-    the name map because a formula is written in column *names* while records are
-    keyed by uuid.
+    Thin now: `chain.build_chain` does the work, and this stays as the name every
+    reader already imports (the metric scan among them). Parsed once for a whole batch
+    rather than once per record, and paired with the name map because a formula is
+    written in column *names* while records are keyed by uuid.
 
-    A stored formula that no longer parses is skipped rather than raised: the
-    language's bounds can tighten (they have), and a column saved under the old
-    ones must cost its own cell, not the whole read — the same rule `evaluate`
-    follows for a row it cannot compute.
+    Order is the part that matters. A formula may reference another calculated column,
+    so the plan comes back topologically sorted and a caller that walks it once — each
+    step reading out of the dict the previous step wrote into — settles a whole chain in
+    a single pass.
+
+    A stored formula that no longer parses comes back with a ``None`` formula rather
+    than raising: the language's bounds can tighten (they have), and a column saved
+    under the old ones must cost its own cell, not the whole read — the same rule
+    `evaluate` follows for a row it cannot compute. `apply_formulas` blanks those.
     """
-    computed: list[tuple[str, Column, Formula]] = []
-    for key, column in columns.items():
-        if column.type not in COMPUTED_TYPES or not (column.config or {}).get("formula"):
-            continue
-        try:
-            computed.append((key, column, parse(column.config["formula"])))
-        except ValidationError:
-            continue
-    return computed, {column.name: key for key, column in columns.items()}
+    return build_chain(columns)
 
 
 def shape_values(
     columns: dict[str, Column],
-    computed: list[tuple[str, Column, Formula]],
+    computed: list[ChainStep],
     key_of_name: dict[str, str],
     data: dict,
 ) -> dict:
     """One record's stored `data` as a reader should see it.
 
     Values are coerced to the shape their column currently declares (see
-    `coerce_shape`) and calculated columns get their value computed and injected
-    under their own key. Kept separate from `_shape_for_read` so a caller holding
-    plain dicts — a metric scan reads `data` alone rather than hydrating whole
-    records — shapes them exactly as the grid does.
+    `coerce_shape`) and calculated columns are **recomputed**, overwriting whatever the
+    record stores under their key. Kept separate from `_shape_for_read` so a caller
+    holding plain dicts — a metric scan reads `data` alone rather than hydrating whole
+    records, and the export streams `data` alone too — shapes them exactly as the grid
+    does.
+
+    Recomputing rather than trusting the stored value is the load-bearing half of the
+    design. A calculated cell *is* stored (see `_validate_data`), but only so Postgres
+    can filter and sort on it; the stored copy is an index and can fall behind a formula
+    edit or a renamed operand. Because every read passes through here, no person ever
+    sees a stale answer — the worst a lagging index can do is put a row in the wrong
+    place in a sorted or filtered view, which the next write or a re-index corrects.
 
     **A key with no live column is dropped.** Deleting a column leaves its values in
     every record — that is what makes the restore a real undo — and this used to pass
@@ -173,14 +179,7 @@ def shape_values(
         for key, value in data.items()
         if key in columns
     }
-    for key, _column, formula in computed:
-        inputs = {
-            name: shaped.get(key_of_name[name])
-            for name in column_refs(formula)
-            if name in key_of_name
-        }
-        shaped[key] = evaluate(formula, inputs)
-    return shaped
+    return apply_formulas(computed, key_of_name, shaped)
 
 
 class ListItemService:
@@ -231,16 +230,21 @@ class ListItemService:
         """Present each record in its columns' declared shape.
 
         Two things happen here: stored values are coerced to the shape their column
-        currently declares (see `coerce_shape`), and calculated columns — which
-        store nothing — have their value computed and injected under their own key.
-        Both are `shape_values`, which anything reading records shares so that a
-        record means the same thing wherever it is read from.
+        currently declares (see `coerce_shape`), and calculated columns are recomputed
+        over the shaped record, overwriting the copy stored for the query index. Both
+        are `shape_values`, which anything reading records shares so that a record
+        means the same thing wherever it is read from.
+
+        Recomputing here is what makes the stored copy safe to let fall behind: a
+        formula edit or a renamed operand can leave the index stale, but never this.
 
         `set_committed_value`, not a plain assignment: this is a *presentation* fix,
         and marking the instance dirty would have the next flush write the coercion
-        (and the computed values, which must never be persisted) back to the
-        database — turning every read into a silent migration, inside whatever
-        transaction happened to be open.
+        back to the database — turning every read into a silent migration, inside
+        whatever transaction happened to be open. That still holds now that the
+        computed value is legitimately stored, because a read is not where it gets
+        written: `_validate_data` and the re-index job are, and both compute it
+        deliberately rather than as a side effect of somebody looking.
         """
         computed, key_of_name = computed_columns(columns)
         for item in items:
@@ -894,6 +898,18 @@ class ListItemService:
         # merged record rather than per column — whichever order the cells
         # arrived in, parent and child are both settled by now.
         await cls._enforce_nested_lookups(db, lst, columns, result, incoming, existing)
+
+        # Every calculated cell, last, over the settled record: defaults have been
+        # applied and every operand is in its final form, so a formula sees what the
+        # row will actually hold rather than what arrived on the wire.
+        #
+        # What this writes is an *index*, not the answer. `shape_values` recomputes on
+        # every read and overwrites it, so nothing a person sees depends on this being
+        # current — it is here so `apply_filters`, `apply_sorts` and `_apply_search`
+        # have a `data ->> key` to work with. A schema change can leave it behind;
+        # `columns/backfill.py` is what brings it back.
+        plan, key_of_name = build_chain(columns)
+        apply_formulas(plan, key_of_name, result)
 
         return result
 

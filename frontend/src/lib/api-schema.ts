@@ -669,6 +669,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/columns/recompute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Recompute Calculated Columns
+         * @description Rebuild the stored index behind this list's calculated columns.
+         *
+         *     **This does not change any value anybody can see.** A calculated cell is recomputed
+         *     on every read, so the grid, a record dialog and the export are already right. What
+         *     it rebuilds is the copy stored in the record, which is what `apply_filters`,
+         *     `apply_sorts` and `_apply_search` read — those run in Postgres, over the stored
+         *     bytes, and so answer for the formula the index was built from. Editing a formula,
+         *     or renaming or deleting a column one reads, leaves that behind until this runs.
+         *
+         *     Scoped to the list rather than one column because the columns are not independent:
+         *     a formula may read another calculated column, so the chain is rebuilt as a whole
+         *     (`chain.build_chain`) and re-indexing half of it would be meaningless.
+         *
+         *     Under `FORMULA_INLINE_MAX_RECORDS` the work happens here and the response is sent
+         *     once it is done. Over it the work is handed to a background task and this answers
+         *     immediately with `deferred: true` — the same total work either way; the threshold
+         *     only decides whether anybody is kept waiting.
+         *
+         *     **One run per list.** A second call while one is in flight gets a 409 rather than a
+         *     second scan of the same rows: the index is shared list state converging on one
+         *     answer, so the run already going is doing the caller's work too. That is also the
+         *     answer for a second *person* — the lock is keyed on the list, not on who asked.
+         */
+        post: operations["recompute_calculated_columns_api_lists__list_uuid__columns_recompute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/columns/{uuid}": {
         parameters: {
             query?: never;
@@ -2337,6 +2378,22 @@ export interface components {
             name_suffix?: string | null;
             /** Birth Date */
             birth_date?: string | null;
+        };
+        /**
+         * RecomputeReport
+         * @description What a re-index of a list's calculated columns did, or was handed off to do.
+         *
+         *     Re-indexing never changes what anybody *sees* — every read recomputes calculated
+         *     cells anyway — so this reports on the stored copy Postgres filters and sorts over,
+         *     not on the values.
+         */
+        RecomputeReport: {
+            /** Records */
+            records: number;
+            /** Deferred */
+            deferred: boolean;
+            /** Changed */
+            changed?: number | null;
         };
         /** RefreshRequest */
         RefreshRequest: {
@@ -4125,6 +4182,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BinnedChildRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    recompute_calculated_columns_api_lists__list_uuid__columns_recompute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecomputeReport"];
                 };
             };
             /** @description Validation Error */

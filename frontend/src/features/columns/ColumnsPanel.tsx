@@ -7,7 +7,12 @@ import { confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
-import type { Column, ColumnType, ConversionReport } from "../../lib/types";
+import type {
+  Column,
+  ColumnType,
+  ConversionReport,
+  RecomputeReport,
+} from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ColumnDialog } from "./ColumnDialog";
 import { ConversionReportDialog } from "./ConversionReportDialog";
@@ -60,6 +65,55 @@ export function ColumnsPanel({
       ),
   });
 
+  // Rebuilding the stored index behind the calculated columns. Deliberately *not*
+  // presented as fixing wrong values, because it never is: a calculated cell is
+  // recomputed on every read, so the grid and the export are already right. What
+  // falls behind is the copy Postgres sorts and filters over, and only a schema
+  // change can do it — editing a record re-indexes that record for free.
+  const recompute = useMutation({
+    mutationFn: () =>
+      api.post<RecomputeReport>(`/lists/${listUuid}/columns/recompute`),
+    onSuccess: (report) => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      if (report.deferred) {
+        toast.success(
+          "Refreshing in the background",
+          `${report.records.toLocaleString()} records. Sorting and filtering will ` +
+            "catch up shortly; the values on screen are already correct.",
+        );
+      } else {
+        toast.success(
+          "Sorting and filtering are up to date",
+          `${(report.changed ?? 0).toLocaleString()} of ` +
+            `${report.records.toLocaleString()} records re-indexed.`,
+        );
+      }
+    },
+    // 409 is an expected answer, not a fault: someone else's refresh — or the
+    // other tab's — is already doing this list. Say so plainly.
+    onError: (err) =>
+      toast.error(
+        err instanceof ApiError && err.status === 409
+          ? "A refresh is already running for this list"
+          : "Could not refresh",
+        err instanceof ApiError && err.status !== 409 ? err.message : undefined,
+      ),
+  });
+
+  function confirmRecompute() {
+    confirmDialog({
+      message:
+        "Rebuild sorting and filtering for this list's calculated columns? " +
+        "The values shown in the grid are always up to date — this brings the " +
+        "stored copy that sorting, filtering and search use into line with the " +
+        "current formulas. It reads every record, so a large list takes a while.",
+      header: "Refresh calculated columns",
+      icon: "pi pi-refresh",
+      acceptLabel: "Refresh",
+      accept: () => recompute.mutate(),
+    });
+  }
+
   function confirmDelete(column: Column) {
     confirmDialog({
       message: `Delete column “${column.display_name}”? Its values stay in existing records but are hidden.`,
@@ -106,8 +160,8 @@ export function ColumnsPanel({
               />
               {/* Separate from Edit because it is a different kind of change: a
                   conversion rewrites every record's value and cannot be undone by
-                  editing back. A calculated column stores nothing, so there is
-                  nothing to convert. */}
+                  editing back. A calculated column is out because gaining or losing
+                  a formula is a decision about the column, not a cell conversion. */}
               {column.type !== "calculated" && (
                 <>
                   <Button
@@ -119,8 +173,8 @@ export function ColumnsPanel({
                     onClick={() => setConverting(column)}
                   />
                   {/* Same engine as Change type, opposite ending: this one adds a
-                      column and leaves the original alone. A calculated column
-                      stores nothing, so there is nothing to copy. */}
+                      column and leaves the original alone. Out for a calculated
+                      column for the same reason as above. */}
                   <Button
                     icon="pi pi-copy"
                     text
@@ -164,6 +218,24 @@ export function ColumnsPanel({
             size="small"
             onClick={() => setShowDeleted(true)}
           />
+          {/* One button for the list, not one per column, because the columns are
+              not independent: a formula may read another calculated column, so the
+              chain is rebuilt as a whole and re-indexing half of it would mean
+              nothing. Offered only when there is a formula to re-index.
+
+              `loading` doubles as the guard against a double click — the server's
+              409 is the backstop, not the interaction. */}
+          {columns.some((c) => c.type === "calculated") && (
+            <Button
+              label="Refresh calculated"
+              icon="pi pi-refresh"
+              text
+              size="small"
+              loading={recompute.isPending}
+              disabled={recompute.isPending}
+              onClick={confirmRecompute}
+            />
+          )}
         </div>
       )}
 
@@ -173,6 +245,21 @@ export function ColumnsPanel({
         column={editing.column}
         visible={editing.open}
         onHide={() => setEditing({ open: false, column: null })}
+        // Offered rather than done, because a formula edit is rarely alone: someone
+        // fixing three of them should re-index once at the end, not three times.
+        onFormulaChanged={() =>
+          confirmDialog({
+            message:
+              "The new values are already showing. Sorting, filtering and search " +
+              "still use the previous formula until the stored copy is rebuilt — " +
+              "do that now? It reads every record.",
+            header: "Formula changed",
+            icon: "pi pi-refresh",
+            acceptLabel: "Refresh now",
+            rejectLabel: "Later",
+            accept: () => recompute.mutate(),
+          })
+        }
       />
       {/* Keyed on the column so the form resets between conversions rather than
           carrying the previous column's target type into the next one. */}

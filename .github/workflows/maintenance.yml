@@ -5,7 +5,8 @@
 # makes a free scheduler an honest home for them.
 #
 # The order is not arbitrary: converge the record shapes first, then purge what is past its
-# window, then sweep the grants those purges orphaned.
+# window, then sweep the grants those purges orphaned — and rebuild the calculated-column
+# index last of all, because it derives from whatever the steps above leave behind.
 name: Daily maintenance
 
 on:
@@ -65,3 +66,10 @@ jobs:
 
       - name: Sweep orphaned grants
         run: uv run python -m src.maintenance.sweep_orphan_grants
+
+      # Last, because it derives from everything above: a converged shape or a purged
+      # column both change what a formula answers. This is only a backstop — the app
+      # re-indexes on demand when a formula changes, and reads recompute regardless, so
+      # a missed night costs a stale sort order, never a wrong value.
+      - name: Rebuild the calculated-column index
+        run: uv run python -m src.maintenance.recompute_calculated

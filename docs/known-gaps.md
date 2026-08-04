@@ -83,14 +83,13 @@ shape.
 
 ---
 
-## 5. Calculated columns are computed on read, and that has edges
+## 5. A calculated column's value is stored as an *index*, and that has edges
 
-A `calculated` column stores no value. It carries a `formula` in its config — arithmetic over
-the list's **number** columns and string functions over its **text** columns, referenced by
-name (`min`/`max`/`round`/`abs`, `CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`,
-and `IF`) — and the value is produced in `_shape_for_read` (`items/services.py`) every time a
-record is read, injected under the column's uuid and never persisted. The result is a number or
-a string depending on the formula; the column has no fixed output type. The formula is parsed
+A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**
+columns, string functions over its **text** columns, and references to other **calculated**
+columns, all by name (`min`/`max`/`round`/`abs`,
+`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, and `IF`). The result is a number
+or a string depending on the formula; the column has no fixed output type. The formula is parsed
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
 handed to it, so a formula cannot reach a builtin, an attribute or a subscript. Keep it that
@@ -98,46 +97,106 @@ way — the moment it grows an `eval` or a real namespace, a list editor (an ord
 an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is joined with
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
 
-Reach is not the only thing a formula has to be bounded on. Because it runs once per record
-on every read, what it may *spend* is bounded too: `MAX_SOURCE` (length), `MAX_DEPTH`
-(nesting — length alone is not a bound on depth, since a unary minus costs one character a
-level and a few hundred of them overflow the stack) and `_MAX_TEXT` (the size of any text it
-produces — `REPLACE` grows a string by a factor set by a literal, and nesting composes those
-factors while the source only grows linearly). The first two are refused at config time; the
-third blanks the cell, since it depends on the row. Keep all three: without them a formula
-that passes every other check is a way to spend the whole server, which is the same problem
-as running code, arrived at from the other side. (Those three, `ROW_FUNCTIONS`, and the two
-`*_row_expression` seams are public because list **metrics** build a second grammar on
-this one — see §9 below. A metric walks this same tree once per record too, over more
-records than a grid page, so the bounds matter more there, not less.)
+**The load-bearing decision is that the value is written down *and* recomputed.**
+`_validate_data` (`items/services.py`) writes each calculated cell into the record on create and
+on every update, under the column's uuid like any other value — which is what gives
+`apply_filters`, `apply_sorts` and `_apply_search` a real `data ->> key` to work with, since
+those run inside Postgres and cannot call a Python evaluator. But `shape_values` still
+recomputes on **every read** and overwrites the stored copy before serialising. So the stored
+value is a **query index, not the source of truth**.
 
-The compute-on-read choice buys correctness for free — editing a dependency or the formula is
-reflected on the next read, no backfill — at these costs, all currently accepted:
+That is the whole safety property, and it is worth stating plainly: a stale index can put a row
+in the wrong place in a sorted or filtered view; it can never put a wrong number on a screen or
+in an export. Full materialisation — trusting the stored copy on read — was built once and is
+the obvious simplification available later, but it converts every missed invalidation into a
+plausible-looking wrong answer, which is the failure mode this arrangement exists to refuse.
 
-- **You cannot filter, sort or search on a calculated column.** Its value is not in the stored
-  JSONB, so `apply_filters`/`apply_sorts`/`_apply_search` see nothing there. They don't error;
-  they just never match. Making them work means evaluating in Python (on-read can't push the
-  expression into SQL) — a real feature, not a patch.
-- **Exports leave calculated columns out** (`transfer/services.py`), and imports skip a value
-  for one. That keeps a file this app writes importing cleanly back into it, since the column
-  is read-only on write. Exporting the *computed value* would be a nice enhancement, but then a
-  re-import has to know to ignore it.
-- **No calc-on-calc.** A formula may only reference `number` and `text` columns,
-  so it cannot reference another calculated column (that would need cycle detection and
-  recursive evaluation). Caught at config time: the referenced column is not one of those types.
-  Choice and temporal columns are also excluded for now — they store ids/ISO strings whose text
-  form would surprise. What a name refers to is decided by *where it sits*, not how it is
-  spelled — `column_refs` reports every value-position name, including the four that collide
-  with function names (`min`, `max`, `round`, `abs`, all valid slugs). Reporting those as
-  functions is what used to let a formula over one skip these checks entirely.
+Reach is not the only thing a formula has to be bounded on. Because it runs once per record on
+every read *and* once per record per re-index, what it may *spend* is bounded too: `MAX_SOURCE`
+(length), `MAX_DEPTH` (nesting — length alone is not a bound on depth, since a unary minus costs
+one character a level and a few hundred of them overflow the stack) and `_MAX_TEXT` (the size of
+any text it produces — `REPLACE` grows a string by a factor set by a literal, and nesting
+composes those factors while the source only grows linearly). The first two are refused at
+config time; the third blanks the cell, since it depends on the row. Keep all three: without
+them a formula that passes every other check is a way to spend the whole server, which is the
+same problem as running code, arrived at from the other side. (Those three, `ROW_FUNCTIONS`, and
+the two `*_row_expression` seams are public because list **metrics** build a second grammar on
+this one — see §9 below. A metric walks this same tree once per record too, over more records
+than a grid page, so the bounds matter more there, not less.)
+
+Storing the value is what makes the column ordinary everywhere else: it filters, sorts, groups
+and searches like any other, and the export writes it. Sorting is the one place the missing
+output type shows: a calculated column emits *two* ORDER BY terms (`_order_terms`), a numeric
+reading guarded by `jsonb_typeof` and the text reading behind it, so a numeric formula sorts
+numerically and a text one alphabetically without either having to declare which it is. A range
+filter picks the same way, from the type of the value being compared against. Casting outright
+would not merely mis-sort a text row — `CAST('Ada' AS numeric)` fails the whole statement.
+
+The remaining edges:
+
+- **Nothing keeps the index current across a schema change, on purpose.** A record write
+  re-indexes that record for free, but editing a formula, or renaming, deleting or restoring a
+  column some formula reads, changes every record's answer without touching a record. There is
+  **no drift detection** — no schema digest, no `recompute_pending` flag, no automatic backfill
+  — because neither entry point needs to detect anything: the column dialog offers a re-index
+  right after a formula edit (it just handled the edit), and `Refresh calculated` in the columns
+  panel is always available. `POST /lists/{uuid}/columns/recompute` is the route,
+  `columns/backfill.py` the engine, and the nightly `recompute_calculated` the backstop. What
+  this costs is a window where a sort or filter answers for the previous formula. A digest and a
+  pending badge were built once; they guard against *visible* staleness, which recomputing on
+  read has already removed.
+- **A re-index is a full-list rewrite with no row ceiling.** Measured at **~0.035 ms of app
+  CPU per record** with two calculated columns per record, linear from 20k to 50k rows
+  (20,000 records ≈ 0.7 s of CPU, ~7 s on a 0.1-CPU instance; 500,000 — the 1 GB ceiling — is
+  ~18 s of CPU, ~3 minutes). Above `FORMULA_INLINE_MAX_RECORDS` (5,000) it goes to a FastAPI
+  background task and the route answers at once; below it the request does the work. The
+  threshold decides who waits, **not** how much is done: a deferred run still walks the whole
+  list, because a half-updated index holds two formulas' answers at once and filters
+  incoherently, which is strictly worse than one uniformly a version behind. Peak Python memory
+  is flat at **2.8 MB** above baseline at both 20k and 50k rows (500-row batches, each committed
+  on its own, so no lock is held across the job) and the longest contiguous event-loop block is
+  **~23 ms**, comfortably inside the health check. A pass over an already-current list costs
+  ~0.026 ms per record and writes nothing, which is what makes the nightly sweep cheap. A background task is awaited inside the ASGI response cycle, so it has **no
+  cancel handle** and uvicorn's graceful shutdown waits for it — a redeploy during one is
+  delayed and then truncated, which is recoverable precisely because chunks commit
+  independently.
+- **One re-index per list, and nothing to unstick.** A session-level `pg_try_advisory_lock`
+  keyed on the list admits one run; a second caller — including a second *person* — gets a 409,
+  which is right, because the index is shared state and the run in flight is doing their work
+  too. Session-scoped for two reasons: it survives the per-chunk `COMMIT`, so one connection
+  serves the whole job, and Postgres releases it when the connection drops, so a killed process
+  needs no TTL or cleanup path.
+- **A superseded run is not detected.** A pass captures its evaluation plan once at the start
+  (deliberately — re-reading per chunk would produce a mixture rather than a version), so if a
+  formula is edited mid-run the finished index is one version behind and the 409 the editor got
+  made it look handled. It converges on the next run or the nightly sweep, and it can only open
+  on a list over the deferral threshold with two `configure` holders acting inside the window.
+- **Calc-on-calc is allowed; cycles are refused.** `chain.build_chain` topologically sorts the
+  graph so a chain settles in one pass per write — `total` reads *this* write's `subtotal` — and
+  `find_cycle` refuses a ring at save time, naming it. Choice and temporal columns are still
+  excluded — they store ids/ISO strings whose text form would surprise. What a name refers to is
+  decided by *where it sits*, not how it is spelled: `column_refs` reports every value-position
+  name, including the four that collide with function names (`min`, `max`, `round`, `abs`, all
+  valid slugs). Reporting those as functions is what used to let a formula over one skip these
+  checks entirely. A calculated column also cannot be `unique`: two rows computing the same
+  answer says something about the formula, not about anything a writer typed.
+- **Exports carry the computed value; templates and imports do not.** The export **computes**
+  rather than reading the stored copy (`shape_values` over the streamed rows), because a file
+  leaves the app and nothing can correct it afterwards — it is the last place that should trust
+  an index. `_parse_cell` skips a calculated column on the way back in, so an exported file
+  re-imports cleanly and the formula rewrites the cell from the row's own values. The
+  *template* still leaves them out: it is a file you fill in, and a heading whose value is
+  discarded looks like it works.
 - **References are by column *name*, and names are editable.** Rename a column a formula reads
   and the formula silently stops finding it — a missing operand reads as blank (see below), so
-  the calculated cells quietly go empty rather than erroring. There is no reverse index from
-  formula to column yet; renaming is not re-checked.
+  the calculated cells quietly go empty rather than erroring, and the index goes empty with them
+  at the next re-index. There is no reverse index from formula to column; renaming is not
+  re-checked.
 - **A missing operand makes the whole cell blank, not zero.** If any referenced cell is empty,
   the result is `None` and the cell renders `—`. This is on purpose: an incomplete row should
-  read as incomplete, not as `0 * price`. Division by zero and non-finite results are blank the
-  same way — one bad row must not fail a whole list read.
+  read as incomplete, not as `0 * price`. Division by zero, a non-finite result, a formula that
+  no longer parses and a cycle are all blank the same way — one bad row must not fail a whole
+  list read, and a calculated column is not a place data hides.
 
 ---
 
@@ -323,9 +382,11 @@ sanitiser drops looks like it works and then silently loses the formatting on sa
 
 A metric (data-model §9) stores a formula, never a number: `GET
 /lists/{uuid}/metrics/values` scans the records in scope and answers every card in one
-pass. That buys the same thing compute-on-read buys a calculated column — a total is never
-stale, and nothing has to be backfilled when a record, a formula or a filter changes — at
-costs worth knowing about.
+pass. A total is therefore never stale, and nothing has to be backfilled when a record, a
+formula or a filter changes. A `calculated` column used to make the same bargain and no
+longer does — it writes its answer down as a query index (§5) — but a metric cannot: its
+number depends on the caller's grants and the request's filters (see below), so there is no
+single value to store. The costs are worth knowing about.
 
 - **The same card shows different numbers to different people, on purpose.** The scan runs
   through `ListItemService.visible_stmt`, so it honours `item_view_filter`. A reader who
@@ -349,8 +410,10 @@ costs worth knowing about.
   for the common shape — a
   bare `AGG(stored_column)` compiles to one `SELECT SUM(CAST(data->>'uuid' AS numeric))` —
   which is why the row limit exists in the meantime. It cannot be the *general* path:
-  formulas take arbitrary row expressions, and a `calculated` column has no stored value to
-  aggregate at all (the same wall as §5).
+  formulas take arbitrary row expressions. A `calculated` column is no longer the second
+  wall it once was — it does have a stored value now (§5) — but that value is an index that
+  may lag a formula edit, and a total computed off a stale index is exactly the silently
+  wrong number this scan exists to avoid. Aggregating one still means recomputing it.
 - **A renamed column breaks its metric — but says so.** Formulas reference columns by name
   and names are editable (§5), and there is still no reverse index. The difference is that a
   metric checks its refs against the live columns before scanning and returns an `error`
@@ -429,10 +492,12 @@ buys and what it costs are both worth knowing before extending it.
   entire design exists so a person reads the report before anything changes. If you widen
   the matrix, widen it with direct pairs that are *better* than the round trip (as
   `date` ↔ `datetime` is), not with auto-chaining.
-- **`calculated` is excluded in both directions** and is the obvious next piece. Converting
-  away from it means evaluating the formula per row and persisting the result — real work,
-  but the evaluator already exists (`computed_columns` / `evaluate`). Converting *to* it
-  means discarding stored values, which needs its own confirmation, not a cell converter.
+- **`calculated` is excluded in both directions.** The reasoning changed even though the
+  answer did not: converting *away from* one is no longer a compute-and-persist job, since
+  the values are already in the records (§5), and converting *to* one no longer discards
+  data either. What remains is that gaining or losing a formula is a decision about the
+  **column** — where its values come from — rather than a conversion of what is in it, and a
+  cell converter is the wrong shape for that.
 - **The cutover mutates `Column.type` in place.** It is the one operation that does, and it
   is what keeps the column's uuid, name and position — so views, forms, formulas and
   `primary_column_id` need no repointing. Anything that caches a column's type across a

@@ -556,8 +556,9 @@ export function GuidePage() {
           become almost anything, so a swap the menu greys out is simply one that
           takes two steps: convert to <Ui>Text</Ui> first, then on to what you wanted.
           Going from <Ui>Date</Ui> to <Ui>Date &amp; time</Ui> (or back) works
-          directly. <Ui>Calculated</Ui> columns can’t take part at all — they store
-          nothing of their own, being worked out fresh each time you look.
+          directly. <Ui>Calculated</Ui> columns can’t take part at all: giving one a
+          formula, or taking its formula away, is a decision about the column rather
+          than a conversion of what’s in it.
         </p>
         <p>
           Turning <Ui>Text</Ui> into <Ui>Choice</Ui> is the clever one: leave the
@@ -710,9 +711,10 @@ export function GuidePage() {
         <p>
           A <Ui>Calculated (formula)</Ui> column doesn’t hold anything you type. It
           holds a <strong>formula</strong>, and its value is worked out from the
-          other columns of the same record every time you look at it. Change a{" "}
-          <em>Quantity</em>, and the <em>Total</em> beside it is already right —
-          there is nothing to refresh and nothing to keep in step.
+          other columns of the same record. Change a <em>Quantity</em>, and the{" "}
+          <em>Total</em> beside it is already right — there is nothing to refresh and
+          nothing to keep in step. The answer is saved with the record too, which is
+          what lets you sort, filter and search by it like any other column.
         </p>
         <p>
           Add one under <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Add column</Ui>,
@@ -725,11 +727,12 @@ export function GuidePage() {
         <p>
           A formula refers to a column by its <strong>short name</strong> — the one
           shown in brackets beside it in the columns list, like{" "}
-          <Code>unit_price</Code> — not by its pretty display name. Only three kinds
-          of column can be named: <strong>Number</strong> and{" "}
-          <strong>Text</strong> (either input style). Dates,
-          choices, tick boxes, people, and linked columns can’t be used in a
-          formula yet, and neither can another calculated column.
+          <Code>unit_price</Code> — not by its pretty display name. Three kinds of
+          column can be named: <strong>Number</strong>, <strong>Text</strong>{" "}
+          (either input style), and another <strong>Calculated</strong> column — so
+          a <em>Total</em> can build on a <em>Subtotal</em>, as long as the two don’t
+          end up depending on each other. Dates, choices, tick boxes, people and
+          linked columns can’t be used in a formula yet.
         </p>
 
         <h3 className="font-semibold pt-1">Doing sums</h3>
@@ -831,17 +834,18 @@ export function GuidePage() {
         <Callout tone="warn" title="What a calculated column can’t do">
           <ul className="flex flex-col gap-1 m-0">
             <li>
-              It has no stored value, so you can’t type into it, give it a{" "}
-              <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> or{" "}
+              The formula is the only thing that writes it, so you can’t type into
+              it, give it a <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> or{" "}
               <Ui>Unique</Ui>.
             </li>
             <li>
-              You can’t sort, filter, or search on it — those work on saved values,
-              and this one is worked out fresh each time.
+              It can read another calculated column, but the two can’t end up
+              depending on each other — a loop is refused when you save it.
             </li>
             <li>
-              Exports leave it out, and a value for it in an imported file is
-              ignored, so a file this app writes always imports cleanly back in.
+              A value for it in an imported file is ignored: the formula works it
+              out from the row itself, so a file this app writes always imports
+              cleanly back in.
             </li>
             <li>
               It has to stay a sensible size. A formula can be up to 1,000
@@ -865,7 +869,8 @@ export function GuidePage() {
         <Callout tone="warn" title="Renaming breaks a formula quietly">
           Formulas find columns by their short name. If you rename a column a
           formula uses, the formula stops finding it and those cells simply go
-          blank — no error. After renaming, open the calculated column and update
+          blank — no error, and the saved copy that sorting uses goes blank with it.
+          After renaming, open the calculated column and update
           the formula to match.
         </Callout>
       </Section>
@@ -1401,10 +1406,11 @@ export function GuidePage() {
           Starting from nothing? Pick a <Ui>Template format</Ui> and click{" "}
           <Ui>Download template</Ui> on that same tab: you get an empty file with one
           heading per column, ready to fill in and upload straight back. Calculated
-          columns aren’t in it, and aren’t on the <Ui>Columns</Ui> or{" "}
-          <Ui>Sort by</Ui> lists either — they work themselves out from your other
-          columns, so there is nothing to fill in, nothing to bring back, and no
-          stored value to put the records in order by.
+          columns aren’t in the template — they work themselves out from your other
+          columns, so there is nothing to fill in. They <em>are</em> on the{" "}
+          <Ui>Columns</Ui> and <Ui>Sort by</Ui> lists, because an export is a file
+          you read: the worked-out value goes into it, and is ignored again if you
+          upload the same file back.
         </p>
         <Callout tone="warn" title="Match the headings">
           Your file’s column headings must match your list’s underlying column names
@@ -1557,9 +1563,12 @@ export function GuidePage() {
             probably renamed; update the formula to the new short name.
           </li>
           <li>
-            <strong>I can’t sort or filter by my formula column.</strong> Calculated
-            values aren’t stored, they’re worked out as you look — so there’s
-            nothing for sorting, filtering, or search to match on.
+            <strong>I changed a formula and the sort order looks wrong.</strong> The
+            values on screen are right straight away, but sorting, filtering and
+            search read a saved copy that is rebuilt separately. Open{" "}
+            <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Refresh calculated</Ui> — the
+            dialog offers this for you right after a formula edit — or leave it, and
+            the nightly tidy-up catches it.
           </li>
         </ul>
         <p className="pt-2">

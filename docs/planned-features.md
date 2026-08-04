@@ -62,9 +62,10 @@ not:
   means resolving the label (exactly what export's `_LabelResolver` does, permissions and all);
   converting *from* `text` means resolving a label back to a uuid (what import does). Reuse those
   two code paths — do not write a third resolver.
-- **`calculated`** — stores no value at all (known-gaps gap 5). Converting *away from* calculated
-  means computing each cell and persisting it; converting *to* calculated means dropping stored
-  values and adding a `formula`. Treat these as their own cases, not part of the general matrix.
+- **`calculated`** — the values are already in the records (known-gaps gap 5), so neither
+  direction is a cell conversion any more. Gaining or losing a formula changes *where a
+  column's values come from*, which is a decision about the column rather than a transform of
+  what is in it. Treat these as their own cases, not part of the general matrix.
 
 **`config` has to be rebuilt, not merged.** Config PATCHes merge (data-model §5), but a type
 change invalidates the old type's keys wholesale — a `choice`'s `options`, a `lookup`'s
@@ -123,9 +124,10 @@ and `text` converts to every type, so the matrix is 2N rules rather than N². `d
 `text` on neither side is **refused with a message naming the two hops**, not chained
 automatically — X → text → Y is two conversions, each with its own report and its own
 chance to stop, and hiding both behind one action defeats the point of verifying first.
-Anything involving `calculated` is out in both directions: it stores no value, so
-converting away from it means evaluating a formula per row and converting to it means
-discarding values, and neither is a cell conversion.
+Anything involving `calculated` is out in both directions. The reasoning changed once its
+values started being stored — there is no longer anything to compute or discard — but the
+answer did not: gaining or losing a formula is a decision about the column, not a cell
+conversion.
 
 **Almost none of it is new code, and that was the point.** Rendering to text is the
 export's `_LabelResolver`. Parsing from text is `_parse_cell` followed by the target
@@ -549,10 +551,12 @@ own argument.
 every card in **one pass** — so the cards always agree with each other — over
 `ListItemService.visible_stmt`, which was extracted out of `ListItemService.list` so the
 cards and the grid cannot disagree about which records are on screen. It cannot be SQL
-`SUM`: formulas take arbitrary row expressions, and a `calculated` column has no stored
-value to aggregate. That last point is also the feature's nicest property — **a metric may
-aggregate a calculated column**, which a calculated column may not reference, because a
-metric is a *leaf*: nothing derives from one, so there is no cycle to detect.
+`SUM`: formulas take arbitrary row expressions, and a `calculated` column's stored value is
+an index that may lag a formula edit — a total taken off a stale one is exactly the quietly
+wrong number this scan avoids. **A metric may aggregate a calculated column**, and since
+those may now reference each other too, the two are simply protected differently: a column
+chain is topologically sorted and its cycles refused at save time, while a metric is a
+*leaf* — nothing derives from one, so there is no cycle to detect.
 
 **Load-bearing details.**
 

@@ -23,7 +23,13 @@ from ..columns.enums import COMPUTED_TYPES, PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column, in_shape
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
-from ..items.services import ListItemService, coerce_shape, display_column_key
+from ..items.services import (
+    ListItemService,
+    coerce_shape,
+    computed_columns,
+    display_column_key,
+    shape_values,
+)
 from ..models import List
 
 # Commit every N successfully-prepared rows to bound the transaction size.
@@ -267,11 +273,20 @@ async def export_rows(
 
     async with db_module.SessionLocal() as db:
         columns = await _ordered_columns(db, list_id, column_names)
-        # Calculated columns store no value; exporting them would write blanks, and
-        # a re-import would then reject the header as a read-only column. Leave them
-        # out so a file this app writes imports cleanly back into it.
-        columns = [c for c in columns if c.type not in COMPUTED_TYPES]
         all_columns = await ListItemService._columns_by_key(db, list_id)
+        # Calculated columns are exported like any other now that they hold a value: a
+        # spreadsheet of orders without the line totals is not the export anyone asked
+        # for. The file still imports cleanly back, because `_parse_cell` skips the
+        # column rather than erroring and the formula rewrites the cell from the row's
+        # own values on the way in — the only correct source for it.
+        #
+        # The value written is **computed here, not read from the record.** An export
+        # leaves the app into a file nothing can correct afterwards, so it is the last
+        # place that should trust the stored copy, which is a query index and may lag a
+        # formula edit. `shape_values` is shared with the grid for exactly this reason,
+        # and takes plain dicts precisely so a streaming reader can use it. `all_columns`
+        # rather than `columns`: a formula may read a column the caller did not tick.
+        computed, key_of_name = computed_columns(all_columns)
 
         # An export is a read of the records, so it must honor exactly the same
         # per-record visibility as the grid — otherwise a list-viewer could export
@@ -312,14 +327,18 @@ async def export_rows(
         )
 
         async def batches() -> AsyncIterator[list[dict]]:
-            """The stream in fixed-size chunks, each with its labels loaded.
+            """The stream in fixed-size chunks, shaped, each with its labels loaded.
 
             Batching exists to resolve labels in one round trip per chunk; the
             rows are still serialized (and yielded) one at a time.
+
+            Shaping happens here rather than in the writers so both formats get it
+            from one place, and before `labels.load` so the resolver sees the same
+            record the file will.
             """
             batch: list[dict] = []
             async for data in result:
-                batch.append(data or {})
+                batch.append(shape_values(all_columns, computed, key_of_name, data or {}))
                 if len(batch) >= _EXPORT_BATCH:
                     await labels.load(batch)
                     yield batch

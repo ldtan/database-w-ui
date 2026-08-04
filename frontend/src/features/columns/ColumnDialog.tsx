@@ -75,6 +75,12 @@ interface Props {
   mode?: "edit" | "convert" | "duplicate";
   /** Convert mode only — the backfill report, for the caller to review. */
   onConverted?: (report: ConversionReport) => void;
+  /** Called after a save that changed what a formula answers — a formula edited, or
+   *  a calculated column added. The values on screen are already correct; what this
+   *  gives the caller is the chance to offer a re-index, so *sorting and filtering*
+   *  catch up too. Raised here rather than detected later because this is the one
+   *  moment the change is known for free. */
+  onFormulaChanged?: () => void;
 }
 
 /** Add, modify, or convert a column.
@@ -98,6 +104,7 @@ export function ColumnDialog({
   onHide,
   mode = "edit",
   onConverted,
+  onFormulaChanged,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -366,10 +373,14 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
     enabled: type === "calculated" || type === "lookup",
   });
+  // `calculated` alongside number and text: a formula may read another formula's
+  // answer, because the chain is evaluated in dependency order on every write. Still
+  // never *this* column — that is a cycle of length one, and the server refuses it.
   const referenceableNames = (ownColumns.data ?? [])
     .filter(
       (c) =>
-        (c.type === "number" || c.type === "text") && c.uuid !== column?.uuid,
+        (c.type === "number" || c.type === "text" || c.type === "calculated") &&
+        c.uuid !== column?.uuid,
     )
     .map((c) => c.name);
 
@@ -403,8 +414,9 @@ export function ColumnDialog({
   // which is not what anyone means by a unique column. Hide it, and clear it.
   const multiValued =
     (type === "user" || type === "group" || type === "lookup") && multiple;
-  // A calculated column is derived on read and stores no value, so required and
-  // unique have nothing to act on.
+  // A calculated column's only writer is its formula, so required and unique have
+  // nothing to act on — nobody can supply a value to require, and two rows sharing
+  // an answer says something about the formula, not about what anyone typed.
   const isCalculated = type === "calculated";
 
   // Types that offer an auto-stamp on write (a "last modified" date, "edited by" user).
@@ -530,6 +542,14 @@ export function ColumnDialog({
       const column_ = saved as Column;
       toast.success(editing ? "Column updated" : "Column added", column_.display_name);
       onHide();
+      // The stored index is what a formula change leaves behind — the grid is right
+      // the moment this returns, because a calculated cell is recomputed on read.
+      // Compared against the *stored* formula rather than tracked as the field is
+      // typed, so re-saving an untouched formula asks for nothing.
+      if (column_.type === "calculated") {
+        const before = editing ? ((column?.config?.formula as string) ?? "") : "";
+        if (formula.trim() !== before.trim()) onFormulaChanged?.();
+      }
     },
   });
 
@@ -953,8 +973,8 @@ export function ColumnDialog({
                 htmlFor="col-formula"
                 hint={
                   <>
-                    Computed from other columns each time a record is read; it
-                    has no stored value of its own. Numbers: <code>+ - * /</code>
+                    Computed from other columns whenever the record is saved, and
+                    again on every read. Numbers: <code>+ - * /</code>
                     , parentheses, <code>MIN</code>, <code>MAX</code>,{" "}
                     <code>ROUND</code>, <code>ABS</code>. Text:{" "}
                     <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
@@ -964,6 +984,8 @@ export function ColumnDialog({
                     {referenceableNames.length > 0
                       ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
                       : " Add a number or text column first — a formula references those."}
+                    {" A formula may also read another calculated column, as long as"}
+                    {" the two do not end up depending on each other."}
                   </>
                 }
               >
