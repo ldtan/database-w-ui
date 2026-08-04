@@ -72,6 +72,12 @@ const EMPTY_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
  *  enough that a single edit settles while you are still looking at it. */
 const SETTLE_DELAY_MS = 800;
 
+/** Uuids the bulk-delete endpoint accepts per call, mirroring `max_length` on
+ *  `BulkDeleteRequest`. A larger selection is sent as several calls; keep the two
+ *  numbers together, since exceeding the server's is a validation error rather
+ *  than anything the person could act on. */
+const BULK_DELETE_MAX = 500;
+
 /** One page with one record replaced, or the page untouched if it is not on it. */
 function withItem(
   page: Page<ListItem>,
@@ -471,20 +477,37 @@ export function ListDetailPage() {
     canItem(item.uuid, "delete"),
   );
   const bulkDelete = useMutation({
-    mutationFn: () =>
-      api.post<{ deleted: number }>(`/lists/${listUuid}/items/bulk-delete`, {
-        uuids: deletableSelection.map((item) => item.uuid),
-      }),
+    mutationFn: async () => {
+      // The endpoint takes 500 uuids at a time. A selection carries across pages,
+      // so six select-alls at a page size of 100 already exceed it — sending the
+      // lot would come back a validation error naming a limit the person never
+      // saw. Chunked instead, and sequentially: the cap is there to bound what one
+      // request costs the server, which several at once would defeat.
+      const uuids = deletableSelection.map((item) => item.uuid);
+      let deleted = 0;
+      for (let i = 0; i < uuids.length; i += BULK_DELETE_MAX) {
+        const res = await api.post<{ deleted: number }>(
+          `/lists/${listUuid}/items/bulk-delete`,
+          { uuids: uuids.slice(i, i + BULK_DELETE_MAX) },
+        );
+        deleted += res.deleted;
+      }
+      return { deleted };
+    },
     onSuccess: (res) => {
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       setSelection([]);
       toast.success("Records deleted", `${res.deleted} record(s)`);
     },
-    onError: (err) =>
+    onError: (err) => {
+      // An earlier chunk may already have gone, so the grid is refetched here too
+      // rather than left showing rows that are no longer there.
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       toast.error(
         "Could not delete records",
         err instanceof ApiError ? err.message : undefined,
-      ),
+      );
+    },
   });
 
   const cols = columns.data ?? [];

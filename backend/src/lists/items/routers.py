@@ -147,15 +147,24 @@ async def bulk_delete_items(
 ):
     # Only delete the records the caller is actually allowed to delete; the rest
     # are silently skipped (like unknown uuids).
-    permitted = []
-    for uuid in payload.uuids:
-        item = await ListItemService.get_by_uuid(db, lst.id, uuid)
-        if item is None:
-            continue
-        if await PermissionService.has(
-            db, current_user, ResourceType.item, item.id, Action.delete
-        ):
-            permitted.append(uuid)
+    #
+    # Resolved for the whole batch at once. Asking per uuid meant a query to find
+    # the record and two more for the caller's group membership and grants, every
+    # time round: three statements a record, where five in total now cover any batch.
+    # `effective_actions_bulk` loads the records in one query, which also warms the
+    # identity map so each chain walk is served from memory, and reads groups and
+    # grants once. It omits unknown and deleted resources, so they fall out of
+    # `permitted` on their own, as before. It resolves item uuids without regard to
+    # which list they belong to; `bulk_delete` is what confines the delete to this
+    # one, so a uuid from elsewhere is still skipped.
+    granted = await PermissionService.effective_actions_bulk(
+        db,
+        current_user,
+        [(ResourceType.item, uuid) for uuid in payload.uuids],
+    )
+    permitted = [
+        uuid for (_, uuid), actions in granted.items() if Action.delete in actions
+    ]
     deleted = await ListItemService.bulk_delete(db, lst, permitted)
     return {"deleted": deleted}
 

@@ -132,6 +132,42 @@ for moving the work to a background task. Deferring it would not have helped any
 same loop in a background task holds the same memory in the same process, and would have
 OOMed after telling the caller it had succeeded.
 
+## Deleting records in bulk asked per record
+
+`POST /lists/{uuid}/items/bulk-delete` is not memory-shaped like the two above — its cost is
+round trips. For each uuid it resolved the record, then asked whether the caller could delete
+it, which fetched their group membership and their grants afresh every time; then the service
+resolved every uuid a second time to soft-delete it one row at a time.
+
+Statements per request, counted at the driver with a `before_cursor_execute` listener,
+2026-08-05:
+
+| uuids in the batch | before | after |
+|---|---|---|
+| 1 | 6 | 5 |
+| 5 | 18 | 5 |
+| 20 | 63 | 5 |
+| 100 | 303 | 5 |
+
+Three per record, plus a fixed three — now five, flat. The batch is resolved once by
+`effective_actions_bulk`, which reads the groups and grants once for the whole set, and the
+delete is a single `UPDATE ... WHERE uuid IN (...)`.
+
+Two things are worth carrying forward from this one:
+
+- **The endpoint had no cap**, so the caller chose how much of this to do; it is now 500, the
+  same limit the other bulk bodies carry. Round-trip latency is what a cap is really bounding
+  here — on a hosted database each of those 303 statements is a network hop, and the count was
+  the caller's to set.
+- **`effective_actions_bulk` was already only *claiming* to be bulk.** It resolved the rows in
+  one query, then dropped its last reference to them — and the identity map holds instances
+  weakly, so they were collected and the chain walk that follows selected every one back by
+  id. The bulk query was pure overhead on top of the per-row queries it was meant to replace.
+  Nothing about this is visible from the results; it needed a statement count to see, which is
+  why there is now a test that asserts the count does not follow the batch size. The other
+  caller, the `/effective` batch endpoint behind the grid's per-row control gating, gets the
+  same fix for free.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:

@@ -6,7 +6,12 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class BulkDeleteRequest(BaseModel):
-    uuids: list[UUID] = Field(default_factory=list)
+    # 500 is the house cap for a bulk body (permissions/schemas.py, the user and
+    # column bulk endpoints). Without it the caller sizes the server's work: every
+    # uuid is a row to resolve and update, and nothing else on the request bounds
+    # how many arrive. The grid pages at 100 at most, so this is far above any
+    # selection the UI can produce.
+    uuids: list[UUID] = Field(default_factory=list, max_length=500)
 
 
 class BulkDeleteResult(BaseModel):

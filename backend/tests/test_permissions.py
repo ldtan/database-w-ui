@@ -5,6 +5,7 @@ logic is exercised directly against the service layer with several distinct user
 and HTTP enforcement is checked via a `make_client` helper that overrides
 get_current_user to act as a chosen user.
 """
+import gc
 import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
@@ -12,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 
 from main import create_app
 from src.auth.dependencies import get_current_user
@@ -281,6 +282,51 @@ async def test_form_targeting_and_configure_scope(session_factory):
         assert {Action.configure, Action.view} <= actions
         assert Action.edit not in actions
         assert Action.share not in actions
+
+
+async def test_effective_actions_bulk_does_not_query_per_resource(
+    session_factory, engine
+):
+    """The whole point of the bulk resolver is a query count that does not follow the
+    batch size, so that is what gets asserted — at two sizes, since only the shape of
+    the growth tells you anything.
+
+    It is worth pinning because the way to lose it is invisible. The rows are resolved
+    in one query and the chain walk below reads them back out of the identity map,
+    which holds them *weakly*: drop the last strong reference and they are collected,
+    the walk misses, and every one is quietly selected again by id. Nothing fails, no
+    result changes, and the per-resource query this call exists to remove is back.
+    """
+    async with session_factory() as db:
+        owner, _, _, lst = await _fixture_world(db)
+        refs = []
+        for _ in range(12):
+            item = await ListItemService.create(db, lst, ListItemCreate(data={}))
+            refs.append((ResourceType.item, item.uuid))
+        # Keep the uuids, not the records: a caller holding the instances would keep
+        # them alive on its own and hide exactly the effect under test.
+        del item
+        gc.collect()
+
+        counted: list[int] = []
+
+        def _count(conn, cursor, statement, params, context, many):
+            counted.append(1)
+
+        event.listen(engine.sync_engine, "before_cursor_execute", _count)
+        try:
+            await PermissionService.effective_actions_bulk(db, owner, refs[:2])
+            for_two = len(counted)
+            counted.clear()
+            gc.collect()
+            await PermissionService.effective_actions_bulk(db, owner, refs)
+            for_twelve = len(counted)
+        finally:
+            event.remove(engine.sync_engine, "before_cursor_execute", _count)
+
+        assert for_two == for_twelve, (
+            f"{for_two} queries for 2 records but {for_twelve} for {len(refs)}"
+        )
 
 
 # --------------------------------------------------------------------------
@@ -618,6 +664,47 @@ async def test_http_export_respects_item_permissions(make_client, session_factor
     async with make_client(owner) as client:
         resp = await client.post(f"/api/lists/{list_uuid}/export", json=body)
         assert len(json.loads(resp.text)) == 2
+
+
+async def test_http_bulk_delete_skips_records_the_caller_cannot_delete(
+    make_client, session_factory
+):
+    """A bulk delete removes what the caller may remove and silently skips the rest,
+    the same way it skips an unknown uuid. Worth pinning at the HTTP level because
+    the check is now resolved for the whole batch at once rather than per record: a
+    row whose inheritance is broken is out of the list grant's reach, and naming it
+    in the batch must not be what gets it deleted."""
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        doomed = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        protected = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.delete],
+            ),
+        )
+        protected.permissions_inherit = False
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        uuids = [str(doomed.uuid), str(protected.uuid)]
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": uuids}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["deleted"] == 1
+
+    # Asked as the owner, who can see both rows: only the granted one went.
+    async with make_client(owner) as client:
+        remaining = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+        assert [row["uuid"] for row in remaining] == [uuids[1]]
 
 
 async def test_http_effective_batch(make_client, session_factory):
