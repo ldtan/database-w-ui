@@ -980,7 +980,9 @@ export function ColumnDialog({
                     <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
                     <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
                     <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
-                    <code>IF(cond, a, b)</code>.
+                    <code>IF(cond, a, b)</code> with{" "}
+                    <code>IS_NULL(x)</code> for an empty cell —{" "}
+                    <code>IF(IS_NULL(discount), price, price - discount)</code>.
                     {referenceableNames.length > 0
                       ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
                       : " Add a number or text column first — a formula references those."}

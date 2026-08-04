@@ -27,6 +27,12 @@ over three rows, one of them empty, is the average of two. Over *no* values,
 ``SUM`` and the counts answer ``0`` (a total of nothing is nothing) while
 ``AVG``/``MIN``/``MAX``/``MEDIAN`` answer blank, because there is no such number
 to invent.
+
+``IS_NULL`` is therefore useful at both levels, and means the same thing at each:
+inside an aggregate it asks about one record's cell (``SUM(IS_NULL(owner))`` is
+the count ``EMPTY(owner)`` gives), and outside it asks about an aggregate's own
+result — ``IF(IS_NULL(AVG(cost)), 0, AVG(cost))`` puts a number on a card that
+would otherwise be blank because there was nothing to average.
 """
 import ast
 from typing import Optional, Sequence, Union
@@ -34,6 +40,7 @@ from typing import Optional, Sequence, Union
 from src.core.exceptions import ValidationError
 
 from ..columns.formula import (
+    ARITHMETIC_ERRORS,
     MAX_DEPTH,
     MAX_SOURCE,
     ROW_FUNCTIONS,
@@ -63,10 +70,6 @@ _COUNTING = frozenset({"COUNT", "COUNT_ROWS", "EMPTY", "UNIQUE"})
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
 _UNARYOPS = (ast.UAdd, ast.USub, ast.Not)
 _CMPOPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
-
-# Raised out of a single row's expression and swallowed per row: one unanswerable
-# record must not fail the whole metric, the same bargain `evaluate` makes.
-_ARITHMETIC_ERRORS = (ZeroDivisionError, ValueError, TypeError, OverflowError, MemoryError)
 
 
 class MetricFormula:
@@ -347,14 +350,17 @@ class MetricEvaluator:
                 continue
             try:
                 accumulator.add(eval_row_expression(argument, values))
-            except _ARITHMETIC_ERRORS:
-                accumulator.add(None)  # one unanswerable record reads as blank
+            except ARITHMETIC_ERRORS:
+                # One unanswerable record must not fail the whole metric, the
+                # same bargain `evaluate` makes for a cell: it reads as blank,
+                # and a blank is skipped rather than counted as zero.
+                accumulator.add(None)
 
     def result(self, formula: MetricFormula) -> Union[float, str, None]:
         """This formula's value over everything added so far."""
         try:
             return normalize_result(_fold(formula.tree.body, self._accumulators))
-        except _ARITHMETIC_ERRORS:
+        except ARITHMETIC_ERRORS:
             return None
 
 
@@ -374,7 +380,17 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
         accumulator = accumulators.get(id(node))
         if accumulator is not None:
             return accumulator.result()
-        folded = [ast.Constant(_fold(arg, accumulators)) for arg in node.args]
+        # An argument that cannot be computed folds to "no value" rather than
+        # being raised past this call. Every function blanks on a blank argument,
+        # so for all but one this is the answer it would have reached anyway —
+        # and `IS_NULL(SUM(a) / COUNT(b))` asks about exactly this condition, so
+        # it has to be handed the blank rather than the exception.
+        folded = []
+        for arg in node.args:
+            try:
+                folded.append(ast.Constant(_fold(arg, accumulators)))
+            except ARITHMETIC_ERRORS:
+                folded.append(ast.Constant(None))
         return eval_row_expression(
             ast.Call(func=node.func, args=folded, keywords=[]), {}
         )

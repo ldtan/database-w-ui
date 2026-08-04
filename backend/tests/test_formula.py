@@ -46,6 +46,53 @@ def test_a_missing_operand_makes_the_result_blank_not_zero():
     assert calc("IF(a > 0, b, c)", a=-1, b=None, c=9) == 9
 
 
+def test_is_null_answers_about_a_blank_instead_of_becoming_one():
+    # The one function that does not propagate "no value" — every other way of
+    # looking at a blank blanks the whole formula, so without this there is no way
+    # to write a condition about one at all.
+    assert calc("IS_NULL(notes)", notes=None) == 1
+    assert calc("IS_NULL(notes)") == 1  # not supplied at all
+    assert calc("IS_NULL(notes)", notes="hi") == 0
+    # A value that is present but falsy is present. Nothing here is about truth.
+    assert calc("IS_NULL(qty)", qty=0) == 0
+    assert calc("IS_NULL(name)", name="") == 0
+
+
+def test_is_null_covers_an_expression_that_cannot_be_computed():
+    # `total / qty` has no value when qty is 0, exactly as it has none when qty is
+    # blank, so IS_NULL answers the same way to both — which is what makes it a
+    # guard you can put in front of the division.
+    assert calc("IS_NULL(total / qty)", total=10, qty=0) == 1
+    assert calc("IS_NULL(total / qty)", total=10, qty=None) == 1
+    assert calc("IS_NULL(total / qty)", total=10, qty=2) == 0
+    assert calc("IF(IS_NULL(total / qty), 0, total / qty)", total=10, qty=0) == 0
+
+
+def test_is_null_gives_the_formulas_a_spreadsheet_writes_as_ifnull():
+    assert calc("IF(IS_NULL(discount), price, price - discount)", price=100) == 100
+    assert (
+        calc("IF(IS_NULL(discount), price, price - discount)", price=100, discount=15)
+        == 85
+    )
+    # 1/0 rather than true/false, so a count of missing things adds up rather than
+    # blanking the cell the way a bare comparison would.
+    assert calc("IS_NULL(a) + IS_NULL(b)", a=None, b=None) == 2
+    assert calc("IS_NULL(a) + IS_NULL(b)", a=1, b=None) == 1
+    assert calc("not IS_NULL(a)", a=1) == 1
+
+
+def test_is_null_takes_exactly_one_argument():
+    for source in ("IS_NULL()", "IS_NULL(a, b)"):
+        with pytest.raises(ValidationError):
+            parse(source)
+
+
+def test_is_null_reads_its_argument_as_a_column_reference():
+    # It is an ordinary row function in every respect but its blank handling, so
+    # the column it names still has to be found and checked at save time.
+    assert column_refs(parse("IF(IS_NULL(notes), 0, LEN(notes))")) == frozenset({"notes"})
+
+
 def test_division_by_zero_and_nonfinite_are_blank_not_errors():
     assert calc("a / b", a=1, b=0) is None
     assert calc("a / (b - c)", a=1, b=3, c=3) is None
