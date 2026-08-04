@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
+from src.core.exceptions import ValidationError
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
@@ -16,7 +17,7 @@ from src.permissions.services import PermissionService
 from ..dependencies import get_list_or_404
 from ..models import List
 from .schemas import ExportRequest, ImportSummary
-from .services import export_rows, import_records
+from .services import export_rows, import_records, read_upload
 
 router = APIRouter(prefix="/{list_uuid}", tags=["transfer"])
 
@@ -77,8 +78,15 @@ async def import_list(
         db, current_user, ResourceType.list, lst.id, Action.edit
     )
     fmt = _infer_format(file.filename, format)
+    # Size-checked while being read, not after: see `read_upload`.
+    try:
+        raw = await read_upload(file)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+
     if fmt == "json":
-        raw = await file.read()
         try:
             parsed = json.loads(raw.decode("utf-8-sig"))
         except (json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -89,13 +97,26 @@ async def import_list(
         elements = parsed if isinstance(parsed, list) else [parsed]
         # Number JSON rows by their 1-based position in the array.
         rows = ((i, element) for i, element in enumerate(elements, start=1))
-        summary = await import_records(db, lst, rows, user=current_user)
     else:
-        raw = await file.read()
-        text = raw.decode("utf-8-sig")
+        try:
+            text = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            # Answered the way the user batch import answers it, rather than as the
+            # 500 an undecodable upload used to become.
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The file is not valid UTF-8 text; save it as UTF-8 CSV",
+            ) from exc
         reader = csv.DictReader(io.StringIO(text))
         # reader.line_num is the actual source line of the row just read, so
         # reported rows stay accurate even when the file has blank lines.
         rows = ((reader.line_num, row) for row in reader)
-        summary = await import_records(db, lst, rows, user=current_user)
-    return summary
+
+    # The row cap. It fires before anything is inserted, so a file over it leaves
+    # the list exactly as it was.
+    try:
+        return await import_records(db, lst, rows, user=current_user)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc

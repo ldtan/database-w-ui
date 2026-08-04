@@ -168,6 +168,36 @@ Two things are worth carrying forward from this one:
   caller, the `/effective` batch endpoint behind the grid's per-row control gating, gets the
   same fix for free.
 
+## Import is bounded now; export always was
+
+These two are worth reading together, because they look symmetrical and are not.
+
+**Export is fine, and was already built this way.** It opens its own session, selects only
+the `data` column through Core so no rows enter the identity map, streams them from a
+server-side cursor with `yield_per=1000`, and yields CSV a row at a time into a
+`StreamingResponse`. Labels resolve in batches of 500 on that same session — deliberately,
+since a second session would have each export holding two pooled connections and enough
+concurrent exports would deadlock the pool — with the resolver's cache evicting oldest-first
+past 50,000 entries. Memory is flat in the size of the list. `limit: null` means "the whole
+list", but the whole list streams, so what an unbounded export costs is time and bandwidth,
+not the instance. Nothing to fix.
+
+**Import was the opposite on every count.** It read the upload whole with `await file.read()`,
+decoded it whole, and for JSON parsed it whole again — so the memory cost was set by whatever
+was sent, before anything had looked at it. Then it inserted rows through the item service,
+several round trips apiece, with no ceiling on how many.
+
+Both ends are now capped: `MAX_UPLOAD_BYTES = 8 MB`, checked *while* the upload is read in
+64 kB pieces rather than after, and `MAX_ROWS = 1000`, the same number and the same reasoning
+as the user batch import.
+
+The ordering is the point. A row cap on its own bounds the database work and nothing else,
+because the file has to be read before its rows can be counted — a single 500 MB row passes a
+row cap and still kills the instance. And the row check runs before the first insert rather
+than as it goes, so a file one row over the limit imports *nothing*. That is what makes
+"split it and import each part separately" advice someone can act on; the alternative leaves
+them reconciling which thousand rows already went in.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:

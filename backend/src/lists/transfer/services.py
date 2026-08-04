@@ -8,7 +8,7 @@ never sinks the batch) with periodic commits.
 import csv
 import io
 import json
-from typing import AsyncIterator, Iterable, Optional, Tuple
+from typing import AsyncIterator, Iterable, Optional, Protocol, Tuple
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,7 +39,66 @@ _EXPORT_BATCH = 500
 # Cap on labels held across batches, so an enormous export stays bounded.
 _LABEL_CACHE_MAX = 50_000
 
+# Rows one import may carry. Every row is validated and inserted through the item
+# service, several round trips apiece, so an unbounded file is a request that does
+# not return. Same number and the same reasoning as auth/users/batch/parsing.py —
+# and, like that one, checked before anything is written, so a file over the limit
+# imports nothing at all rather than the first thousand rows of itself. That is what
+# makes "split it and import each part separately" advice someone can act on.
+MAX_ROWS = 1000
+
+# What an upload may weigh. The row cap bounds the database work but not the memory:
+# the file has to be read whole before anything can count its rows, and a JSON one is
+# then parsed whole as well, which costs several times what it weighed on the wire.
+# 8 MB is far above a thousand rows of any real list, and small enough that the parsed
+# form still fits on a 512 MB instance.
+MAX_UPLOAD_BYTES = 8 * 1024 * 1024
+# How much is read at a time while checking that, so an oversized upload is refused
+# one chunk past the limit instead of after the whole thing is in hand.
+_UPLOAD_CHUNK = 64 * 1024
+
 _SKIP = object()  # sentinel: leave this cell out of the record entirely
+
+
+class Upload(Protocol):
+    """The only part of an uploaded file this needs: bytes, on request.
+
+    Typed structurally so the service layer does not import the web framework for
+    one signature — the same reason columns/backfill.py describes its `Deferrer`
+    this way rather than naming Starlette's.
+    """
+
+    async def read(self, size: int = -1) -> bytes: ...
+
+
+async def read_upload(file: Upload, limit: Optional[int] = None) -> bytes:
+    """The upload's bytes, refusing anything past ``limit`` (default
+    ``MAX_UPLOAD_BYTES``).
+
+    Read in pieces rather than whole. `await file.read()` with no argument
+    materialises whatever was sent before anything gets a chance to ask how big it
+    is, which makes the size check pointless: by the time it fails, the memory has
+    already been spent.
+
+    The default is resolved here rather than in the signature so the module global
+    is read at call time — as a default argument it would be bound once at import
+    and stop following the constant.
+    """
+    limit = MAX_UPLOAD_BYTES if limit is None else limit
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(_UPLOAD_CHUNK)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise ValidationError(
+                f"This file is larger than {limit // (1024 * 1024)} MB; "
+                "split it and import each part separately"
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # -- export --------------------------------------------------------------
@@ -446,7 +505,24 @@ async def import_records(
     file line. Each row runs in a savepoint so a failure is isolated; commits
     happen in batches and the committed rows are expunged so memory stays flat
     over a large import. ``user`` is the importer, attributed to any
-    `current_user` default/onupdate. Returns a summary dict {created, errors}."""
+    `current_user` default/onupdate. Returns a summary dict {created, errors}.
+
+    More than ``MAX_ROWS`` rows raises `ValidationError` and writes nothing. The
+    check lives here rather than in the router so both upload formats inherit it
+    from one place."""
+    # Counted before a single row is written. Checking as we went would leave a file
+    # one row over the cap having imported the thousand rows before it, which is the
+    # one outcome the caller cannot easily undo. Stops one row past the limit, so an
+    # enormous file is refused rather than held in order to be measured.
+    counted: list[Tuple[int, dict]] = []
+    for row in rows:
+        counted.append(row)
+        if len(counted) > MAX_ROWS:
+            raise ValidationError(
+                f"This file has more than {MAX_ROWS} rows; split it and import "
+                "each part separately"
+            )
+
     columns = await ListItemService._columns_by_key(db, lst.id)
     by_name = {c.name: c for c in columns.values()}
 
@@ -454,7 +530,7 @@ async def import_records(
     errors: list[dict] = []
     batch: list[ListItem] = []
 
-    for row_number, raw_row in rows:
+    for row_number, raw_row in counted:
         try:
             incoming: dict = {}
             for key, value in raw_row.items():
