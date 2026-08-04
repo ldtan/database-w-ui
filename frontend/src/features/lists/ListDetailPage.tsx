@@ -538,7 +538,7 @@ export function ListDetailPage() {
   // Editing a cell is editing a record, so the update form decides which columns
   // may be written and which are read-only — the same answer the Edit dialog
   // gets, from the same place. A list with no update form gets the default: every
-  // column except the calculated ones, which store nothing.
+  // column except the calculated ones, which the formula writes rather than you.
   const updateForm = formList.find((f) => f.type === "update") ?? null;
   const editKinds = useMemo(
     () => cellEditKinds(resolveFields(cols, updateForm)),
@@ -1145,12 +1145,11 @@ export function ListDetailPage() {
               <DataColumn
                 key={col.uuid}
                 field={`data.${col.uuid}`}
-                // A calculated column stores nothing — its value is computed per row
-                // as the records are read — so there is no column in the database to
-                // order the whole list by, and a header that sorted only the page on
-                // screen would be the bug this page just lost. Not offered, rather
-                // than offered and quietly wrong.
-                sortable={!groupColumn && col.type !== "calculated"}
+                // Calculated columns sort like any other now: the value is stored in
+                // the record, so the server orders the whole list by it rather than
+                // there being nothing in the database to order by. (A header that
+                // sorted only the page on screen would be the bug this page lost.)
+                sortable={!groupColumn}
                 // Deleting a column moved into List settings: a trash button on every
                 // header crowded out the thing the grid is for.
                 header={col.display_name}

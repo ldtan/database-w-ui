@@ -291,10 +291,13 @@ async def _seed_calculated(client, list_uuid, add_column):
     return qty, price, total
 
 
-async def test_export_leaves_a_calculated_column_out(client, list_uuid, add_column):
-    """A calculated column stores nothing, so exporting it would write a blank
-    heading — and a re-import of that file would carry a column the list refuses
-    to be told about. It is dropped even when named explicitly."""
+async def test_export_carries_the_calculated_value(client, list_uuid, add_column):
+    """A calculated column holds a value now, so the export writes it.
+
+    It used to be dropped even when named explicitly, because exporting it would have
+    written a blank heading. The file still round-trips: `_parse_cell` skips the column
+    on the way back in and the formula rewrites the cell from the row's own values.
+    """
     qty, price, _ = await _seed_calculated(client, list_uuid, add_column)
     await client.post(
         f"/api/lists/{list_uuid}/items/", json={"data": {qty: 3, price: 10}}
@@ -306,7 +309,42 @@ async def test_export_leaves_a_calculated_column_out(client, list_uuid, add_colu
     )
     assert resp.status_code == 200, resp.text
     rows = resp.json()
-    assert list(rows[0]) == ["qty", "price"]  # no "total" key at all
+    assert list(rows[0]) == ["qty", "price", "total"]
+    assert rows[0]["total"] == 30
+
+
+async def test_export_computes_rather_than_reading_the_stored_index(
+    client, list_uuid, add_column, session_factory
+):
+    """An export is the one read that leaves the app, so it must not trust the index.
+
+    The stored copy is written for Postgres to filter and sort on and can lag a formula
+    edit. A file nothing can correct afterwards has to carry the formula's real answer,
+    so the export shapes each row exactly as the grid does.
+    """
+    import sqlalchemy as sa
+
+    qty, price, total = await _seed_calculated(client, list_uuid, add_column)
+    await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {qty: 3, price: 10}}
+    )
+
+    # Corrupt the index behind the service's back, the way a stale one would look.
+    async with session_factory() as db:
+        await db.execute(
+            sa.text(
+                "UPDATE list_items "
+                "SET data = jsonb_set(data, ARRAY[:key], '999'::jsonb)"
+            ),
+            {"key": total},
+        )
+        await db.commit()
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/export", json={"format": "json"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()[0]["total"] == 30  # recomputed, not the 999 on disk
 
 
 async def test_import_ignores_a_value_for_a_calculated_column(

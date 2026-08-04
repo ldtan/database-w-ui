@@ -226,6 +226,7 @@ Common `config` keys (all optional unless noted):
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
 | `time`        | ISO-8601 time `string` (`HH:MM[:SS]`)      | `min?`, `max?` (ISO time); `default: "now"` |
 | `datetime`    | ISO-8601 date-time `string`                | `min?`, `max?` (ISO date-time); `default: "now"` |
+| `calculated`  | `number` **or** `string` — the formula decides, per row | `formula` (required) |
 
 Common keys on **every** type: `required`, `default`, `unique`, `help_text`, plus the
 UI-only hints `placeholder` and `read_only` (stored, not enforced by the API).
@@ -308,6 +309,20 @@ Notes:
     accepting a name is what lets an exported CSV (which writes names, because a file of
     uuids is useless to a human) be imported straight back. `lookup` does the same with row
     labels.
+- `calculated` — **the formula is the cell's only writer**, and a client sending a value is
+  refused rather than ignored. `_validate_data` computes it on create and on every update, so
+  the value sits in `data` like any other and Postgres can filter, sort, group and search it;
+  `shape_values` then recomputes it on every *read* and overwrites that copy, which makes the
+  stored one a **query index rather than the source of truth**. The distinction is the whole
+  design: a stale index misplaces a row in a sorted or filtered view, but no reader — grid,
+  record dialog or export — is ever served a stale number. Only a *schema* change can make it
+  stale (a formula edited, or a column a formula reads renamed or deleted), and re-indexing is
+  an explicit action: `POST /lists/{uuid}/columns/recompute`, offered by the column dialog
+  right after a formula edit, with the nightly `recompute_calculated` as the backstop. A
+  formula may reference another `calculated` column — `columns/chain.py` topologically sorts
+  the chain so it settles in one pass per write, and refuses cycles at save time — but never
+  carry a `default` or `unique`, neither of which means anything when nobody supplies the
+  value. Full details and the costs in [known gaps §5](known-gaps.md).
 - The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
   **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind
@@ -494,8 +509,8 @@ and whether each is enabled. Field layout is JSONB (D5).
 **`view` forms are display-only, and two rules follow from it.** A view form lays a
 record out for *reading* — it exists so a grid view can stay narrow (a dozen columns is
 a dozen slivers) while every field stays one click away. So it **may include
-`calculated` columns**, which `create`/`update` may not: a calculated value is computed
-on read (§5, known-gaps §5) and rejected on write, so it is never an input but is
+`calculated` columns**, which `create`/`update` may not: its formula is the only writer
+(§5, known-gaps §5) and a client value is rejected, so it is never an input but is
 exactly what someone opens a record to see. And its fields' **`enabled` flag means
 nothing** — nothing on it is editable. `resolveFields`
 (`frontend/src/features/records/recordValues.ts`) takes an `includeCalculated` option
@@ -520,9 +535,12 @@ views and forms: list-scoped, named (D6), ordered, behaviour in a JSONB `config`
 | `config`    | `JSONB`         | `formula` (required), plus `precision?`, `prefix?`, `suffix?`. |
 
 **A metric stores the question, never the answer.** The value is computed per request
-and never persisted — the same compute-on-read bargain `calculated` columns make (§5),
-for the same reason: editing a record, a formula or a filter is reflected on the next
-read with nothing to backfill.
+and never persisted: editing a record, a formula or a filter is reflected on the next
+read with nothing to backfill. A `calculated` column no longer makes that bargain — it
+writes its answer down as a query index (§5) — but a metric still does, and should.
+A metric's number depends on the *caller*: `visible_stmt` applies their grants and the
+request's filters, so two people correctly see different totals. There is no one value
+to store.
 
 **The formula language is the row language with one level on top**
 (`metrics/aggregate.py` over `columns/formula.py`):
@@ -543,9 +561,10 @@ function picking between the values written there (nothing is lost, because a on
 row `MIN` is its own argument).
 
 Notes:
-- **A metric may aggregate a `calculated` column**, which a calculated column may not
-  reference (§5, "no calc-on-calc"). A metric is a **leaf** — nothing derives from one —
-  so there is no cycle to detect.
+- **A metric may aggregate a `calculated` column.** So may another calculated column
+  now (§5), and the two are protected differently: a column chain is topologically sorted
+  and its cycles refused at save time, while a metric needs neither because it is a
+  **leaf** — nothing derives from one, so there is no cycle to detect.
 - **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
   The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
 - **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in

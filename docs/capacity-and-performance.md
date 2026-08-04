@@ -43,6 +43,48 @@ work is real but small. Search is the expensive read, at ~4× a plain page, beca
 
 Everything else is a rounding error next to login.
 
+## Re-indexing a calculated column
+
+The one operation whose cost scales with the *list* rather than the page. A calculated
+column's value is stored so Postgres can filter and sort on it, and a schema change — a
+formula edited, or a column one reads renamed or deleted — leaves that stored copy behind
+until `POST /lists/{uuid}/columns/recompute` or the nightly `recompute_calculated` rebuilds
+it. Nothing a person reads depends on it: reads recompute and overwrite the stored value, so
+a stale index misplaces a row in a sorted or filtered view but never shows a wrong number.
+
+Measured 2026-08-04, same machine and method, on a synthetic list with two calculated
+columns per record (`qty * price` and a `CONCAT`), every row forced to rewrite:
+
+| | 20,000 records | 50,000 records |
+|---|---|---|
+| App CPU | 0.67 s | 1.83 s |
+| **CPU per record** | **0.034 ms** | **0.037 ms** |
+| Peak Python memory over baseline | 2.8 MB | 2.8 MB |
+| Longest contiguous event-loop block | — | 23 ms |
+
+Three things that table is meant to settle:
+
+- **It is linear**, so the per-record figure extrapolates. 5,000 records (the
+  `FORMULA_INLINE_MAX_RECORDS` threshold) is ~0.2 s of CPU; 500,000 — what a 1 GB database
+  holds — is ~18 s of CPU, about three minutes of wall time on the free tier's 0.1 CPU.
+- **Memory is flat, not proportional.** 500-row batches are read, rewritten and released,
+  so a list ten times longer costs the same 2.8 MB. This is why there is no row ceiling:
+  a big list makes a slow job, not a failing one.
+- **The event loop is never blocked long.** Every batch awaits the database, so the longest
+  stretch of uninterrupted Python is ~23 ms — comfortably inside the health check, so the
+  instance is not restarted underneath a running re-index.
+
+A pass over a list that is *already* current costs ~0.026 ms per record and writes nothing,
+because rows whose values already agree are skipped rather than rewritten with identical
+bytes. That is what makes running the nightly sweep unconditionally cheap.
+
+Two measurement traps worth recording, since both produced numbers that were wrong by an
+order of magnitude before they were caught. `tracemalloc` traces every allocation and
+inflates CPU roughly 10×, so memory and timing cannot be sampled in the same run. And an
+event-loop watchdog built on `await asyncio.sleep(0)` is a busy spin: it re-schedules
+immediately, saturates the process, and `process_time()` then charges all of it to the job
+being measured. Sleep a real interval and measure the overshoot instead.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:

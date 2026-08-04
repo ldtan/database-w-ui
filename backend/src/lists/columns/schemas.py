@@ -160,6 +160,27 @@ class ConversionReport(BaseModel):
     errors_truncated: bool
 
 
+class RecomputeReport(BaseModel):
+    """What a re-index of a list's calculated columns did, or was handed off to do.
+
+    Re-indexing never changes what anybody *sees* — every read recomputes calculated
+    cells anyway — so this reports on the stored copy Postgres filters and sorts over,
+    not on the values.
+    """
+
+    # How many records the run walks. The UI puts this on the action, so nobody
+    # triggers minutes of work without being told what they asked for.
+    records: int
+    # True when the work went to a background task and this response came back before
+    # it finished. Decided by `FORMULA_INLINE_MAX_RECORDS`, and it does not mean less
+    # work is done — a deferred run still walks the whole list.
+    deferred: bool
+    # How many records the index actually changed. ``None`` when deferred, because
+    # nobody has counted yet. Rows already agreeing are left alone, so a re-index of an
+    # already-current list reports 0 rather than the row count.
+    changed: Optional[int] = None
+
+
 class ColumnRead(BaseModel):
     uuid: UUID
     name: str

@@ -55,7 +55,8 @@ interface ImportResult {
  * list, since a file can do both; it reports per-row errors rather than failing the
  * whole file.
  *
- * Calculated columns are absent from every control here — see `stored` below.
+ * Calculated columns are exported and sorted like any other; only the template
+ * leaves them out — see `writable` below.
  */
 export function ImportExportDialog({
   listUuid,
@@ -85,20 +86,18 @@ export function ImportExportDialog({
   const [conjunction, setConjunction] = useState<"and" | "or">("and");
   const [conditions, setConditions] = useState<FilterCondition[]>([]);
 
-  // The columns that store a value of their own. A calculated column does not — it
-  // is a formula over its neighbours, worked out when a record is read — and every
-  // control on this tab turns out to want the distinction, for the same underlying
-  // reason each time: there is no cell to read, write, or order by.
+  // A file you *read* and a file you *write* want different column sets, and a
+  // calculated column is the whole of the difference.
   //
-  //  * the template would offer a heading to fill in whose values import discards;
-  //  * a ticked export column never reaches the file, because `export_rows` drops
-  //    it before the header is written;
-  //  * "Sort by" would name a column `_order_term` refuses to order by, since
-  //    `data ->> uuid` is NULL for every row — so the sort silently does nothing.
+  // Exporting one is right: it holds a real value, and a spreadsheet of orders
+  // without the line totals is not the export anyone asked for. It sorts and filters
+  // too, because the value is stored where the server can order by it.
   //
-  // In all three the server is already right and only the UI was offering the
-  // choice, which is the worst arrangement: it looks like it worked.
-  const stored = useMemo(
+  // Putting one in a **template** is not. A template is a file to fill in, and
+  // import discards any value given for a calculated column — the formula decides it
+  // from the row's own cells. A heading whose column is ignored is a heading that
+  // looks like it works.
+  const writable = useMemo(
     () => columns.filter((c) => c.type !== "calculated"),
     [columns],
   );
@@ -106,13 +105,13 @@ export function ImportExportDialog({
   // Default to all columns selected whenever the dialog opens.
   useEffect(() => {
     if (visible) {
-      setSelected(new Set(stored.map((c) => c.uuid)));
+      setSelected(new Set(columns.map((c) => c.uuid)));
       setResult(null);
       setExportError(null);
     }
-  }, [visible, stored]);
+  }, [visible, columns]);
 
-  const chosen = stored.filter((c) => selected.has(c.uuid));
+  const chosen = columns.filter((c) => selected.has(c.uuid));
 
   function toggle(uuid: string, on: boolean) {
     setSelected((prev) => {
@@ -151,11 +150,12 @@ export function ImportExportDialog({
 
   // Every writable column, not the export tab's ticked subset: a template answers
   // "what shape does a file for this list have?", and the answer is the whole list
-  // minus what you cannot write. Columns you have nothing to say about can be
-  // deleted from the file — import only sets the ones it finds.
+  // minus what you cannot write — which is where `writable` differs from the export
+  // half. Columns you have nothing to say about can be deleted from the file —
+  // import only sets the ones it finds.
   function handleTemplate() {
     if (templateFormat === "json") {
-      const sample = Object.fromEntries(stored.map((c) => [c.name, ""]));
+      const sample = Object.fromEntries(writable.map((c) => [c.name, ""]));
       downloadFile(
         `${listName}-template.json`,
         JSON.stringify([sample], null, 2),
@@ -164,7 +164,7 @@ export function ImportExportDialog({
     } else {
       downloadFile(
         `${listName}-template.csv`,
-        toCsv(stored.map((c) => c.name), []),
+        toCsv(writable.map((c) => c.name), []),
         "text/csv",
       );
     }
@@ -241,7 +241,7 @@ export function ImportExportDialog({
               icon="pi pi-file"
               text
               onClick={handleTemplate}
-              disabled={stored.length === 0}
+              disabled={writable.length === 0}
             />
             <Button label="Close" text onClick={onHide} />
           </>
@@ -266,7 +266,7 @@ export function ImportExportDialog({
 
             <FormSection
               title="Columns"
-              description={`Headers use the column name. ${chosen.length} of ${stored.length} selected.`}
+              description={`Headers use the column name. ${chosen.length} of ${columns.length} selected.`}
             >
               <div className="flex items-center gap-1 -mt-1">
                 <Button
@@ -274,7 +274,7 @@ export function ImportExportDialog({
                   text
                   size="small"
                   onClick={() =>
-                    stored.forEach((c) => toggle(c.uuid, true))
+                    columns.forEach((c) => toggle(c.uuid, true))
                   }
                 />
                 <Button
@@ -282,12 +282,12 @@ export function ImportExportDialog({
                   text
                   size="small"
                   onClick={() =>
-                    stored.forEach((c) => toggle(c.uuid, false))
+                    columns.forEach((c) => toggle(c.uuid, false))
                   }
                 />
               </div>
               <div className="flex flex-col gap-1 max-h-48 overflow-auto">
-                {stored.map((col) => (
+                {columns.map((col) => (
                   <div key={col.uuid} className="flex items-center gap-2">
                     <Checkbox
                       inputId={`io-${col.uuid}`}
@@ -322,7 +322,7 @@ export function ImportExportDialog({
                   <Dropdown
                     inputId="io-sort"
                     value={sortColumn}
-                    options={stored.map((c) => ({
+                    options={columns.map((c) => ({
                       label: c.display_name,
                       value: c.uuid,
                     }))}

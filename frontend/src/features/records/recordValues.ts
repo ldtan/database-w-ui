@@ -25,7 +25,8 @@ export interface ResolvedField {
  * which is what `enabled: false` already means everywhere it is read.
  *
  * The same reasoning `resolveFields` applies to calculated columns, one step
- * short of it: those store nothing at all, so they are dropped rather than shown.
+ * further: the formula is their only writer, so they are dropped from an input
+ * form rather than shown disabled.
  */
 function writable(column: Column): boolean {
   return !column.config.onupdate;
@@ -36,9 +37,9 @@ function writable(column: Column): boolean {
  * label overrides. An empty/absent config means "all columns in schema order".
  *
  * `includeCalculated` is what separates a display surface from an input one. A
- * calculated column is computed on read and rejected on write, so it can never be
- * an input — but it is exactly what a view form exists to show, and the value is
- * already sitting in the record the backend handed over.
+ * calculated column is written by its formula and rejected from a client write, so
+ * it can never be an input — but it is exactly what a view form exists to show, and
+ * the value is already sitting in the record the backend handed over.
  *
  * **A column the config has never heard of is newer than the config, not excluded
  * by it**, so it is appended in schema order rather than dropped. The distinction

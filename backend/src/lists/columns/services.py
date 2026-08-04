@@ -14,7 +14,7 @@ from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from ..items.models import ListItem
 from ..models import List
-from .enums import PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
+from .enums import COMPUTED_TYPES, PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column, in_shape
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
@@ -79,7 +79,7 @@ class ColumnService:
         cls, db: AsyncSession, lst: List, payload: ColumnCreate, user
     ) -> Column:
         config = await cls._validate_config(
-            db, lst, payload.type, payload.config, user
+            db, lst, payload.type, payload.config, user, current_name=payload.name
         )
         column = Column(
             list_id=lst.id,
@@ -129,6 +129,10 @@ class ColumnService:
                 user,
                 existing=column.config,
                 current_uuid=column.uuid,
+                # The name this save lands on: a PATCH may rename and re-formulate in
+                # one request, and a cycle has to be judged against the name the
+                # formula will be found under afterwards.
+                current_name=payload.name or column.name,
             )
             new_target = (column.config or {}).get("target_list_uuid")
             if old_target is not None and str(old_target) != str(new_target):
@@ -297,6 +301,7 @@ class ColumnService:
         user,
         existing: Optional[dict] = None,
         current_uuid: Optional[UUID] = None,
+        current_name: Optional[str] = None,
     ) -> dict:
         """Validate type-specific settings and return the JSON-ready dict to store.
 
@@ -306,6 +311,9 @@ class ColumnService:
         keep settings the caller did not resend (choice options included).
         ``current_uuid`` is the column being updated (absent on create), needed
         to refuse a nested lookup nesting under itself or its own descendants.
+        ``current_name`` is the name this column will have once saved — the *new*
+        one when a PATCH renames it — which is what a formula cycle is expressed in,
+        since formulas reference columns by name.
         """
         # Only the keys the caller explicitly set on this request, so that on
         # update the merge below preserves stored settings left unspecified.
@@ -393,24 +401,29 @@ class ColumnService:
             )
 
         if type_ == ColumnType.calculated:
+            from .chain import find_cycle, formula_edges
             from .formula import column_refs, parse
 
             formula = parse(data.get("formula"))
-            # Every referenced name must be an existing number column of this list.
-            # A calculated column referencing itself, or another calculated column,
-            # is caught here too: on update it is among these siblings and is not a
-            # `number`; on create its name is not present at all.
+            # `in_shape`, not `deleted_at` alone: a conversion's scratch column is live
+            # but not a field of the list, so `_columns_by_key` will never hand its
+            # value to a formula. Letting one be referenced here would save a formula
+            # whose operand is permanently missing, and — now that the answer is
+            # stored — write a blank into something a filter can find.
             siblings = (
                 await db.execute(
-                    select(Column).where(
-                        Column.list_id == lst.id, Column.deleted_at.is_(None)
-                    )
+                    select(Column).where(Column.list_id == lst.id, in_shape())
                 )
             ).scalars().all()
             by_name = {c.name: c for c in siblings}
+            # `calculated` is referenceable now that the value is stored: a chain is
+            # computed front to back in one pass (`chain.build_chain`), so reading
+            # another formula's answer is reading this write's, not the last one's.
+            # Cycles are what that opens up, and they are refused below.
             referenceable = {
                 ColumnType.number,
                 ColumnType.text,
+                ColumnType.calculated,
             }
             for name in sorted(column_refs(formula)):
                 target = by_name.get(name)
@@ -420,11 +433,39 @@ class ColumnService:
                     )
                 if target.type not in referenceable:
                     raise ValidationError(
-                        f"Formula can only reference number or text columns; "
-                        f"'{name}' is {target.type.value}"
+                        f"Formula can only reference number, text or calculated "
+                        f"columns; '{name}' is {target.type.value}"
                     )
             if data.get("default") is not None:
                 raise ValidationError("A calculated column cannot have a default")
+            if data.get("unique"):
+                # Meaningless while nothing was stored, and a trap now that something
+                # is: `_enforce_unique` reads the record, so this would start rejecting
+                # writes because two rows computed the same answer — which is a
+                # property of the formula, not of anything the writer typed.
+                raise ValidationError("A calculated column cannot be unique")
+
+            # Self-reference used to be caught by the type check (the column was among
+            # its own siblings and was not a `number`). Now that `calculated` is
+            # referenceable it is a cycle of length one, and it comes out here with
+            # every longer ring.
+            if current_name:
+                edges = formula_edges(siblings, also=frozenset({current_name}))
+                calc_names = {
+                    c.name for c in siblings if c.type in COMPUTED_TYPES
+                } | {current_name}
+                # The pending formula, not the stored one: on update `formula_edges`
+                # read the config this save is replacing, and on create there is no
+                # row to read at all.
+                edges[current_name] = {
+                    name for name in column_refs(formula) if name in calc_names
+                }
+                cycle = find_cycle(edges, current_name)
+                if cycle is not None:
+                    raise ValidationError(
+                        "A formula cannot depend on itself: "
+                        + " -> ".join(cycle)
+                    )
 
         if type_ in PRINCIPAL_TYPES and data.get("default") is not None:
             # A user column may default to the acting user — a dynamic token resolved

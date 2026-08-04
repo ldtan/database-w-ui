@@ -170,14 +170,13 @@ async def test_total_respects_the_search(client, list_uuid, add_column):
     assert res.headers["X-Total-Count"] == "2"
 
 
-async def test_sort_by_calculated_column_falls_back_rather_than_emptying(
+async def test_sort_by_calculated_column_orders_by_the_computed_value(
     client, list_uuid, add_column
 ):
-    """A calculated column stores nothing, so there is no field to order by.
+    """A calculated column is stored, so ordering by it is an ordinary `data ->> key`.
 
-    The grid does not offer the header, but the query parameter is public. It must
-    degrade to the stable default order rather than ordering every row by NULL and
-    handing back an arbitrary page.
+    This used to degrade to the stable default order — the term was dropped because
+    there was no field to order by — and the grid did not offer the header at all.
     """
     score = await add_column(
         list_uuid, name="score", display_name="Score", type="number"
@@ -199,8 +198,59 @@ async def test_sort_by_calculated_column_falls_back_rather_than_emptying(
     )
 
     assert res.status_code == 200
-    assert [r["data"][score] for r in res.json()] == [1, 2, 3]  # insertion order
-    assert [r["data"][doubled] for r in res.json()] == [2, 4, 6]  # still computed
+    assert [r["data"][doubled] for r in res.json()] == [6, 4, 2]
+    assert [r["data"][score] for r in res.json()] == [3, 2, 1]
+
+    asc = await client.get(
+        f"/api/lists/{list_uuid}/items/?sort_by={doubled}&sort_dir=asc"
+    )
+    assert [r["data"][doubled] for r in asc.json()] == [2, 4, 6]
+
+
+async def test_a_numeric_formula_sorts_numerically_and_a_text_one_alphabetically(
+    client, list_uuid, add_column
+):
+    """One list, two formulas, no declared output type.
+
+    The language decides the type per formula, so `_order_terms` emits a
+    `jsonb_typeof`-guarded numeric reading with the text reading behind it. Numbers
+    must not sort as text (`100` before `9`), and text must not all collapse to NULL.
+    """
+    score = await add_column(
+        list_uuid, name="score", display_name="Score", type="number"
+    )
+    label = await add_column(
+        list_uuid, name="label", display_name="Label", type="text"
+    )
+    scaled = await add_column(
+        list_uuid,
+        name="scaled",
+        display_name="Scaled",
+        type="calculated",
+        config={"formula": "score * 1"},
+    )
+    shout = await add_column(
+        list_uuid,
+        name="shout",
+        display_name="Shout",
+        type="calculated",
+        config={"formula": "UPPER(label)"},
+    )
+    for value, text in ((9, "beta"), (100, "alpha"), (10, "gamma")):
+        await client.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {score: value, label: text}},
+        )
+
+    numeric = await client.get(
+        f"/api/lists/{list_uuid}/items/?sort_by={scaled}&sort_dir=asc"
+    )
+    assert [r["data"][scaled] for r in numeric.json()] == [9, 10, 100]
+
+    textual = await client.get(
+        f"/api/lists/{list_uuid}/items/?sort_by={shout}&sort_dir=asc"
+    )
+    assert [r["data"][shout] for r in textual.json()] == ["ALPHA", "BETA", "GAMMA"]
 
 
 async def test_sort_dir_is_validated(client, list_uuid, add_column):

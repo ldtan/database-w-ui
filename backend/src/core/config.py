@@ -41,6 +41,19 @@ class Settings(BaseSettings):
     # per-username limit doing the work.
     LOGIN_MAX_FAILURES_PER_IP: int = 50
 
+    # Above this many records, re-indexing a list's calculated columns is handed to a
+    # background task and the request answers at once. Below it the work happens in the
+    # request, so the response is already correct when it goes out — which is every list
+    # in a deployment this size, and why the deferred path is rarely reached.
+    #
+    # The threshold decides who waits, **not** how much work is done: a deferred run
+    # still walks the whole list. Stopping partway would leave the index holding two
+    # formulas' answers at once, which filters incoherently — strictly worse than one
+    # that is uniformly a version behind. Measured at ~0.035 ms of app CPU per record,
+    # so this threshold is ~0.2 s of CPU — under two seconds of wall time even on a
+    # 0.1-CPU instance.
+    FORMULA_INLINE_MAX_RECORDS: int = 5_000
+
     @model_validator(mode="after")
     def _auth_may_only_be_disabled_in_debug(self) -> "Settings":
         """DISABLE_AUTH is a development shortcut and a production disaster.
