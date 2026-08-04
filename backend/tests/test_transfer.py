@@ -1,4 +1,7 @@
 """Streaming export and bulk import of records."""
+import json
+
+from src.lists.transfer import services as transfer_services
 
 
 async def _seed(client, list_uuid, add_column):
@@ -262,11 +265,18 @@ async def test_export_larger_than_a_batch_resolves_labels_mid_stream(
         client, add_column, workspace_uuid, list_uuid, [f"School {i}" for i in range(20)]
     )
     # More than _EXPORT_BATCH (500), so labels load repeatedly while streaming.
-    body = "school\n" + "".join(f"School {i % 20}\n" for i in range(1200))
-    imported = await client.post(
-        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
-    )
-    assert imported.json()["created"] == 1200, imported.text
+    # Seeded in two files because one import is capped at MAX_ROWS — which is what
+    # the cap's own message tells anyone with a large file to do. Nothing here is
+    # about import; it just fills the list faster than 1200 POSTs would.
+    for start in (0, 600):
+        body = "school\n" + "".join(
+            f"School {i % 20}\n" for i in range(start, start + 600)
+        )
+        imported = await client.post(
+            f"/api/lists/{list_uuid}/import",
+            files={"file": ("rows.csv", body, "text/csv")},
+        )
+        assert imported.json()["created"] == 600, imported.text
 
     export = await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
     assert export.status_code == 200, export.text
@@ -364,3 +374,82 @@ async def test_import_ignores_a_value_for_a_calculated_column(
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert items[0]["data"][total] == 30  # the formula's answer, not the file's 999
+
+
+async def test_import_refuses_a_file_over_the_row_cap_without_writing_any_of_it(
+    client, list_uuid, add_column, monkeypatch
+):
+    """Every row is several round trips, so the file has to be bounded somewhere.
+    The cap is checked before the first insert, which is the part worth pinning: a
+    file one row too long has to leave the list exactly as it was, or "split it and
+    import each part separately" would silently mean "and skip whatever already
+    went in"."""
+    monkeypatch.setattr(transfer_services, "MAX_ROWS", 3)
+    name, age = await _seed(client, list_uuid, add_column)
+
+    body = "name,age\n" + "".join(f"P{i},{i}\n" for i in range(4))
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "more than 3 rows" in resp.json()["detail"]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/")).json() == []
+
+    # The cap itself is allowed through, so the message names a limit that works.
+    body = "name,age\n" + "".join(f"P{i},{i}\n" for i in range(3))
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] == 3
+
+
+async def test_import_refuses_a_file_over_the_row_cap_as_json_too(
+    client, list_uuid, add_column, monkeypatch
+):
+    """The cap lives in `import_records` rather than in either parser, so both
+    upload formats get it from one place."""
+    monkeypatch.setattr(transfer_services, "MAX_ROWS", 2)
+    await _seed(client, list_uuid, add_column)
+
+    body = json.dumps([{"name": f"P{i}", "age": i} for i in range(3)])
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.json", body, "application/json")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "more than 2 rows" in resp.json()["detail"]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/")).json() == []
+
+
+async def test_import_refuses_an_upload_over_the_size_cap(
+    client, list_uuid, add_column, monkeypatch
+):
+    """The row cap alone bounds the database work but not the memory: the file is
+    read whole before anything can count its rows. A single enormous row would pass
+    a row cap and still be a request that cannot be served."""
+    monkeypatch.setattr(transfer_services, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    name, _ = await _seed(client, list_uuid, add_column)
+
+    body = "name,age\n" + "x" * (2 * 1024 * 1024) + ",1\n"
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import", files={"file": ("rows.csv", body, "text/csv")}
+    )
+    assert resp.status_code == 400, resp.text
+    assert "larger than 1 MB" in resp.json()["detail"]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/")).json() == []
+
+
+async def test_import_answers_an_undecodable_file_rather_than_failing(
+    client, list_uuid, add_column
+):
+    """A file saved in the wrong encoding is the user's mistake to fix, so it gets a
+    sentence saying so — it used to escape the handler and become a 500."""
+    await _seed(client, list_uuid, add_column)
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", b"name,age\n\xff\xfe\x00bad,1\n", "text/csv")},
+    )
+    assert resp.status_code == 400, resp.text
+    assert "UTF-8" in resp.json()["detail"]
