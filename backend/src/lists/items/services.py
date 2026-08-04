@@ -586,15 +586,40 @@ class ListItemService:
     ) -> int:
         """Soft-delete several records in one transaction. Unknown/already-deleted
         uuids are skipped. Returns the number actually deleted. References to these
-        rows survive, as for a single delete."""
-        now = datetime.now(timezone.utc)
-        deleted = 0
-        for uuid in uuids:
-            item = await cls.get_by_uuid(db, lst.id, uuid)
-            if item is None:
-                continue
-            item.deleted_at = now
-            deleted += 1
+        rows survive, as for a single delete.
+
+        One UPDATE for the whole batch rather than a resolve-then-assign per uuid,
+        which is what made a bulk delete cost a round trip per record. The `list_id`
+        clause is what keeps this scoped: a uuid belonging to another list is simply
+        not matched, so it is skipped exactly as an unknown one is — and that is the
+        only place the scoping lives now, since the caller resolves permissions by
+        uuid alone.
+
+        Counting rows matched rather than uuids handled also stops a uuid repeated
+        in the payload from being counted twice, which the old loop did.
+        """
+        parsed = {
+            value
+            for value in (coerce_uuid(uuid) for uuid in uuids)
+            if value is not None
+        }
+        if not parsed:
+            return 0
+        result = await db.execute(
+            sa.update(ListItem)
+            .where(
+                ListItem.list_id == lst.id,
+                ListItem.uuid.in_(parsed),
+                ListItem.deleted_at.is_(None),
+            )
+            .values(deleted_at=datetime.now(timezone.utc))
+            # These rows are in the identity map — the caller's permission check
+            # loaded them — so the in-memory copies are updated in Python rather
+            # than left claiming they are still live. "evaluate" does that without
+            # the extra SELECT "fetch" would issue.
+            .execution_options(synchronize_session="evaluate")
+        )
+        deleted = result.rowcount
         if deleted:
             await db.commit()
         return deleted

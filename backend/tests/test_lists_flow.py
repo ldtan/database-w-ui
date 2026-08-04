@@ -1,6 +1,6 @@
 """End-to-end tests over the HTTP API: workspaces, lists, columns, records."""
 from datetime import datetime, timezone
-from uuid import UUID
+from uuid import UUID, uuid7
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
@@ -228,6 +228,75 @@ async def test_bulk_delete_items(client, list_uuid, add_column):
 
     items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
     assert [i["data"][col] for i in items] == ["c"]
+
+
+async def test_bulk_delete_counts_a_repeated_uuid_once(client, list_uuid, add_column):
+    """The count is what the UI reports back, so it has to be rows removed rather
+    than uuids handled. Naming the same record twice used to add two to the total
+    while deleting one."""
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "a"}}
+    )
+    uuid = resp.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": [uuid, uuid]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 1
+
+
+async def test_bulk_delete_ignores_a_uuid_from_another_list(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Permissions are now resolved from the uuid alone, without reference to which
+    list the record is on, so the delete itself is what confines the batch. A record
+    the caller owns elsewhere must not go just because it was named here."""
+    resp = await client.post(
+        "/api/lists/",
+        json={"name": "l2", "display_name": "List 2", "workspace_uuid": workspace_uuid},
+    )
+    other_list = resp.json()["uuid"]
+    other_col = await add_column(other_list, name="n", display_name="N", type="text")
+    resp = await client.post(
+        f"/api/lists/{other_list}/items/", json={"data": {other_col: "keep"}}
+    )
+    stranger = resp.json()["uuid"]
+
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "go"}}
+    )
+    mine = resp.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete", json={"uuids": [mine, stranger]}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 1
+
+    survivors = (await client.get(f"/api/lists/{other_list}/items/")).json()
+    assert [i["uuid"] for i in survivors] == [stranger]
+
+
+async def test_bulk_delete_refuses_an_oversized_batch(client, list_uuid):
+    """The cap is the only thing bounding this endpoint's work — nothing else on the
+    request says how many uuids may arrive."""
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete",
+        json={"uuids": [str(uuid7()) for _ in range(501)]},
+    )
+    assert resp.status_code == 422, resp.text
+
+    # And the boundary itself is allowed through (none of them exist, so nothing
+    # is deleted — the point is that it is accepted at all).
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-delete",
+        json={"uuids": [str(uuid7()) for _ in range(500)]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["deleted"] == 0
 
 
 async def test_required_rejected_when_missing(client, list_uuid, add_column):

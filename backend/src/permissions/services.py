@@ -247,6 +247,12 @@ class PermissionService:
                 by_type.setdefault(ResourceType(resource_type), set()).add(parsed)
 
         ids: dict[tuple[ResourceType, UUID], int] = {}
+        # Held only to keep the loaded rows alive. The identity map references them
+        # weakly, so without a strong reference of our own they are collected as soon
+        # as this loop drops them — and `_security_context` below, which fetches each
+        # one by id, then misses and re-selects it. That put a query per resource back
+        # into the very call written to avoid one.
+        resolved: list = []
         for rt, uuids in by_type.items():
             model = _MODELS.get(rt)
             if model is None:
@@ -257,6 +263,7 @@ class PermissionService:
                 )
             )
             for obj in rows.scalars().all():
+                resolved.append(obj)
                 ids[(rt, obj.uuid)] = obj.id
 
         contexts: dict[tuple[ResourceType, UUID], tuple[list, int]] = {}
