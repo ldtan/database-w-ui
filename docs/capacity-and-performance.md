@@ -85,6 +85,53 @@ event-loop watchdog built on `await asyncio.sleep(0)` is a busy spin: it re-sche
 immediately, saturates the process, and `process_time()` then charges all of it to the job
 being measured. Sleep a real interval and measure the overshoot instead.
 
+## Cloning a list with its records
+
+The other operation that scales with the list rather than the page, and the only one that
+was ever a threat to the instance rather than to a response time. `POST /lists/{uuid}/clone`
+with `with_records: true` used to load every source record as an ORM instance, build a
+second instance for each copy, and hold both until a single flush at the end.
+
+Measured 2026-08-04, same machine, on a synthetic list of three columns at ~1.9 kB per
+record, with RSS sampled every 10 ms from a separate thread *during* the call — reading it
+afterwards measures what survived garbage collection, which for the old version understated
+the peak by about 5×:
+
+| | 20,000 records | 100,000 records |
+|---|---|---|
+| Peak RSS over baseline, before | 174 MB | 859 MB |
+| **Peak RSS over baseline, after** | **0.6 MB** | **0.6 MB** |
+| Wall time, before | 4.3 s | 23.7 s |
+| **Wall time, after** | **1.9 s** | **9.9 s** |
+| Throughput, after | 10,700 rows/s | 10,100 rows/s |
+
+- **This was an availability bug, not a slow endpoint.** 859 MB of peak growth cannot happen
+  on a 512 MB instance; the process is killed and every user goes down with it. Even 20,000
+  records put it at ~320 MB against a ~146 MB idle baseline. One request, from any user who
+  owns a list, was enough.
+- **Memory is now flat, not merely smaller** — the same 0.6 MB at both sizes, and the same
+  at any size. The source is keyset-paged and each batch is copied by a single
+  `INSERT ... SELECT` that remaps the column-uuid keys with `jsonb_object_agg`, so record
+  data never becomes a Python object at all. Only the ids and the new uuids cross into the
+  app.
+- **It also got 2.4× faster**, which is a side effect rather than the point: what was
+  removed is a JSONB decode and re-encode per row, plus two ORM instances. On a 0.1-CPU
+  instance the win is larger than it looks here, because nearly all of the remaining time
+  is Postgres rather than app CPU, and app CPU is what the platform meters.
+- **The batches deliberately do not commit as they go**, unlike the maintenance jobs that
+  share this shape. Those can be interrupted because their half-done state is one the data
+  was already in; a half-populated clone is not. Keeping the batches in one transaction is
+  what leaves a failed clone with nothing behind.
+
+Wall time is still linear, and its dominant term is now `ix_list_items_data`, the GIN index
+on `data`: every inserted row has to be indexed into it, which costs more than the heap
+insert and the key remap together. Extrapolating, 500,000 records — what a 1 GB database
+holds — is roughly 50 s here and correspondingly longer on the free tier. That is a slow
+request, not a broken one, and Render allows a 100-minute request, so there is no case yet
+for moving the work to a background task. Deferring it would not have helped anyway: the
+same loop in a background task holds the same memory in the same process, and would have
+OOMed after telling the caller it had succeeded.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:
