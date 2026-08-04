@@ -812,6 +812,41 @@ export function GuidePage() {
           <strong>double</strong> equals sign for “is equal to”.
         </p>
 
+        <h3 className="font-semibold pt-1">When a cell is empty</h3>
+        <p>
+          A formula that needs a value it hasn’t got gives no answer at all: leave{" "}
+          <em>Discount</em> blank and <Code>price - discount</Code> is blank too,
+          rather than quietly treating the gap as a zero. An incomplete record
+          should look incomplete.
+        </p>
+        <p>
+          When you’d rather fill the gap in, <Code>IS_NULL(x)</Code> is the one
+          thing that can look at an empty cell without going blank itself. It gives{" "}
+          <Code>1</Code> when there’s nothing there and <Code>0</Code> when there
+          is, so pair it with <Code>IF</Code>:
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>IF(IS_NULL(discount), price, price - discount)</Code> — no
+            discount means full price.
+          </li>
+          <li>
+            <Code>IF(IS_NULL(nickname), full_name, nickname)</Code> — the first of
+            these that has been filled in.
+          </li>
+          <li>
+            <Code>IS_NULL(email) + IS_NULL(phone)</Code> — how many contact details
+            are still missing, as a number you can sort by.
+          </li>
+        </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          It also covers a sum that can’t be worked out, which is the tidy way to
+          head off dividing by nothing:{" "}
+          <Code>IF(IS_NULL(total / qty), 0, total / qty)</Code>. Note that empty is
+          not the same as zero — a <em>Quantity</em> of 0 is a value someone typed,
+          so <Code>IS_NULL(qty)</Code> is <Code>0</Code> for it.
+        </p>
+
         <h3 className="font-semibold pt-1">A few worked examples</h3>
         <ul className="flex flex-col gap-1">
           <li>
@@ -823,7 +858,7 @@ export function GuidePage() {
             — <em>Ada L.</em>
           </li>
           <li>
-            <Code>IF(LEN(notes) &gt; 0, "Has notes", "—")</Code> — a tidy flag
+            <Code>IF(IS_NULL(notes), "—", "Has notes")</Code> — a tidy flag
             column.
           </li>
           <li>
@@ -1143,6 +1178,12 @@ export function GuidePage() {
             value shouldn’t drag an average down.
           </li>
         </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          An average of <em>nothing</em> is blank rather than 0, since there is no
+          such number to show. If you’d rather see a figure,{" "}
+          <Code>IS_NULL</Code> works here as it does in a formula:{" "}
+          <Code>IF(IS_NULL(AVG(cost)), 0, AVG(cost))</Code>.
+        </p>
         <Callout tone="tip" title="If a card shows a warning">
           A metric finds its columns by their short name. Rename a column it uses and
           the card says which one it can no longer find, rather than quietly showing

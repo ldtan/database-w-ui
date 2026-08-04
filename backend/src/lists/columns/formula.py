@@ -16,8 +16,8 @@ can at worst return a wrong number or nothing.
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
 **and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
 and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``IF(cond, then, else)``,
-and the string functions ``CONCAT``, ``UPPER``, ``LOWER``, ``TRIM``, ``LEN``,
-``LEFT``, ``RIGHT`` and ``REPLACE``.
+``IS_NULL(x)``, and the string functions ``CONCAT``, ``UPPER``, ``LOWER``, ``TRIM``,
+``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``.
 
 Every function name is ALL CAPS, and a column name is a slug that must start with
 a lowercase letter — so the two namespaces cannot overlap and no formula is ever
@@ -30,6 +30,13 @@ number or text depending on the formula; the column has no fixed output type.
 Missing data propagates as "no value": if any referenced cell is empty, the
 result is ``None`` (the cell renders blank) rather than a silent zero or an empty
 string — an incomplete row should read as incomplete.
+
+``IS_NULL(x)`` is the one function that does not propagate it, and the only way
+to ask about a blank at all: every other way of looking at one blanks the whole
+formula, so ``IF(notes == "", …)`` can never be true. It answers ``1`` when its
+argument has no value and ``0`` when it has one — which makes ``IF(IS_NULL(x),
+0, x)`` the "treat blank as zero" a spreadsheet writes as IFNULL/COALESCE, and
+``IS_NULL(a) + IS_NULL(b)`` a count of how many of them are missing.
 
 This grammar is *row-scoped*: every name it resolves is one cell of one record.
 List **metrics** layer a second, aggregate-level grammar on top of it
@@ -59,6 +66,7 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "ROUND": (1, 2),
     "ABS": (1, 1),
     "IF": (3, 3),
+    "IS_NULL": (1, 1),
     "CONCAT": (2, None),
     "UPPER": (1, 1),
     "LOWER": (1, 1),
@@ -72,6 +80,13 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
 _UNARYOPS = (ast.UAdd, ast.USub, ast.Not)
 _CMPOPS = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
+
+# What evaluating a row expression may raise on data it cannot compute over —
+# a division by zero, a number too large to represent. Public because both
+# callers of the row evaluator (`evaluate` below, and the metric language, which
+# runs one row at a time) have to swallow these per row, and because `IS_NULL`
+# treats them as one more way of having no value.
+ARITHMETIC_ERRORS = (ZeroDivisionError, ValueError, TypeError, OverflowError, MemoryError)
 
 # A formula longer than this is almost certainly a mistake or an attempt to make
 # parsing expensive; either way it is not something a person typed on purpose.
@@ -240,7 +255,7 @@ def evaluate(formula: Formula, values: dict[str, object]) -> Union[float, str, N
     """
     try:
         result = _eval(formula.tree.body, values)
-    except (ZeroDivisionError, ValueError, TypeError, OverflowError, MemoryError):
+    except ARITHMETIC_ERRORS:
         return None
     return normalize_result(result)
 
@@ -341,6 +356,20 @@ def _eval(node: ast.AST, values: dict[str, object]):
                 return None
             branch = node.args[1] if cond else node.args[2]
             return _eval(branch, values)
+        if name == "IS_NULL":
+            # Evaluated before the "any argument missing blanks the call" rule
+            # below, because being missing is the whole question. Arithmetic
+            # errors answer 1 for the same reason: `IS_NULL(total / qty)` asks
+            # whether that expression has a value, and dividing by zero is one
+            # more way of not having one.
+            try:
+                has_value = _eval(node.args[0], values) is not None
+            except ARITHMETIC_ERRORS:
+                return 1
+            # 1/0 rather than True/False so the answer is a *number*: arithmetic
+            # here is numbers only, and `IS_NULL(a) + IS_NULL(b)` — how many of
+            # these are missing — should add up rather than blank the cell.
+            return 0 if has_value else 1
         args = [_eval(a, values) for a in node.args]
         if any(a is None for a in args):
             return None

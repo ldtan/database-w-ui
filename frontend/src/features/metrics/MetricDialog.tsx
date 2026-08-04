@@ -139,7 +139,9 @@ export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
                 <code>UNIQUE</code>, <code>EMPTY</code>. What goes inside one is an
                 ordinary per-record expression, so <code>SUM(qty * price)</code>{" "}
                 multiplies first and totals after. Results combine with{" "}
-                <code>+ - * /</code> — <code>SUM(revenue) - SUM(cost)</code>.
+                <code>+ - * /</code> — <code>SUM(revenue) - SUM(cost)</code>.{" "}
+                <code>IS_NULL(x)</code> asks whether something came out blank:{" "}
+                <code>IF(IS_NULL(AVG(cost)), 0, AVG(cost))</code>.
                 {referenceable.length > 0
                   ? ` Columns you can aggregate: ${referenceable.join(", ")}.`
                   : " Add a number or text column first — a metric aggregates those."}

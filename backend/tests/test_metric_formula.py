@@ -123,6 +123,26 @@ def test_a_record_that_cannot_be_computed_blanks_only_itself():
     assert value_of("SUM(a / b)", rows) == 7
 
 
+def test_is_null_works_at_both_levels():
+    """Inside an aggregate it asks about one record's cell; outside it asks about
+    the aggregate's own result, which is how a card that would be blank gets a
+    number instead."""
+    assert value_of("SUM(IS_NULL(qty))", ROWS) == value_of("EMPTY(qty)", ROWS) == 1
+    assert value_of("IS_NULL(AVG(qty))", []) == 1
+    assert value_of("IF(IS_NULL(AVG(qty)), 0, AVG(qty))", []) == 0
+    assert value_of("IF(IS_NULL(AVG(qty)), 0, AVG(qty))", ROWS) == 7.5
+
+
+def test_is_null_sees_an_uncomputable_aggregate_expression_as_blank():
+    """A metric over records none of which count divides by zero, and IS_NULL is
+    the guard for it — so the error has to reach IS_NULL as a blank rather than
+    blanking the whole card on its way past."""
+    rows = [{"a": 5, "owner": None}, {"a": 5, "owner": None}]
+    assert value_of("SUM(a) / COUNT(owner)", rows) is None
+    assert value_of("IS_NULL(SUM(a) / COUNT(owner))", rows) == 1
+    assert value_of("IF(IS_NULL(SUM(a) / COUNT(owner)), 0, SUM(a) / COUNT(owner))", rows) == 0
+
+
 def test_a_bare_column_name_is_refused():
     """The rule that makes the two levels unambiguous: `hours` is one value per
     record, and a metric is one value in total."""

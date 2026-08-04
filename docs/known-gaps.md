@@ -88,7 +88,7 @@ shape.
 A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**
 columns, string functions over its **text** columns, and references to other **calculated**
 columns, all by name (`min`/`max`/`round`/`abs`,
-`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, and `IF`). The result is a number
+`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `IF`, and `IS_NULL`). The result is a number
 or a string depending on the formula; the column has no fixed output type. The formula is parsed
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
@@ -96,6 +96,14 @@ handed to it, so a formula cannot reach a builtin, an attribute or a subscript. 
 way — the moment it grows an `eval` or a real namespace, a list editor (an ordinary user, not
 an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is joined with
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
+
+A missing cell propagates as "no value" — any formula reading one is blank, never a silent zero.
+`IS_NULL(x)` is the **single exception**, and has to be: every other way of looking at a blank
+blanks the formula, so without it `IF(notes == "", …)` can never be true and there is no way to
+ask the question at all. It answers `1`/`0` rather than a boolean, so that `IS_NULL(a) +
+IS_NULL(b)` counts missing things instead of blanking (arithmetic here is numbers-only and a
+bool is not a number), and it treats an arithmetic failure as one more way of having no value,
+which is what makes `IF(IS_NULL(total / qty), 0, total / qty)` a working divide-by-zero guard.
 
 **The load-bearing decision is that the value is written down *and* recomputed.**
 `_validate_data` (`items/services.py`) writes each calculated cell into the record on create and
