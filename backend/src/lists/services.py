@@ -1,5 +1,6 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import json
 from typing import Optional, Sequence, Union
 from uuid import UUID, uuid7
 
@@ -32,6 +33,44 @@ from .views.schemas import ViewConfig
 
 # Everything scoped under a list; soft-deleted together when the list goes.
 _LIST_CHILD_MODELS = (Column, ListItem, View, Form, Metric)
+
+# Source records copied per statement by `clone`. What this bounds is the *statement* —
+# its duration, and the size of the two array parameters — not the total, since the
+# batches run one after another. Same distinction columns/backfill.py draws about its
+# own CHUNK.
+CLONE_CHUNK = 1_000
+
+# The record copy, performed entirely inside Postgres: the rows never become Python
+# objects, so cloning a large list costs the app neither the memory to hold it nor the
+# CPU to decode and re-encode every cell. `COALESCE(map ->> key, key)` is the SQL
+# spelling of `col_map.get(key, key)` — a data key the map does not mention (a leftover
+# from a deleted column, or a conversion's hidden scratch column, which `in_shape` kept
+# out of the clone's schema) is carried across untouched, as it always has been.
+#
+# The outer COALESCE is for a record whose `data` is `{}`: `jsonb_object_agg` over no
+# rows answers NULL, and the column is not nullable.
+#
+# uuids are minted per batch in Python and joined by position rather than generated in
+# SQL, because there is no uuid7 to generate them with — the same call migration
+# d2f6a8c41b93 made, for the same reason. `ORDER BY src.id` keeps the clone's rows in
+# the source's order, so their ids and their uuids agree about it.
+_COPY_RECORDS = text("""
+    INSERT INTO list_items (uuid, list_id, data, permissions_inherit, created_at, updated_at)
+    SELECT b.new_uuid,
+           :clone_id,
+           COALESCE(
+               (SELECT jsonb_object_agg(
+                           COALESCE(CAST(:col_map AS jsonb) ->> kv.key, kv.key), kv.value)
+                  FROM jsonb_each(src.data) AS kv),
+               '{}'::jsonb
+           ),
+           true,
+           :now, :now
+      FROM list_items AS src
+      JOIN unnest(CAST(:src_ids AS bigint[]), CAST(:new_uuids AS uuid[]))
+             AS b(src_id, new_uuid) ON b.src_id = src.id
+     ORDER BY src.id
+""")
 
 
 class ListService:
@@ -595,22 +634,47 @@ class ListService:
             )
 
         if with_records:
-            source_items = (
-                await db.execute(
-                    select(ListItem)
-                    .where(
-                        ListItem.list_id == source.id,
-                        ListItem.deleted_at.is_(None),
+            # Keyset-paged, not loaded whole: the source list is the one thing here
+            # whose size a caller controls, and holding all of it — twice, once as the
+            # source instances and once as the copies — is how a single clone request
+            # takes the process down. Only the ids come back to Python; the cells are
+            # copied by `_COPY_RECORDS` without ever leaving the database.
+            #
+            # Deliberately *not* committed per batch, unlike the maintenance jobs that
+            # share this shape. They can be interrupted because their half-done state is
+            # a state the data was already in; a half-populated clone is not. Keeping
+            # the batches inside the caller's transaction is what leaves a failed clone
+            # with nothing behind, and keeps the IntegrityError below meaningful.
+            after = 0
+            while True:
+                src_ids = (
+                    await db.execute(
+                        select(ListItem.id)
+                        .where(
+                            ListItem.list_id == source.id,
+                            ListItem.deleted_at.is_(None),
+                            ListItem.id > after,
+                        )
+                        .order_by(ListItem.id)
+                        .limit(CLONE_CHUNK)
                     )
-                    .order_by(ListItem.id)
+                ).scalars().all()
+                if not src_ids:
+                    break
+                after = src_ids[-1]
+                # One timestamp for the batch rather than one per row: the records were
+                # created by a single act, and staggering them by microseconds would
+                # claim otherwise.
+                await db.execute(
+                    _COPY_RECORDS,
+                    {
+                        "clone_id": clone.id,
+                        "col_map": json.dumps(col_map),
+                        "src_ids": list(src_ids),
+                        "new_uuids": [uuid7() for _ in src_ids],
+                        "now": datetime.now(timezone.utc),
+                    },
                 )
-            ).scalars().all()
-            for item in source_items:
-                data = {
-                    col_map.get(key, key): value
-                    for key, value in (item.data or {}).items()
-                }
-                db.add(ListItem(list_id=clone.id, data=data))
 
         try:
             await db.flush()
