@@ -54,6 +54,33 @@ class Settings(BaseSettings):
     # 0.1-CPU instance.
     FORMULA_INLINE_MAX_RECORDS: int = 5_000
 
+    # How many rows one import may carry — the list importer and the user batch
+    # importer both read this. A policy decision rather than a tuning knob: every row
+    # is validated and inserted through the ordinary service, several round trips
+    # apiece, so what this really sets is how long one import may occupy the single
+    # worker. Someone whose spreadsheets are routinely larger has a fair reason to
+    # raise it and no need to read the code to decide.
+    #
+    # Both importers check it before writing anything, so whatever it is set to, a
+    # file over the limit imports nothing rather than part of itself.
+    IMPORT_MAX_ROWS: int = 1_000
+
+    # What an uploaded file may weigh. Belongs to the instance rather than to the
+    # feature: the file is read whole, and a JSON one is then parsed whole again at
+    # several times its size on the wire, so the ceiling that matters is available
+    # memory. 8 MB suits the 512 MB instance this runs on, and a larger plan should
+    # not need a code change to use what it paid for.
+    MAX_UPLOAD_BYTES: int = 8 * 1024 * 1024
+
+    # Records one bulk delete may name. Unlike the two above, this one is also a
+    # published API limit — it reaches the OpenAPI schema through
+    # `BulkDeleteRequest`, and the frontend keeps its own copy to chunk a large
+    # selection against (a static build cannot read this). So it may be raised
+    # freely, but lowering it below the client's 500 would produce a validation
+    # error nobody could act on; change `BULK_DELETE_MAX` in ListDetailPage.tsx
+    # first if it ever needs to go down.
+    BULK_DELETE_MAX: int = 500
+
     @model_validator(mode="after")
     def _auth_may_only_be_disabled_in_debug(self) -> "Settings":
         """DISABLE_AUTH is a development shortcut and a production disaster.

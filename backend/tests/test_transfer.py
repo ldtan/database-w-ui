@@ -1,8 +1,7 @@
 """Streaming export and bulk import of records."""
 import json
 
-from src.core import uploads
-from src.lists.transfer import services as transfer_services
+from src.core.config import settings
 
 
 async def _seed(client, list_uuid, add_column):
@@ -266,7 +265,7 @@ async def test_export_larger_than_a_batch_resolves_labels_mid_stream(
         client, add_column, workspace_uuid, list_uuid, [f"School {i}" for i in range(20)]
     )
     # More than _EXPORT_BATCH (500), so labels load repeatedly while streaming.
-    # Seeded in two files because one import is capped at MAX_ROWS — which is what
+    # Seeded in two files because one import is capped at IMPORT_MAX_ROWS — which is
     # the cap's own message tells anyone with a large file to do. Nothing here is
     # about import; it just fills the list faster than 1200 POSTs would.
     for start in (0, 600):
@@ -385,7 +384,7 @@ async def test_import_refuses_a_file_over_the_row_cap_without_writing_any_of_it(
     file one row too long has to leave the list exactly as it was, or "split it and
     import each part separately" would silently mean "and skip whatever already
     went in"."""
-    monkeypatch.setattr(transfer_services, "MAX_ROWS", 3)
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 3)
     name, age = await _seed(client, list_uuid, add_column)
 
     body = "name,age\n" + "".join(f"P{i},{i}\n" for i in range(4))
@@ -410,7 +409,7 @@ async def test_import_refuses_a_file_over_the_row_cap_as_json_too(
 ):
     """The cap lives in `import_records` rather than in either parser, so both
     upload formats get it from one place."""
-    monkeypatch.setattr(transfer_services, "MAX_ROWS", 2)
+    monkeypatch.setattr(settings, "IMPORT_MAX_ROWS", 2)
     await _seed(client, list_uuid, add_column)
 
     body = json.dumps([{"name": f"P{i}", "age": i} for i in range(3)])
@@ -429,7 +428,7 @@ async def test_import_refuses_an_upload_over_the_size_cap(
     """The row cap alone bounds the database work but not the memory: the file is
     read whole before anything can count its rows. A single enormous row would pass
     a row cap and still be a request that cannot be served."""
-    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_BYTES", 1024 * 1024)
     name, _ = await _seed(client, list_uuid, add_column)
 
     body = "name,age\n" + "x" * (2 * 1024 * 1024) + ",1\n"

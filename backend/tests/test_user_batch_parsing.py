@@ -7,7 +7,8 @@ milliseconds.
 """
 import pytest
 
-from src.auth.users.batch.parsing import MAX_ROWS, parse_file
+from src.auth.users.batch.parsing import parse_file
+from src.core.config import settings
 from src.core.exceptions import ValidationError
 
 PERSON_HEADER = "name_prefix,first_name,middle_name,last_name,name_suffix,birth_date"
@@ -51,10 +52,10 @@ def test_headers_with_no_rows_is_not_an_error():
 
 
 def test_row_cap_is_enforced():
-    body = "".join(f"u{i},u{i}@example.com\n" for i in range(MAX_ROWS + 1))
+    body = "".join(f"u{i},u{i}@example.com\n" for i in range(settings.IMPORT_MAX_ROWS + 1))
     with pytest.raises(ValidationError) as exc:
         parse_file(f"username,email\n{body}")
-    assert str(MAX_ROWS) in str(exc.value)
+    assert str(settings.IMPORT_MAX_ROWS) in str(exc.value)
 
 
 @pytest.mark.parametrize(
