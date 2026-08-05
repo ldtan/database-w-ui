@@ -71,4 +71,32 @@ class PermissionGrant(BaseModel):
         sa.Index(
             "ix_permission_grants_resource", "resource_type", "resource_id"
         ),
+        # Every collection-visibility filter asks the opposite question from the one
+        # this table was indexed for: not "who may touch this resource" but "what may
+        # this principal touch". `workspace_view_filter`, `list_query_filter` and
+        # `item_view_filter` all select `resource_id` given a principal and a
+        # resource_type.
+        #
+        # The unique indexes above can be used for that — resource_type does lead
+        # them and the filters do constrain it — but badly, because it is the whole
+        # of the usable prefix and it has five values. Measured at 50k grants, the
+        # planner bitmap-scanned `uq_permission_grants_user` through 33 buffers to
+        # return nothing: it walked the entire 'workspace' fifth of the index looking
+        # for one principal. Leading with the principal instead makes that 2 buffers.
+        #
+        # Partial for the same reason the unique indexes are: exactly one principal
+        # column is set per row, so half the entries would otherwise be NULLs no
+        # query will ever look for.
+        sa.Index(
+            "ix_permission_grants_user_resource_type",
+            "user_id",
+            "resource_type",
+            postgresql_where=sa.text("user_id IS NOT NULL"),
+        ),
+        sa.Index(
+            "ix_permission_grants_group_resource_type",
+            "group_id",
+            "resource_type",
+            postgresql_where=sa.text("group_id IS NOT NULL"),
+        ),
     )
