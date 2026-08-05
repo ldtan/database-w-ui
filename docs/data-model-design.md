@@ -332,9 +332,13 @@ Notes:
   an explicit action: `POST /lists/{uuid}/columns/recompute`, offered by the column dialog
   right after a formula edit, with the nightly `recompute_calculated` as the backstop. A
   formula may reference another `calculated` column — `columns/chain.py` topologically sorts
-  the chain so it settles in one pass per write, and refuses cycles at save time — but never
-  carry a `default` or `unique`, neither of which means anything when nobody supplies the
-  value. Full details and the costs in [known gaps §5](known-gaps.md).
+  the chain so it settles in one pass per write, and refuses cycles at save time. It never
+  carries a `default`, which means nothing when the formula overwrites it on the same write,
+  but it **may be `unique`**: that is a question about the answer, and a formula is how a key
+  no single column holds gets expressed. The check runs after the computed cell is written,
+  so it sees this write's answer — and compares it against the other rows' *index*, which is
+  the one place staleness costs more than a misordered row. Full details and the costs in
+  [known gaps §5](known-gaps.md).
 - The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
   **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind

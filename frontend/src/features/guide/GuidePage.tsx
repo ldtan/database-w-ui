@@ -898,8 +898,9 @@ export function GuidePage() {
           <ul className="flex flex-col gap-1 m-0">
             <li>
               The formula is the only thing that writes it, so you can’t type into
-              it, give it a <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> or{" "}
-              <Ui>Unique</Ui>.
+              it, give it a <Ui>Default value</Ui>, or mark it <Ui>Required</Ui> —
+              there’s no cell for anyone to fill in or leave blank.{" "}
+              <Ui>Unique</Ui> is the exception, and it’s below.
             </li>
             <li>
               It can read another calculated column, but the two can’t end up
@@ -935,6 +936,17 @@ export function GuidePage() {
           blank — no error, and the saved copy that sorting uses goes blank with it.
           After renaming, open the calculated column and update
           the formula to match.
+        </Callout>
+        <Callout tone="tip" title="Unique: a key made of several columns">
+          Tick <Ui>Unique</Ui> on a calculated column and no two records may work
+          out to the same answer — <Code>CONCAT(course, "-", section)</Code> is how
+          you say “this pair may only appear once”, which no single column can. The
+          record you’re saving is refused, even though you were editing the columns
+          the formula reads rather than the answer itself, so the message names the
+          calculated column and the value it worked out. Two things it won’t do:
+          existing duplicates are left alone until one of them is next saved, and
+          changing the formula so that records collide doesn’t go back and complain
+          about them either.
         </Callout>
       </Section>
 
