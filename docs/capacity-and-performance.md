@@ -251,6 +251,95 @@ stays because the bin asks the opposite question — soft-deleted rows — which
 deliberately excludes. Against the GIN index on `data`, which every insert already pays for,
 both are noise.
 
+**When the planner actually takes it.** Re-measured 2026-08-05 against a second dataset, this
+time varying how sparse the list is in the table and A/B-ing the index in place:
+
+| list's share of the table | index chosen | buffers | time |
+|---|---|---|---|
+| 1% | **`ix_list_items_list_id_id`** | 44 | 0.04 ms (from 2.81 ms) |
+| 5% | `list_items_pkey`, 1,882 rows discarded | 408 | 0.39 ms |
+| 49% | `list_items_pkey`, 109 rows discarded | 71 | 0.06 ms |
+
+The index is ignored unless the list is sparse, and that is the planner being right rather
+than wrong: reaching rows through it costs a random heap fetch each, which only beats walking
+the primary key in order once there are enough foreign rows to skip. Sparsity is the variable
+that decides it — which is the same thing the paragraph above says, now with the other side of
+the curve measured. A workspace with many lists is where this index earns its keep; a database
+with one big list will never use it, and does not need it.
+
+## Paging by cursor, because `OFFSET` cannot be indexed away
+
+Measured 2026-08-05 on a scratch database of 200,000 records: one list holding 100,000 (99,009
+live), interleaved 50/50 with twenty other lists, `data` averaging 533 bytes, 120 MB heap, every
+current index in place.
+
+One page of 100 in the default order:
+
+| page | `skip` | | `after` | |
+|---|---|---|---|---|
+| | time | buffers | time | buffers |
+| 1 | 0.08 ms | 40 | 0.08 ms | 43 |
+| 50 | 3.31 ms | 1,800 | 0.08 ms | 42 |
+| 200 | 12.16 ms | 7,180 | 0.08 ms | 44 |
+| 500 | 30.85 ms | 17,942 | 0.08 ms | 44 |
+| 990 | 68.25 ms | 35,526 | 0.08 ms | 44 |
+
+**No index can fix this, which is the whole reason the endpoint needed a second way to page.**
+`OFFSET` is applied by the Limit node *above* the scan, so the scan is obliged to produce
+complete rows — heap fetches included — for every row that is then discarded. The planner
+knows it, and at depth it deliberately refuses `ix_list_items_list_id_id` in favour of the
+primary key: reaching 99,000 doomed rows through the partial index would mean 99,000 random
+heap fetches, where the primary key walks them in order. It picks the cheaper way to do
+unnecessary work. A cursor is the only thing that stops the work being requested, because
+`id > :after` moves the starting point *into* the scan.
+
+Through `ListItemService.list`, which is what the endpoint actually spends:
+
+| page | `skip=` | `after=` | |
+|---|---|---|---|
+| 1 | 3.5 ms | 3.9 ms | 0.9× |
+| 50 | 7.0 ms | 5.6 ms | 1.3× |
+| 200 | 15.7 ms | 4.6 ms | 3.5× |
+| 500 | 31.7 ms | 4.1 ms | 7.8× |
+| 990 | 60.2 ms | 3.9 ms | **15.6×** |
+
+**The finding that made this worth building** was not the 100k list. Deep pages of a huge list
+are a place few people go. But the cost is driven by how expensive the *discarded* rows are to
+produce, and both a filter and a sparse list make them more expensive:
+
+| | page 1 | page 50 | page 200 |
+|---|---|---|---|
+| filtered view (`status = 'open'`, 49,504 rows), `skip` | 0.20 ms | **99.13 ms** | 105.42 ms |
+| filtered view, `after` | 0.14 ms | 0.18 ms | 0.20 ms |
+| 10,000-record list at 5% of the table, `skip` | 0.42 ms | **26.79 ms** | — |
+| 10,000-record list, `after` | 0.36 ms | 0.38 ms | — |
+
+Page 50 of a ten-thousand-record list is an ordinary place for an ordinary person to be, and
+it costs 27 ms of the app's scarcest resource to get there. That is the case this fixes.
+
+**It is also a correctness fix.** `skip` names a position, so a record deleted ahead of that
+position pulls every later one back a place and the next page steps over one the caller never
+saw. Ids only grow, so an insert cannot cause this — a delete can, and a bin any editor can
+fill makes it routine rather than a race. `tests/test_lists_flow.py` pins the difference:
+after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor returns
+`03, 04, 05`.
+
+**What it does not fix, deliberately.**
+
+- **Sorted or grouped listings.** `after` is refused there with a 400 rather than approximated,
+  because `id > :after` only names a position when `id` is the ordering. It would not have
+  helped anyway: ordering by a data column is an unindexed expression, so Postgres sorts the
+  whole matching set on *every* page — 105 ms at page 1, rising only to 268 ms at page 990. That
+  path is slow everywhere, not slow deep, and what it needs is an expression index (still
+  entangled with the `multiple` toggle; see `known-gaps.md`).
+- **`X-Total-Count`.** A flat 12–13 ms against this list, paid on every page load whichever way
+  the page was fetched. Once the page itself is ~4 ms, the count is three-quarters of the
+  request — it is now the largest single thing this endpoint does, and the next place to look.
+- **The grid.** Still pages with `skip`, and should: PrimeReact's paginator offers numbered page
+  links, and page 7 is an offset by definition. `after` serves API clients and anything built
+  as "load more". Converting the grid is a UX decision about losing jump-to-page, not a
+  performance one.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:

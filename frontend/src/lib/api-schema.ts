@@ -93,8 +93,8 @@ export interface paths {
          *     it.
          *
          *     Two kinds of failure, deliberately kept apart. A problem with the *file* -- wrong
-         *     columns, too many rows, not text -- is a 400, because nothing in it can be
-         *     trusted and nothing has been created. A problem with a *row* comes back inside
+         *     columns, too many rows, too large, not text -- is a 400, because nothing in it can
+         *     be trusted and nothing has been created. A problem with a *row* comes back inside
          *     the summary, because the rows around it were fine and are already saved.
          *
          *     **The response carries generated passwords in plaintext.** It is the only place
@@ -694,9 +694,10 @@ export interface paths {
          *     (`chain.build_chain`) and re-indexing half of it would be meaningless.
          *
          *     Under `FORMULA_INLINE_MAX_RECORDS` the work happens here and the response is sent
-         *     once it is done. Over it the work is handed to a background task and this answers
-         *     immediately with `deferred: true` — the same total work either way; the threshold
-         *     only decides whether anybody is kept waiting.
+         *     once it is done — measured at ~0.035 ms of app CPU per record, that is under two
+         *     seconds of wall time at the threshold even on a 0.1-CPU instance. Over it the work
+         *     is handed to a background task and this answers immediately with `deferred: true`.
+         *     The same total work either way; the threshold only decides who is kept waiting.
          *
          *     **One run per list.** A second call while one is in flight gets a 409 rather than a
          *     second scan of the same rows: the index is shared list state converging on one
@@ -898,6 +899,13 @@ export interface paths {
          *     The total number of matches (ignoring skip/limit, honouring everything else)
          *     comes back in X-Total-Count, which is what a paginator needs; the body stays a
          *     plain array, like every other listing here.
+         *
+         *     Two ways to ask for a page. `skip` is what a numbered paginator needs, since
+         *     page 7 is an offset and nothing else; its cost grows with depth. `after` names
+         *     the last record you already have and costs the same wherever it lands, which is
+         *     what a "load more" or an API client walking the whole list wants — see
+         *     `ListItemService._after_id` for the measurements and for why it is confined to
+         *     the default order.
          */
         get: operations["list_items_api_lists__list_uuid__items__get"];
         put?: never;
@@ -4534,6 +4542,8 @@ export interface operations {
                 view_uuid?: string | null;
                 skip?: number;
                 limit?: number;
+                /** @description Page from the record with this uuid rather than by offset — the last one you already have. Costs the same at any depth. Needs the default order, so it cannot be combined with sorting, grouping or skip */
+                after?: string | null;
                 /** @description Match any column's text */
                 q?: string | null;
                 /** @description Column uuid to order by; replaces the view's saved sorts. Empty means no order at all, as distinct from omitting it */
