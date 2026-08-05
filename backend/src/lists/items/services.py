@@ -1112,7 +1112,17 @@ class ListItemService:
         data: dict,
         exclude_id: Optional[int],
     ) -> None:
-        """Reject records that duplicate a value on a column marked unique."""
+        """Reject records that duplicate a value on a column marked unique.
+
+        Runs after `_validate_data`, which is what lets a `calculated` column be
+        unique: by now this record's computed cells are in ``data``, so the answer
+        being checked is the one this write produces. The rows it is checked
+        *against* are read as stored, which for a calculated column is the query
+        index — so between a formula edit and a re-index, uniqueness is judged
+        against the answers the old formula gave. That window admits both a false
+        conflict and a missed one; `POST /lists/{uuid}/columns/recompute` closes it,
+        and the nightly sweep closes it eventually.
+        """
         unique_columns = {
             key: column
             for key, column in columns.items()
@@ -1141,6 +1151,15 @@ class ListItemService:
                 stmt = stmt.where(ListItem.id != exclude_id)
             existing = (await db.execute(stmt.limit(1))).scalars().first()
             if existing is not None:
+                # A calculated column gets its own wording. The writer did not type
+                # the value that collided — they edited an operand — so a message
+                # about "that value" would be about something they cannot see in
+                # front of them, and would read as a complaint about the wrong cell.
+                if column.type in COMPUTED_TYPES:
+                    raise ConflictError(
+                        f"Column '{column.name}' must be unique; this record computes "
+                        f"{value!r}, which another record already has"
+                    )
                 raise ConflictError(
                     f"Column '{column.name}' must be unique; that value already exists"
                 )

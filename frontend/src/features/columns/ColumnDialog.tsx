@@ -421,9 +421,10 @@ export function ColumnDialog({
   // which is not what anyone means by a unique column. Hide it, and clear it.
   const multiValued =
     (type === "user" || type === "group" || type === "lookup") && multiple;
-  // A calculated column's only writer is its formula, so required and unique have
-  // nothing to act on — nobody can supply a value to require, and two rows sharing
-  // an answer says something about the formula, not about what anyone typed.
+  // A calculated column's only writer is its formula, so `required` has nothing to
+  // act on — there is no value for anyone to leave blank. `Unique` does: it asks
+  // whether two rows may compute the same answer, which is how a formula expresses
+  // a key no single column holds. So the section is shown, minus Required.
   const isCalculated = type === "calculated";
 
   // Types that offer an auto-stamp on write (a "last modified" date, "edited by" user).
@@ -449,7 +450,7 @@ export function ColumnDialog({
       // stored one, so leaving it out would preserve a `true` this dialog is
       // currently hiding — a constraint still enforced but no longer visible.
       const config: Record<string, unknown> = isCalculated
-        ? { formula: formula.trim() }
+        ? { formula: formula.trim(), unique }
         : {
             required,
             unique: multiValued ? false : unique,
@@ -1168,8 +1169,8 @@ export function ColumnDialog({
           </FormSection>
         )}
 
-        {!isCalculated && (
-          <FormSection title="Validation">
+        <FormSection title="Validation">
+          {!isCalculated && (
             <CheckboxField
               inputId="col-required"
               checked={required}
@@ -1177,21 +1178,23 @@ export function ColumnDialog({
               label="Required"
               hint="A record cannot be saved with this one left blank."
             />
-            {!multiValued && (
-              <CheckboxField
-                inputId="col-unique"
-                checked={unique}
-                onChange={setUnique}
-                label="Unique"
-                hint={
-                  editing && !column.config.unique && unique
-                    ? "Existing duplicates are left alone — this is checked when a record is saved, so they surface the next time one of them is edited."
+          )}
+          {!multiValued && (
+            <CheckboxField
+              inputId="col-unique"
+              checked={unique}
+              onChange={setUnique}
+              label="Unique"
+              hint={
+                editing && !column.config.unique && unique
+                  ? "Existing duplicates are left alone — this is checked when a record is saved, so they surface the next time one of them is edited."
+                  : isCalculated
+                    ? "No two records may work out to the same answer. The record being saved is refused, even though the value came from the formula rather than from anything typed."
                     : "No two records may hold the same value."
-                }
-              />
-            )}
-          </FormSection>
-        )}
+              }
+            />
+          )}
+        </FormSection>
       </div>
     </AppDialog>
   );

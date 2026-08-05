@@ -193,8 +193,19 @@ The remaining edges:
   decided by *where it sits*, not how it is spelled: `column_refs` reports every value-position
   name, including the four that collide with function names (`min`, `max`, `round`, `abs`, all
   valid slugs). Reporting those as functions is what used to let a formula over one skip these
-  checks entirely. A calculated column also cannot be `unique`: two rows computing the same
-  answer says something about the formula, not about anything a writer typed.
+  checks entirely.
+- **A calculated column may be `unique`, and it is judged against the index.** It is how you
+  express a key no single column holds (`CONCAT(course, section)`), and it works because
+  `_validate_data` writes the computed cell before `_enforce_unique` reads it — the answer
+  checked is this write's. The rows it is checked *against* are read as stored, so between a
+  formula edit and a re-index uniqueness is judged on the answers the old formula gave: a
+  false conflict, or a missed one, until `POST /lists/{uuid}/columns/recompute` or the
+  nightly sweep runs. This is the one place a stale index is more than a misordered row, and
+  it is left that way rather than recomputing every row of the list on every write. Two other
+  edges follow from the check being per-write: turning `unique` on leaves existing duplicates
+  alone (they surface the next time one of them is saved), and a re-index that *creates*
+  duplicates writes them without complaint. `default` is still refused — a value somebody
+  supplies is exactly what a formula overwrites.
 - **Exports carry the computed value; templates and imports do not.** The export **computes**
   rather than reading the stored copy (`shape_values` over the streamed rows), because a file
   leaves the app and nothing can correct it afterwards — it is the last place that should trust

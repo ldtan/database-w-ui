@@ -445,12 +445,15 @@ class ColumnService:
                     )
             if data.get("default") is not None:
                 raise ValidationError("A calculated column cannot have a default")
-            if data.get("unique"):
-                # Meaningless while nothing was stored, and a trap now that something
-                # is: `_enforce_unique` reads the record, so this would start rejecting
-                # writes because two rows computed the same answer — which is a
-                # property of the formula, not of anything the writer typed.
-                raise ValidationError("A calculated column cannot be unique")
+            # `unique` *is* allowed, unlike `default`. A default is a value somebody
+            # supplies and the formula would immediately overwrite; uniqueness is a
+            # question about the answer, and a formula is a perfectly good way to
+            # express a key that no single column holds — `CONCAT(course, section)`,
+            # say. `_validate_data` writes calculated cells before `_enforce_unique`
+            # reads them, so the check sees this write's answer, not the last one's.
+            # What it compares against is the stored index of the *other* rows, so a
+            # formula edit that has not been re-indexed yet is judged against the old
+            # answers; see the note on staleness in `_enforce_unique`.
 
             # Self-reference used to be caught by the type check (the column was among
             # its own siblings and was not a `number`). Now that `calculated` is

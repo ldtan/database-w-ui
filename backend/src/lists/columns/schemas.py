@@ -19,7 +19,11 @@ class ColumnConfig(BaseModel):
     # re-stamped onto the cell on create and on every edit (see columns/validation).
     onupdate: Any = None
     help_text: Optional[str] = None
-    unique: bool = False  # enforced: no two records may share the value
+    # Enforced: no two records may share the value. On a `calculated` column it is
+    # the *computed answer* that may not repeat — a formula is how a key spanning
+    # several columns is expressed — so the record refused is one whose operands
+    # were edited rather than one that typed the value.
+    unique: bool = False
     placeholder: Optional[str] = None  # UI hint, not enforced
     read_only: bool = False  # UI hint, not enforced
     # text

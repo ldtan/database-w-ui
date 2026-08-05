@@ -202,8 +202,19 @@ function makeCtx(page, tenant) {
     },
 
     /** Let React paint, queries land, and any transition finish. Animations are
-     *  off (see `prepare`), so this is short on purpose. */
+     *  off (see `prepare`), so the fixed pause is short on purpose.
+     *
+     *  The wait before it is the one that matters: a loading list renders
+     *  `.skeleton` bars, and a fixed pause is a bet on how long a query takes.
+     *  Most shots hide that bet behind a `waitFor` on something the data
+     *  produces — but `shell` photographs the home page as a whole and has
+     *  nothing to name, so it lost the bet on a cold dev server and went into
+     *  the guide as a page of grey placeholders. Waiting for the class every
+     *  loading state shares makes it moot everywhere at once. A locator matching
+     *  nothing is already detached, so a page with no skeletons pays nothing.
+     */
     async settle(ms = 350) {
+      await page.locator(".skeleton").first().waitFor({ state: "detached" });
       await page.waitForTimeout(ms);
     },
   };

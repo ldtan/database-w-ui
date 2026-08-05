@@ -239,21 +239,111 @@ async def test_a_calculated_column_named_like_a_function_can_be_referenced(
     assert created.json()["data"][resp.json()["uuid"]] == 12
 
 
-async def test_a_calculated_column_cannot_be_unique(client, priced_list):
-    # Meaningless while nothing was stored. Now that something is, `_enforce_unique`
-    # would start rejecting writes because two rows computed the same answer — a
-    # property of the formula, not of anything the writer typed.
+async def test_a_calculated_column_can_be_unique(client, priced_list):
+    # A formula is how you express a key no single column holds. It works because
+    # `_validate_data` writes the computed cell before `_enforce_unique` reads it,
+    # so the check sees this write's answer rather than the previous one.
+    lst, qty, price = priced_list["list"], priced_list["qty"], priced_list["price"]
+    resp = await client.post(
+        f"/api/lists/{lst}/columns/",
+        json={
+            "name": "key",
+            "display_name": "Key",
+            "type": "calculated",
+            "config": {"formula": "qty * price", "unique": True},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    first = await client.post(
+        f"/api/lists/{lst}/items/", json={"data": {qty: 3, price: 10}}
+    )
+    assert first.status_code == 201, first.text
+
+    # Different operands, same answer — which is exactly what a unique formula is
+    # asked to refuse, and the message says so rather than blaming a typed value.
+    clash = await client.post(
+        f"/api/lists/{lst}/items/", json={"data": {qty: 5, price: 6}}
+    )
+    assert clash.status_code == 409, clash.text
+    assert "computes" in clash.text.lower()
+
+    # A different answer still saves.
+    ok = await client.post(
+        f"/api/lists/{lst}/items/", json={"data": {qty: 5, price: 7}}
+    )
+    assert ok.status_code == 201, ok.text
+
+
+async def test_editing_into_a_taken_answer_is_refused(client, priced_list):
+    # The collision an edit causes: nothing about the *unique* column was touched,
+    # so this is the case the wording has to survive.
+    lst, qty, price = priced_list["list"], priced_list["qty"], priced_list["price"]
+    resp = await client.post(
+        f"/api/lists/{lst}/columns/",
+        json={
+            "name": "key",
+            "display_name": "Key",
+            "type": "calculated",
+            "config": {"formula": "qty * price", "unique": True},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    await client.post(f"/api/lists/{lst}/items/", json={"data": {qty: 3, price: 10}})
+    other = await client.post(
+        f"/api/lists/{lst}/items/", json={"data": {qty: 4, price: 10}}
+    )
+    uuid = other.json()["uuid"]
+
+    clash = await client.patch(
+        f"/api/lists/{lst}/items/{uuid}", json={"data": {qty: 3}}
+    )
+    assert clash.status_code == 409, clash.text
+    assert "key" in clash.text
+
+    # And a record does not collide with itself: re-saving the same operands is fine.
+    same = await client.patch(
+        f"/api/lists/{lst}/items/{uuid}", json={"data": {qty: 4}}
+    )
+    assert same.status_code == 200, same.text
+
+
+async def test_a_blank_computed_value_does_not_collide(client, priced_list):
+    # `_enforce_unique` skips empty values, and an incomplete row computes to blank —
+    # so a unique formula must not make "not filled in yet" a one-record-only state.
+    lst, qty, price = priced_list["list"], priced_list["qty"], priced_list["price"]
+    resp = await client.post(
+        f"/api/lists/{lst}/columns/",
+        json={
+            "name": "key",
+            "display_name": "Key",
+            "type": "calculated",
+            "config": {"formula": "qty * price", "unique": True},
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    first = await client.post(f"/api/lists/{lst}/items/", json={"data": {qty: 3}})
+    assert first.status_code == 201, first.text
+    second = await client.post(f"/api/lists/{lst}/items/", json={"data": {qty: 4}})
+    assert second.status_code == 201, second.text
+
+
+async def test_a_calculated_column_still_cannot_have_a_default(client, priced_list):
+    # The other half of the pair, and the reason they part company: a default is a
+    # value somebody supplies, and the formula would overwrite it on the same write.
     resp = await client.post(
         f"/api/lists/{priced_list['list']}/columns/",
         json={
-            "name": "u",
-            "display_name": "U",
+            "name": "d",
+            "display_name": "D",
             "type": "calculated",
-            "config": {"formula": "qty * 2", "unique": True},
+            "config": {"formula": "qty * 2", "default": 5},
         },
     )
     assert resp.status_code == 400, resp.text
-    assert "unique" in resp.text.lower()
+    assert "default" in resp.text.lower()
 
 
 async def test_a_number_column_named_like_a_function_still_works(client, list_uuid):
