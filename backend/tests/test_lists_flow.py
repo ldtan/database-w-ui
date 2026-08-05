@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid7
 from zoneinfo import ZoneInfo
 
+import pytest_asyncio
 from sqlalchemy import func, select
 
 from src.auth.users.models import User
@@ -748,6 +749,165 @@ async def test_search_matches_lookup_and_user_labels(
     assert await search("alice") == ["Ann"]
     # And plain text still works.
     assert await search("Bo") == ["Bo"]
+
+
+@pytest_asyncio.fixture
+async def paged_list(client, list_uuid, add_column):
+    """Ten records: `n` runs "00".."09" in creation order, `grp` alternates."""
+    col = await add_column(list_uuid, name="n", display_name="N", type="text")
+    grp = await add_column(list_uuid, name="grp", display_name="Grp", type="text")
+    for i in range(10):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {col: f"{i:02d}", grp: "alpha" if i % 2 == 0 else "beta"}},
+        )
+        assert resp.status_code == 201, resp.text
+    return list_uuid, col, grp
+
+
+async def test_after_walks_the_whole_list_exactly_once(client, paged_list):
+    list_uuid, col, _ = paged_list
+    seen, cursor = [], None
+    while True:
+        query = "limit=3" + (f"&after={cursor}" if cursor else "")
+        resp = await client.get(f"/api/lists/{list_uuid}/items/?{query}")
+        assert resp.status_code == 200, resp.text
+        page = resp.json()
+        if not page:
+            break
+        seen.extend(r["data"][col] for r in page)
+        cursor = page[-1]["uuid"]
+
+    # Every record, once, in the order `skip` would have produced.
+    assert seen == [f"{i:02d}" for i in range(10)]
+
+
+async def test_after_and_skip_agree_page_for_page(client, paged_list):
+    list_uuid, _, _ = paged_list
+    first = (await client.get(f"/api/lists/{list_uuid}/items/?limit=4")).json()
+    by_skip = (await client.get(f"/api/lists/{list_uuid}/items/?skip=4&limit=4")).json()
+    by_after = (
+        await client.get(
+            f"/api/lists/{list_uuid}/items/?after={first[-1]['uuid']}&limit=4"
+        )
+    ).json()
+    assert [r["uuid"] for r in by_after] == [r["uuid"] for r in by_skip]
+
+
+async def test_after_still_reports_the_total(client, paged_list):
+    list_uuid, _, _ = paged_list
+    first = (await client.get(f"/api/lists/{list_uuid}/items/?limit=3")).json()
+    resp = await client.get(
+        f"/api/lists/{list_uuid}/items/?after={first[-1]['uuid']}&limit=3"
+    )
+    # The count is of the whole matching set, not of what is left after the cursor.
+    assert resp.headers["X-Total-Count"] == "10"
+
+
+async def test_a_delete_behind_the_cursor_does_not_skip_a_record(client, paged_list):
+    """The correctness half of keyset paging, and why it is not only the faster one.
+
+    `skip` names a position, so anything removed ahead of that position pulls every
+    later record back one place and the next page steps straight over one the caller
+    never saw. Ids only ever grow, so an *insert* cannot do this — a delete can, and
+    a bin that anyone with `delete` can fill makes it an ordinary occurrence rather
+    than a race. A cursor names a record, so nothing happening elsewhere moves it.
+    """
+    list_uuid, col, _ = paged_list
+    first = (await client.get(f"/api/lists/{list_uuid}/items/?limit=3")).json()
+    cursor = first[-1]["uuid"]
+    assert [r["data"][col] for r in first] == ["00", "01", "02"]
+
+    await client.delete(f"/api/lists/{list_uuid}/items/{first[0]['uuid']}")
+
+    by_skip = (
+        await client.get(f"/api/lists/{list_uuid}/items/?skip=3&limit=3")
+    ).json()
+    by_after = (
+        await client.get(f"/api/lists/{list_uuid}/items/?after={cursor}&limit=3")
+    ).json()
+
+    # "03" has moved into the slot the offset already passed, so `skip` never shows it.
+    assert [r["data"][col] for r in by_skip] == ["04", "05", "06"]
+    assert [r["data"][col] for r in by_after] == ["03", "04", "05"]
+
+
+async def test_after_respects_a_search(client, paged_list):
+    list_uuid, col, _ = paged_list
+    alpha = f"/api/lists/{list_uuid}/items/?q=alpha&limit=2"
+    page = (await client.get(alpha)).json()
+    assert [r["data"][col] for r in page] == ["00", "02"]
+    nxt = (await client.get(f"{alpha}&after={page[-1]['uuid']}")).json()
+    # The cursor moves through the *matching* records, not the list's own order.
+    assert [r["data"][col] for r in nxt] == ["04", "06"]
+
+
+async def test_after_is_refused_when_the_listing_is_sorted(client, paged_list):
+    list_uuid, col, _ = paged_list
+    first = (await client.get(f"/api/lists/{list_uuid}/items/?limit=3")).json()
+    cursor = first[-1]["uuid"]
+
+    resp = await client.get(
+        f"/api/lists/{list_uuid}/items/?after={cursor}&sort_by={col}"
+    )
+    assert resp.status_code == 400, resp.text
+    assert "sorted or grouped" in resp.json()["detail"]
+
+    resp = await client.get(
+        f"/api/lists/{list_uuid}/items/?after={cursor}&group_by={col}"
+    )
+    assert resp.status_code == 400, resp.text
+
+    # `sort_by=` is "no order at all", which is the default order, so it is fine.
+    resp = await client.get(f"/api/lists/{list_uuid}/items/?after={cursor}&sort_by=")
+    assert resp.status_code == 200, resp.text
+
+
+async def test_after_is_refused_alongside_skip(client, paged_list):
+    list_uuid, _, _ = paged_list
+    first = (await client.get(f"/api/lists/{list_uuid}/items/?limit=3")).json()
+    resp = await client.get(
+        f"/api/lists/{list_uuid}/items/?after={first[-1]['uuid']}&skip=3"
+    )
+    assert resp.status_code == 400, resp.text
+    assert "not both" in resp.json()["detail"]
+
+
+async def test_after_is_refused_for_a_uuid_this_list_does_not_have(
+    client, paged_list, workspace_uuid
+):
+    """Unknown, binned, and belonging to another list are all the same refusal.
+
+    Each of them would otherwise silently restart the walk from the top, which reads
+    as the list having rewound rather than as the caller's mistake.
+    """
+    list_uuid, _col, _grp = paged_list
+    base = f"/api/lists/{list_uuid}/items/?after="
+
+    unknown = "00000000-0000-0000-0000-000000000000"
+    assert (await client.get(base + unknown)).status_code == 400
+
+    rows = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    binned = rows[0]["uuid"]
+    await client.delete(f"/api/lists/{list_uuid}/items/{binned}")
+    resp = await client.get(base + binned)
+    assert resp.status_code == 400, resp.text
+    assert "no page after it" in resp.json()["detail"]
+
+    other = (
+        await client.post(
+            "/api/lists/",
+            json={
+                "name": "l2",
+                "display_name": "List 2",
+                "workspace_uuid": workspace_uuid,
+            },
+        )
+    ).json()["uuid"]
+    elsewhere = (
+        await client.post(f"/api/lists/{other}/items/", json={"data": {}})
+    ).json()["uuid"]
+    assert (await client.get(base + elsewhere)).status_code == 400
 
 
 async def test_deleted_records_are_listed_and_restorable(client, list_uuid, add_column):
