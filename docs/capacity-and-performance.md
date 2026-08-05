@@ -406,6 +406,10 @@ behaviour change: `_apply_search` matches per column specifically so a query can
 column *uuid* instead of something a person can read. Reference columns complicate it further,
 since they resolve labels to uuids first and match with `?|`, which no trigram index touches.
 
+That design is now written up in **[search-design.md](search-design.md)**, which settles the
+uuid problem by indexing values without keys and the reference problem by indexing the uuids
+rather than the labels — so nothing it maintains depends on a row other than its own. Not built.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:
