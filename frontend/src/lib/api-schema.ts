@@ -898,7 +898,10 @@ export interface paths {
          *
          *     The total number of matches (ignoring skip/limit, honouring everything else)
          *     comes back in X-Total-Count, which is what a paginator needs; the body stays a
-         *     plain array, like every other listing here.
+         *     plain array, like every other listing here. `total=false` suppresses it, and
+         *     `GET items/count` answers it on its own — the total is the same number for
+         *     every page of one query, so a caller that turns pages can ask once instead of
+         *     once per page. See that endpoint for what it costs.
          *
          *     Two ways to ask for a page. `skip` is what a numbered paginator needs, since
          *     page 7 is an offset and nothing else; its cost grows with depth. `after` names
@@ -911,6 +914,38 @@ export interface paths {
         put?: never;
         /** Create Item */
         post: operations["create_item_api_lists__list_uuid__items__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Items
+         * @description How many records match — the same number `GET items/` puts in X-Total-Count.
+         *
+         *     Separate because it is the same number for every page of one query, and it is
+         *     not cheap: counting means visiting every matching record, so it scales with the
+         *     list rather than with the page. Measured against a list of 100,000, the count is
+         *     12 ms where the page beside it is 4 ms; under a search it is 268 ms against a
+         *     page of 501 ms. Asked once per query instead of once per page, that is most of
+         *     the cost of turning a page.
+         *
+         *     It takes only the parameters that change *which* records match — the view, the
+         *     search, the filter. The page, the order and the grouping are all absent by
+         *     design: none of them changes how many records there are, so including them would
+         *     invite a caller to re-ask a question whose answer cannot have moved.
+         */
+        get: operations["count_items_api_lists__list_uuid__items_count_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2126,6 +2161,11 @@ export interface components {
              * Format: uuid
              */
             workspace_uuid: string;
+        };
+        /** ListItemCountRead */
+        ListItemCountRead: {
+            /** Total */
+            total: number;
         };
         /** ListItemCreate */
         ListItemCreate: {
@@ -4544,6 +4584,8 @@ export interface operations {
                 limit?: number;
                 /** @description Page from the record with this uuid rather than by offset — the last one you already have. Costs the same at any depth. Needs the default order, so it cannot be combined with sorting, grouping or skip */
                 after?: string | null;
+                /** @description Whether to compute X-Total-Count. Pass false when the total is already known — it is the same number for every page of one query, and it costs a scan of every matching record to produce */
+                total?: boolean;
                 /** @description Match any column's text */
                 q?: string | null;
                 /** @description Column uuid to order by; replaces the view's saved sorts. Empty means no order at all, as distinct from omitting it */
@@ -4604,6 +4646,44 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    count_items_api_lists__list_uuid__items_count_get: {
+        parameters: {
+            query?: {
+                /** @description The view to apply */
+                view_uuid?: string | null;
+                /** @description Match any column's text */
+                q?: string | null;
+                /** @description Filter the records for this request only, as a URL-encoded JSON filter group: {"conjunction": "and"|"or", "conditions": [{"column_uuid", "operator", "value"}]}. Replaces the view's saved filters; an empty `conditions` list means no filter at all, which is how a caller asks for the whole list through a filtered view. */
+                filters?: string | null;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItemCountRead"];
                 };
             };
             /** @description Validation Error */

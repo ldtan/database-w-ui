@@ -27,6 +27,10 @@ class BulkDeleteResult(BaseModel):
     deleted: int
 
 
+class ListItemCountRead(BaseModel):
+    total: int
+
+
 class ListItemCreate(BaseModel):
     # Keys are column uuids (as strings); values are validated per column type.
     data: dict = Field(default_factory=dict)

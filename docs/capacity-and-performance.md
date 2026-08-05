@@ -334,11 +334,77 @@ after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor r
   entangled with the `multiple` toggle; see `known-gaps.md`).
 - **`X-Total-Count`.** A flat 12–13 ms against this list, paid on every page load whichever way
   the page was fetched. Once the page itself is ~4 ms, the count is three-quarters of the
-  request — it is now the largest single thing this endpoint does, and the next place to look.
+  request — it was the largest single thing this endpoint did, and is dealt with in the next
+  section.
 - **The grid.** Still pages with `skip`, and should: PrimeReact's paginator offers numbered page
   links, and page 7 is an offset by definition. `after` serves API clients and anything built
   as "load more". Converting the grid is a UX decision about losing jump-to-page, not a
   performance one.
+
+## The total was recounted on every page turn
+
+`count(*)` cannot be made cheaper. Measured on the same 200,000-record database, the count
+of the 100k list runs an **index-only scan** on `ix_list_items_list_id_id` — 269 buffers,
+zero heap fetches after a vacuum, which is as good as the plan gets. It still takes 12 ms,
+because it has to visit all 97,029 matching index entries and that is ~0.12 µs each. It is
+CPU, not I/O:
+
+| | buffers | heap fetches | time |
+|---|---|---|---|
+| before `VACUUM` | 3,131 | 15,734 | 16.5 ms |
+| after | **269** | **0** | 12.5 ms |
+
+Removing 94% of the buffer traffic bought 24% of the time. There is no index and no query
+rewrite left — three spellings of the same count (over the whole-row subquery `count()`
+actually builds, over an id-only subquery, and flat with no subquery at all) all produced the
+identical plan and the same 12–13 ms, so the whole-row projection that looked like an obvious
+culprit was being flattened away all along.
+
+What was actually wasteful was **asking**. The total rode in a header on the page request, so
+turning a page re-asked a question whose answer cannot have changed — the count ignores
+`skip`, `limit`, the sort and the grouping by construction. Page 2 of a search made the server
+count every matching record a second time to return the number it had just returned.
+
+So the count moved to `GET items/count`, taking only the parameters that change which records
+match — the view, the search, the filter — and `GET items/` gained `total=false`. The grid
+fetches the count under a key holding exactly that scope (`recordCountKey`, deliberately the
+same shape as `metricValuesKey`), so paging, sorting and grouping all read the cached answer:
+
+| one page turn on the 100k list | before | after |
+|---|---|---|
+| plain listing | 15.5 ms | **3.3 ms** |
+| under a search | 769 ms | **501 ms** |
+
+First load is unchanged — it still costs a page and a count, now as two requests instead of
+one. Everything after it is the page alone.
+
+**Sizing this honestly:** the count is proportional to *matching* records, so it is 12.2 ms at
+97,029 rows, 2.4 ms at 10,000 and 1.8 ms at 1,980. On the school demo it is under 2 ms and
+this change is unmeasurable. It matters at a size the deployment has not reached.
+
+**The search numbers above are the real finding.** Counting is a rounding error next to what
+search costs on a large list:
+
+| request on the 100k list | count | page | total |
+|---|---|---|---|
+| plain | 11.5 ms | 3.8 ms | 15 ms |
+| filter `status = 'open'` | 12.7 ms | 4.0 ms | 17 ms |
+| search `q=alpha` (0 matches) | 268 ms | 501 ms | **769 ms** |
+| search `q=Record 12345` (1 match) | 548 ms | 273 ms | **821 ms** |
+
+`_apply_search` runs an `ILIKE` against one JSONB extraction per column, OR'd, over every row.
+The GIN index on `data` is `jsonb_ops` — containment and key existence — so it does nothing for
+pattern matching. Removing the duplicate count is the only part of that this change touches;
+the scan itself remains, and is now by a wide margin the most expensive read in the app.
+
+Fixing it is a design problem rather than a tuning one, which is why it is not done here.
+`pg_trgm` indexes an *expression*, and the expressions are `data ->> '<column-uuid>'` where the
+uuids are per-list and unbounded — there is no finite set of indexes to create. The realistic
+shapes are a maintained `search_text` column or a generated column with an immutable extractor,
+and both turn per-column matching into matching over the row's values, which is a deliberate
+behaviour change: `_apply_search` matches per column specifically so a query cannot hit a
+column *uuid* instead of something a person can read. Reference columns complicate it further,
+since they resolve labels to uuids first and match with `?|`, which no trigram index touches.
 
 ## Login was 30× a page load, and most of it was waste
 

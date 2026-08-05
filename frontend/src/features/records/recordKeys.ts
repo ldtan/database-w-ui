@@ -16,5 +16,30 @@
  * `"page"` here, `"metrics"` there — and anything writing into the cache targets
  * that longer prefix instead of the namespace.
  */
+import type { FilterGroup } from "../../lib/types";
+
 export const recordPagesKey = (listUuid: string) =>
   ["items", listUuid, "page"] as const;
+
+/** How many records match — the paginator's total, keyed on the *scope* only.
+ *
+ * Deliberately not keyed on the page, the order or the grouping, because none of
+ * them changes the answer. That is the whole point of it being a separate query:
+ * the total rode on the page request, so turning a page re-asked a question whose
+ * answer could not have moved, and the server counted every matching record again
+ * to return the same number. Sharing a key across the pages of one query is what
+ * makes the cache do that arithmetic once.
+ *
+ * The scope it *is* keyed on — view, search, filter — matches `metricValuesKey`
+ * exactly, and for the same reason: both ask "which records", and both go stale at
+ * the moment the records do. Living under `["items", listUuid]` is what gets them
+ * refreshed by the invalidations already spelled at every call site that writes a
+ * record; `"count"` is what keeps this query distinguishable from those, per the
+ * rule above.
+ */
+export const recordCountKey = (
+  listUuid: string,
+  viewUuid: string | null,
+  q: string,
+  filters: FilterGroup,
+) => ["items", listUuid, "count", viewUuid, q, filters] as const;
