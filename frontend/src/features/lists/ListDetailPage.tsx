@@ -9,7 +9,7 @@ import { SplitButton } from "primereact/splitbutton";
 import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
-import { api, ApiError, type Page } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
@@ -43,7 +43,7 @@ import {
   type CellEditKind,
 } from "../records/cellEdit";
 import { InlineCellEditor } from "../records/inlineEdit";
-import { recordPagesKey } from "../records/recordKeys";
+import { recordCountKey, recordPagesKey } from "../records/recordKeys";
 import { resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -53,7 +53,7 @@ import { SortControl } from "../views/SortControl";
 import { ViewBar } from "../views/ViewBar";
 import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
-import { recordParams } from "../views/recordQuery";
+import { recordParams, recordScopeParams } from "../views/recordQuery";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
   useEffectiveActions,
@@ -83,14 +83,11 @@ const BULK_DELETE_MAX = 500;
 
 /** One page with one record replaced, or the page untouched if it is not on it. */
 function withItem(
-  page: Page<ListItem>,
+  rows: ListItem[],
   uuid: string,
   next: (item: ListItem) => ListItem,
-): Page<ListItem> {
-  return {
-    ...page,
-    items: page.items.map((item) => (item.uuid === uuid ? next(item) : item)),
-  };
+): ListItem[] {
+  return rows.map((item) => (item.uuid === uuid ? next(item) : item));
 }
 
 // Split out of the bundle: the decoder it pulls in is ~110 kB gzipped — a quarter
@@ -232,7 +229,7 @@ export function ListDetailPage() {
       filters,
     ],
     queryFn: () =>
-      api.getPage<ListItem>(
+      api.get<ListItem[]>(
         `/lists/${listUuid}/items/?${recordParams({
           viewUuid: activeViewUuid,
           q,
@@ -248,8 +245,26 @@ export function ListDetailPage() {
     // height to nothing while the next one is in flight.
     placeholderData: (prev) => prev,
   });
-  const rows = items.data?.items ?? [];
-  const total = items.data?.total ?? 0;
+  // The paginator's total, asked separately because it is the same number for
+  // every page of one query. Keyed on the view, the search and the filter alone
+  // (see `recordCountKey`), so turning a page, sorting or grouping all read the
+  // cached answer instead of making the server recount every matching record.
+  // Live like the pages are, since a record someone else adds changes it.
+  const count = useQuery({
+    ...live,
+    queryKey: recordCountKey(listUuid, activeViewUuid, q, filters),
+    queryFn: () =>
+      api.get<{ total: number }>(
+        `/lists/${listUuid}/items/count?${recordScopeParams({
+          viewUuid: activeViewUuid,
+          q,
+          filters,
+        })}`,
+      ),
+    placeholderData: (prev) => prev,
+  });
+  const rows = items.data ?? [];
+  const total = count.data?.total ?? 0;
   // The rows the grid is *currently* showing, for the cell editor to open from.
   // PrimeReact hands its `editor` a snapshot of the row rather than the row, so
   // an editor opened after a poll would otherwise be seeded from what the record
@@ -408,14 +423,14 @@ export function ListDetailPage() {
       // asking the server anything. A refetch cannot do that job: offline there
       // is nothing to refetch, and the value the server rejected would sit on
       // screen until the connection came back.
-      const previous = queryClient.getQueriesData<Page<ListItem>>({
+      const previous = queryClient.getQueriesData<ListItem[]>({
         queryKey: recordPagesKey(listUuid),
       });
-      queryClient.setQueriesData<Page<ListItem>>(
+      queryClient.setQueriesData<ListItem[]>(
         { queryKey: recordPagesKey(listUuid) },
-        (page) =>
-          page &&
-          withItem(page, vars.uuid, (item) => ({
+        (rows) =>
+          rows &&
+          withItem(rows, vars.uuid, (item) => ({
             ...item,
             data: { ...item.data, ...vars.patch },
           })),
@@ -426,9 +441,9 @@ export function ListDetailPage() {
     // calculated columns recomputed and `onupdate` columns stamped. Refetching the
     // page to ask again would be a slower way to learn less than we already hold.
     onSuccess: (saved) => {
-      queryClient.setQueriesData<Page<ListItem>>(
+      queryClient.setQueriesData<ListItem[]>(
         { queryKey: recordPagesKey(listUuid) },
-        (page) => page && withItem(page, saved.uuid, () => saved),
+        (rows) => rows && withItem(rows, saved.uuid, () => saved),
       );
     },
     onError: (err, _vars, context) => {
@@ -1013,7 +1028,7 @@ export function ListDetailPage() {
           listUuid={listUuid}
           items={rows}
           columns={visibleCols}
-          loading={columns.isLoading || items.isLoading}
+          loading={columns.isLoading || items.isLoading || count.isLoading}
           principalUuids={principalUuids}
           lookupUuids={lookupUuids}
           selection={selection}
@@ -1035,7 +1050,7 @@ export function ListDetailPage() {
       ) : (
         <DataTable
           value={rows}
-          loading={columns.isLoading || items.isLoading}
+          loading={columns.isLoading || items.isLoading || count.isLoading}
           dataKey="uuid"
           // Bounds the wrapper's height so the header can stick to the top of it
           // and the paginator stays on screen — see `.data-grid` in themes.css.

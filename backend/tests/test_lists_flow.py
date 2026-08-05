@@ -910,6 +910,69 @@ async def test_after_is_refused_for_a_uuid_this_list_does_not_have(
     assert (await client.get(base + elsewhere)).status_code == 400
 
 
+async def test_count_agrees_with_the_total_the_listing_reports(client, paged_list):
+    list_uuid, _, _ = paged_list
+    for query in ("", "?q=alpha", "?filters=%7B%22conditions%22%3A%5B%5D%7D"):
+        listing = await client.get(f"/api/lists/{list_uuid}/items/{query}")
+        counted = await client.get(f"/api/lists/{list_uuid}/items/count{query}")
+        assert counted.status_code == 200, counted.text
+        # The two are the same number by construction — both are built off
+        # `visible_stmt` — and this is what keeps them that way.
+        assert str(counted.json()["total"]) == listing.headers["X-Total-Count"], query
+
+
+async def test_count_ignores_the_page_and_the_order(client, paged_list):
+    list_uuid, col, _ = paged_list
+    plain = (await client.get(f"/api/lists/{list_uuid}/items/count")).json()["total"]
+    assert plain == 10
+    # None of these change how many records there are, and the endpoint does not
+    # accept them; passing them anyway must not change the answer either.
+    noisy = (
+        await client.get(
+            f"/api/lists/{list_uuid}/items/count"
+            f"?skip=5&limit=2&sort_by={col}&sort_dir=desc&group_by={col}"
+        )
+    ).json()["total"]
+    assert noisy == plain
+
+
+async def test_count_is_not_parsed_as_a_record_uuid(client, paged_list):
+    """`/count` is declared before `/{uuid}`; this is what holds that ordering."""
+    list_uuid, _, _ = paged_list
+    resp = await client.get(f"/api/lists/{list_uuid}/items/count")
+    assert resp.status_code == 200, resp.text
+    assert "total" in resp.json()
+
+
+async def test_total_false_omits_the_header_and_the_rows_are_unchanged(
+    client, paged_list
+):
+    list_uuid, col, _ = paged_list
+    withhdr = await client.get(f"/api/lists/{list_uuid}/items/?limit=3")
+    without = await client.get(f"/api/lists/{list_uuid}/items/?limit=3&total=false")
+
+    assert withhdr.headers["X-Total-Count"] == "10"
+    assert "X-Total-Count" not in without.headers
+    # Suppressing the total changes nothing about which records come back.
+    assert [r["data"][col] for r in without.json()] == [
+        r["data"][col] for r in withhdr.json()
+    ]
+
+
+async def test_count_drops_a_binned_record(client, paged_list):
+    """The count is the paginator's total, so it must not describe more records
+    than the listing will hand over — a total reaching past them is how a paginator
+    offers pages that come back empty."""
+    list_uuid, _, _ = paged_list
+    rows = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    await client.delete(f"/api/lists/{list_uuid}/items/{rows[0]['uuid']}")
+
+    counted = (await client.get(f"/api/lists/{list_uuid}/items/count")).json()["total"]
+    listed = await client.get(f"/api/lists/{list_uuid}/items/")
+    assert counted == 9
+    assert counted == len(listed.json()) == int(listed.headers["X-Total-Count"])
+
+
 async def test_deleted_records_are_listed_and_restorable(client, list_uuid, add_column):
     col = await add_column(list_uuid, name="n", display_name="N", type="text")
     created = await client.post(
