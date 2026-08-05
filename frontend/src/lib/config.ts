@@ -14,6 +14,26 @@ export const LIVE_REFRESH_SECONDS = readNonNegativeNumber(
   10,
 );
 
+/**
+ * The *floor* on how often the metric strip re-asks for its values, in seconds.
+ *
+ * A metric is a scan of every record the caller can see, recomputed per request
+ * and cached nowhere, while a page of records is one indexed query — so the two
+ * do not deserve the same interval even though they answer the same question
+ * about the same list. The rows underneath a total are what has to be live; a
+ * total a minute old is a total.
+ *
+ * A floor rather than a value, applied by `useLiveList`: the effective interval
+ * is `max(LIVE_REFRESH_SECONDS, this)`, and `LIVE_REFRESH_SECONDS = 0` still
+ * disables polling outright. That ordering is the point — a deploy that slows
+ * the records down must not leave the cards above them refreshing faster, which
+ * an independent setting would allow by omission.
+ */
+export const METRIC_REFRESH_SECONDS = readNonNegativeNumber(
+  import.meta.env.VITE_METRIC_REFRESH_SECONDS,
+  60,
+);
+
 function readNonNegativeNumber(
   raw: string | undefined,
   fallback: number,

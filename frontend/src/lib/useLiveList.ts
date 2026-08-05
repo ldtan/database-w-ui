@@ -37,14 +37,27 @@ const ACTIVITY_EVENTS = [
  * refetch is a normal, permissioned `GET /items/`, so a poll can never surface a
  * row the viewer isn't allowed to see.
  *
+ * `minSeconds` raises the interval for a caller whose query is dearer than a page
+ * of records — the metric strip scans the whole list per request, so it asks for
+ * `METRIC_REFRESH_SECONDS`. It can only ever slow a query down, never speed one
+ * up past the deploy's setting, and it cannot revive polling that
+ * `LIVE_REFRESH_SECONDS = 0` turned off. Both guardrails above still apply, which
+ * is the reason this is a parameter here rather than a second `refetchInterval`
+ * written at the call site: an expensive query is the last one that should be
+ * polling an abandoned tab.
+ *
  * The seam exists so this can become server push (SSE) later **without touching a
  * single call site**: swap this hook's body to open a per-list event stream and
  * call `queryClient.invalidateQueries(["items", listUuid])` on each event, then
  * return `{}`. `listUuid` is already taken for exactly that per-list
  * subscription. See planned-features #8.
  */
-export function useLiveList(listUuid: string) {
-  const polling = LIVE_REFRESH_SECONDS > 0;
+export function useLiveList(listUuid: string, minSeconds = 0) {
+  // `0` means "no polling" rather than "as fast as possible", so the floor is
+  // applied only once there is an interval to raise.
+  const seconds =
+    LIVE_REFRESH_SECONDS > 0 ? Math.max(LIVE_REFRESH_SECONDS, minSeconds) : 0;
+  const polling = seconds > 0;
   const [idle, setIdle] = useState(false);
 
   useEffect(() => {
@@ -71,8 +84,8 @@ export function useLiveList(listUuid: string) {
     void listUuid; // reserved for the SSE subscription this hook will grow
     if (!polling || idle) return {} as const; // disabled by config, or idle
     return {
-      refetchInterval: LIVE_REFRESH_SECONDS * 1000,
+      refetchInterval: seconds * 1000,
       refetchIntervalInBackground: false,
     } as const;
-  }, [listUuid, polling, idle]);
+  }, [listUuid, polling, idle, seconds]);
 }

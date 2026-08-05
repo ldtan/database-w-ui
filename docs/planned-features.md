@@ -565,8 +565,11 @@ chain is topologically sorted and its cycles refused at save time, while a metri
   `tests/test_metrics.py::test_two_readers_get_the_totals_of_what_each_can_see`.
 - **Bounded.** `METRIC_ROW_LIMIT` (50,000), streaming `data` alone in batches of 1,000,
   with `truncated` in the response and a note on the card. A metric is recomputed per
-  request *and* re-asked on the live-records interval, so an unbounded scan was a way to
-  spend the whole server.
+  request *and* re-asked on a timer, so an unbounded scan was a way to spend the whole
+  server. **Shipped since:** `metrics/pushdown.py` compiles the common aggregates to SQL,
+  which removes ~2,000 ms of app CPU per 100k records for those shapes and lifts the cap
+  for them (nothing accumulates in Python to bound). The cap still governs everything that
+  falls back. See capacity-and-performance.md and known-gaps §9.
 - **`_shape_for_read` was split** into `computed_columns` + a pure `shape_values`, so the
   scan shapes records exactly as the grid does without hydrating 50k ORM instances. The
   `set_committed_value` call stays where it was — see its docstring for why that matters.

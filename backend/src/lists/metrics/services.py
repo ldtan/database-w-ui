@@ -15,7 +15,7 @@ from ..columns.models import Column, in_shape
 from ..items.models import ListItem
 from ..items.services import ListItemService, computed_columns, shape_values
 from ..models import List
-from . import aggregate
+from . import aggregate, pushdown
 from .models import Metric
 from .schemas import MetricConfig, MetricCreate, MetricUpdate, MetricValue, MetricValues
 
@@ -28,12 +28,16 @@ REFERENCEABLE_TYPES = frozenset(
     {ColumnType.number, ColumnType.text, ColumnType.calculated}
 )
 
-# How many records one evaluation will read before it stops and says so. A
-# metric is recomputed on every request — and the frontend re-asks on the live
-# refresh interval — so an unbounded scan is a way to spend the whole server on a
-# list nobody thought was large. Past this the answers describe the first
-# `METRIC_ROW_LIMIT` records and `truncated` says so, which is a number a reader
-# can judge; refusing outright would leave them nothing at all.
+# How many records one *scan* will read before it stops and says so. A metric is
+# recomputed on every request — and the frontend re-asks on its refresh interval —
+# so an unbounded scan is a way to spend the whole server on a list nobody thought
+# was large. Past this the answers describe the first `METRIC_ROW_LIMIT` records
+# and `truncated` says so, which is a number a reader can judge; refusing outright
+# would leave them nothing at all.
+#
+# It bounds the Python path only. A request `pushdown` can compile is answered by
+# Postgres over every matching record, with nothing accumulating in Python to cap —
+# so the cap is what a formula falls back *to*, not a property of metrics.
 METRIC_ROW_LIMIT = 50_000
 # Rows per round trip while streaming. Large enough that a scan is not chatty,
 # small enough that a wide list does not land in memory at once.
@@ -172,7 +176,7 @@ class MetricService:
         q: Optional[str] = None,
         filters: Optional[dict] = None,
     ) -> MetricValues:
-        """Answer every metric on the list in one pass over its records.
+        """Answer every metric on the list in one pass over the records in scope.
 
         The records are whatever the caller may see through this view, search and
         filter — `ListItemService.visible_stmt` is the same statement the grid reads
@@ -183,6 +187,12 @@ class MetricService:
         has to be a total *of that grid*. Narrowing the records without narrowing the
         cards would leave a "Total owed" reading the whole list while the rows under
         it show one customer, which is worse than showing nothing.
+
+        The pass is either one SQL statement Postgres aggregates (`pushdown`) or one
+        stream folded in Python (`_scan`), decided by the formulas alone and never by
+        the data. Which one ran is invisible in the answer — that is the property the
+        equivalence tests exist to hold — except that a compiled request is not
+        subject to `METRIC_ROW_LIMIT` and so never reports `truncated`.
         """
         metrics = await cls.list(db, lst.id)
         if not metrics:
@@ -211,37 +221,25 @@ class MetricService:
             parsed.append((metric, formula, None))
 
         usable = [formula for _, formula, _ in parsed if formula is not None]
-        evaluator: Optional[aggregate.MetricEvaluator] = None
+        results: dict[int, object] = {}
         row_count = 0
         truncated = False
 
         if usable:
-            evaluator = aggregate.MetricEvaluator(usable)
-            computed, key_of_name = computed_columns(columns)
-            # Only the keys the formulas actually read, resolved once rather than
-            # per record.
-            wanted = {
-                name: key_of_name[name]
-                for name in evaluator.column_names
-                if name in key_of_name
-            }
-
             stmt, _sorts, _group_by = await ListItemService.visible_stmt(
                 db, lst, user, columns, view_uuid, q, filters
             )
-            # `data` alone, ordered by id: an aggregate has no use for the view's
-            # sort, and hydrating whole records would cost 50k ORM instances for
-            # values that are thrown away a row later.
-            stmt = stmt.with_only_columns(ListItem.data).order_by(ListItem.id)
-            result = await db.stream(stmt.execution_options(yield_per=_SCAN_BATCH))
-            async for (data,) in result:
-                shaped = shape_values(columns, computed, key_of_name, data or {})
-                evaluator.add_row({name: shaped.get(key) for name, key in wanted.items()})
-                row_count += 1
-                if row_count >= METRIC_ROW_LIMIT:
-                    truncated = True
-                    break
-            await result.close()
+            # Postgres answers these itself where the formulas allow it, and then no
+            # record becomes a Python object at all — which is the whole cost of this
+            # endpoint on a large list. All-or-nothing: `compile_all` returns None if
+            # any one aggregate will not go, so the cards can never describe two
+            # different record sets. See `pushdown` for what compiles and why.
+            by_name = {column.name: column for column in columns.values()}
+            compiled = pushdown.compile_all(usable, by_name)
+            if compiled is not None:
+                results, row_count = await pushdown.run(db, stmt, compiled)
+            else:
+                results, row_count, truncated = await cls._scan(db, columns, stmt, usable)
 
         return MetricValues(
             row_count=row_count,
@@ -250,9 +248,50 @@ class MetricService:
                 MetricValue(
                     uuid=metric.uuid,
                     name=metric.name,
-                    value=None if formula is None else evaluator.result(formula),
+                    value=None if formula is None else aggregate.fold(formula, results),
                     error=error,
                 )
                 for metric, formula, error in parsed
             ],
         )
+
+    @staticmethod
+    async def _scan(
+        db: AsyncSession,
+        columns: dict[str, Column],
+        stmt,
+        usable: Sequence[aggregate.MetricFormula],
+    ) -> tuple[dict[int, object], int, bool]:
+        """The general path: fold every visible record in Python, one pass, bounded.
+
+        What `pushdown` cannot compile ends up here, which is every formula whose
+        argument is more than arithmetic over columns — and, deliberately, every
+        formula reading a `calculated` column, whose stored value may lag and so has
+        to be recomputed per record rather than totalled where it sits.
+        """
+        evaluator = aggregate.MetricEvaluator(usable)
+        computed, key_of_name = computed_columns(columns)
+        # Only the keys the formulas actually read, resolved once rather than
+        # per record.
+        wanted = {
+            name: key_of_name[name]
+            for name in evaluator.column_names
+            if name in key_of_name
+        }
+
+        row_count = 0
+        truncated = False
+        # `data` alone, ordered by id: an aggregate has no use for the view's
+        # sort, and hydrating whole records would cost 50k ORM instances for
+        # values that are thrown away a row later.
+        stmt = stmt.with_only_columns(ListItem.data).order_by(ListItem.id)
+        result = await db.stream(stmt.execution_options(yield_per=_SCAN_BATCH))
+        async for (data,) in result:
+            shaped = shape_values(columns, computed, key_of_name, data or {})
+            evaluator.add_row({name: shaped.get(key) for name, key in wanted.items()})
+            row_count += 1
+            if row_count >= METRIC_ROW_LIMIT:
+                truncated = True
+                break
+        await result.close()
+        return evaluator.results(), row_count, truncated

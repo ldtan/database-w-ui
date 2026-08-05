@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "primereact/skeleton";
 
 import { api } from "../../lib/api";
+import { METRIC_REFRESH_SECONDS } from "../../lib/config";
 import { useLiveList } from "../../lib/useLiveList";
 import type { FilterGroup, Metric, MetricValue, MetricValues } from "../../lib/types";
 import { recordScopeParams } from "../views/recordQuery";
@@ -56,9 +57,18 @@ export function MetricBar({
   filters,
   visible,
 }: Props) {
-  const live = useLiveList(listUuid);
+  const live = useLiveList(listUuid, METRIC_REFRESH_SECONDS);
   const values = useQuery({
-    // Cards follow the records: same live refresh, same guardrails.
+    // Cards follow the records — same guardrails, same invalidation — but on a
+    // slower clock. A metric is an aggregate over the whole list where a page of
+    // rows is one indexed query, so matching intervals meant the dearest query on
+    // the screen ran as often as the cheapest. The backend compiles the common
+    // formulas to SQL, which makes most of them cheap, but not the ones that fall
+    // back to a record-by-record scan — and the frontend cannot tell which a given
+    // card is. Your *own* edits still show immediately either way: the key is
+    // nested under the items key, so the invalidation the grid already fires
+    // refreshes the cards too, and the interval only carries other people's
+    // changes.
     ...live,
     queryKey: metricValuesKey(listUuid, viewUuid, q, filters),
     queryFn: () =>
