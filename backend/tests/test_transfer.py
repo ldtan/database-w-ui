@@ -1,6 +1,7 @@
 """Streaming export and bulk import of records."""
 import json
 
+from src.core import uploads
 from src.lists.transfer import services as transfer_services
 
 
@@ -428,7 +429,7 @@ async def test_import_refuses_an_upload_over_the_size_cap(
     """The row cap alone bounds the database work but not the memory: the file is
     read whole before anything can count its rows. A single enormous row would pass
     a row cap and still be a request that cannot be served."""
-    monkeypatch.setattr(transfer_services, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 1024 * 1024)
     name, _ = await _seed(client, list_uuid, add_column)
 
     body = "name,age\n" + "x" * (2 * 1024 * 1024) + ",1\n"

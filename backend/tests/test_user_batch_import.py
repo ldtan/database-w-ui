@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 
 from src.auth.helpers import verify_password
+from src.core import uploads
 from src.auth.users.batch.parsing import parse_file
 from src.auth.users.batch.services import import_users
 from src.auth.users.schemas import UserCreate, UserGroupCreate
@@ -315,6 +316,22 @@ async def test_endpoint_rejects_an_over_cap_file(session_factory, make_client):
         )
     assert resp.status_code == 400
     assert str(MAX_ROWS) in resp.json()["detail"]
+
+
+async def test_endpoint_rejects_an_oversized_file(
+    session_factory, make_client, monkeypatch
+):
+    """The row cap cannot see a row until the whole upload is decoded, so it bounds
+    the accounts created and not the memory spent getting there — one enormous row
+    passes it untouched. Superuser-only narrows who can send that; it does not make
+    it survivable."""
+    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    admin = await _admin(session_factory)
+    body = "username,email\n" + "x" * (2 * 1024 * 1024) + ",a@example.com\n"
+    async with make_client(admin) as client:
+        resp = await client.post("/api/auth/users/import", files=_upload(body))
+    assert resp.status_code == 400, resp.text
+    assert "larger than 1 MB" in resp.json()["detail"]
 
 
 async def test_endpoint_rejects_a_file_that_is_not_utf8(session_factory, make_client):

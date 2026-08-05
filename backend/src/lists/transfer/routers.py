@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
 from src.core.exceptions import ValidationError
+from src.core.uploads import read_upload
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
 from src.permissions.services import PermissionService
@@ -17,7 +18,7 @@ from src.permissions.services import PermissionService
 from ..dependencies import get_list_or_404
 from ..models import List
 from .schemas import ExportRequest, ImportSummary
-from .services import export_rows, import_records, read_upload
+from .services import export_rows, import_records
 
 router = APIRouter(prefix="/{list_uuid}", tags=["transfer"])
 
