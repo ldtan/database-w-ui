@@ -580,14 +580,24 @@ Notes:
 - **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
   The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
 - **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in
-  **one scan**, so the cards always agree with each other. The scan is
+  **one pass**, so the cards always agree with each other. That pass is built on
   `ListItemService.visible_stmt` — the same statement the grid reads — so it honours the
   caller's permissions, the filters and the search, and the cards agree with what is on
   screen. It takes `filters` for that last reason: a total above a grid narrowed for one
   request has to be a total *of that grid*. Two people with different grants correctly
   see different numbers.
-- **Bounded at `METRIC_ROW_LIMIT` (50,000) records**, past which the response sets
-  `truncated` and the card says so. See known-gaps.
+- **Two ways that pass can run, chosen by the formula alone.** `metrics/pushdown.py`
+  compiles the common aggregates (`SUM`, `AVG`, `MIN`, `MAX`, `COUNT`, `EMPTY`, over a
+  column or `+`/`-`/`*` arithmetic on columns and literals) into one SQL statement, so
+  Postgres answers them and nothing is read into Python — about 2,000 ms of app CPU per
+  100k records becomes indistinguishable from zero. Everything else streams the records
+  and folds them in Python. Only the *aggregate call* ever compiles: the arithmetic around
+  it (`ROUND(SUM(a) / COUNT(), 2)`) is folded by `aggregate.fold` either way, so the two
+  paths share one implementation of `IF`, `IS_NULL` and the blank-propagation rules.
+- **The Python path is bounded at `METRIC_ROW_LIMIT` (50,000) records**, past which the
+  response sets `truncated` and the card says so; a compiled request has nothing to bound
+  and answers over all of them. Compiling is all-or-nothing per request so two cards can
+  never describe two different record sets. See known-gaps §9.
 - **No `permissions_inherit`**, unlike views and forms: a metric carries no permissions
   of its own. List `view` to read, list `configure` to write.
 - Metrics cascade-delete and restore with their list (`_LIST_CHILD_MODELS`), and a

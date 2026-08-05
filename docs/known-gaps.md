@@ -393,42 +393,88 @@ sanitiser drops looks like it works and then silently loses the formatting on sa
 
 ---
 
-## 9. Metrics are recomputed per request, and bounded
+## 9. Metrics are recomputed per request, and the scan is bounded
 
 A metric (data-model §9) stores a formula, never a number: `GET
-/lists/{uuid}/metrics/values` scans the records in scope and answers every card in one
-pass. A total is therefore never stale, and nothing has to be backfilled when a record, a
+/lists/{uuid}/metrics/values` answers every card over the records in scope, together, per
+request. A total is therefore never stale, and nothing has to be backfilled when a record, a
 formula or a filter changes. A `calculated` column used to make the same bargain and no
 longer does — it writes its answer down as a query index (§5) — but a metric cannot: its
 number depends on the caller's grants and the request's filters (see below), so there is no
 single value to store. The costs are worth knowing about.
 
-- **The same card shows different numbers to different people, on purpose.** The scan runs
-  through `ListItemService.visible_stmt`, so it honours `item_view_filter`. A reader who
+**There are two paths, and which one runs depends only on the formula.** `metrics/pushdown.py`
+compiles the common aggregate shapes into one SQL statement, so Postgres answers them and no
+record becomes a Python object; anything it cannot compile falls back to the scan below.
+Measured on a 100,000-record list (2026-08-05, same machine and method as
+capacity-and-performance.md), per request:
+
+| | scan | compiled |
+|---|---|---|
+| `SUM(qty)` | 1,991 ms app CPU | **9 ms** |
+| `SUM(qty * price)` | 2,175 ms | **3 ms** |
+| `COUNT()` | 1,884 ms | **0 ms** |
+| `AVG(qty)` | 1,941 ms | **0 ms** |
+
+The compiled column is at the resolution floor of `time.process_time` on Windows (~15.6 ms),
+measured over batches — the honest reading is "indistinguishable from zero app CPU, and
+12–196 ms of *Postgres* wall time", which is the side of the box that has capacity to spare.
+The scan costs ~20 µs of app CPU per record, and that is the number the row limit exists to
+bound.
+
+- **The same card shows different numbers to different people, on purpose.** Both paths build
+  on `ListItemService.visible_stmt`, so they honour `item_view_filter`. A reader who
   cannot see a record must not learn its value from a total, which means "Total hours" is
   the total of *your* hours, not the list's. `row_count` in the response is the count after
   permissions, filters and search, so it is the number to show if you want to explain a
   figure — it will not match the list's record count and is not meant to.
-- **It is a scan, and it is capped at `METRIC_ROW_LIMIT` (50,000).** Past that the answers
-  describe the first 50,000 records and `truncated` is set; the card renders a note rather
-  than a number that quietly means something else. Refusing outright was the alternative and
-  leaves the reader nothing. The scan streams `data` alone (not ORM instances) in batches of
-  1,000 and skips the view's sort, which an aggregate has no use for.
-- **Nothing is cached, and the frontend re-asks on the live interval.** The values query
-  rides `useLiveList`, so a large list plus a short `VITE_LIVE_REFRESH_SECONDS` is where
-  this will first hurt. What keeps that in hand today is that **the strip is hidden until
-  the toolbar's Metrics button reveals it**, and `visible` gates the query rather than
-  just the markup — a list nobody is totalling costs nothing, and the interval only runs
-  for someone actually looking at a total. Keep those two facts attached: making the strip
-  default to shown, or rendering it hidden with the query still enabled, quietly turns
-  every open list into a repeating full scan. The fix when it does hurt is a SQL fast path
-  for the common shape — a
-  bare `AGG(stored_column)` compiles to one `SELECT SUM(CAST(data->>'uuid' AS numeric))` —
-  which is why the row limit exists in the meantime. It cannot be the *general* path:
-  formulas take arbitrary row expressions. A `calculated` column is no longer the second
-  wall it once was — it does have a stored value now (§5) — but that value is an index that
-  may lag a formula edit, and a total computed off a stale index is exactly the silently
-  wrong number this scan exists to avoid. Aggregating one still means recomputing it.
+- **The scan is capped at `METRIC_ROW_LIMIT` (50,000); the compiled path is not.** Past the
+  cap the answers describe the first 50,000 records and `truncated` is set; the card renders
+  a note rather than a number that quietly means something else. Refusing outright was the
+  alternative and leaves the reader nothing. The scan streams `data` alone (not ORM
+  instances) in batches of 1,000 and skips the view's sort, which an aggregate has no use
+  for. A compiled request has nothing accumulating in Python to cap, so it answers over
+  every matching record and reports the true `row_count`.
+- **Compiling is all-or-nothing per request.** One uncompilable metric puts the whole strip
+  back on the scan. The alternative — compiled cards answered over every record while
+  scanned ones stop at 50,000 — would sit two numbers describing two different record sets
+  side by side, with only one carrying the truncation note. Cards agreeing with each other
+  is the property the single-pass design exists to provide.
+- **What stays on the scan, and why each one.** `MEDIAN` and `UNIQUE` (their equality and
+  ordering semantics do not survive the round trip through JSONB text — `1` and `1.0` are
+  one element of a Python `set` and two distinct strings in SQL); division *inside* an
+  aggregate (Postgres fails the whole statement on a zero divisor where the scan blanks that
+  one row); row functions inside an aggregate (`ROUND`, `IF`, `CONCAT`); `multiple` columns;
+  and every `calculated` column, whose stored value may lag a formula edit (§5) — totalling
+  the stale copy is exactly the silently wrong number the scan exists to avoid, so
+  aggregating one still means recomputing it per record. `pushdown`'s module docstring is
+  the authority on this list.
+- **Arithmetic differs in Postgres's favour.** `numeric` is exact decimal where Python's
+  floats are binary, so a compiled `SUM(qty * price)` over 100k rows measured
+  `106250024.4` against the scan's `106250024.40004165`. The compiled answer is the more
+  accurate one, and the gap is far below the 1e-6 the frontend already rounds to. Worth
+  knowing before someone reports it as a bug.
+- **Nothing is cached, and the frontend re-asks on a timer.** The values query rides
+  `useLiveList`, so a large list is where this will first hurt. Three things keep it in
+  hand, and they are worth keeping attached to each other:
+  - **The strip is hidden until the toolbar's Metrics button reveals it**, and `visible`
+    gates the query rather than just the markup — a list nobody is totalling costs
+    nothing, and the timer only runs for someone actually looking at a total. Making the
+    strip default to shown, or rendering it hidden with the query still enabled, quietly
+    turns every open list into a repeating full scan.
+  - **The cards poll on their own, slower clock**: `METRIC_REFRESH_SECONDS` (default 60)
+    is a *floor* the hook raises `LIVE_REFRESH_SECONDS` to for this caller, so a deploy
+    that makes records snappier cannot drag a whole-list scan along with it, and one that
+    slows records down still wins because the floor only ever raises. `0` still disables
+    polling outright. The rows under a total are what has to be live; a total a minute old
+    is a total.
+  - **Your own edits do not wait for that clock.** The values key is nested under the
+    items key (below), so the invalidation the grid already fires refreshes the cards
+    immediately. The interval carries only *other people's* changes, which is why
+    lengthening it costs so little.
+
+  The three still matter after pushdown, because pushdown does not help the formulas that
+  fall back — and those are exactly the expensive ones, since a scan is what they cost.
 - **A renamed column breaks its metric — but says so.** Formulas reference columns by name
   and names are editable (§5), and there is still no reverse index. The difference is that a
   metric checks its refs against the live columns before scanning and returns an `error`

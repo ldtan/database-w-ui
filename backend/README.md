@@ -65,7 +65,7 @@ backend/
         ├── items/           # ListItem (record data + validation)
         ├── views/           # View
         ├── forms/           # Form + FormType enum
-        └── metrics/       # Metric + the aggregate formula language
+        └── metrics/       # Metric + the aggregate formula language (+ its SQL pushdown)
 ```
 
 Each resource follows the same four-file convention: `models.py`, `schemas.py`,

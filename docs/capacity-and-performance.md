@@ -31,7 +31,7 @@ Do not measure wall time — argon2 runs on four threads by default, so it burns
 | `GET lists/{u}/views/` | 20 ms |
 | `GET lists/{u}/items/?limit=25` | 23 ms |
 | `GET lists/{u}/items/?limit=100` | 29 ms |
-| `GET lists/{u}/metrics/values` | 28 ms |
+| `GET lists/{u}/metrics/values` | 28 ms (see "Metrics" below) |
 | `GET lists/{u}/items/?q=…` (search) | 106 ms |
 | **Opening a list** (list + columns + items + views + forms) | **98 ms** |
 | **`POST auth/tokens/login`** | **717 ms** |
@@ -42,6 +42,45 @@ work is real but small. Search is the expensive read, at ~4× a plain page, beca
 `_reference_matches` resolves labels in other tables before it can match cells.
 
 Everything else is a rounding error next to login.
+
+## Metrics: the same total, on the app's CPU or on the database's
+
+The 28 ms above is the school demo's ~740 records, which says nothing about a large list.
+A metric is an aggregate over *every* record in scope, so its cost scales with the list —
+and unlike the re-index below it runs on every request, on a timer, while someone is
+looking at the strip.
+
+`metrics/pushdown.py` compiles the common aggregate shapes into one SQL statement so
+Postgres computes them, and falls back to streaming the records into Python for the rest.
+Measured 2026-08-05, same machine and method, on a 100,000-record list with two number
+columns (the scan's cap lifted so both paths cover the same records):
+
+| Formula | Scan — app CPU | Compiled — app CPU | Compiled — Postgres wall |
+|---|---|---|---|
+| `SUM(qty)` | 1,991 ms | ~9 ms | 156 ms |
+| `SUM(qty * price)` | 2,175 ms | ~3 ms | 196 ms |
+| `COUNT()` | 1,884 ms | ~0 ms | 12 ms |
+| `AVG(qty)` | 1,941 ms | ~0 ms | 130 ms |
+| `SUM(qty) / COUNT()` | 2,003 ms | ~0 ms | 155 ms |
+
+What the table is meant to settle:
+
+- **The scan costs ~20 µs of app CPU per record**, linear, which is what
+  `METRIC_ROW_LIMIT` (50,000 — so ~1 s) exists to bound. On the free tier's 0.1 CPU that
+  cap is still ~10 wall seconds, which is why the strip is hidden by default and polls on
+  its own slower clock (`METRIC_REFRESH_SECONDS`).
+- **The compiled column is at the measurement floor**, not actually zero: Windows
+  `time.process_time` resolves to ~15.6 ms, so these are batch averages. The honest
+  reading is "indistinguishable from zero app CPU". The work moved to Postgres, which is
+  the resource this deployment has spare — the database has never been the bottleneck.
+- **It is the app's CPU that was the constraint, and it is gone for these shapes.** The
+  row cap is now what a formula falls back *to*, not a property of metrics.
+
+Which formulas compile, and why the rest deliberately do not, is in `pushdown`'s module
+docstring and known-gaps §9. One consequence worth knowing before it is reported as a bug:
+`numeric` is exact decimal where Python's floats are binary, so a compiled
+`SUM(qty * price)` answered `106250024.4` where the scan answered `106250024.40004165`.
+The compiled one is the more accurate of the two.
 
 ## Re-indexing a calculated column
 

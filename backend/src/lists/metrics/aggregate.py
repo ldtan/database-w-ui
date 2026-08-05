@@ -234,10 +234,15 @@ def _is_num(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _kind(call: ast.Call) -> str:
+def call_kind(call: ast.Call) -> str:
     """The accumulator a call needs. ``COUNT()`` counts records rather than
     values, which is a different accumulator from ``COUNT(col)``, not a special
-    case inside one."""
+    case inside one.
+
+    Public because `pushdown` decides what it can compile per *kind* and must
+    split ``COUNT`` the same way this does; two spellings of that rule would
+    eventually disagree about which one `COUNT()` is.
+    """
     name = call.func.id
     return "COUNT_ROWS" if name == "COUNT" and not call.args else name
 
@@ -335,7 +340,7 @@ class MetricEvaluator:
         for formula in formulas:
             names |= formula.refs
             for call in formula.calls:
-                accumulator = _Accumulator(_kind(call))
+                accumulator = _Accumulator(call_kind(call))
                 self._accumulators[id(call)] = accumulator
                 self._work.append(
                     (call.args[0] if call.args else None, accumulator)
@@ -356,18 +361,39 @@ class MetricEvaluator:
                 # and a blank is skipped rather than counted as zero.
                 accumulator.add(None)
 
+    def results(self) -> dict[int, object]:
+        """Each aggregate call's value, keyed by ``id()`` of its node.
+
+        The seam `fold` consumes. Scanning records in Python is one way to fill
+        this in and `pushdown` is the other, which is what lets a metric answered
+        by Postgres and a metric answered by a scan share every line of the outer
+        arithmetic below rather than growing a second copy of `IF`, `ROUND` and
+        the blank-propagation rules.
+        """
+        return {key: acc.result() for key, acc in self._accumulators.items()}
+
     def result(self, formula: MetricFormula) -> Union[float, str, None]:
         """This formula's value over everything added so far."""
-        try:
-            return normalize_result(_fold(formula.tree.body, self._accumulators))
-        except ARITHMETIC_ERRORS:
-            return None
+        return fold(formula, self.results())
 
 
-def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
+def fold(formula: MetricFormula, results: dict[int, object]) -> Union[float, str, None]:
+    """One formula's value, given every aggregate call's result.
+
+    ``results`` is keyed by ``id()`` of the call nodes in `MetricFormula.calls` —
+    see that class for why those ids are stable and unique for the formula's
+    lifetime.
+    """
+    try:
+        return normalize_result(_fold(formula.tree.body, results))
+    except ARITHMETIC_ERRORS:
+        return None
+
+
+def _fold(node: ast.AST, results: dict[int, object]):
     """Reduce an outer node to a value.
 
-    An aggregate call becomes its accumulated result; every other node is handed
+    An aggregate call becomes its computed result; every other node is handed
     back to the *row* evaluator with its children already reduced to constants.
     So the arithmetic, the comparisons and the function semantics — including the
     text bounds that make them safe — stay defined in exactly one place, and this
@@ -377,9 +403,11 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
         return node.value
 
     if isinstance(node, ast.Call):
-        accumulator = accumulators.get(id(node))
-        if accumulator is not None:
-            return accumulator.result()
+        # Membership, not a truthy lookup: an aggregate legitimately results in
+        # ``None`` (``AVG`` of nothing), and `.get` would send that back round as
+        # a row function to be re-evaluated.
+        if id(node) in results:
+            return results[id(node)]
         # An argument that cannot be computed folds to "no value" rather than
         # being raised past this call. Every function blanks on a blank argument,
         # so for all but one this is the answer it would have reached anyway —
@@ -388,7 +416,7 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
         folded = []
         for arg in node.args:
             try:
-                folded.append(ast.Constant(_fold(arg, accumulators)))
+                folded.append(ast.Constant(_fold(arg, results)))
             except ARITHMETIC_ERRORS:
                 folded.append(ast.Constant(None))
         return eval_row_expression(
@@ -397,16 +425,16 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
 
     if isinstance(node, ast.UnaryOp):
         return eval_row_expression(
-            ast.UnaryOp(op=node.op, operand=ast.Constant(_fold(node.operand, accumulators))),
+            ast.UnaryOp(op=node.op, operand=ast.Constant(_fold(node.operand, results))),
             {},
         )
 
     if isinstance(node, ast.BinOp):
         return eval_row_expression(
             ast.BinOp(
-                left=ast.Constant(_fold(node.left, accumulators)),
+                left=ast.Constant(_fold(node.left, results)),
                 op=node.op,
-                right=ast.Constant(_fold(node.right, accumulators)),
+                right=ast.Constant(_fold(node.right, results)),
             ),
             {},
         )
@@ -415,7 +443,7 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
         return eval_row_expression(
             ast.BoolOp(
                 op=node.op,
-                values=[ast.Constant(_fold(v, accumulators)) for v in node.values],
+                values=[ast.Constant(_fold(v, results)) for v in node.values],
             ),
             {},
         )
@@ -423,10 +451,10 @@ def _fold(node: ast.AST, accumulators: dict[int, _Accumulator]):
     if isinstance(node, ast.Compare):
         return eval_row_expression(
             ast.Compare(
-                left=ast.Constant(_fold(node.left, accumulators)),
+                left=ast.Constant(_fold(node.left, results)),
                 ops=node.ops,
                 comparators=[
-                    ast.Constant(_fold(c, accumulators)) for c in node.comparators
+                    ast.Constant(_fold(c, results)) for c in node.comparators
                 ],
             ),
             {},

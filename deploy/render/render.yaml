@@ -76,6 +76,11 @@ services:
       # Optional — the app defaults to 5s if unset. `0` disables polling. Lower is
       # snappier but more requests; on the free tier a focused open tab polling
       # keeps the single instance awake. See docs/planned-features.md #8.
+      #
+      # The metric strip does not follow this down: it takes the greater of this and
+      # VITE_METRIC_REFRESH_SECONDS (default 60), because a metric is a scan of the
+      # whole list per request while a page of rows is one indexed query. Lowering
+      # the value below therefore speeds up records alone, which is the intent.
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "60"
     routes:
