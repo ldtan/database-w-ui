@@ -198,6 +198,56 @@ than as it goes, so a file one row over the limit imports *nothing*. That is wha
 "split it and import each part separately" advice someone can act on; the alternative leaves
 them reconciling which thousand rows already went in.
 
+## Two indexes for the questions actually asked
+
+Both tables were indexed for a question nobody was asking.
+
+Measured 2026-08-05 on a scratch database of 100,000 records spread over 50 lists (so one
+list is 1/50th of the table, which is what a real workspace looks like) and 50,000 grants
+over 2,000 users and 50 groups. `EXPLAIN (ANALYZE, BUFFERS)`, same session and same data
+with the indexes dropped and then created:
+
+| | before | after |
+|---|---|---|
+| Grid page — one list's live records, id order, `LIMIT 100` | 5.9 ms, 553 buffers | **0.29 ms** |
+| Collection filter — grants for one principal and resource type | 1.0 ms, 44 buffers | **0.20 ms**, 4 buffers |
+
+**`list_items (list_id, id) WHERE deleted_at IS NULL`.** The grid orders by `id` —
+`apply_sorts` appends it as the tiebreaker and it is the whole ordering when no sort is
+chosen. Given a `list_id` index that offers no order, the planner preferred the *primary
+key*, which is already in id order, and simply discarded the rows belonging to other lists:
+
+```
+->  Index Scan using list_items_pkey on list_items
+      Filter: ((deleted_at IS NULL) AND (list_id = 1))
+      Rows Removed by Filter: 9850
+```
+
+9,850 rows read and thrown away to return 100. What that cost tracks is not how large the
+list is but how *sparse* it is in the table — a workspace with many lists is worse per list,
+not better — and `OFFSET` paging multiplies it per page, since page 50 discards fifty times
+as much. With `id` trailing `list_id` the scan is already in the right order and stops after
+100 rows.
+
+**`permission_grants (user_id, resource_type)` and `(group_id, resource_type)`, each partial
+on its principal.** Every collection-visibility filter asks what one principal may see. The
+existing unique indexes *can* serve that — `resource_type` leads them and the filters do
+constrain it — but that is the entire usable prefix and it has five values, so answering
+meant walking a whole fifth of the index:
+
+```
+->  Bitmap Index Scan on uq_permission_grants_user   (Buffers: shared hit=33)
+      Index Cond: ((resource_type = 'workspace') AND (user_id = 1234))
+```
+
+33 buffers to return nothing. Principal-first makes it 2. The resource-led index stays: grant
+management still asks the original question, "who may touch this resource".
+
+Neither index is free on writes, and `list_items` now carries two on `list_id`. The plain one
+stays because the bin asks the opposite question — soft-deleted rows — which the partial index
+deliberately excludes. Against the GIN index on `data`, which every insert already pays for,
+both are noise.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:
