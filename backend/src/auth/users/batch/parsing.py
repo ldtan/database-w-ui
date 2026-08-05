@@ -11,6 +11,7 @@ from typing import NamedTuple, Optional
 
 from pydantic import ValidationError as PydanticValidationError
 
+from src.core.config import settings
 from src.core.exceptions import ValidationError
 from src.people.schemas import PersonCreate
 
@@ -26,9 +27,9 @@ PERSON_HEADERS = (
 KNOWN_HEADERS = (*ACCOUNT_HEADERS, *PERSON_HEADERS)
 REQUIRED_HEADERS = ("username", "email")
 
-# Each row is several round trips, so an unbounded file is a request that never
-# returns. Parsing is pure, so hitting this cap still means nothing was written.
-MAX_ROWS = 1000
+# The row cap is `settings.IMPORT_MAX_ROWS`, shared with the list importer: each row
+# is several round trips either way, so an unbounded file is a request that never
+# returns. Parsing is pure, so hitting the cap still means nothing was written.
 
 
 class ParsedFile(NamedTuple):
@@ -100,6 +101,7 @@ def parse_file(text: str) -> ParsedFile:
     reader = csv.DictReader(io.StringIO(text))
     check_headers(reader.fieldnames)
 
+    max_rows = settings.IMPORT_MAX_ROWS
     rows: list[tuple[int, BatchUserRow]] = []
     errors: list[BatchUserError] = []
 
@@ -108,9 +110,9 @@ def parse_file(text: str) -> ParsedFile:
         # points at the right line when the file has blank ones. Same reasoning as
         # lists/transfer/routers.py.
         number = reader.line_num
-        if len(rows) + len(errors) >= MAX_ROWS:
+        if len(rows) + len(errors) >= max_rows:
             raise ValidationError(
-                f"This file has more than {MAX_ROWS} rows; split it and import "
+                f"This file has more than {max_rows} rows; split it and import "
                 "each part separately"
             )
 

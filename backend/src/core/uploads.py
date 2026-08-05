@@ -5,19 +5,19 @@ hazard is the same in both and only one of them had noticed it.
 """
 from typing import Optional, Protocol
 
+from src.core.config import settings
 from src.core.exceptions import ValidationError
 
-# What an upload may weigh. Row caps bound the database work but not the memory: a
-# file has to be read before anything can count its rows, and a JSON one is then
-# parsed whole as well, which costs several times what it weighed on the wire. So a
-# row cap on its own is not a bound at all — one enormous row passes it and still
-# takes the process down. 8 MB is far above a thousand rows of anything either
-# importer accepts, and small enough that the parsed form still fits on a 512 MB
-# instance.
-MAX_UPLOAD_BYTES = 8 * 1024 * 1024
-
-# How much is read at a time while checking that, so an oversized upload is refused
-# one chunk past the limit instead of after the whole thing is in hand.
+# The size limit itself is `settings.MAX_UPLOAD_BYTES`, because it belongs to the
+# instance rather than to this function. What is worth stating here is why it has to
+# exist at all: a row cap bounds the database work but not the memory, since a file
+# has to be read before anything can count its rows, and a JSON one is then parsed
+# whole again at several times its size on the wire. One enormous row passes a row
+# cap untouched and still takes the process down.
+#
+# How much is read at a time while checking, so an oversized upload is refused one
+# chunk past the limit instead of after the whole thing is in hand. Mechanism, not
+# policy: no deployment has an opinion about it.
 _UPLOAD_CHUNK = 64 * 1024
 
 
@@ -34,18 +34,18 @@ class Upload(Protocol):
 
 async def read_upload(file: Upload, limit: Optional[int] = None) -> bytes:
     """The upload's bytes, refusing anything past ``limit`` (default
-    ``MAX_UPLOAD_BYTES``).
+    ``settings.MAX_UPLOAD_BYTES``).
 
     Read in pieces rather than whole. `await file.read()` with no argument
     materialises whatever was sent before anything gets a chance to ask how big it
     is, which makes a size check pointless: by the time it could fail, the memory has
     already been spent.
 
-    The default is resolved here rather than in the signature so the module global is
-    read at call time — as a default argument it would be bound once at import and
-    stop following the constant.
+    The default is resolved here rather than in the signature so the setting is read
+    at call time — as a default argument it would be bound once at import and stop
+    following it.
     """
-    limit = MAX_UPLOAD_BYTES if limit is None else limit
+    limit = settings.MAX_UPLOAD_BYTES if limit is None else limit
     chunks: list[bytes] = []
     total = 0
     while True:

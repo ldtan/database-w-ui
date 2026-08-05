@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.auth.users.models import User, UserGroup
+from src.core.config import settings
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import coerce_uuid
 from src.infrastructure import database as db_module
@@ -38,14 +39,6 @@ _IMPORT_BATCH = 500
 _EXPORT_BATCH = 500
 # Cap on labels held across batches, so an enormous export stays bounded.
 _LABEL_CACHE_MAX = 50_000
-
-# Rows one import may carry. Every row is validated and inserted through the item
-# service, several round trips apiece, so an unbounded file is a request that does
-# not return. Same number and the same reasoning as auth/users/batch/parsing.py —
-# and, like that one, checked before anything is written, so a file over the limit
-# imports nothing at all rather than the first thousand rows of itself. That is what
-# makes "split it and import each part separately" advice someone can act on.
-MAX_ROWS = 1000
 
 _SKIP = object()  # sentinel: leave this cell out of the record entirely
 
@@ -456,19 +449,20 @@ async def import_records(
     over a large import. ``user`` is the importer, attributed to any
     `current_user` default/onupdate. Returns a summary dict {created, errors}.
 
-    More than ``MAX_ROWS`` rows raises `ValidationError` and writes nothing. The
-    check lives here rather than in the router so both upload formats inherit it
-    from one place."""
+    More than ``settings.IMPORT_MAX_ROWS`` rows raises `ValidationError` and writes
+    nothing. The check lives here rather than in the router so both upload formats
+    inherit it from one place."""
     # Counted before a single row is written. Checking as we went would leave a file
     # one row over the cap having imported the thousand rows before it, which is the
     # one outcome the caller cannot easily undo. Stops one row past the limit, so an
     # enormous file is refused rather than held in order to be measured.
+    max_rows = settings.IMPORT_MAX_ROWS
     counted: list[Tuple[int, dict]] = []
     for row in rows:
         counted.append(row)
-        if len(counted) > MAX_ROWS:
+        if len(counted) > max_rows:
             raise ValidationError(
-                f"This file has more than {MAX_ROWS} rows; split it and import "
+                f"This file has more than {max_rows} rows; split it and import "
                 "each part separately"
             )
 

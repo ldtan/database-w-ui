@@ -6,7 +6,9 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 
 from src.auth.users.models import User
+from src.core.config import settings
 from src.lists.columns.models import Column
+from src.lists.items.schemas import BulkDeleteRequest
 from src.lists.forms.models import Form
 from src.lists.items.models import ListItem
 from src.lists.models import List
@@ -278,6 +280,18 @@ async def test_bulk_delete_ignores_a_uuid_from_another_list(
 
     survivors = (await client.get(f"/api/lists/{other_list}/items/")).json()
     assert [i["uuid"] for i in survivors] == [stranger]
+
+
+def test_the_bulk_delete_cap_comes_from_config():
+    """`max_length` is read once when the class is defined, so unlike the other two
+    limits this one cannot be monkeypatched and the tests below use its default
+    directly. Assert the wiring instead, or a future edit could quietly put the
+    literal back and nothing would notice."""
+    caps = [
+        getattr(meta, "max_length", None)
+        for meta in BulkDeleteRequest.model_fields["uuids"].metadata
+    ]
+    assert settings.BULK_DELETE_MAX in caps
 
 
 async def test_bulk_delete_refuses_an_oversized_batch(client, list_uuid):

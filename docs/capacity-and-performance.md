@@ -187,9 +187,12 @@ decoded it whole, and for JSON parsed it whole again — so the memory cost was 
 was sent, before anything had looked at it. Then it inserted rows through the item service,
 several round trips apiece, with no ceiling on how many.
 
-Both ends are now capped: `MAX_UPLOAD_BYTES = 8 MB`, checked *while* the upload is read in
-64 kB pieces rather than after, and `MAX_ROWS = 1000`, the same number and the same reasoning
-as the user batch import.
+Both ends are now capped: `MAX_UPLOAD_BYTES` (8 MB), checked *while* the upload is read in
+64 kB pieces rather than after, and `IMPORT_MAX_ROWS` (1,000). Both are settings rather than
+constants, and both importers — list records and user accounts — read the same two, since the
+reasoning is identical either side. The batch sizes around them stay constants: they are
+shaped by round-trip latency and memory, not by anything a deployment has an opinion about,
+and their optimum is flat enough that there is no better value to find.
 
 The ordering is the point. A row cap on its own bounds the database work and nothing else,
 because the file has to be read before its rows can be counted — a single 500 MB row passes a

@@ -72,10 +72,13 @@ const EMPTY_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
  *  enough that a single edit settles while you are still looking at it. */
 const SETTLE_DELAY_MS = 800;
 
-/** Uuids the bulk-delete endpoint accepts per call, mirroring `max_length` on
- *  `BulkDeleteRequest`. A larger selection is sent as several calls; keep the two
- *  numbers together, since exceeding the server's is a validation error rather
- *  than anything the person could act on. */
+/** Uuids the bulk-delete endpoint accepts per call. A larger selection is sent as
+ *  several calls.
+ *
+ *  The server's limit is `BULK_DELETE_MAX` in its config, defaulting to the same
+ *  500. This is a static build and cannot read that, so the two are kept in step by
+ *  hand: the server's may be raised freely, but lowering it below this number would
+ *  produce a validation error naming a limit the person never saw. */
 const BULK_DELETE_MAX = 500;
 
 /** One page with one record replaced, or the page untouched if it is not on it. */

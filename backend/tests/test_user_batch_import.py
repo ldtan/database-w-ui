@@ -8,7 +8,7 @@ import pytest
 import pytest_asyncio
 
 from src.auth.helpers import verify_password
-from src.core import uploads
+from src.core.config import settings
 from src.auth.users.batch.parsing import parse_file
 from src.auth.users.batch.services import import_users
 from src.auth.users.schemas import UserCreate, UserGroupCreate
@@ -306,16 +306,15 @@ async def test_endpoint_rejects_a_malformed_file(session_factory, make_client, t
 
 
 async def test_endpoint_rejects_an_over_cap_file(session_factory, make_client):
-    from src.auth.users.batch.parsing import MAX_ROWS
-
+    max_rows = settings.IMPORT_MAX_ROWS
     admin = await _admin(session_factory)
-    body = "".join(f"u{i},u{i}@example.com\n" for i in range(MAX_ROWS + 1))
+    body = "".join(f"u{i},u{i}@example.com\n" for i in range(max_rows + 1))
     async with make_client(admin) as client:
         resp = await client.post(
             "/api/auth/users/import", files=_upload(f"username,email\n{body}")
         )
     assert resp.status_code == 400
-    assert str(MAX_ROWS) in resp.json()["detail"]
+    assert str(max_rows) in resp.json()["detail"]
 
 
 async def test_endpoint_rejects_an_oversized_file(
@@ -325,7 +324,7 @@ async def test_endpoint_rejects_an_oversized_file(
     the accounts created and not the memory spent getting there — one enormous row
     passes it untouched. Superuser-only narrows who can send that; it does not make
     it survivable."""
-    monkeypatch.setattr(uploads, "MAX_UPLOAD_BYTES", 1024 * 1024)
+    monkeypatch.setattr(settings, "MAX_UPLOAD_BYTES", 1024 * 1024)
     admin = await _admin(session_factory)
     body = "username,email\n" + "x" * (2 * 1024 * 1024) + ",a@example.com\n"
     async with make_client(admin) as client:
