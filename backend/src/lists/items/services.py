@@ -1204,6 +1204,17 @@ class ListItemService:
             # trimming here keeps the stored string and the checked string the
             # same one — otherwise `unique` and `max_length` see the padding.
             value = value.strip()
+        if column.type == ColumnType.choice and (column.config or {}).get("allow_other"):
+            # An "other" answer is typed, so it arrives with whatever spacing was
+            # typed around it, and it is stored as the value itself. Trimmed for
+            # the same reason a link is: the column's own options are stored
+            # trimmed, so a padded " Todo" would otherwise become a value distinct
+            # from the option it was meant to be — invisibly, since the padding
+            # does not show in a cell.
+            if isinstance(value, str):
+                value = value.strip()
+            elif isinstance(value, list):
+                value = [v.strip() if isinstance(v, str) else v for v in value]
         validate_scalar(column.type, column.config or {}, column.name, value)
         return value
 

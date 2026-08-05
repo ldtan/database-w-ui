@@ -156,6 +156,35 @@ async def test_text_to_choice_fails_the_values_outside_a_supplied_option_set(
     assert "Nonsense" in report["errors"][0]["message"]
 
 
+async def test_text_to_choice_keeps_stray_values_when_others_are_allowed(
+    client, list_uuid, add_column
+):
+    """`allow_other` is what a free-text column converting to a choice usually
+    wants: the options say what people should pick from now on, and the answers
+    already written stay as they are rather than failing a row at a time."""
+    col = await add_column(list_uuid, name="stage", display_name="Stage", type="text")
+    await _add_rows(client, list_uuid, col, ["Todo", "Nonsense"])
+
+    report = (
+        await _convert(
+            client,
+            list_uuid,
+            col,
+            type="choice",
+            config={"options": ["Todo", "Done"], "allow_other": True},
+        )
+    ).json()
+    assert (report["converted"], report["failed"]) == (2, 0)
+
+    await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    )
+    assert sorted(r["data"][col] for r in await _rows(client, list_uuid)) == [
+        "Nonsense",
+        "Todo",
+    ]
+
+
 async def test_text_to_date(client, list_uuid, add_column):
     col = await add_column(list_uuid, name="due", display_name="Due", type="text")
     await _add_rows(client, list_uuid, col, ["2026-05-04"])

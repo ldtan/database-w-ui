@@ -335,11 +335,18 @@ class ColumnService:
                 data.setdefault(key, value)
 
         if type_ == ColumnType.choice:
-            # A cell stores the option itself, so a default must be one of them.
-            # Checked after the merge: an edit that drops an option must not let
-            # a stored default keep pointing at it.
+            # A cell stores the option itself, so a default must be one of them —
+            # unless the column takes an answer of the record's own, in which case
+            # a default off the list is as valid as a cell holding one (the shared
+            # validator below still refuses a blank). Checked after the merge: an
+            # edit that drops an option, or that turns `allow_other` off, must not
+            # let a stored default keep pointing at what is no longer offered.
             default = data.get("default")
-            if isinstance(default, str) and default not in set(data["options"]):
+            if (
+                isinstance(default, str)
+                and not data.get("allow_other")
+                and default not in set(data["options"])
+            ):
                 raise ValidationError(
                     f"'{default}' is not one of the column's options"
                 )

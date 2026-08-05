@@ -81,6 +81,13 @@ guess. If bulk relabeling ever matters, it belongs in the planned column **data 
 feature (planned-features #2), which is built for exactly this find→replace-across-records
 shape.
 
+`allow_other` widens the same seam rather than closing it. A column that takes an answer of
+the record's own accepts any non-empty string, so nothing about an off-list value is
+irregular while the flag is on — but turning it **off** puts every write-in in exactly the
+position above: still displayed, still exported, and refused on the next write of that
+cell. The dialog says so where the flag is; there is deliberately no sweep that rewrites or
+promotes those answers, for the same reason there is no cascade-rename.
+
 ---
 
 ## 5. A calculated column's value is stored as an *index*, and that has edges

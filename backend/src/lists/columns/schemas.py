@@ -47,6 +47,12 @@ class ColumnConfig(BaseModel):
     choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
     options: Optional[list[str]] = None  # canonical form, e.g. ["Todo", "Doing"]
     multiple: Optional[bool] = None
+    # An "Other…" answer: with this on, a cell may hold any non-empty string
+    # rather than only one of `options`, and the options become the offered
+    # answers rather than the permitted ones. What gets typed is stored as
+    # itself — nothing marks it as an other-answer — so an off-list value is
+    # exactly as filterable, sortable and exportable as an option (D3).
+    allow_other: Optional[bool] = None
     # lookup
     target_list_uuid: Optional[UUID] = None
     # which column of the target list to show as each row's label; defaults to
