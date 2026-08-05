@@ -1694,6 +1694,8 @@ export interface components {
             options?: string[] | null;
             /** Multiple */
             multiple?: boolean | null;
+            /** Allow Other */
+            allow_other?: boolean | null;
             /** Target List Uuid */
             target_list_uuid?: string | null;
             /** Display Column Uuid */

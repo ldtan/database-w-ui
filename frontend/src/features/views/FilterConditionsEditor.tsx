@@ -121,10 +121,14 @@ export function FilterConditionsEditor({
                   style={{ width: 120 }}
                 />
               ) : col?.type === "choice" ? (
+                // Typable when the column takes answers of its own: those are
+                // stored as whatever was typed, so the options are no longer the
+                // whole set of values a filter could be looking for.
                 <Dropdown
                   value={(cond.value as string) ?? null}
                   options={options}
                   onChange={(e) => update(i, { value: e.value })}
+                  editable={!!col.config.allow_other}
                   placeholder="Value"
                   style={{ width: 120 }}
                 />

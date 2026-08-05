@@ -157,7 +157,7 @@ const TYPE_HELP: Record<string, string> = {
   text: "Writing — a name, a title, a reference number. Choose how it is filled in: one line, several lines for notes or an address, or rich text, which gives you bold, italic, lists, quotes and links. You can change that later without disturbing what is already stored.",
   number: "A number you can total or compare. You can set a smallest and largest allowed value, or require whole numbers only.",
   checkbox: "A simple yes/no, on/off tick — “Paid?”, “Active?”.",
-  choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording.",
+  choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording. You can also allow an “Other” answer, which adds a box for anything the options don’t cover.",
   date: "A calendar day, with no time of day.",
   time: "A time of day, with no date.",
   datetime: "A day and a time together.",
@@ -460,6 +460,10 @@ export function GuidePage() {
             Have date, time, or user columns stamp themselves automatically when a
             record is created or edited.
           </li>
+          <li>
+            Let a <Ui>Choice</Ui> column take an <Ui>Other</Ui> answer, for the cases
+            your options don’t cover — see below.
+          </li>
         </ul>
         <Callout tone="tip" title="Four columns are already there">
           Every list starts with <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
@@ -499,6 +503,27 @@ export function GuidePage() {
             </div>
           ))}
         </dl>
+        <h3 className="font-semibold pt-1">When your options don’t cover it</h3>
+        <p>
+          A <Ui>Choice</Ui> column can allow an <Ui>Other</Ui> answer. Tick{" "}
+          <Ui>Allow an “Other” answer</Ui> when you set the column up, and the menu
+          gains an <em>Other…</em> entry that opens a box to type in. Useful when you
+          know most of the answers but not all of them — a <em>Reason for leaving</em>,
+          say, or a <em>Referred by</em>.
+        </p>
+        <p>
+          What gets typed is stored exactly as typed, the same way an option is, so
+          those answers sort, filter and export like everything else. The flip side is
+          that the app can’t tell that <em>Referred by a friend</em> and{" "}
+          <em>referred by friend</em> were meant to be the same thing — they’re two
+          answers. If you find yourself getting the same write-in over and over, add it
+          to the options.
+        </p>
+        <Callout tone="warn" title="Turning it back off">
+          Records that already hold a write-in keep it, and it still shows and exports.
+          But the column no longer accepts it, so the next person to edit one of those
+          records has to pick from the list. Nothing is rewritten behind your back.
+        </Callout>
         <Callout tone="tip" title="Start simple">
           Text, Number, Checkbox, Choice, and Date cover almost everything. The
           people-, link-, lookup-, and formula-style columns are powerful extras you
@@ -564,7 +589,10 @@ export function GuidePage() {
           Turning <Ui>Text</Ui> into <Ui>Choice</Ui> is the clever one: leave the
           options blank and the app reads your records and offers one option per
           distinct value it finds. Type the options yourself instead and anything
-          outside your list is reported as a failure rather than quietly added.
+          outside your list is reported as a failure rather than quietly added —
+          unless you also tick <Ui>Allow an “Other” answer</Ui>, which is usually what
+          you want here: the options say what people should pick from now on, and
+          what’s already written stays put.
         </p>
 
         <Callout tone="tip" title="Your old values are kept">

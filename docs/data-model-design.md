@@ -48,6 +48,10 @@ but must pick a current option on their next edit). An earlier design carried st
 per-option ids to make renames free, but the id was invisible everywhere in the UI
 while being required on every out-of-band write — a worse trade.
 
+The same property is what lets a choice column take an answer that is not on its list at
+all (`allow_other`, §4): with nothing but the label stored, a write-in needs no second
+field to live in and no case of its own in filtering, sorting, export or search.
+
 ### D4 — Links/lookups reference rows by `uuid`, with no DB-level FK
 A `lookup` column stores the target row's `uuid` (or an array of uuids). There is no
 foreign key, so **orphan cleanup on delete is the app's responsibility**. A junction
@@ -218,7 +222,7 @@ Common `config` keys (all optional unless noted):
 | `text`        | `string` (HTML when `text_mode` is `rich`) | `text_mode?` (`single`/`multiline`/`rich`), `min_length?`, `max_length?`, `pattern?` |
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
-| `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?` |
+| `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?`; `allow_other?` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together) |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
@@ -254,6 +258,14 @@ Notes:
   shorthand (`"Todo;Doing;Done"`) is split server-side into `options`; explicit
   `options` (a list of strings) override the shorthand. Labels must be unique within
   the column, and a `default` must be one of them.
+- `choice` with **`allow_other`** — the options become what the column *offers* rather
+  than what it permits: a cell may hold any non-empty string, and the `default` is freed
+  from the option set with it. An "other" answer is stored as the typed string itself,
+  trimmed like a `link` — nothing marks it as one — so it filters, sorts, groups, exports
+  and de-duplicates as its own value, with no special case anywhere downstream. The cost
+  is the flip side of the same coin: two people writing the same thing differently are
+  two values, and turning the flag off later leaves existing answers in place while
+  refusing the next write of those cells (the deal in known-gaps #4).
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the lookup's
   `display_column_uuid`, falling back to the target list's `primary_column_id`
   (`display_column_key`). A lookup column cannot have a `default`. Its **target may be any
@@ -627,7 +639,8 @@ Because the DB does not enforce record-level constraints, the service layer MUST
 
 1. Validate each `data` value against its column `type` and `config` on write.
 2. Enforce `required`, `unique`, `min`/`max`, `max_length` where configured.
-3. Validate `choice` values against the current option labels (exact match).
+3. Validate `choice` values against the current option labels (exact match) — or, on a
+   column with `allow_other`, as any non-empty string.
 4. Validate `lookup` uuids exist in the target list; clean up stale refs on delete.
 5. Validate `name` against the `NameSlug` pattern and scope all uniqueness checks —
    list `name` per owner; column/view/form/metric `name` per list — excluding

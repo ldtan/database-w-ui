@@ -11,6 +11,8 @@
  * Nothing here decides *which* fields to show. That is `resolveFields`' job, from
  * the list's form; a caller passes the result in.
  */
+import { useState } from "react";
+
 import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
 import { Dropdown } from "primereact/dropdown";
@@ -66,6 +68,81 @@ const RICH_TOOLBAR = (
     </span>
   </>
 );
+
+/**
+ * The dropdown entry standing for "none of these". Not a value anything stores:
+ * picking it empties the cell, and what fills it again is whatever gets typed in
+ * the box it reveals. A control character so it can never collide with a real
+ * option — those are trimmed, non-empty labels.
+ */
+const OTHER = "\u0000other";
+
+/**
+ * A choice cell: the options, plus — when the column allows it — an answer of the
+ * record's own.
+ *
+ * An "other" answer is stored as the typed string itself, exactly as an option is
+ * (D3 in the data-model doc), so nothing on disk marks one. That is what makes it
+ * sort, filter, export and search like any other value, and it is why this control
+ * recognises one by *not finding it among the options* rather than by a flag.
+ */
+function ChoiceField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: {
+  id: string;
+  column: Column;
+  value: unknown;
+  disabled: boolean;
+  onChange: (v: unknown) => void;
+}) {
+  const options = column.config.options ?? [];
+  const allowOther = !!column.config.allow_other;
+  const offList =
+    allowOther &&
+    typeof value === "string" &&
+    value !== "" &&
+    !options.includes(value);
+  // Sticky rather than derived outright, because the box has to survive its own
+  // contents: an answer typed a letter at a time passes through strings that
+  // *are* options ("Done" on the way to "Done, late"), and a purely derived mode
+  // would snatch the box away mid-word and put the half-typed answer in the
+  // dropdown instead.
+  const [othering, setOthering] = useState(offList);
+  const other = othering || offList;
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Dropdown
+        inputId={id}
+        value={other ? OTHER : ((value as string) ?? null)}
+        options={[
+          ...options.map((o) => ({ label: o, value: o })),
+          ...(allowOther ? [{ label: "Other…", value: OTHER }] : []),
+        ]}
+        onChange={(e) => {
+          setOthering(e.value === OTHER);
+          onChange(e.value === OTHER ? null : e.value);
+        }}
+        showClear
+        placeholder="Select…"
+        disabled={disabled}
+      />
+      {other && (
+        <InputText
+          aria-label={`${column.display_name}: your own answer`}
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder="Type your answer"
+          disabled={disabled}
+        />
+      )}
+    </div>
+  );
+}
 
 export function RecordField({
   listUuid,
@@ -140,24 +217,16 @@ export function RecordField({
           disabled={disabled}
         />
       );
-    case "choice": {
-      // Options are the values: a cell stores the label itself.
-      const options = (column.config.options ?? []).map((o) => ({
-        label: o,
-        value: o,
-      }));
+    case "choice":
       return (
-        <Dropdown
-          inputId={id}
-          value={(value as string) ?? null}
-          options={options}
-          onChange={(e) => onChange(e.value)}
-          showClear
-          placeholder="Select…"
+        <ChoiceField
+          id={id}
+          column={column}
+          value={value}
           disabled={disabled}
+          onChange={onChange}
         />
       );
-    }
     case "date":
       return (
         <Calendar

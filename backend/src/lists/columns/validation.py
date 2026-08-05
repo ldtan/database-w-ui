@@ -267,6 +267,11 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
 
     elif column_type == ColumnType.choice:
         valid = set(config.get("options", []) or [])
+        # With `allow_other`, the options are what the column *offers*, not what it
+        # permits: anything typed into the "Other" box is a valid answer. It still
+        # has to be a string with something in it — a blank one is an empty cell
+        # spelled awkwardly, and the caller means null.
+        other = bool(config.get("allow_other"))
         if config.get("multiple"):
             if not isinstance(value, list):
                 _expect(name, "a list of options")
@@ -274,9 +279,20 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         else:
             candidates = [value]
         for item in candidates:
-            if item not in valid:
+            # `isinstance` first, and not only for speed: an unhashable value —
+            # a dict or list arriving in a cell — raises out of a set membership
+            # test rather than failing validation, which is a 500 for what is
+            # plainly a bad request.
+            if isinstance(item, str) and item in valid:
+                continue
+            if not other:
                 raise ValidationError(
                     f"'{item}' is not a valid option for column '{name}'"
+                )
+            if not isinstance(item, str) or not item.strip():
+                raise ValidationError(
+                    f"Column '{name}' expects one of its options or an answer of "
+                    f"your own, not {item!r}"
                 )
 
     elif column_type == ColumnType.link:

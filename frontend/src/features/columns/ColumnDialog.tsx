@@ -124,6 +124,10 @@ export function ColumnDialog({
   const [max, setMax] = useState<number | null>(null);
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
+  // Choice: whether a record may answer with something not on the list. What gets
+  // typed is stored as itself, so this widens what the column accepts rather than
+  // adding a value to it.
+  const [allowOther, setAllowOther] = useState(false);
   const [linkText, setLinkText] = useState("");
   // Which workspace's lists the target dropdown is drawn from. A lookup can point
   // at any list the user can view — their own across workspaces, or one shared
@@ -189,6 +193,7 @@ export function ColumnDialog({
       setMax(null);
       setIntegerOnly(false);
       setChoices("");
+      setAllowOther(false);
       setLinkText("");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
@@ -212,6 +217,7 @@ export function ColumnDialog({
       setMax(null);
       setIntegerOnly(false);
       setChoices("");
+      setAllowOther(false);
       setLinkText("");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
@@ -235,6 +241,7 @@ export function ColumnDialog({
     setMax((config.max as number) ?? null);
     setIntegerOnly(!!config.integer_only);
     setChoices(((config.options as string[]) ?? []).join(";"));
+    setAllowOther(!!config.allow_other);
     setLinkText((config.label as string) ?? "");
     // Left null so the seeding effect can resolve which workspace the stored
     // target lives in (the config only records the list, not its workspace).
@@ -459,7 +466,13 @@ export function ColumnDialog({
         config.max = max;
         config.integer_only = integerOnly;
       }
-      if (type === "choice") config.choices = choices;
+      if (type === "choice") {
+        config.choices = choices;
+        // Always sent, like `unique`: a config PATCH merges, so omitting it would
+        // keep a stored `true` and leave the column still taking answers the
+        // dialog now says it does not.
+        config.allow_other = allowOther;
+      }
       if (type === "link") config.label = linkText.trim() || null;
       if (type === "user" || type === "group") config.multiple = multiple;
       if (type === "lookup") {
@@ -771,22 +784,39 @@ export function ColumnDialog({
             )}
 
             {type === "choice" && (
-              <Field
-                label="Choices"
-                htmlFor="col-choices"
-                hint={
-                  editing
-                    ? 'Separated by ";". Renaming an option keeps records pointing at it; removing one leaves records holding a value the column no longer offers.'
-                    : 'Separated by ";".'
-                }
-              >
-                <InputText
-                  id="col-choices"
-                  value={choices}
-                  onChange={(e) => setChoices(e.target.value)}
-                  placeholder="Todo;Doing;Done"
+              <>
+                <Field
+                  label="Choices"
+                  htmlFor="col-choices"
+                  hint={
+                    editing
+                      ? 'Separated by ";". Renaming an option keeps records pointing at it; removing one leaves records holding a value the column no longer offers.'
+                      : 'Separated by ";".'
+                  }
+                >
+                  <InputText
+                    id="col-choices"
+                    value={choices}
+                    onChange={(e) => setChoices(e.target.value)}
+                    placeholder="Todo;Doing;Done"
+                  />
+                </Field>
+                <CheckboxField
+                  inputId="col-allow-other"
+                  checked={allowOther}
+                  onChange={setAllowOther}
+                  label="Allow an “Other” answer"
+                  hint={
+                    // Says what it stores, because that is the surprise: an "Other"
+                    // answer is not tagged as one anywhere. It is simply the words
+                    // that were typed, so it groups, filters and exports as its own
+                    // value rather than alongside the other write-ins.
+                    editing && allowOther
+                      ? "Records may answer with something not on the list, typed in a box below the choices. Turning this off leaves those answers on the records that hold them, but the next edit of such a record must pick one of the options."
+                      : "Records may answer with something not on the list, typed in a box below the choices. What they type is stored as the value itself, so two people writing the same thing differently stay two different values."
+                  }
                 />
-              </Field>
+              </>
             )}
 
             {type === "link" && (
@@ -1055,6 +1085,9 @@ export function ColumnDialog({
                   />
                 )}
                 {type === "choice" && (
+                  // Typable when the column takes an answer of its own, because
+                  // then a default off the option list is as valid as a cell
+                  // holding one — the server judges it by the same rule.
                   <Dropdown
                     inputId="col-default"
                     value={defaultChoice}
@@ -1062,6 +1095,7 @@ export function ColumnDialog({
                     onChange={(e) => setDefaultChoice(e.value ?? null)}
                     placeholder="No default"
                     showClear
+                    editable={allowOther}
                     className="w-full"
                   />
                 )}

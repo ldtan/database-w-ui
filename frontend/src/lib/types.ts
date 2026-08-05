@@ -107,6 +107,10 @@ export interface ColumnConfig {
   text_mode?: TextMode;
   /** Choice options are plain labels; a cell stores the label itself. */
   options?: string[];
+  /** Choice columns only. With this on the options are what the column *offers*:
+   *  a cell may hold an answer of its own, stored as the typed string like any
+   *  other label, so nothing downstream can tell the two apart. */
+  allow_other?: boolean;
   target_list_uuid?: string;
   display_column_uuid?: string;
   /** Nested lookup: the sibling lookup whose value filters this one's options,
