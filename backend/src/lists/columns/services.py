@@ -243,7 +243,10 @@ class ColumnService:
         label = ListItem.data[key].astext if key else sa_null()
 
         stmt = select(
-            ListItem.uuid, label.label("label"), ListItem.deleted_at
+            ListItem.uuid,
+            label.label("label"),
+            ListItem.deleted_at,
+            ListItem.archived_at,
         ).where(
             ListItem.list_id == target.id,
             await PermissionService.item_view_filter(
@@ -251,16 +254,18 @@ class ColumnService:
             ),
         )
 
-        # Resolving and offering are different questions, and a deleted row answers
-        # them differently. A grid asking for *specific* uuids is labelling what its
-        # records already hold, and one of those rows may be in the bin — it must
-        # still get a name, or a live relationship renders as an unidentifiable stub.
-        # A *search* is offering choices, and nothing new may be linked to a row that
-        # is on its way out.
+        # Resolving and offering are different questions, and a deleted or archived
+        # row answers them differently. A grid asking for *specific* uuids is
+        # labelling what its records already hold, and one of those rows may be in the
+        # bin or the archive — it must still get a name, or a live relationship
+        # renders as an unidentifiable stub. A *search* is offering choices, and
+        # nothing new may be linked to a row that is on its way out or finished with.
         if uuids is not None:
             stmt = stmt.where(ListItem.uuid.in_(uuids))
         else:
-            stmt = stmt.where(ListItem.deleted_at.is_(None))
+            stmt = stmt.where(
+                ListItem.deleted_at.is_(None), ListItem.archived_at.is_(None)
+            )
             # Nested lookup: a search offers only rows belonging to the parent's
             # selection. Resolving (`uuids`) is deliberately unfiltered — a held
             # value must always get its label, however stale. The filter column
@@ -282,13 +287,19 @@ class ColumnService:
         if q and q.strip() and key:
             stmt = stmt.where(
                 ListItem.deleted_at.is_(None),
+                ListItem.archived_at.is_(None),
                 label.ilike(like_pattern(q.strip()), escape=LIKE_ESCAPE),
             )
 
         rows = await db.execute(stmt.order_by(label, ListItem.id).limit(limit))
         return [
-            {"uuid": uuid, "label": text, "deleted": deleted_at is not None}
-            for uuid, text, deleted_at in rows
+            {
+                "uuid": uuid,
+                "label": text,
+                "deleted": deleted_at is not None,
+                "archived": archived_at is not None,
+            }
+            for uuid, text, deleted_at, archived_at in rows
         ]
 
     @classmethod

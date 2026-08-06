@@ -14,6 +14,11 @@ class ExportRequest(BaseModel):
     filters: FilterGroup = Field(default_factory=FilterGroup)
     sorts: list[SortSpec] = Field(default_factory=list)
     limit: Optional[int] = Field(default=None, ge=1)  # None = all matching rows
+    # Archived records are left out by default, because an export is a read of the
+    # list and every other read excludes them. The flag exists so that archiving
+    # cannot make records permanently unexportable — without it the archive would be
+    # a one-way door for anyone trying to get their data out.
+    include_archived: bool = False
 
 
 class ImportError(BaseModel):

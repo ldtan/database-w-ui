@@ -14,6 +14,9 @@ from src.permissions.services import PermissionService
 from ..dependencies import filter_param, resolve_list_or_404
 from ..models import List
 from .schemas import (
+    ArchivedListItemRead,
+    BulkArchiveRequest,
+    BulkArchiveResult,
     BulkDeleteRequest,
     BulkDeleteResult,
     DeletedListItemRead,
@@ -237,6 +240,50 @@ async def bulk_delete_items(
     return {"deleted": deleted}
 
 
+@router.get("/archived", response_model=list[ArchivedListItemRead])
+async def list_archived_items(
+    response: Response,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    # Gated on list-level `delete`, matching the bin. An archived record still has a
+    # permission context of its own, unlike a soft-deleted one — but archiving is
+    # what takes a record away from everybody who can read the list, so the authority
+    # to see the archive is the authority to have put things in it.
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    response.headers["X-Total-Count"] = str(
+        await ListItemService.count_archived(db, lst)
+    )
+    return await ListItemService.list_archived(db, lst, skip=skip, limit=limit)
+
+
+@router.post("/bulk-archive", response_model=BulkArchiveResult)
+async def bulk_archive_items(
+    payload: BulkArchiveRequest,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Same shape as `bulk_delete_items`: resolve the whole batch's permissions in one
+    # go, archive only what the caller may delete, and let `bulk_archive` confine the
+    # update to this list so a uuid from elsewhere is skipped like an unknown one.
+    granted = await PermissionService.effective_actions_bulk(
+        db,
+        current_user,
+        [(ResourceType.item, uuid) for uuid in payload.uuids],
+    )
+    permitted = [
+        uuid for (_, uuid), actions in granted.items() if Action.delete in actions
+    ]
+    archived = await ListItemService.bulk_archive(db, lst, permitted)
+    return {"archived": archived}
+
+
 @router.get("/{uuid}", response_model=ListItemRead)
 async def get_item(
     uuid: UUID,
@@ -292,7 +339,9 @@ async def delete_item(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    item = await ListItemService.get_by_uuid(db, lst.id, uuid)
+    # Live or archived: delete wins over archive, so the archive must not be a place
+    # a record can hide from being binned (`get_unbinned_by_uuid`).
+    item = await ListItemService.get_unbinned_by_uuid(db, lst.id, uuid)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     await PermissionService.require(
@@ -337,3 +386,42 @@ async def purge_item(
     )
     if not await ListItemService.purge(db, lst, uuid):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+
+
+@router.post("/{uuid}/archive", status_code=status.HTTP_204_NO_CONTENT)
+async def archive_item(
+    uuid: UUID,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Per-item `delete`, exactly like `delete_item`: an archive takes the record away
+    # from everyone who can read the list, so it asks for the same authority as
+    # binning it. The record is still live at this point, so it still resolves to a
+    # permission context of its own.
+    item = await ListItemService.get_by_uuid(db, lst.id, uuid)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.item, item.id, Action.delete
+    )
+    await ListItemService.archive(db, lst, uuid)
+
+
+@router.post("/{uuid}/unarchive", response_model=ListItemRead)
+async def unarchive_item(
+    uuid: UUID,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Gated on list-level `delete`, matching the archive listing this is reached
+    # from. Unlike `restore_item` there is no 409 to handle: an archived record never
+    # released its unique values, so nothing can have taken them (`unarchive`).
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    item = await ListItemService.unarchive(db, lst, uuid)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return item

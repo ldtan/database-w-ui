@@ -54,8 +54,12 @@ CLONE_CHUNK = 1_000
 # SQL, because there is no uuid7 to generate them with — the same call migration
 # d2f6a8c41b93 made, for the same reason. `ORDER BY src.id` keeps the clone's rows in
 # the source's order, so their ids and their uuids agree about it.
+#
+# `archived_at` is carried across rather than cleared. A clone with records is asked
+# for to get the data, and dropping the archived rows — or bringing them back live —
+# would both be the clone quietly disagreeing with the source about what it holds.
 _COPY_RECORDS = text("""
-    INSERT INTO list_items (uuid, list_id, data, permissions_inherit, created_at, updated_at)
+    INSERT INTO list_items (uuid, list_id, data, permissions_inherit, archived_at, created_at, updated_at)
     SELECT b.new_uuid,
            :clone_id,
            COALESCE(
@@ -65,6 +69,7 @@ _COPY_RECORDS = text("""
                '{}'::jsonb
            ),
            true,
+           src.archived_at,
            :now, :now
       FROM list_items AS src
       JOIN unnest(CAST(:src_ids AS bigint[]), CAST(:new_uuids AS uuid[]))
@@ -650,6 +655,8 @@ class ListService:
                 src_ids = (
                     await db.execute(
                         select(ListItem.id)
+                        # Archived rows are copied too — see `_COPY_RECORDS`, which
+                        # carries `archived_at` over so they arrive archived.
                         .where(
                             ListItem.list_id == source.id,
                             ListItem.deleted_at.is_(None),
@@ -774,6 +781,9 @@ class ListService:
             key = str(column.uuid)
             await db.execute(
                 update(ListItem)
+                # Archived rows are scrubbed too, deliberately: the target is being
+                # destroyed, so a pointer left on an archived row would be dangling
+                # the moment anyone unarchived it.
                 .where(
                     ListItem.list_id == column.list_id,
                     ListItem.deleted_at.is_(None),

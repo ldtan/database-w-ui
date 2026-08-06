@@ -185,8 +185,22 @@ def shape_values(
 class ListItemService:
     @staticmethod
     def _select(list_id: int):
+        """A list's *normal* records: neither binned nor archived.
+
+        `visible_stmt` is built on this, and every reader goes through that — so the
+        two predicates here are what keep archived records out of the grid, the
+        count, search, filters, sorts and the metric scan at once, rather than each
+        of those having to remember.
+
+        The pair must also match `ix_list_items_list_id_id`'s `postgresql_where`
+        exactly: a partial index is only usable when the query's predicate implies
+        the index's, so dropping either clause here quietly costs the index rather
+        than returning wrong rows, which is the harder failure to notice.
+        """
         return select(ListItem).where(
-            ListItem.deleted_at.is_(None), ListItem.list_id == list_id
+            ListItem.deleted_at.is_(None),
+            ListItem.archived_at.is_(None),
+            ListItem.list_id == list_id,
         )
 
     @classmethod
@@ -211,6 +225,33 @@ class ListItemService:
         if for_update:
             stmt = stmt.with_for_update()
         result = await db.execute(stmt)
+        return result.scalars().first()
+
+    @classmethod
+    async def get_unbinned_by_uuid(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """A record that is not in the bin — live *or* archived.
+
+        Exists for the delete path alone, and the reason is the rule that delete wins
+        over archive: an archived record must still be bin-able, or the archive would
+        be a place records could hide from being deleted, and the only way out would
+        be to unarchive first. Every other caller wants `get_by_uuid`, which is the
+        list as anyone reading it sees it.
+
+        It still resolves a permission context, because `_security_context` tests
+        only `deleted_at` — so the per-item `delete` check works here unchanged.
+        """
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            select(ListItem).where(
+                ListItem.list_id == list_id,
+                ListItem.uuid == parsed,
+                ListItem.deleted_at.is_(None),
+            )
+        )
         return result.scalars().first()
 
     @classmethod
@@ -266,6 +307,17 @@ class ListItemService:
         A lookup obeys the target list's permissions — `lookup` on it, then the
         per-record filter — exactly as the picker and the export do: searching must
         not become a way to learn what is in a list you cannot read.
+
+        Archived target rows are skipped, which is the one place archiving reaches
+        across lists: an order whose customer has been archived stops being findable
+        by typing "Acme", though the cell still *reads* "Acme" because rendering a
+        held reference is a uuid lookup and never comes through here. That is the
+        rule stated whole — matching a label is search, and archived records are not
+        searchable — and it is also the only shape that performs. The `LIMIT` below
+        bounds the result, not the scan: a term matching nothing reads every row of
+        the target list to prove it, and without this clause the query could not use
+        the partial index at all, so it would keep reading the whole archive while
+        every query around it got smaller.
         """
         if column.type in PRINCIPAL_TYPES:
             model = User if column.type == ColumnType.user else UserGroup
@@ -317,6 +369,7 @@ class ListItemService:
             .where(
                 ListItem.list_id == target.id,
                 ListItem.deleted_at.is_(None),
+                ListItem.archived_at.is_(None),
                 await PermissionService.item_view_filter(
                     db, user, target, Action.lookup
                 ),
@@ -484,14 +537,17 @@ class ListItemService:
                 select(ListItem.id).where(
                     ListItem.list_id == lst.id,
                     ListItem.uuid == parsed,
+                    # A cursor names a position in the listing, so it has to name a
+                    # record the listing contains — archived as well as deleted.
                     ListItem.deleted_at.is_(None),
+                    ListItem.archived_at.is_(None),
                 )
             )
         )
         if after_id is None:
             # Starting from the top instead would look, to the caller, like the list
-            # rewound — and a record deleted out from under a cursor is exactly when
-            # that would happen.
+            # rewound — and a record deleted or archived out from under a cursor is
+            # exactly when that would happen.
             raise ValidationError(
                 "No record in this list has that uuid, so there is no page after it"
             )
@@ -645,7 +701,10 @@ class ListItemService:
     async def delete(
         cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
     ) -> bool:
-        item = await cls.get_by_uuid(db, lst.id, uuid)
+        # Archived records are bin-able too — see `get_unbinned_by_uuid`. `deleted_at`
+        # is set without clearing `archived_at`, so a restore returns the record to
+        # the archive it came from rather than silently to the live list.
+        item = await cls.get_unbinned_by_uuid(db, lst.id, uuid)
         if item is None:
             return False
 
@@ -820,6 +879,145 @@ class ListItemService:
         )
         await db.commit()
         return True
+
+    # -- the archive: records kept, but out of the way ----------------------
+    #
+    # A second lifecycle axis beside the bin, and orthogonal to it. Where a delete
+    # says "this was a mistake, and it goes for good in thirty days", an archive says
+    # "this happened, and I have finished with it" — so there is no retention window
+    # and no purge job, and the record is expected to sit here indefinitely.
+    #
+    # What it buys is that `_select` stops returning it, which takes it out of the
+    # grid, the count, search, filters, sorts and the metric scan at once, and out of
+    # the partial index all of those read. What it deliberately does *not* change is
+    # anything outside this list: an archived row keeps its inbound references
+    # resolvable and keeps its `unique` values reserved (see `_enforce_unique`).
+    #
+    # Delete wins where the two meet. Archiving then deleting puts a record in the
+    # bin — `_select_archived` requires `deleted_at IS NULL` — because the bin is the
+    # surface with the deadline on it, and a record about to be purged must not be
+    # hiding somewhere with no deadline. Restoring it returns it to the archive.
+
+    @staticmethod
+    def _select_archived(list_id: int):
+        """A list's archived records.
+
+        No retention cutoff, unlike `_select_deleted`: nothing expires out of the
+        archive, so everything ever archived is still here to unarchive.
+        """
+        return select(ListItem).where(
+            ListItem.list_id == list_id,
+            ListItem.archived_at.is_not(None),
+            ListItem.deleted_at.is_(None),
+        )
+
+    @classmethod
+    async def archive(
+        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+    ) -> bool:
+        """Archive one record. False if it is not a live record of this list."""
+        item = await cls.get_by_uuid(db, lst.id, uuid)
+        if item is None:
+            return False
+
+        # Only this, for the same reason `delete` does only this: the inbound
+        # references are what make the record worth keeping, and unarchiving has to
+        # give back what archiving took.
+        item.archived_at = datetime.now(timezone.utc)
+        await db.commit()
+        return True
+
+    @classmethod
+    async def bulk_archive(
+        cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
+    ) -> int:
+        """Archive several records in one transaction, mirroring `bulk_delete`:
+        one UPDATE for the batch, `list_id` doing the scoping so a uuid from another
+        list is skipped like an unknown one, and rows counted rather than uuids so a
+        repeat in the payload counts once.
+        """
+        parsed = {
+            value
+            for value in (coerce_uuid(uuid) for uuid in uuids)
+            if value is not None
+        }
+        if not parsed:
+            return 0
+        result = await db.execute(
+            sa.update(ListItem)
+            .where(
+                ListItem.list_id == lst.id,
+                ListItem.uuid.in_(parsed),
+                ListItem.deleted_at.is_(None),
+                ListItem.archived_at.is_(None),
+            )
+            .values(archived_at=datetime.now(timezone.utc))
+            # See `bulk_delete`: the caller's permission check loaded these rows, so
+            # "evaluate" updates the in-memory copies without a second SELECT.
+            .execution_options(synchronize_session="evaluate")
+        )
+        archived = result.rowcount
+        if archived:
+            await db.commit()
+        return archived
+
+    @classmethod
+    async def get_archived_by_uuid(
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """A single archived record. `get_by_uuid` filters them out, so unarchive
+        needs its own fetch — exactly as restore does."""
+        parsed = coerce_uuid(uuid)
+        if parsed is None:
+            return None
+        result = await db.execute(
+            cls._select_archived(list_id).where(ListItem.uuid == parsed)
+        )
+        return result.scalars().first()
+
+    @classmethod
+    async def list_archived(
+        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100
+    ) -> Sequence[ListItem]:
+        """The list's archive, most recently archived first, shaped for rendering so
+        its reference and calculated cells read the same as in the live grid."""
+        columns = await cls._columns_by_key(db, lst.id)
+        stmt = (
+            cls._select_archived(lst.id)
+            .order_by(ListItem.archived_at.desc(), ListItem.id.desc())
+            .offset(skip)
+            .limit(limit)
+        )
+        items = (await db.execute(stmt)).scalars().all()
+        cls._shape_for_read(columns, items)
+        return items
+
+    @classmethod
+    async def count_archived(cls, db: AsyncSession, lst: List) -> int:
+        """How many records are archived — the paginator's total, off the same
+        predicate as the listing so the two cannot drift."""
+        stmt = select(func.count()).select_from(cls._select_archived(lst.id).subquery())
+        return await db.scalar(stmt) or 0
+
+    @classmethod
+    async def unarchive(
+        cls, db: AsyncSession, lst: List, uuid: Union[str, UUID]
+    ) -> Optional[ListItem]:
+        """Bring an archived record back into the list. None if it is not archived.
+
+        Unlike `restore` this **cannot conflict**, and that is a property of the
+        archive rather than an oversight: `_enforce_unique` scans `deleted_at IS
+        NULL`, which an archived row satisfies, so its unique values were never
+        released and nothing can have taken them meanwhile. There is nothing to
+        re-check and nothing that can 409.
+        """
+        item = await cls.get_archived_by_uuid(db, lst.id, uuid)
+        if item is None:
+            return None
+
+        item.archived_at = None
+        await db.commit()
+        return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
     async def _scrub_lookup_references(
@@ -1122,6 +1320,13 @@ class ListItemService:
         against the answers the old formula gave. That window admits both a false
         conflict and a missed one; `POST /lists/{uuid}/columns/recompute` closes it,
         and the nightly sweep closes it eventually.
+
+        **Archived rows are checked against, deliberately** — the scan below tests
+        `deleted_at IS NULL` only, and an archived row still satisfies it. So an
+        archived record keeps its unique value reserved, and that is precisely what
+        makes `unarchive` incapable of conflicting: nothing could have taken the
+        value while the row was away. It is the one asymmetry with the bin, where a
+        binned row *does* release its value and `restore` can therefore 409.
         """
         unique_columns = {
             key: column
@@ -1314,8 +1519,9 @@ class ListItemService:
         than a guess: unlike a username, a row label is not unique.
 
         A uuid in ``kept`` — already stored in this cell — is allowed even if the
-        target row has since been deleted. Anything else must point at a live row:
-        nothing new may be linked to a record on its way out.
+        target row has since been deleted or archived. Anything else must point at a
+        live row: nothing new may be linked to a record on its way out, and nothing
+        new may be linked to one somebody has finished with.
         """
         config = column.config or {}
         multiple, raws = cls._reference_inputs(column, value, "row")
@@ -1334,14 +1540,19 @@ class ListItemService:
         found_uuids: set[str] = set()
         if uuids:
             rows = await db.execute(
-                select(ListItem.uuid, ListItem.deleted_at).where(
+                select(
+                    ListItem.uuid, ListItem.deleted_at, ListItem.archived_at
+                ).where(
                     ListItem.list_id == target_list_id,
                     ListItem.uuid.in_(uuids),
                 )
             )
-            for row_uuid, gone in rows.all():
-                # Live, or already in this cell and since deleted.
-                if gone is None or str(row_uuid) in kept:
+            for row_uuid, gone, archived in rows.all():
+                # Live, or already in this cell and since deleted or archived. Both
+                # states are tested here so this agrees with the label branch below:
+                # if a name cannot pick an archived row, neither may its uuid, or a
+                # pasted uuid would make a link the picker refuses to offer.
+                if (gone is None and archived is None) or str(row_uuid) in kept:
                     found_uuids.add(str(row_uuid))
 
         by_label: dict[str, tuple[str, int]] = {}
@@ -1361,9 +1572,10 @@ class ListItemService:
                 .where(
                     ListItem.list_id == target_list_id,
                     # Live rows only: a *label* is how something new gets picked, and
-                    # nothing new may point at a row in the bin. A uuid already in the
-                    # cell is handled above.
+                    # nothing new may point at a row in the bin or in the archive. A
+                    # uuid already in the cell is handled above.
                     ListItem.deleted_at.is_(None),
+                    ListItem.archived_at.is_(None),
                     label_col.in_(labels),
                 )
                 .group_by(label_col)

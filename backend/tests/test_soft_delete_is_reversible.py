@@ -89,7 +89,9 @@ async def test_a_deleted_row_keeps_its_inbound_reference_and_stays_labelled(
             f"/api/lists/{list_uuid}/columns/{lookup}/options?uuid={row}"
         )
     ).json()
-    assert resolved == [{"uuid": row, "label": "Springfield", "deleted": True}]
+    assert resolved == [
+        {"uuid": row, "label": "Springfield", "deleted": True, "archived": False}
+    ]
 
     # But the picker will not offer it to anyone choosing a new value.
     offered = (

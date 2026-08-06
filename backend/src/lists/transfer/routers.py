@@ -39,6 +39,7 @@ async def export_list(
         filters=payload.filters.model_dump(),
         sorts=[s.model_dump() for s in payload.sorts],
         limit=payload.limit,
+        include_archived=payload.include_archived,
     )
     media_type = "text/csv" if payload.format == "csv" else "application/json"
     filename = f"{lst.name}.{payload.format}"

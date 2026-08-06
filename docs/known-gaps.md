@@ -356,6 +356,56 @@ What is still missing:
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
 
+### The archive is a second axis, and it is not a bin
+
+Records — and only records — also carry `archived_at`. It exists for a different reason than
+`deleted_at` and behaves differently at almost every edge, so the two are worth keeping apart
+in your head: a delete says *this was a mistake and it goes for good in thirty days*, an
+archive says *this happened and I have finished with it*. What it buys is that
+`ListItemService._select` stops returning the record, which takes it out of the grid, the
+count, search, filters, sorts and the metric scan in one predicate — and out of
+`ix_list_items_list_id_id`, which is partial on **both** flags. That index and `_select` have
+to keep saying the same thing: a partial index is only usable when the query's predicate
+implies the index's, so dropping `archived_at` from either quietly costs the index rather
+than returning wrong rows, which is the harder failure to notice.
+
+Five things about it are deliberate:
+
+- **No retention, no purge.** Nothing removes a record for being archived, so the archive
+  surface has no deadline to display and nothing ages out of it. `PURGE_DELETED_AFTER_DAYS`
+  still applies only to `deleted_at`.
+- **Delete wins where they meet.** `_select_archived` requires `deleted_at IS NULL`, so
+  archiving and then deleting puts the record in the *bin* — the surface with the deadline on
+  it, because a record about to be purged must not be hiding somewhere with none. `delete`
+  does not clear `archived_at`, so restoring returns it to the archive rather than silently to
+  the live list. This is also why the delete path resolves through
+  `ListItemService.get_unbinned_by_uuid` (live *or* archived) rather than `get_by_uuid`:
+  without it an archived record could not be binned at all.
+- **Unarchive cannot 409, and restore can.** `_enforce_unique` scans `deleted_at IS NULL`,
+  which an archived row satisfies — so an archived record never releases its unique values and
+  nothing can have taken them meanwhile. A *binned* one does release them, which is why
+  `restore` re-runs the check and can legitimately conflict.
+- **Rendering a label is uuid-keyed and always works; matching a label is search, and archived
+  records are out of it.** So a cell already pointing at an archived row still shows its name
+  (the options endpoint's resolving branch, `uuid IN (…)`, is unfiltered), while no picker
+  offers it, no search in the referring list finds it by that label, and nothing new may link
+  to it — by name *or* by pasted uuid, since `_resolve_lookup_values`'s two branches have to
+  agree or a uuid would make a link the picker refuses. The one place this reaches across
+  lists is `_reference_matches`, which does filter archived rows: its `LIMIT` bounds the
+  result and not the scan, so leaving it unfiltered would have kept one query reading the
+  whole archive while every query around it got smaller.
+- **Maintenance and structural paths still see archived rows**, deliberately: the purge job,
+  the list cascade, the permanent column-delete scrub, and the whole conversion path — a
+  conversion rewrites archived rows too, or unarchiving one would return data in the old type.
+  `ListService.clone` copies them and carries `archived_at` over. Export is the exception that
+  proves the rule: it excludes them like every other read, but takes `include_archived` so
+  archiving cannot make records permanently unexportable.
+
+**Access is list-level `delete`, like the bin, but for a different reason.** A soft-deleted
+record resolves to no permission context at all; an archived one still does. The gate is the
+same because archiving is what takes a record away from everyone who can read the list, so the
+authority to see the archive is the authority to have put things in it.
+
 ---
 
 ## 7. Nested lookups: stale pairs survive, and the picker filter is advisory

@@ -1559,6 +1559,16 @@ export function GuidePage() {
           passes they’re gone for good and can’t be restored — so recover anything
           important soon.
         </Callout>
+        <Callout tone="tip" title="Finished with a record? Archive it instead">
+          Deleting is for mistakes, and it runs on a clock. <strong>Archiving</strong>{" "}
+          is for records you’re simply done with — last year’s orders, closed
+          tickets. An archived record keeps everything it had and is never removed,
+          but it drops out of the grid, searches, filters and totals, which is what
+          keeps a long list quick. Archive one from the <Ui>⋯</Ui> menu on its row,
+          or select several and click <Ui>Archive selected</Ui>; bring them back from{" "}
+          <Ui>⋯</Ui> → <Ui>Archived records</Ui>. Anything already pointing at an
+          archived record still shows its name.
+        </Callout>
         <Callout tone="tip" title="A list deleted with its workspace">
           Restoring a workspace brings its lists back with it. That’s why a list that
           went down with its workspace isn’t in the <Ui>Deleted lists</Ui> bin on its

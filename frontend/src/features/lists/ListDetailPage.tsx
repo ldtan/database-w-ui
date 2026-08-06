@@ -34,7 +34,8 @@ import { MetricBar, useMetrics } from "../metrics/MetricBar";
 import { RecordCards } from "../records/RecordCards";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { RecordViewDialog } from "../records/RecordViewDialog";
-import { DeletedRecordsDialog } from "../records/DeletedRecordsDialog";
+import { ArchiveHint, isWholeListScope } from "../records/ArchiveHint";
+import { BinnedRecordsDialog } from "../records/BinnedRecordsDialog";
 import { fillFromQr, parseQrPayload } from "../records/qrFill";
 import {
   cellEditKinds,
@@ -145,6 +146,7 @@ export function ListDetailPage() {
   const [showSettings, setShowSettings] = useState(false);
   const [showTransfer, setShowTransfer] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
   const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
@@ -529,6 +531,51 @@ export function ListDetailPage() {
     },
   });
 
+  // Archive takes the same authority as delete — it takes the record away from
+  // everyone who can read the list — so it filters the selection the same way and
+  // chunks against the same cap, which the server shares between the two endpoints.
+  const archiveItem = useMutation({
+    mutationFn: (uuid: string) =>
+      api.post(`/lists/${listUuid}/items/${uuid}/archive`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["archived", listUuid] });
+      toast.success("Record archived");
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not archive record",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
+  const bulkArchive = useMutation({
+    mutationFn: async () => {
+      const uuids = deletableSelection.map((item) => item.uuid);
+      let archived = 0;
+      for (let i = 0; i < uuids.length; i += BULK_DELETE_MAX) {
+        const res = await api.post<{ archived: number }>(
+          `/lists/${listUuid}/items/bulk-archive`,
+          { uuids: uuids.slice(i, i + BULK_DELETE_MAX) },
+        );
+        archived += res.archived;
+      }
+      return { archived };
+    },
+    onSuccess: (res) => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["archived", listUuid] });
+      setSelection([]);
+      toast.success("Records archived", `${res.archived} record(s)`);
+    },
+    onError: (err) => {
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.error(
+        "Could not archive records",
+        err instanceof ApiError ? err.message : undefined,
+      );
+    },
+  });
+
   const cols = columns.data ?? [];
   // Apply the view's column order first (for the columns it names), then any
   // remaining columns in their default position order (so new columns appear).
@@ -812,6 +859,16 @@ export function ListDetailPage() {
       accept: () => bulkDelete.mutate(),
     });
   }
+  // Archiving is reversible and destroys nothing, so the message says where the
+  // records go rather than warning about what is lost.
+  function confirmBulkArchive() {
+    confirmDialog({
+      message: `Archive ${deletableSelection.length} selected record(s)? They stay in "Archived records" and can be brought back at any time.`,
+      header: "Archive records",
+      icon: "pi pi-box",
+      accept: () => bulkArchive.mutate(),
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -864,10 +921,17 @@ export function ListDetailPage() {
                   disabled: cols.length === 0,
                   command: () => setShowTransfer(true),
                 },
-                // The bin is a recovery surface gated on list-level delete (a
-                // deleted record has no per-item permission to check).
+                // Both holding surfaces are gated on list-level delete: a deleted
+                // record has no per-item permission to check, and an archive is
+                // filled by whoever may take records out of the list.
                 ...(listActions.has("delete")
                   ? [
+                      {
+                        label: "Archived records",
+                        icon: "pi pi-box",
+                        disabled: cols.length === 0,
+                        command: () => setShowArchived(true),
+                      },
                       {
                         label: "Deleted records",
                         icon: "pi pi-trash",
@@ -1009,6 +1073,22 @@ export function ListDetailPage() {
               ? "This list has no columns yet. Add them under Settings → Columns, then add records."
               : "This list has no columns yet."
           }
+        />
+      )}
+
+      {/* Only for someone who can actually archive, matching the gate on the
+          archive dialog and the Archive actions. `total` is keyed on the scope, so
+          the hint reads it only when the scope is the whole list — see ArchiveHint. */}
+      {listActions.has("delete") && (
+        <ArchiveHint
+          listUuid={listUuid}
+          total={count.data?.total}
+          scopeIsWholeList={isWholeListScope(
+            q,
+            filters,
+            (activeView?.config?.filters?.conditions?.length ?? 0) > 0,
+          )}
+          onOpenArchive={() => setShowArchived(true)}
         />
       )}
 
@@ -1327,6 +1407,16 @@ export function ListDetailPage() {
                     onClick: () => setSharingItemUuid(row.uuid),
                   },
                   {
+                    key: "archive",
+                    icon: "pi pi-box",
+                    label: "Archive record",
+                    // Same authority as delete, and offered before it: archiving is
+                    // the non-destructive way to get a finished record out of the
+                    // way, and it should be the easier one to reach.
+                    visible: canItem(row.uuid, "delete"),
+                    onClick: () => archiveItem.mutate(row.uuid),
+                  },
+                  {
                     key: "delete",
                     icon: "pi pi-trash",
                     label: "Delete record",
@@ -1351,19 +1441,36 @@ export function ListDetailPage() {
           </span>
           <span className="toolbar-divider" aria-hidden />
           {deletableSelection.length > 0 && (
-            <Button
-              label={
-                deletableSelection.length === selection.length
-                  ? "Delete selected"
-                  : `Delete ${deletableSelection.length} of ${selection.length}`
-              }
-              icon="pi pi-trash"
-              severity="danger"
-              text
-              size="small"
-              onClick={confirmBulkDelete}
-              loading={bulkDelete.isPending}
-            />
+            <>
+              {/* Archive first, and not in danger red: of the two ways to clear a
+                  selection off the grid it is the reversible one, and on a long
+                  list it is usually the one that was meant. */}
+              <Button
+                label={
+                  deletableSelection.length === selection.length
+                    ? "Archive selected"
+                    : `Archive ${deletableSelection.length} of ${selection.length}`
+                }
+                icon="pi pi-box"
+                text
+                size="small"
+                onClick={confirmBulkArchive}
+                loading={bulkArchive.isPending}
+              />
+              <Button
+                label={
+                  deletableSelection.length === selection.length
+                    ? "Delete selected"
+                    : `Delete ${deletableSelection.length} of ${selection.length}`
+                }
+                icon="pi pi-trash"
+                severity="danger"
+                text
+                size="small"
+                onClick={confirmBulkDelete}
+                loading={bulkDelete.isPending}
+              />
+            </>
           )}
           <Button
             label="Clear"
@@ -1453,11 +1560,19 @@ export function ListDetailPage() {
         visible={showTransfer}
         onHide={() => setShowTransfer(false)}
       />
-      <DeletedRecordsDialog
+      <BinnedRecordsDialog
+        kind="deleted"
         listUuid={listUuid}
         columns={cols}
         visible={showDeleted}
         onHide={() => setShowDeleted(false)}
+      />
+      <BinnedRecordsDialog
+        kind="archived"
+        listUuid={listUuid}
+        columns={cols}
+        visible={showArchived}
+        onHide={() => setShowArchived(false)}
       />
       {/* No longer gated on there being an active view: a filter is this request's,
           so a list with no views at all can still be narrowed. */}

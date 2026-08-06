@@ -108,6 +108,9 @@ class LookupOption(BaseModel):
     # never offers one — so the caller can render an existing link as unavailable
     # rather than pretending the relationship is gone.
     deleted: bool = False
+    # The row has been archived. Same contract as `deleted` above and for the same
+    # reason: a held link still resolves to its label, but no search offers one.
+    archived: bool = False
 
 
 class ConversionStart(BaseModel):

@@ -34,6 +34,25 @@ export const METRIC_REFRESH_SECONDS = readNonNegativeNumber(
   60,
 );
 
+/**
+ * How many live records a list may hold before the app suggests archiving, or `0`
+ * to never suggest it.
+ *
+ * 25,000 because that is roughly where the operations whose cost *scales with the
+ * live row count* start to be felt on the free tier's 0.1 CPU — search first
+ * (~7.7 µs per row per search on a twenty-column list, so ~1 s of wall time), then
+ * metrics that fall back to the Python scan at ~20 µs a record. The default paged
+ * listing is not among them: it is a few milliseconds whatever the list size,
+ * which is why this is a suggestion about a specific kind of slowness rather than
+ * a general "your list is big" warning. See docs/capacity-and-performance.md for
+ * the measurements and the caveats — chiefly that column count drives the search
+ * cost as much as row count does.
+ */
+export const ARCHIVE_HINT_THRESHOLD = readNonNegativeNumber(
+  import.meta.env.VITE_ARCHIVE_HINT_THRESHOLD,
+  25000,
+);
+
 function readNonNegativeNumber(
   raw: string | undefined,
   fallback: number,

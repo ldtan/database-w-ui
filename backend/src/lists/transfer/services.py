@@ -263,6 +263,7 @@ async def export_rows(
     filters: Optional[dict],
     sorts: Optional[list],
     limit: Optional[int],
+    include_archived: bool = False,
 ) -> AsyncIterator[str]:
     """Yield the export file in chunks. Opens its own session so it is
     independent of the request's dependency lifecycle while streaming.
@@ -306,6 +307,11 @@ async def export_rows(
         stmt = select(ListItem).where(
             ListItem.deleted_at.is_(None), ListItem.list_id == list_id, visible
         )
+        # Archived rows are excluded by default, like every other read of the list —
+        # but on request they are included, because an export is also the way data
+        # leaves the app and archiving must not be able to strand records here.
+        if not include_archived:
+            stmt = stmt.where(ListItem.archived_at.is_(None))
         stmt = apply_filters(stmt, filters, all_columns)
         stmt = apply_sorts(stmt, sorts, all_columns)
         if limit is not None:

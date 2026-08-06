@@ -391,6 +391,21 @@ One record. All values live in a single JSONB blob keyed by column uuid (D2).
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
 | `list_id`   | FK → `lists.id` | Owner list. |
 | `data`      | `JSONB` default `{}` | `{"<column.uuid>": <value>, …}` |
+| `archived_at` | `timestamptz` null | Finished with, but kept. See below. |
+
+**`archived_at` is a second lifecycle axis, orthogonal to `deleted_at`.** A delete says
+"this was a mistake, and it goes for good in `PURGE_DELETED_AFTER_DAYS`"; an archive says
+"this happened and I have finished with it". So an archive has **no retention window** and
+no purge job — a record stays archived until somebody unarchives or deletes it — and it is
+records only, which is why the field is on `ListItem` rather than on `BaseModel`.
+
+Archiving takes a record out of every *normal* read at once, because they all funnel through
+`ListItemService._select`: the grid, `items/count`, search, filters, sorts, and the metric
+scan. It changes nothing outside the list — an archived row still resolves as a lookup label
+and still reserves its `unique` values. Where the two axes meet, **delete wins**: archiving
+then deleting puts the record in the bin, not the archive, and restoring returns it to the
+archive it came from. See known-gaps §6 for the full rule and capacity §"When to archive"
+for what it is worth.
 
 Example, for the schema above plus a text "Title" column `a4f0…`:
 

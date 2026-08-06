@@ -44,6 +44,10 @@ export type ListRead = Response<Schemas["ListRead"]>;
 export type ListItem = Response<Schemas["ListItemRead"]>;
 // A record in the bin: a ListItem plus when it was deleted.
 export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
+// A record in the archive: a ListItem plus when it was archived. A separate axis
+// from the bin — there is no retention window to count down here, so `archived_at`
+// only ever says how long ago, never how long is left.
+export type ArchivedListItem = Response<Schemas["ArchivedListItemRead"]>;
 // Bin rows for workspaces and lists: the read shape plus when it was deleted. The
 // backend exposes DeletedWorkspaceRead / DeletedListRead, so `npm run gen:api` will
 // fold these into the generated schema; until it is re-run they mirror them here by
