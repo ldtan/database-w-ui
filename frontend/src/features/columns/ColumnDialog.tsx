@@ -61,6 +61,20 @@ const SPECIFIC = "__specific__";
 // other people's workspaces, which don't belong to a workspace the user owns.
 const SHARED = "__shared__";
 
+// What a formula may name — mirrors FORMULA_REFERENCEABLE_TYPES on the server.
+// `calculated` is here because a formula may read another formula's answer: the chain
+// is evaluated in dependency order on every write. `choice` is here because a cell
+// stores its label, and the temporal two because a cell is an ISO string that AGE and
+// DT_FORMAT can read.
+const FORMULA_REFERENCEABLE: ColumnType[] = [
+  "number",
+  "text",
+  "calculated",
+  "choice",
+  "date",
+  "datetime",
+];
+
 interface Props {
   listUuid: string;
   workspaceUuid: string | null;
@@ -380,14 +394,11 @@ export function ColumnDialog({
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
     enabled: type === "calculated" || type === "lookup",
   });
-  // `calculated` alongside number and text: a formula may read another formula's
-  // answer, because the chain is evaluated in dependency order on every write. Still
-  // never *this* column — that is a cycle of length one, and the server refuses it.
+  // Never *this* column, on top of the type gate: naming itself is a cycle of length
+  // one, and the server refuses it.
   const referenceableNames = (ownColumns.data ?? [])
     .filter(
-      (c) =>
-        (c.type === "number" || c.type === "text" || c.type === "calculated") &&
-        c.uuid !== column?.uuid,
+      (c) => FORMULA_REFERENCEABLE.includes(c.type) && c.uuid !== column?.uuid,
     )
     .map((c) => c.name);
 
@@ -1007,16 +1018,18 @@ export function ColumnDialog({
                     Computed from other columns whenever the record is saved, and
                     again on every read. Numbers: <code>+ - * /</code>
                     , parentheses, <code>MIN</code>, <code>MAX</code>,{" "}
-                    <code>ROUND</code>, <code>ABS</code>. Text:{" "}
+                    <code>ROUND</code>, <code>ABS</code>, <code>INT</code>. Text:{" "}
                     <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
                     <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
-                    <code>RIGHT</code>, <code>REPLACE</code>. And{" "}
+                    <code>RIGHT</code>, <code>REPLACE</code>. Dates:{" "}
+                    <code>AGE(date)</code> for years old, and{" "}
+                    <code>DT_FORMAT(date, "%d %b %Y")</code> to write one out. And{" "}
                     <code>IF(cond, a, b)</code> with{" "}
                     <code>IS_NULL(x)</code> for an empty cell —{" "}
                     <code>IF(IS_NULL(discount), price, price - discount)</code>.
                     {referenceableNames.length > 0
                       ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
-                      : " Add a number or text column first — a formula references those."}
+                      : " Add a number, text, choice or date column first — a formula references those."}
                     {" A formula may also read another calculated column, as long as"}
                     {" the two do not end up depending on each other."}
                   </>

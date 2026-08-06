@@ -14,7 +14,13 @@ from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
 from ..items.models import ListItem
 from ..models import List
-from .enums import COMPUTED_TYPES, PRINCIPAL_TYPES, REFERENCE_TYPES, ColumnType
+from .enums import (
+    COMPUTED_TYPES,
+    FORMULA_REFERENCEABLE_TYPES,
+    PRINCIPAL_TYPES,
+    REFERENCE_TYPES,
+    ColumnType,
+)
 from .models import Column, in_shape
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
@@ -434,25 +440,26 @@ class ColumnService:
                 )
             ).scalars().all()
             by_name = {c.name: c for c in siblings}
-            # `calculated` is referenceable now that the value is stored: a chain is
-            # computed front to back in one pass (`chain.build_chain`), so reading
-            # another formula's answer is reading this write's, not the last one's.
-            # Cycles are what that opens up, and they are refused below.
-            referenceable = {
-                ColumnType.number,
-                ColumnType.text,
-                ColumnType.calculated,
-            }
+            # `calculated` is among the referenceable types now that the value is
+            # stored: a chain is computed front to back in one pass
+            # (`chain.build_chain`), so reading another formula's answer is reading
+            # this write's, not the last one's. Cycles are what that opens up, and
+            # they are refused below.
             for name in sorted(column_refs(formula)):
                 target = by_name.get(name)
                 if target is None:
                     raise ValidationError(
                         f"Formula references unknown column '{name}'"
                     )
-                if target.type not in referenceable:
+                if target.type not in FORMULA_REFERENCEABLE_TYPES:
+                    # Listed from the set rather than spelled out, so a type added
+                    # there can never be accepted by a message that denies it.
+                    allowed = ", ".join(
+                        sorted(t.value for t in FORMULA_REFERENCEABLE_TYPES)
+                    )
                     raise ValidationError(
-                        f"Formula can only reference number, text or calculated "
-                        f"columns; '{name}' is {target.type.value}"
+                        f"Formula can only reference {allowed} columns; "
+                        f"'{name}' is {target.type.value}"
                     )
             if data.get("default") is not None:
                 raise ValidationError("A calculated column cannot have a default")

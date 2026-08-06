@@ -174,7 +174,7 @@ Notes:
   the same workspace, structure always, records optionally. Because records are keyed by
   column **uuid** (D2), the clone's new columns get new uuids and every reference is
   rewritten through an old→new column-uuid map: record `data` keys, `primary_column_id`,
-  and the column-uuid refs in view/form configs. Cell *values* copy verbatim (choice ids,
+  and the column-uuid refs in view/form configs. Cell *values* copy verbatim (choice labels,
   lookup/user/group uuids); a self-lookup is left pointing at the original list. Unlike a
   create, cloning does **not** run `_provision_defaults` (it copies the source's real
   columns/views/forms) and does **not** copy grants — the clone starts private. Details in

@@ -93,9 +93,11 @@ promotes those answers, for the same reason there is no cascade-rename.
 ## 5. A calculated column's value is stored as an *index*, and that has edges
 
 A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**
-columns, string functions over its **text** columns, and references to other **calculated**
-columns, all by name (`min`/`max`/`round`/`abs`,
-`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `IF`, and `IS_NULL`). The result is a number
+columns, string functions over its **text** and **choice** columns, date functions over its
+**date**/**datetime** columns, and references to other **calculated** columns, all by name
+(`min`/`max`/`round`/`abs`/`int`,
+`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`, `IF`, and
+`IS_NULL`). The result is a number
 or a string depending on the formula; the column has no fixed output type. The formula is parsed
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
@@ -125,6 +127,16 @@ in the wrong place in a sorted or filtered view; it can never put a wrong number
 in an export. Full materialisation — trusting the stored copy on read — was built once and is
 the obvious simplification available later, but it converts every missed invalidation into a
 plausible-looking wrong answer, which is the failure mode this arrangement exists to refuse.
+
+**`AGE` makes the clock a second thing that puts the index behind.** Every other way the stored
+copy falls out of date is a *schema* change — a formula edited, a referenced column renamed —
+which the app can notice and offer a re-index for. `AGE` needs no event at all: the answer for an
+unchanged record differs the morning after a birthday. The property above is what makes that
+tolerable rather than a bug, and `maintenance/recompute_calculated.py` already runs nightly for
+exactly this class of drift, so the window is one day on one row. Two consequences to keep in
+mind before adding another clock-reading function: a `unique` formula over `AGE` is judged
+against other rows' *stored* answers, which may have been computed on a different day; and a
+saved view filtered on an age range can miss a row for that same window.
 
 Reach is not the only thing a formula has to be bounded on. Because it runs once per record on
 every read *and* once per record per re-index, what it may *spend* is bounded too: `MAX_SOURCE`
@@ -188,8 +200,14 @@ The remaining edges:
   on a list over the deferral threshold with two `configure` holders acting inside the window.
 - **Calc-on-calc is allowed; cycles are refused.** `chain.build_chain` topologically sorts the
   graph so a chain settles in one pass per write — `total` reads *this* write's `subtotal` — and
-  `find_cycle` refuses a ring at save time, naming it. Choice and temporal columns are still
-  excluded — they store ids/ISO strings whose text form would surprise. What a name refers to is
+  `find_cycle` refuses a ring at save time, naming it. What a formula may name is
+  `FORMULA_REFERENCEABLE_TYPES`: number, text, calculated, **choice** (a cell stores its label,
+  so it is already the text a formula wants; a *multiple* one reads as its labels joined with
+  ", "), and **date/datetime** (a cell is an ISO string, which `AGE` and `DT_FORMAT` read and
+  which compares and sorts lexically for free). Still excluded: `checkbox` and `link`, which have
+  no text form worth computing over, and the REFERENCE_TYPES, whose ids need a database round
+  trip to become a label — the evaluator is a pure function of one record's values and has no
+  session to make one with. What a name refers to is
   decided by *where it sits*, not how it is spelled: `column_refs` reports every value-position
   name, including the four that collide with function names (`min`, `max`, `round`, `abs`, all
   valid slugs). Reporting those as functions is what used to let a formula over one skip these

@@ -30,7 +30,8 @@ adding, renaming, or removing a column never requires a database migration.
 - **Columns** — typed fields: `text` (one line or several, per `config.text_mode`),
   `number`, `checkbox`, `choice`,
   `lookup` (link to another list's rows), `link` (a URL, restricted to safe schemes),
-  `user` / `group` (reference an account or a group), `date`, `time`, `datetime`.
+  `user` / `group` (reference an account or a group), `date`, `time`, `datetime`, and
+  `calculated` (a formula over the others — see [the formula language](#calculated-columns-the-formula-language)).
   Type-specific settings live in a per-column JSONB `config`.
 - **Records** (`list_items`) — stored as JSONB keyed by column UUID; every value is
   validated against its column's type and config on write (required, choice options,
@@ -265,6 +266,67 @@ Two things that did not change:
   restricted more tightly than their list, and `list_views`/`list_forms` already omit what
   the caller cannot see, so one route calling a view absent while another calls it
   forbidden would help nobody.
+
+### Calculated columns: the formula language
+
+A `calculated` column carries a `formula` in its `config` and stores no value of its own —
+it is computed on write (so Postgres can sort, filter and search it) and **recomputed on
+every read**, which makes the stored copy a query index rather than the source of truth.
+The language is a deliberately tiny AST walker in `src/lists/columns/formula.py`: it never
+calls `eval`, and the only names it resolves are that record's own cell values.
+
+A formula names other columns by their **`name`** (the slug), and may name a `number`,
+`text`, `choice`, `date`, `datetime` or another `calculated` column
+(`FORMULA_REFERENCEABLE_TYPES`). A choice cell reads as its label — its labels joined with
+`", "` when the column allows several. A date or datetime cell reads as its ISO-8601 string,
+which is what `AGE` and `DT_FORMAT` parse and what makes `due > "2026-01-01"` order
+correctly. Function names are ALL CAPS and a column slug starts lowercase, so the two can
+never collide.
+
+Also available: `+ - * /` (numbers only — text is joined with `CONCAT`), parentheses, unary
+minus, `< <= > >= == !=`, and `and` / `or` / `not`.
+
+| Name | Parameters | What it does | Example |
+|------|-----------|--------------|---------|
+| `MIN` | `a, b, …` | The smallest of the values given. | `MIN(quoted, agreed)` |
+| `MAX` | `a, b, …` | The largest of the values given. | `MAX(0, total - paid)` → never below 0 |
+| `ROUND` | `number[, places]` | Rounds off; whole number without `places`. | `ROUND(qty * price, 2)` → `12.35` |
+| `ABS` | `number` | The value without its sign. | `ABS(counted - expected)` → `3` |
+| `INT` | `text \| number` | Reads a whole number out of text, truncating toward zero. | `INT("42.7")` → `42`; `INT("-3.9")` → `-3` |
+| `CONCAT` | `a, b, …` | Joins pieces; numbers are coerced to text. | `CONCAT(first, " ", last)` → `Ada Lovelace` |
+| `UPPER` | `text` | Upper case. | `UPPER(code)` → `AB12` |
+| `LOWER` | `text` | Lower case. | `LOWER(email)` → `ada@x.com` |
+| `TRIM` | `text` | Strips whitespace from both ends. | `TRIM("  hi  ")` → `hi` |
+| `LEN` | `text` | Character count, as a number. | `LEN("hello")` → `5` |
+| `LEFT` | `text, n` | The first `n` characters (`n <= 0` is empty). | `LEFT(surname, 1)` → `L` |
+| `RIGHT` | `text, n` | The last `n` characters. | `RIGHT(phone, 4)` → `7788` |
+| `REPLACE` | `text, find, with` | Replaces every occurrence. | `REPLACE(ref, "-", "/")` → `AB/12` |
+| `AGE` | `date` | Whole years elapsed, as a number. Negative for a future date. | `AGE(birthday)` → `36` |
+| `DT_FORMAT` | `date, pattern` | Renders a date; see the directives below. | `DT_FORMAT(due, "%d %b %Y")` → `06 Aug 2026` |
+| `IF` | `condition, then, otherwise` | Picks a branch. | `IF(qty > 100, "Bulk", "Standard")` |
+| `IS_NULL` | `value` | `1` when the value is missing, `0` when present. | `IF(IS_NULL(discount), price, price - discount)` |
+
+`DT_FORMAT` directives — rendered from an explicit table rather than handed to
+`datetime.strftime`, so the answer never depends on the host's locale or C library:
+`%Y` (2026), `%y` (26), `%m` (08), `%B` (August), `%b` (Aug), `%d` (06), `%A` (Thursday),
+`%a` (Thu), `%j` (218), `%H` (00–23), `%I` (01–12), `%p` (AM/PM), `%M`, `%S`, and `%%` for a
+literal percent. Anything else after a `%` is refused when the pattern is written into the
+formula, and blanks the cell when it arrives from a text column. A `date` cell has no time,
+so its time directives read as midnight.
+
+Two behaviours worth knowing before writing one:
+
+- **A missing operand blanks the whole result** rather than reading as zero or `""` — an
+  incomplete row should look incomplete. `IS_NULL` is the single exception, and is the only
+  way to ask about a blank at all.
+- **`AGE` reads the clock**, so an unchanged record's answer differs the morning after a
+  birthday. What is displayed is always recomputed and therefore current; only a *sort or
+  filter* can lag, until `recompute_calculated` runs (below) or somebody presses **Refresh
+  calculated**. See `docs/known-gaps.md` §5.
+
+Metrics layer an aggregate grammar (`SUM`, `AVG`, `COUNT`, `EMPTY`, `UNIQUE`, `MIN`, `MAX`,
+`MEDIAN`) on top of this one, where an aggregate's argument is an ordinary row expression —
+so every function above is available inside one. See `src/lists/metrics/aggregate.py`.
 
 ## Maintenance jobs
 
