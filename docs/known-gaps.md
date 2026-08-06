@@ -610,7 +610,12 @@ Follow-ups, in the order they will be missed:
   `Intl.DateTimeFormat().resolvedOptions().timeZone` on load and re-reports whenever it
   differs, which is right for a travelling user but leaves no way to *override* it — a
   picker in the profile page is the missing piece for anyone whose machine is set wrong.
-- **`TimezoneSync` has no test**, because the frontend has no test runner at all. Its loop
+- **`TimezoneSync` has no test**, and the runner that exists cannot give it one. `vitest` runs
+  here in a **node** environment with `include: ["src/**/*.test.ts"]` and no jsdom
+  (`vite.config.ts`), deliberately: what it pins is rules a record goes through — what counts
+  as empty, how a value serializes, which reordering is a permutation — none of which render,
+  and PrimeReact under jsdom is a maintenance cost of its own. Six files use it today. A
+  component that mounts, reads `Intl` and PATCHes is out of its reach, so this loop still
   terminates by inspection (PATCH → cache update → `local === stored` → early return, with
   the `pushed` ref covering the in-flight window), which is not the same as a green test.
 - **Display of instants ignores the setting.** The three `toLocaleString()` call sites (the
@@ -656,7 +661,11 @@ buys and what it costs are both worth knowing before extending it.
 - **A duplicate inherits the source's `position`**, which reads as "next to it" and is not.
   Nothing in the UI ever sets `position`, so every column is 0 and the order falls through to
   `id` — a duplicate appears last, like any other new column. Placing it adjacent means
-  renumbering every column after it, which is a reordering feature and not this one.
+  renumbering every column after it, which is a reordering feature and not this one. The
+  reordering that *has* since shipped does not close this: a view's `column_order` and a
+  form's `fields` are drag-editable and the Columns tab sorts by `display_name`, so all three
+  surfaces put the copy somewhere sensible while `position` — the list's default order, which
+  the grid falls back to — is still written by nothing.
 - **Copying into an *already existing* column is still not built.** `ConversionService.start`
   always creates its target, so that needs a target parameter and a decision the planned-features
   doc still lists as open: overwrite the target, or only fill cells where it is empty.
@@ -859,9 +868,29 @@ correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. An
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
 
+**A page of records can be asked for two ways, and the cursor is not just a faster offset.**
+`GET /items/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —
+or `after=<record uuid>` (`ListItemService._after_id`). `after` is a **400** in a sorted,
+grouped or `skip`ed listing rather than an approximation: `id > :after` names a position only
+while `id` is the ordering, and a caller cannot tell from the rows it gets back that it
+quietly lost some. A uuid this list does not have, including one since binned, is refused for
+the same reason — starting from the top would read as the list rewinding. Three things follow.
+The cursor is a bare record uuid rather than an encoded blob precisely so it cannot carry a
+stale ordering; don't "improve" it into one. What it fixes is not only depth cost but a
+correctness hole — `skip` names a position, so a record deleted ahead of it pulls every later
+row back a place and the next page steps over one nobody saw, which a bin any editor can fill
+makes routine rather than a race. And sorted listings remain offset-only and are slow
+*everywhere* rather than slow deep (they sort an unindexed expression over the whole matching
+set), so keyset would not have helped them; that is the path to attack next, not this one.
+The count is now a separate question — `total=false` suppresses `X-Total-Count` for a caller
+that already holds it, `GET items/count` asks it alone, and the page is fetched *before* the
+total so a rejected `after` pays for no count at all.
+
 **"Live records" is polling, and its refresh must stay a permissioned re-read — never a
 data push.** An open list refetches its records every `VITE_LIVE_REFRESH_SECONDS` (default
-5, `0` disables) through the `useLiveList` hook (`frontend/src/lib/useLiveList.ts`), paused
+10, `0` disables; the Render deploy sets 60) through the `useLiveList` hook
+(`frontend/src/lib/useLiveList.ts`) — which a dearer caller may only ever *slow*, via the
+`minSeconds` floor the metric strip passes (§9) — paused
 while the tab is hidden **and** after 5 minutes with no user activity on a still-visible tab
 (so a list left open on screen stops polling until touched). It works precisely *because*
 each refresh is an ordinary
@@ -1095,9 +1124,13 @@ Three rules hold it together, and all three are easy to get backwards:
   window. Shape-agnostic (`?|` plus a `CASE`), set-based (one UPDATE per column, not per row).
 
 **Deleting a *list* is the deliberate exception** and still scrubs. Every value in a lookup
-pointing at it goes stale at once; the permission resolver returns *no access* for a deleted
-resource, so those labels could not even be authorised; and restoring a list would mean
-un-cascading its columns, records, views and forms — a feature that does not exist.
+pointing at it goes stale at once, and the permission resolver returns *no access* for a
+deleted resource, so those labels could not even be authorised. The old justification — that
+restoring a list would mean un-cascading its children, which nothing did — has expired:
+`ListService.restore` does exactly that, matching each child on the `deleted_at` the cascade
+stamped. What has not changed is the asymmetry that makes the scrub a real gap: the restore
+brings the list's own contents back and cannot bring back what was cleared on *other* lists'
+records, because nothing recorded which cells those were (gap 6, "What is still missing").
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
