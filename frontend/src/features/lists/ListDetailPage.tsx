@@ -54,6 +54,7 @@ import { ViewBar } from "../views/ViewBar";
 import { ViewControls } from "../views/ViewControls";
 import { FilterDialog } from "../views/FilterDialog";
 import { recordParams, recordScopeParams } from "../views/recordQuery";
+import { moveTo } from "../views/reorder";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
   useEffectiveActions,
@@ -753,14 +754,14 @@ export function ListDetailPage() {
       visible ? prev.filter((u) => u !== uuid) : [...new Set([...prev, uuid])],
     );
   }
-  // Materialize the full effective order, swap two entries, and store it — so
+  // Materialize the full effective order, move one entry, and store it — so
   // column_order is always a complete ordering after any manual reorder.
-  function moveColumn(index: number, delta: number) {
-    const target = index + delta;
-    if (target < 0 || target >= orderedCols.length) return;
-    const next = orderedCols.map((c) => c.uuid);
-    [next[index], next[target]] = [next[target], next[index]];
-    setColumnOrder(next);
+  //
+  // `moveTo` splices rather than swapping. That is invisible to the chevrons,
+  // which only ever move one place, and it is the whole point for a drag, which
+  // moves a column past several others at once.
+  function reorderColumn(from: number, to: number) {
+    setColumnOrder(moveTo(orderedCols.map((c) => c.uuid), from, to));
   }
 
   // One object, handed to both the toolbar and List settings → Views, so the two
@@ -769,7 +770,7 @@ export function ListDetailPage() {
     columns: orderedCols,
     hiddenColumns,
     onToggleColumn: toggleColumn,
-    onMoveColumn: moveColumn,
+    onReorderColumn: reorderColumn,
     groupBy,
     onGroupBy: setGroupBy,
     filterCount,

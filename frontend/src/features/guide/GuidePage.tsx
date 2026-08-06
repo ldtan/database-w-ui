@@ -1105,8 +1105,10 @@ export function GuidePage() {
         <Figure name="views" />
         <ul className="flex flex-col gap-1">
           <li>
-            Use <Ui>Columns</Ui> to tick which columns appear, and{" "}
-            <Ui>Move up</Ui> / <Ui>Move down</Ui> to reorder them.
+            Use <Ui>Columns</Ui> to tick which columns appear. To reorder them,
+            drag a column by the grip on its left, or step it one place at a time
+            with <Ui>Move up</Ui> / <Ui>Move down</Ui> — the buttons also work from
+            the keyboard.
           </li>
           <li>
             You can rename or delete a view from its settings. Deleting a view only
@@ -1133,8 +1135,9 @@ export function GuidePage() {
             people type into it (a hidden field can’t be edited).
           </li>
           <li>
-            Reorder fields with <Ui>Move up</Ui> / <Ui>Move down</Ui>, and give a
-            field a friendlier <Ui>Label</Ui> just for this form.
+            Reorder fields by dragging the grip on the left, or with{" "}
+            <Ui>Move up</Ui> / <Ui>Move down</Ui>, and give a field a friendlier{" "}
+            <Ui>Label</Ui> just for this form.
           </li>
           <li>Click <Ui>Save</Ui> to apply. New fields start out shown and editable.</li>
         </ul>

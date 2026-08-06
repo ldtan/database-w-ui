@@ -1931,6 +1931,39 @@ a {
   flex-shrink: 0;
 }
 
+/* The drag handle on a reorderable row (components/SortableList).
+   Quiet until the row is hovered: a column of grip icons at full contrast reads
+   as the most important thing in the list, which it is not — the column names
+   are. `touch-action: none` is required by dnd-kit's pointer sensor, or the
+   browser scrolls the panel instead of starting the drag. */
+.drag-grip {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 1.5rem;
+  height: 1.75rem;
+  border: none;
+  background: none;
+  border-radius: var(--radius-sm, 4px);
+  color: var(--text-muted);
+  opacity: 0.45;
+  cursor: grab;
+  touch-action: none;
+  transition: opacity 0.12s ease, background-color 0.12s ease;
+}
+.drag-grip:hover,
+.drag-grip:focus-visible {
+  opacity: 1;
+  background: var(--surface-hover, rgba(127, 127, 127, 0.12));
+}
+.drag-grip:active {
+  cursor: grabbing;
+}
+.drag-grip i {
+  font-size: 0.8rem;
+}
+
 /* A titled group. The rule above it is what turns a list of fields into two or
    three things to decide, which is how many decisions most of these dialogs
    actually contain. */

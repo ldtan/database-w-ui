@@ -9,12 +9,14 @@ import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
 import { NameFields } from "../../components/NameFields";
+import { DRAG_GRIP_WIDTH, SortableList } from "../../components/SortableList";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
+import { moveTo } from "../views/reorder";
 
 interface Row {
   column_uuid: string;
@@ -163,14 +165,12 @@ export function FormsEditor({
     },
   });
 
-  function move(index: number, delta: number) {
-    setRows((prev) => {
-      const next = [...prev];
-      const target = index + delta;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
-      return next;
-    });
+  // The chevrons and the grip are the same move: `moveTo` splices, so dragging a
+  // field past several others lands it where it was dropped rather than trading
+  // places with whatever was there. `save` writes the array index back as `order`,
+  // so nothing downstream needs to know how the order changed.
+  function reorder(from: number, to: number) {
+    setRows((prev) => moveTo(prev, from, to));
   }
   function update(index: number, patch: Partial<Row>) {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -254,58 +254,73 @@ export function FormsEditor({
         <div className="overflow-x-auto">
         <div className="flex flex-col gap-1" style={{ minWidth: 460 }}>
           <div className="flex items-center gap-2 text-sm text-muted px-1">
+            {/* Indented past the drag grip so the headers sit over their columns. */}
+            <span style={{ width: DRAG_GRIP_WIDTH, flexShrink: 0 }} />
             <span style={{ width: 64 }}>Order</span>
             <span className="flex-1">Field</span>
             <span style={{ width: 70 }}>Shown</span>
             {showsEnabled && <span style={{ width: 76 }}>Editable</span>}
             <span style={{ width: 150 }}>Label</span>
           </div>
-          {rows.map((row, i) => (
-            <div key={row.column_uuid} className="flex items-center gap-2">
-              <div className="flex" style={{ width: 64 }}>
-                <Button
-                  icon="pi pi-chevron-up"
-                  text
-                  size="small"
-                  aria-label="Move up"
-                  disabled={!canEdit || i === 0}
-                  onClick={() => move(i, -1)}
-                />
-                <Button
-                  icon="pi pi-chevron-down"
-                  text
-                  size="small"
-                  aria-label="Move down"
-                  disabled={!canEdit || i === rows.length - 1}
-                  onClick={() => move(i, 1)}
-                />
-              </div>
-              <span className="flex-1">{row.display_name}</span>
-              <span style={{ width: 70 }}>
-                <Checkbox
-                  checked={row.included}
-                  disabled={!canEdit}
-                  onChange={(e) => update(i, { included: !!e.checked })}
-                />
-              </span>
-              {showsEnabled && (
-                <span style={{ width: 76 }}>
+          {/* Drag by the grip or step with the chevrons — and the grip is why the
+              row is not itself draggable: these rows hold checkboxes and a text
+              input, all of which a draggable row would swallow the pointer for.
+              `disabled` for a reader, who has nothing to reorder. */}
+          <SortableList
+            items={rows}
+            idOf={(row) => row.column_uuid}
+            onReorder={reorder}
+            disabled={!canEdit}
+            className="flex flex-col gap-1"
+            rowClassName="flex items-center gap-2"
+          >
+            {(row, i) => (
+              <>
+                <div className="flex" style={{ width: 64 }}>
+                  <Button
+                    icon="pi pi-chevron-up"
+                    text
+                    size="small"
+                    aria-label="Move up"
+                    disabled={!canEdit || i === 0}
+                    onClick={() => reorder(i, i - 1)}
+                  />
+                  <Button
+                    icon="pi pi-chevron-down"
+                    text
+                    size="small"
+                    aria-label="Move down"
+                    disabled={!canEdit || i === rows.length - 1}
+                    onClick={() => reorder(i, i + 1)}
+                  />
+                </div>
+                <span className="flex-1">{row.display_name}</span>
+                <span style={{ width: 70 }}>
                   <Checkbox
-                    checked={row.enabled}
-                    disabled={!canEdit || !row.included}
-                    onChange={(e) => update(i, { enabled: !!e.checked })}
+                    checked={row.included}
+                    disabled={!canEdit}
+                    onChange={(e) => update(i, { included: !!e.checked })}
                   />
                 </span>
-              )}
-              <InputText
-                value={row.label_override}
-                onChange={(e) => update(i, { label_override: e.target.value })}
-                placeholder={row.display_name}
-                disabled={!canEdit}
-                style={{ width: 150 }}
-              />
-            </div>
-          ))}
+                {showsEnabled && (
+                  <span style={{ width: 76 }}>
+                    <Checkbox
+                      checked={row.enabled}
+                      disabled={!canEdit || !row.included}
+                      onChange={(e) => update(i, { enabled: !!e.checked })}
+                    />
+                  </span>
+                )}
+                <InputText
+                  value={row.label_override}
+                  onChange={(e) => update(i, { label_override: e.target.value })}
+                  placeholder={row.display_name}
+                  disabled={!canEdit}
+                  style={{ width: 150 }}
+                />
+              </>
+            )}
+          </SortableList>
           {rows.length === 0 && <p>Add a column to configure this form.</p>}
         </div>
         </div>

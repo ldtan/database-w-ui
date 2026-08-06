@@ -4,14 +4,17 @@ import { Checkbox } from "primereact/checkbox";
 import { Dropdown } from "primereact/dropdown";
 import { OverlayPanel } from "primereact/overlaypanel";
 
+import { SortableList } from "../../components/SortableList";
 import type { Column } from "../../lib/types";
 
 interface Props {
-  // In display order, which is what the reorder buttons move within.
+  // In display order, which is what the reorder controls move within.
   columns: Column[];
   hiddenColumns: string[];
   onToggleColumn: (uuid: string, visible: boolean) => void;
-  onMoveColumn: (index: number, delta: number) => void;
+  /** Both the grip and the chevrons go through this: the buttons are the same
+   *  move, asked for one place at a time. */
+  onReorderColumn: (from: number, to: number) => void;
   groupBy: string | null;
   onGroupBy: (uuid: string | null) => void;
   filterCount: number;
@@ -38,7 +41,7 @@ export function ViewControls({
   columns,
   hiddenColumns,
   onToggleColumn,
-  onMoveColumn,
+  onReorderColumn,
   groupBy,
   onGroupBy,
   filterCount,
@@ -54,17 +57,28 @@ export function ViewControls({
   const empty = columns.length === 0;
   const groupColumn = columns.find((c) => c.uuid === groupBy) ?? null;
 
+  // Drag by the grip, or one place at a time with the chevrons. The buttons are
+  // not a fallback for a browser that cannot drag — they are how this works with a
+  // keyboard, on a touch screen, and when the list is long enough to scroll while
+  // you are holding a row.
   const columnList = (
-    <div className="flex flex-col gap-1" style={{ minWidth: "15rem" }}>
-      {columns.map((col, i) => (
-        <div key={col.uuid} className="flex items-center gap-1">
+    <SortableList
+      items={columns}
+      idOf={(col) => col.uuid}
+      onReorder={onReorderColumn}
+      // minWidth so the overlay panel does not shrink-wrap to the longest name,
+      // which made the panel a different width on every list.
+      className="flex flex-col gap-1 min-w-60"
+    >
+      {(col, i) => (
+        <>
           <Button
             icon="pi pi-chevron-up"
             text
             size="small"
             aria-label={`Move ${col.display_name} up`}
             disabled={i === 0}
-            onClick={() => onMoveColumn(i, -1)}
+            onClick={() => onReorderColumn(i, i - 1)}
           />
           <Button
             icon="pi pi-chevron-down"
@@ -72,7 +86,7 @@ export function ViewControls({
             size="small"
             aria-label={`Move ${col.display_name} down`}
             disabled={i === columns.length - 1}
-            onClick={() => onMoveColumn(i, 1)}
+            onClick={() => onReorderColumn(i, i + 1)}
           />
           <Checkbox
             inputId={`vis-${stacked ? "tab-" : ""}${col.uuid}`}
@@ -85,9 +99,9 @@ export function ViewControls({
           >
             {col.display_name}
           </label>
-        </div>
-      ))}
-    </div>
+        </>
+      )}
+    </SortableList>
   );
 
   const groupOptions = columns.map((c) => ({
