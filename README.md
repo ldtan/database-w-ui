@@ -94,6 +94,10 @@ host:
 
 ## Documentation
 
+- [The formula language](backend/README.md#calculated-columns-the-formula-language) — what a
+  `calculated` column may reference and every function it can call, with parameters and
+  examples. The same reference, written for the people using the app, is in the in-app
+  **Guide** under *Calculated columns: writing a formula*.
 - [Data model design](docs/data-model-design.md) — the six models (lists, columns,
   list_items, views, forms, metrics), the JSONB record strategy, column types, and the
   decisions behind them.

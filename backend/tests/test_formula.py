@@ -4,14 +4,29 @@ This is the security boundary: the evaluator must never reach anything but the
 column values it is handed. These tests pin both halves — what it computes, and
 what it refuses to parse.
 """
+from datetime import date
+
 import pytest
 
 from src.core.exceptions import ValidationError
+from src.lists.columns import formula as formula_module
 from src.lists.columns.formula import column_refs, evaluate, parse
 
 
 def calc(source, **values):
     return evaluate(parse(source), values)
+
+
+@pytest.fixture
+def today(monkeypatch):
+    """Pin the date `AGE` counts to, and hand it back.
+
+    `_today` exists as a seam for exactly this: an assertion computed from the real
+    clock would either restate the implementation or pass on the wrong day.
+    """
+    pinned = date(2026, 8, 6)
+    monkeypatch.setattr(formula_module, "_today", lambda: pinned)
+    return pinned
 
 
 def test_arithmetic_and_precedence():
@@ -238,3 +253,169 @@ def test_replace_measures_an_empty_search_string_correctly():
     # "abc".replace("", ".") inserts between every character and at both ends, so
     # the predicted size has to match: 3 + 4, not 3.
     assert calc("REPLACE(name, '', '.')", name="abc") == ".a.b.c."
+
+
+# -- values that are not scalars -------------------------------------------------
+
+
+def test_a_multiple_choice_cell_reads_as_its_labels_joined():
+    # The one column value that is neither a scalar nor a reference. Joining is what
+    # makes a multi-select usable at all — every other treatment of a list blanks it.
+    assert calc("tags", tags=["Red", "Blue"]) == "Red, Blue"
+    assert calc("CONCAT(tags, '!')", tags=["Red", "Blue"]) == "Red, Blue!"
+    assert calc("LEN(tags)", tags=["Red", "Blue"]) == 9
+    # A single selection reads as itself either way round, so a formula written
+    # against a choice column keeps working if `multiple` is turned on.
+    assert calc("IF(tags == 'Red', 1, 0)", tags=["Red"]) == 1
+    assert calc("IF(tags == 'Red', 1, 0)", tags="Red") == 1
+
+
+def test_an_empty_selection_is_an_empty_cell_not_an_empty_string():
+    assert calc("tags", tags=[]) is None
+    assert calc("IS_NULL(tags)", tags=[]) == 1
+    assert calc("IS_NULL(tags)", tags=["Red"]) == 0
+
+
+def test_a_list_of_anything_but_labels_gives_no_value():
+    # Nothing referenceable stores one, and the day something does, it must not be
+    # silently stringified into a cell — a row of uuids reads as data.
+    assert calc("tags", tags=[1, 2]) is None
+    assert calc("tags", tags=[{"uuid": "x"}]) is None
+
+
+# -- AGE -------------------------------------------------------------------------
+
+
+def test_age_counts_whole_years(today):
+    assert calc("AGE(born)", born="1990-03-01") == 36
+    # A birthday not yet reached this year counts one less. This is the entire
+    # reason AGE is a function rather than a subtraction of two years.
+    assert calc("AGE(born)", born="1990-12-25") == 35
+    # On the day itself, the year counts.
+    assert calc("AGE(born)", born="1990-08-06") == 36
+    assert calc("AGE(born)", born="2026-08-06") == 0
+
+
+def test_age_reads_a_datetime_as_its_date(today):
+    assert calc("AGE(born)", born="1990-03-01T13:45:00") == 36
+    assert calc("AGE(born)", born="1990-03-01T13:45:00+08:00") == 36
+
+
+def test_age_of_a_future_date_is_negative_not_blank(today):
+    # A real answer beats a blank, which would be indistinguishable from an empty
+    # cell — so `IF(AGE(starts) < 0, …)` can act on it.
+    assert calc("AGE(starts)", starts="2030-01-01") == -4
+    assert calc("IF(AGE(starts) < 0, 'Not yet', 'Started')", starts="2030-01-01") == (
+        "Not yet"
+    )
+
+
+def test_age_of_something_that_is_not_a_date_is_blank(today):
+    assert calc("AGE(born)", born="not a date") is None
+    assert calc("AGE(born)", born="2026-13-99") is None
+    assert calc("AGE(born)", born=1990) is None
+    assert calc("AGE(born)") is None
+
+
+def test_age_is_a_number_so_it_takes_part_in_arithmetic(today):
+    assert calc("AGE(born) * 12", born="1990-08-06") == 432
+    assert calc("IF(AGE(born) >= 18, 'Adult', 'Minor')", born="2015-01-01") == "Minor"
+
+
+# -- DT_FORMAT -------------------------------------------------------------------
+
+
+def test_dt_format_fills_in_the_parts_of_a_date():
+    assert calc("DT_FORMAT(d, '%d/%m/%Y')", d="2026-08-06") == "06/08/2026"
+    assert calc("DT_FORMAT(d, '%A, %d %B %Y')", d="2026-08-06") == (
+        "Thursday, 06 August 2026"
+    )
+    assert calc("DT_FORMAT(d, '%a %b %y')", d="2026-08-06") == "Thu Aug 26"
+    assert calc("DT_FORMAT(d, '%j')", d="2026-08-06") == "218"
+
+
+def test_dt_format_reads_the_time_off_a_datetime():
+    assert calc("DT_FORMAT(d, '%H:%M:%S')", d="2026-08-06T13:45:07") == "13:45:07"
+    assert calc("DT_FORMAT(d, '%I:%M %p')", d="2026-08-06T13:45:07") == "01:45 PM"
+    assert calc("DT_FORMAT(d, '%I:%M %p')", d="2026-08-06T00:45:07") == "12:45 AM"
+
+
+def test_a_plain_date_formats_its_time_as_midnight():
+    # A `date` cell has no time on it. Reading midnight beats blanking the whole
+    # cell over a directive the writer could reasonably have included.
+    assert calc("DT_FORMAT(d, '%Y-%m-%d %H:%M')", d="2026-08-06") == "2026-08-06 00:00"
+
+
+def test_dt_format_copies_everything_that_is_not_a_directive():
+    assert calc("DT_FORMAT(d, 'Due on the %d')", d="2026-08-06") == "Due on the 06"
+    assert calc("DT_FORMAT(d, 'hello')", d="2026-08-06") == "hello"
+    assert calc("DT_FORMAT(d, '100%% done by %Y')", d="2026-08-06") == "100% done by 2026"
+
+
+def test_dt_format_of_something_that_is_not_a_date_is_blank():
+    assert calc("DT_FORMAT(d, '%Y')", d="nope") is None
+    assert calc("DT_FORMAT(d, '%Y')", d=2026) is None
+    assert calc("DT_FORMAT(d, '%Y')") is None
+    # The format is text and only text; a number there is not a format anyone meant.
+    assert calc("DT_FORMAT(d, f)", d="2026-08-06", f=5) is None
+
+
+def test_a_written_out_format_is_judged_when_the_formula_is_saved():
+    # The alternative is saving a column that answers blank on every record for a
+    # reason nothing tells you about.
+    with pytest.raises(ValidationError) as exc:
+        parse("DT_FORMAT(d, '%q')")
+    assert "%q" in str(exc.value)
+    with pytest.raises(ValidationError):
+        parse("DT_FORMAT(d, 'ends in %')")
+    # And a good one saves.
+    assert column_refs(parse("DT_FORMAT(d, '%d %b %Y')")) == frozenset({"d"})
+
+
+def test_a_format_that_comes_from_a_cell_is_judged_per_row():
+    # It cannot be checked at save time, so an unknown directive blanks that row the
+    # way every other unanswerable formula does.
+    assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%q") is None
+    assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%Y") == "2026"
+
+
+def test_dt_format_cannot_grow_a_value_without_bound():
+    # The format can arrive from a text cell, so its length is not bounded by
+    # MAX_SOURCE. Measured before it is built, as CONCAT and REPLACE are.
+    assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%B" * 2000) is None
+    assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%B" * 10) == "August" * 10
+
+
+# -- INT -------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("42", 42),
+        ("42.7", 42),  # truncated, not rounded
+        ("-3.9", -3),  # toward zero, not floored
+        ("  42  ", 42),
+        ("1e3", 1000),
+        ("abc", None),
+        ("", None),
+        ("nan", None),
+        ("inf", None),
+        ("1e400", None),  # overflows to infinity rather than becoming a huge int
+    ],
+)
+def test_int_reads_a_whole_number_out_of_text(value, expected):
+    assert calc("INT(code)", code=value) == expected
+
+
+def test_int_drops_the_decimals_of_a_number_too():
+    assert calc("INT(price)", price=3.9) == 3
+    assert calc("INT(price)", price=-3.9) == -3
+    assert calc("INT(price)", price=7) == 7
+    assert calc("INT(price)") is None
+
+
+def test_int_result_is_a_number_so_it_can_be_computed_with():
+    # The point of the cast: a code typed into a text column can be totalled.
+    assert calc("INT(code) * 2", code="21") == 42
+    assert calc("INT(code) + qty", code="10", qty=5) == 15

@@ -93,6 +93,96 @@ function Code({ children }: { children: ReactNode }) {
   );
 }
 
+/** Every formula function on one row each, for looking one up rather than reading
+ *  about it. The prose above it teaches; this is what you come back to. */
+const FUNCTIONS: {
+  name: string;
+  params: string;
+  what: string;
+  example: string;
+  gives: string;
+}[] = [
+  // Numbers
+  { name: "MIN", params: "a, b, …", what: "The smallest of the values given.", example: 'MIN(quoted, agreed)', gives: "the lower price" },
+  { name: "MAX", params: "a, b, …", what: "The largest of the values given.", example: "MAX(0, total - paid)", gives: "never below 0" },
+  { name: "ROUND", params: "number, places?", what: "Rounds off. Leave the places out for a whole number.", example: "ROUND(total, 2)", gives: "12.35" },
+  { name: "ABS", params: "number", what: "The value without its minus sign.", example: "ABS(counted - expected)", gives: "3" },
+  { name: "INT", params: "text or number", what: "Reads a whole number out of text, dropping anything after the point.", example: 'INT("42.7")', gives: "42" },
+  // Words
+  { name: "CONCAT", params: "a, b, …", what: "Sticks pieces together. Numbers are welcome.", example: 'CONCAT(first, " ", last)', gives: "Ada Lovelace" },
+  { name: "UPPER", params: "text", what: "The same words in capitals.", example: "UPPER(code)", gives: "AB12" },
+  { name: "LOWER", params: "text", what: "The same words in small letters.", example: "LOWER(email)", gives: "ada@x.com" },
+  { name: "TRIM", params: "text", what: "Removes stray spaces from either end.", example: 'TRIM("  hi  ")', gives: "hi" },
+  { name: "LEN", params: "text", what: "How many characters it has, as a number.", example: 'LEN("hello")', gives: "5" },
+  { name: "LEFT", params: "text, n", what: "The first n characters.", example: "LEFT(surname, 1)", gives: "L" },
+  { name: "RIGHT", params: "text, n", what: "The last n characters.", example: "RIGHT(phone, 4)", gives: "7788" },
+  { name: "REPLACE", params: "text, find, with", what: "Swaps every occurrence of one bit of text for another.", example: 'REPLACE(ref, "-", "/")', gives: "AB/12" },
+  // Dates
+  { name: "AGE", params: "date", what: "How many whole years have passed. Negative for a date still to come.", example: "AGE(birthday)", gives: "36" },
+  { name: "DT_FORMAT", params: "date, pattern", what: "Writes a date out however you like — see the pattern pieces above.", example: 'DT_FORMAT(due, "%d %b %Y")', gives: "06 Aug 2026" },
+  // Choosing
+  { name: "IF", params: "condition, then, otherwise", what: "The second value when the condition holds, the third when it doesn’t.", example: 'IF(qty > 100, "Bulk", "Standard")', gives: "Bulk" },
+  { name: "IS_NULL", params: "value", what: "1 when there’s nothing there, 0 when there is. The only thing that can look at an empty cell.", example: "IF(IS_NULL(discount), price, price - discount)", gives: "the full price" },
+];
+
+/** The reference table itself. Scrolls sideways on a narrow screen rather than
+ *  pushing the page out of shape. */
+function FunctionTable() {
+  return (
+    <div style={{ overflowX: "auto", maxWidth: "100%" }}>
+      <table
+        className="text-sm"
+        style={{ borderCollapse: "collapse", minWidth: 640, width: "100%" }}
+      >
+        <thead>
+          <tr style={{ borderBottom: "var(--border-width) solid var(--border)" }}>
+            {["Name", "What goes in it", "What it does", "Example"].map((h) => (
+              <th
+                key={h}
+                className="font-semibold"
+                style={{ textAlign: "left", padding: "0.5rem 0.75rem 0.5rem 0" }}
+              >
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {FUNCTIONS.map((fn) => (
+            <tr
+              key={fn.name}
+              style={{ borderBottom: "var(--border-width) solid var(--border)" }}
+            >
+              <td style={{ padding: "0.5rem 0.75rem 0.5rem 0", verticalAlign: "top" }}>
+                <Code>{fn.name}</Code>
+              </td>
+              <td
+                style={{
+                  padding: "0.5rem 0.75rem 0.5rem 0",
+                  verticalAlign: "top",
+                  color: "var(--text-muted)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {fn.params}
+              </td>
+              <td style={{ padding: "0.5rem 0.75rem 0.5rem 0", verticalAlign: "top" }}>
+                {fn.what}
+              </td>
+              <td style={{ padding: "0.5rem 0 0.5rem 0", verticalAlign: "top" }}>
+                <Code>{fn.example}</Code>
+                <div style={{ color: "var(--text-muted)", paddingTop: "0.2rem" }}>
+                  → {fn.gives}
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 /** A titled section with a stable id so the contents list can jump to it. */
 function Section({
   id,
@@ -755,12 +845,19 @@ export function GuidePage() {
         <p>
           A formula refers to a column by its <strong>short name</strong> — the one
           shown in brackets beside it in the columns list, like{" "}
-          <Code>unit_price</Code> — not by its pretty display name. Three kinds of
+          <Code>unit_price</Code> — not by its pretty display name. Six kinds of
           column can be named: <strong>Number</strong>, <strong>Text</strong>{" "}
-          (either input style), and another <strong>Calculated</strong> column — so
-          a <em>Total</em> can build on a <em>Subtotal</em>, as long as the two don’t
-          end up depending on each other. Dates, choices, tick boxes, people and
-          linked columns can’t be used in a formula yet.
+          (either input style), <strong>Choice</strong>, <strong>Date</strong>,{" "}
+          <strong>Date &amp; time</strong>, and another <strong>Calculated</strong>{" "}
+          column — so a <em>Total</em> can build on a <em>Subtotal</em>, as long as
+          the two don’t end up depending on each other. Tick boxes, web links,
+          people and linked columns can’t be used in a formula yet.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          A <strong>Choice</strong> column reads as the option itself, so{" "}
+          <Code>IF(status == "Done", 1, 0)</Code> does what it looks like. Where
+          several options can be picked at once, they read as one piece of text with
+          commas between them — <em>Robotics, Choir</em>.
         </p>
 
         <h3 className="font-semibold pt-1">Doing sums</h3>
@@ -789,6 +886,14 @@ export function GuidePage() {
           </li>
           <li>
             <Code>ABS(number)</Code> — the value without its minus sign.
+          </li>
+          <li>
+            <Code>INT(text)</Code> — reads a number out of a piece of text, and
+            drops anything after the decimal point. <Code>INT("42.7")</Code> is{" "}
+            <Code>42</Code> and <Code>INT("-3.9")</Code> is <Code>-3</Code>. Handy
+            when a code or a reference number was typed into a text column and you
+            want to do sums with it; text that isn’t a number at all gives no
+            answer.
           </li>
         </ul>
 
@@ -823,6 +928,60 @@ export function GuidePage() {
         <p style={{ color: "var(--text-muted)" }}>
           Text you type into a formula yourself goes in quotes —{" "}
           <Code>"Ms. "</Code> — so the app can tell it apart from a column name.
+        </p>
+
+        <h3 className="font-semibold pt-1">Working with dates</h3>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>AGE(date)</Code> — how many <strong>whole years</strong> have
+            passed, as a number. <Code>AGE(birthday)</Code> is how old someone is
+            today, counting a birthday that hasn’t come round yet as the year
+            before. A date in the future comes out negative, so{" "}
+            <Code>IF(AGE(starts) &lt; 0, "Not yet", "Started")</Code> works.
+          </li>
+          <li>
+            <Code>DT_FORMAT(date, "pattern")</Code> — writes a date out however you
+            like. <Code>DT_FORMAT(enrolled, "%d %b %Y")</Code> gives{" "}
+            <em>06 Aug 2026</em>.
+          </li>
+        </ul>
+        <p>The pieces you can put in a pattern:</p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <strong>Year</strong> — <Code>%Y</Code> (2026), <Code>%y</Code> (26).
+          </li>
+          <li>
+            <strong>Month</strong> — <Code>%m</Code> (08), <Code>%B</Code>{" "}
+            (August), <Code>%b</Code> (Aug).
+          </li>
+          <li>
+            <strong>Day</strong> — <Code>%d</Code> (06), <Code>%A</Code>{" "}
+            (Thursday), <Code>%a</Code> (Thu), <Code>%j</Code> (218, the day of the
+            year).
+          </li>
+          <li>
+            <strong>Time</strong> — <Code>%H</Code> (00–23), <Code>%I</Code> (01–12)
+            with <Code>%p</Code> (AM/PM), <Code>%M</Code> minutes,{" "}
+            <Code>%S</Code> seconds.
+          </li>
+          <li>
+            <Code>%%</Code> if you want a literal percent sign. Everything else in
+            the pattern is copied through as you typed it.
+          </li>
+        </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          A plain <strong>Date</strong> column has no time on it, so the time pieces
+          read as midnight. Anything after a <Code>%</Code> that isn’t in the list
+          above isn’t understood — the app tells you so when you save, rather than
+          leaving you a column full of blanks.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          <Code>AGE</Code> is the one thing here that changes on its own: the same
+          formula gives a different answer tomorrow. What you see is always worked
+          out fresh, so the number on screen is right today. Sorting and filtering
+          read a stored copy that catches up overnight, so on somebody’s birthday
+          they can be a day behind — press <Ui>Refresh calculated</Ui> in the
+          columns panel if that matters.
         </p>
 
         <h3 className="font-semibold pt-1">Choosing between two answers</h3>
@@ -893,6 +1052,22 @@ export function GuidePage() {
             <Code>MAX(0, total - paid)</Code> — what’s still owed, never negative.
           </li>
         </ul>
+
+        <h3 className="font-semibold pt-1">Every function at a glance</h3>
+        <p>
+          The whole list, for looking one up. Anything with a <Code>?</Code> after
+          it can be left out. Function names are always in capitals; the column
+          names in the examples are made up, so swap in your own.
+        </p>
+        <FunctionTable />
+        <p style={{ color: "var(--text-muted)" }}>
+          Metrics — the summary cards above a list — understand all of these too,
+          and add their own for totalling a whole column. See{" "}
+          <a href="#metrics" style={{ color: "var(--brand)" }}>
+            Metrics
+          </a>
+          .
+        </p>
 
         <Callout tone="warn" title="What a calculated column can’t do">
           <ul className="flex flex-col gap-1 m-0">
@@ -1662,7 +1837,9 @@ export function GuidePage() {
             search read a saved copy that is rebuilt separately. Open{" "}
             <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Refresh calculated</Ui> — the
             dialog offers this for you right after a formula edit — or leave it, and
-            the nightly tidy-up catches it.
+            the nightly tidy-up catches it. The same is true of an{" "}
+            <Code>AGE</Code> column on somebody’s birthday: the age shown is
+            today’s, while sorting by it can be a day behind until that rebuild.
           </li>
         </ul>
         <p className="pt-2">

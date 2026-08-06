@@ -19,11 +19,14 @@ from . import aggregate, pushdown
 from .models import Metric
 from .schemas import MetricConfig, MetricCreate, MetricUpdate, MetricValue, MetricValues
 
-# What a metric may aggregate. Numbers and text are the row language's own
-# referenceable set; `calculated` is added because a metric is a **leaf** —
-# nothing derives from a metric, so there is no cycle to detect, and totalling a
-# per-record formula (`SUM(line_total)`) is one of the things people most want.
-# The remaining types store ids or ISO strings whose text form would surprise.
+# What a metric may aggregate. Deliberately **narrower** than what a row formula may
+# name (`columns.enums.FORMULA_REFERENCEABLE_TYPES`, which also covers choice and the
+# two temporal types): numbers and text are what an aggregate has an answer for, and
+# `calculated` is added because a metric is a **leaf** — nothing derives from a metric,
+# so there is no cycle to detect, and totalling a per-record formula
+# (`SUM(line_total)`) is one of the things people most want. A choice or a date is
+# reachable from here anyway, through a calculated column that reads one — which keeps
+# the pushdown question (`pushdown._PUSHABLE_TYPES`) to one place rather than two.
 REFERENCEABLE_TYPES = frozenset(
     {ColumnType.number, ColumnType.text, ColumnType.calculated}
 )

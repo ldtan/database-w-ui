@@ -15,9 +15,10 @@ can at worst return a wrong number or nothing.
 
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
 **and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
-and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``IF(cond, then, else)``,
-``IS_NULL(x)``, and the string functions ``CONCAT``, ``UPPER``, ``LOWER``, ``TRIM``,
-``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``.
+and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``INT``, ``IF(cond, then,
+else)``, ``IS_NULL(x)``, the string functions ``CONCAT``, ``UPPER``, ``LOWER``,
+``TRIM``, ``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``, and the two date functions
+``AGE`` and ``DT_FORMAT``.
 
 Every function name is ALL CAPS, and a column name is a slug that must start with
 a lowercase letter — so the two namespaces cannot overlap and no formula is ever
@@ -26,6 +27,19 @@ ambiguous about which one a name means.
 Arithmetic (``+ - * /``) is numeric only — joining text is ``CONCAT``, so a
 string can never slip into ``*`` and become a silent repetition. A value can be a
 number or text depending on the formula; the column has no fixed output type.
+
+A value is a number, text, or nothing — those three and no more. **Dates travel as
+their ISO-8601 text**, which is what a `date` or `datetime` cell already stores, so
+they need no fourth kind: ``AGE`` and ``DT_FORMAT`` read that text, and because ISO
+sorts lexically, ``due > "2026-01-01"`` and ``MIN(start, end)``-by-comparison mean
+what they look like they mean. A *multiple* choice cell — the one column value that
+is neither scalar nor a reference — reads as its labels joined with ", ".
+
+``AGE`` is the one function here that reads something outside the record: today's
+date. That makes a stored answer go stale with the calendar rather than only with a
+schema change — see `chain.py` on why the stored value is an index and
+`maintenance/recompute_calculated.py` on the sweep that catches up with it. What is
+on screen is always recomputed, so only a sort or filter can lag, and only by a day.
 
 Missing data propagates as "no value": if any referenced cell is empty, the
 result is ``None`` (the cell renders blank) rather than a silent zero or an empty
@@ -47,11 +61,14 @@ and are not free to change shape.
 """
 import ast
 import math
+from datetime import date, datetime, timezone
 from typing import Optional, Union
 
 from src.core.exceptions import ValidationError
 
-# Functions whose arguments and result are numbers.
+# Functions whose arguments and result are numbers. This set is a *gate*: a
+# non-number argument blanks the cell rather than being coerced. `INT` is absent on
+# purpose — reading a number out of text is the whole point of it.
 _NUMERIC_FUNCTIONS = {"MIN", "MAX", "ROUND", "ABS"}
 # Functions that operate on text. Numeric arguments are coerced to their text
 # form (``CONCAT("$", price)``), and LEN's result is a number.
@@ -65,6 +82,7 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "MAX": (1, None),
     "ROUND": (1, 2),
     "ABS": (1, 1),
+    "INT": (1, 1),
     "IF": (3, 3),
     "IS_NULL": (1, 1),
     "CONCAT": (2, None),
@@ -75,6 +93,8 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "LEFT": (2, 2),
     "RIGHT": (2, 2),
     "REPLACE": (3, 3),
+    "AGE": (1, 1),
+    "DT_FORMAT": (2, 2),
 }
 
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
@@ -102,6 +122,47 @@ TOO_DEEP = f"A formula may not nest more than {MAX_DEPTH} levels deep"
 # linearly — so without this, a short formula allocates gigabytes, once per record,
 # on every read. A calculated cell is a grid cell; nothing legitimate is this long.
 _MAX_TEXT = 10_000
+
+# How a *multiple* choice cell — a list of labels — reads as one value. The grid
+# shows the same set with a comma, and this is the form a person would write by hand.
+_MULTI_JOIN = ", "
+
+_MONTHS = (
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+)
+# Indexed by `date.weekday()`, which counts from Monday.
+_WEEKDAYS = (
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+)
+
+# What `DT_FORMAT` understands, spelled the way `strftime` spells it — and rendered
+# here rather than handed to `datetime.strftime`, for three reasons. An unknown
+# directive is platform-dependent (glibc passes `%q` through, the Windows CRT
+# raises), so the same formula would answer differently on a dev box and on the
+# server. The name directives are *locale*-dependent, so the answer would depend on
+# the environment the process happens to have been started in. And an explicit table
+# is what gives the output a length bound to check before building it.
+_DT_DIRECTIVES = {
+    "Y": lambda d: f"{d.year:04d}",
+    "y": lambda d: f"{d.year % 100:02d}",
+    "m": lambda d: f"{d.month:02d}",
+    "d": lambda d: f"{d.day:02d}",
+    "j": lambda d: f"{d.timetuple().tm_yday:03d}",
+    "H": lambda d: f"{d.hour:02d}",
+    "I": lambda d: f"{(d.hour % 12) or 12:02d}",
+    "M": lambda d: f"{d.minute:02d}",
+    "S": lambda d: f"{d.second:02d}",
+    "p": lambda d: "AM" if d.hour < 12 else "PM",
+    "B": lambda d: _MONTHS[d.month - 1],
+    "b": lambda d: _MONTHS[d.month - 1][:3],
+    "A": lambda d: _WEEKDAYS[d.weekday()],
+    "a": lambda d: _WEEKDAYS[d.weekday()][:3],
+    "%": lambda d: "%",
+}
+# The widest any one directive expands to: "September". Every other one is shorter,
+# and a year is four digits because `datetime` stops at 9999.
+_DT_MAX_EXPANSION = 9
 
 
 class Formula:
@@ -192,6 +253,19 @@ def _check(node: ast.AST, refs: set[str], depth: int) -> None:
         if n < low or (high is not None and n > high):
             want = f"{low}" if low == high else f"{low}+" if high is None else f"{low}-{high}"
             raise ValidationError(f"Function '{name}' takes {want} argument(s), got {n}")
+        if name == "DT_FORMAT":
+            # A format written out in the formula can be judged now, and should be:
+            # the alternative is saving a column that answers blank on every record
+            # for a reason nothing tells you. One that arrives from a cell cannot be
+            # judged here and is checked per row instead (`_dt_format`).
+            fmt = node.args[1]
+            if isinstance(fmt, ast.Constant) and isinstance(fmt.value, str):
+                bad = _bad_directive(fmt.value)
+                if bad is not None:
+                    known = " ".join(f"%{key}" for key in _DT_DIRECTIVES)
+                    raise ValidationError(
+                        f"DT_FORMAT does not understand '{bad}'; it knows {known}"
+                    )
         for arg in node.args:
             _check(arg, refs, depth)
 
@@ -294,6 +368,126 @@ def _to_text(v) -> str:
     return str(v)
 
 
+def _to_int(v) -> Optional[int]:
+    """A number or a numeric string as a whole number, truncated toward zero.
+
+    A cast, not a floor: ``INT("-3.9")`` is ``-3``, the digits before the point,
+    which is what reading text as a whole number means. Routing a string through
+    ``float`` first is also what bounds this — anything past about 1.8e308 becomes
+    infinity and answers ``None``, so a long run of digits can never be turned into
+    an unbounded integer.
+    """
+    if isinstance(v, bool):
+        return None
+    if isinstance(v, int):
+        return v
+    if isinstance(v, float):
+        number = v
+    elif isinstance(v, str):
+        try:
+            number = float(v)
+        except ValueError:
+            return None
+    else:
+        return None
+    if not math.isfinite(number):
+        return None
+    return math.trunc(number)
+
+
+def _to_datetime(v) -> Optional[datetime]:
+    """An ISO-8601 date or date-time string as a ``datetime``, or ``None``.
+
+    A `date` cell reads as midnight, so a time directive in ``DT_FORMAT`` answers
+    "00" rather than blanking the whole cell. Anything that is not a string is not a
+    date, and gives no answer — this language's one way of saying so.
+
+    Deliberately not `validation.parse_temporal`: that map is keyed by `ColumnType`
+    and this has only a value, which may equally have come from a text column or
+    another formula.
+    """
+    if not isinstance(v, str):
+        return None
+    try:
+        # Accepts a bare "YYYY-MM-DD" as midnight, which is exactly what a `date`
+        # cell holds — so one call covers both temporal column types.
+        return datetime.fromisoformat(v)
+    except (ValueError, TypeError):
+        return None
+
+
+def _today() -> date:
+    """The date ``AGE`` counts up to.
+
+    UTC rather than the acting user's zone, unlike a stamped ``today`` default
+    (`validation._wall_clock_now`). `evaluate` is a pure function of one record's
+    values — that is what lets a single parsed formula serve every row, and what
+    lets the write path and the read path agree on an answer. Threading a user
+    through would make the *stored index* depend on whoever last saved the record
+    while a read recomputed it under whoever was reading, and the two would
+    disagree about the same cell. The cost is being a day out for a reader far from
+    UTC, on their birthday only.
+
+    A seam as much as a helper: a test pins today by replacing it.
+    """
+    return datetime.now(timezone.utc).date()
+
+
+def _age(v) -> Optional[int]:
+    """Whole years from an ISO date to today, or ``None``.
+
+    A birthday not yet reached this year counts one less, which is the whole reason
+    this is a function rather than a subtraction of years. A date in the *future*
+    gives a negative number rather than a blank: it is a real answer, and
+    ``IF(AGE(d) < 0, …)`` can act on it, where a blank would be indistinguishable
+    from an empty cell.
+    """
+    moment = _to_datetime(v)
+    if moment is None:
+        return None
+    born, today = moment.date(), _today()
+    return today.year - born.year - ((today.month, today.day) < (born.month, born.day))
+
+
+def _bad_directive(fmt: str) -> Optional[str]:
+    """The first thing in ``fmt`` that ``DT_FORMAT`` does not understand, or ``None``.
+
+    Shared by both moments a format can be judged: at parse time when it is written
+    out in the formula, and per row when it arrives from a cell.
+    """
+    i = fmt.find("%")
+    while i != -1:
+        if i + 1 >= len(fmt):
+            return "%"  # a trailing percent with nothing after it
+        letter = fmt[i + 1]
+        if letter not in _DT_DIRECTIVES:
+            return f"%{letter}"
+        i = fmt.find("%", i + 2)
+    return None
+
+
+def _dt_format(moment: datetime, fmt: str) -> Optional[str]:
+    """``fmt`` with its date parts filled in, or ``None`` if it cannot be rendered."""
+    if _bad_directive(fmt) is not None:
+        return None
+    # Measured before it is built, the way CONCAT and REPLACE are — measuring after
+    # is too late, the allocation is the damage. `_DT_MAX_EXPANSION` is the ceiling
+    # on what any one directive contributes, so this bounds the whole scan.
+    if len(fmt) * _DT_MAX_EXPANSION > _MAX_TEXT:
+        return None
+    parts: list[str] = []
+    i = 0
+    while True:
+        j = fmt.find("%", i)
+        if j == -1:
+            parts.append(fmt[i:])
+            return "".join(parts)
+        parts.append(fmt[i:j])
+        # `_bad_directive` already proved this letter exists and is known.
+        parts.append(_DT_DIRECTIVES[fmt[j + 1]](moment))
+        i = j + 2
+
+
 def _eval(node: ast.AST, values: dict[str, object]):
     if isinstance(node, ast.Constant):
         return node.value
@@ -302,6 +496,16 @@ def _eval(node: ast.AST, values: dict[str, object]):
         v = values.get(node.id)
         if isinstance(v, bool):
             return None
+        if isinstance(v, list):
+            # The only list-valued column a formula may name is a `multiple` choice,
+            # and its elements are labels — `validate_scalar` enforces that, and the
+            # shape is already settled by `coerce_shape` before formulas run. Every
+            # other type that stores a list (lookup, user, group) is not
+            # referenceable, so this can never quietly stringify a row of uuids.
+            # An empty selection is an empty cell, not an empty string.
+            if not v or not all(isinstance(item, str) for item in v):
+                return None
+            return _MULTI_JOIN.join(v)
         return v if isinstance(v, (int, float, str)) else None
 
     if isinstance(node, ast.UnaryOp):
@@ -388,6 +592,23 @@ def _eval(node: ast.AST, values: dict[str, object]):
             # ROUND(x) or ROUND(x, ndigits)
             ndigits = int(args[1]) if len(args) > 1 else None
             return round(args[0], ndigits)
+
+        if name == "INT":
+            # Outside `_NUMERIC_FUNCTIONS` on purpose: that set is a gate that blanks
+            # on a non-number, and reading a number out of text is what this is for.
+            return _to_int(args[0])
+
+        if name == "AGE":
+            return _age(args[0])
+
+        if name == "DT_FORMAT":
+            moment = _to_datetime(args[0])
+            # The format is text and only text — a number in that position is not a
+            # format anyone meant, so it blanks rather than being coerced the way a
+            # string function's argument would be.
+            if moment is None or not isinstance(args[1], str):
+                return None
+            return _dt_format(moment, args[1])
 
         # String functions. Numeric arguments are coerced to their text form, so
         # UPPER(price) or CONCAT("Qty ", qty) work as a spreadsheet user expects.

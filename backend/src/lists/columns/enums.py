@@ -30,3 +30,18 @@ REFERENCE_TYPES = frozenset({ColumnType.lookup, ColumnType.user, ColumnType.grou
 COMPUTED_TYPES = frozenset({ColumnType.calculated})
 # `user`/`group` are lookup with a fixed target — an account or a group, not a row.
 PRINCIPAL_TYPES = frozenset({ColumnType.user, ColumnType.group})
+# What a formula in a `calculated` column may name. Every one of these stores a
+# self-contained scalar a row expression can already read: a number, text, a choice
+# *label* (a cell is the label itself — see `resolve_choice_options`), an ISO-8601
+# temporal string, or another formula's answer. The rest are excluded for a reason
+# rather than an omission: `checkbox` has no text form worth having, `link` is a URL
+# nobody computes over, and the REFERENCE_TYPES store ids that need a database round
+# trip to become the label a person would expect to see.
+FORMULA_REFERENCEABLE_TYPES = frozenset({
+    ColumnType.number,
+    ColumnType.text,
+    ColumnType.calculated,
+    ColumnType.choice,
+    ColumnType.date,
+    ColumnType.datetime,
+})

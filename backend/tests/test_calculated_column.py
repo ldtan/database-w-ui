@@ -132,14 +132,19 @@ async def test_a_text_column_can_be_referenced_and_produce_text(client, list_uui
 async def test_formula_referencing_an_unsupported_type_is_rejected(
     client, list_uuid
 ):
-    # Date columns store ISO strings but are not offered to formulas (v1).
+    # A tick box has no text form worth computing over, so it stays outside
+    # FORMULA_REFERENCEABLE_TYPES along with `link` and everything that stores an id.
     await client.post(
         f"/api/lists/{list_uuid}/columns/",
-        json={"name": "due", "display_name": "Due", "type": "date"},
+        json={"name": "paid", "display_name": "Paid", "type": "checkbox"},
     )
-    resp = await _add_calculated(client, list_uuid, "bad", "LEN(due)")
+    resp = await _add_calculated(client, list_uuid, "bad", "LEN(paid)")
     assert resp.status_code == 400, resp.text
-    assert "number, text or calculated" in resp.text.lower()
+    # The message is built from the set, so it lists what *is* allowed rather than
+    # a hardcoded phrase that could outlive the rule.
+    assert "is checkbox" in resp.text
+    for allowed in ("number", "text", "calculated", "choice", "date", "datetime"):
+        assert allowed in resp.text
 
 
 async def test_a_calculated_column_can_reference_another(client, priced_list):
@@ -702,3 +707,167 @@ async def test_grouping_by_a_calculated_column_makes_its_rows_adjacent(
         f"/api/lists/{lst}/items/", params={"group_by": total}
     )
     assert [r["data"][total] for r in grouped.json()] == [10, 10, 20, 20]
+
+
+# -- the types a formula may name, beyond number and text ------------------------
+
+
+async def test_a_choice_column_can_be_referenced_as_its_label(
+    client, list_uuid, add_column
+):
+    """A choice cell stores the label itself, so it needs no resolving to be text.
+
+    It used to be refused on the grounds that it stored an id, which stopped being
+    true at the `choice_options_store_labels` migration.
+    """
+    status = await add_column(
+        list_uuid,
+        name="status",
+        display_name="Status",
+        type="choice",
+        config={"choices": "Todo;Doing;Done"},
+    )
+    calc = await _add_calculated(
+        client, list_uuid, "flag", "IF(status == 'Done', 'Finished', UPPER(status))"
+    )
+    assert calc.status_code == 201, calc.text
+    flag = calc.json()["uuid"]
+
+    done = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {status: "Done"}}
+    )
+    assert done.json()["data"][flag] == "Finished"
+    doing = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {status: "Doing"}}
+    )
+    assert doing.json()["data"][flag] == "DOING"
+
+
+async def test_a_multiple_choice_column_reads_as_its_labels_joined(
+    client, list_uuid, add_column
+):
+    # Created through the API because the column dialog does not yet offer
+    # `multiple` for a choice column.
+    programs = await add_column(
+        list_uuid,
+        name="programs",
+        display_name="Programs",
+        type="choice",
+        config={"choices": "Robotics;Choir;Chess", "multiple": True},
+    )
+    calc = await _add_calculated(
+        client, list_uuid, "summary", "CONCAT('In: ', programs)"
+    )
+    assert calc.status_code == 201, calc.text
+    summary = calc.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {programs: ["Robotics", "Choir"]}},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][summary] == "In: Robotics, Choir"
+
+    # No selection is an empty cell, so the formula has nothing to answer with.
+    empty = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {programs: []}}
+    )
+    assert empty.json()["data"][summary] is None
+
+
+async def test_age_over_a_date_column(client, list_uuid, add_column):
+    from datetime import date
+
+    born = await add_column(
+        list_uuid, name="born", display_name="Born", type="date"
+    )
+    calc = await _add_calculated(client, list_uuid, "years", "AGE(born)")
+    assert calc.status_code == 201, calc.text
+    years = calc.json()["uuid"]
+
+    # Computed against the real clock rather than a pinned one — this test is about
+    # a date column reaching the evaluator at all, and `test_formula.py` pins the
+    # arithmetic. A date exactly N years ago is N whatever day it runs, except on a
+    # 29 February, which is why the fixture date is the 1st.
+    today = date.today()
+    long_ago = date(today.year - 30, 3, 1) if today.month > 3 else date(
+        today.year - 31, 3, 1
+    )
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {born: long_ago.isoformat()}}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][years] == today.year - long_ago.year - (
+        (today.month, today.day) < (3, 1)
+    )
+
+
+async def test_dt_format_over_a_datetime_column(client, list_uuid, add_column):
+    enrolled = await add_column(
+        list_uuid, name="enrolled", display_name="Enrolled", type="datetime"
+    )
+    calc = await _add_calculated(
+        client, list_uuid, "pretty", "DT_FORMAT(enrolled, '%d %b %Y at %H:%M')"
+    )
+    assert calc.status_code == 201, calc.text
+    pretty = calc.json()["uuid"]
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/",
+        json={"data": {enrolled: "2026-08-06T09:30:00"}},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][pretty] == "06 Aug 2026 at 09:30"
+
+
+async def test_a_written_out_format_that_makes_no_sense_is_refused_at_save(
+    client, list_uuid, add_column
+):
+    await add_column(list_uuid, name="due", display_name="Due", type="date")
+    resp = await _add_calculated(client, list_uuid, "bad", "DT_FORMAT(due, '%q')")
+    assert resp.status_code == 400, resp.text
+    assert "%q" in resp.text
+
+
+async def test_int_makes_a_text_code_filterable_as_a_number(
+    client, list_uuid, add_column
+):
+    """The cast reaches the stored index, not just the screen.
+
+    A number written into a text column sorts and filters as text — "9" after "10" —
+    until something reads it as a number. `INT` is that something, and because the
+    answer is stored under the calculated column's uuid, Postgres can compare it.
+    """
+    import json
+
+    code = await add_column(list_uuid, name="code", display_name="Code", type="text")
+    calc = await _add_calculated(client, list_uuid, "num", "INT(code)")
+    assert calc.status_code == 201, calc.text
+    num = calc.json()["uuid"]
+
+    # Inserted out of order, so a real sort is distinguishable from insertion order —
+    # and "100" before "9" is exactly the pair that text ordering gets wrong.
+    for raw in ("100", "9", "not a number", "10"):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {code: raw}}
+        )
+        assert resp.status_code == 201, resp.text
+
+    filters = json.dumps(
+        {
+            "conjunction": "and",
+            "conditions": [{"column_uuid": num, "operator": "gt", "value": 9}],
+        }
+    )
+    above = await client.get(f"/api/lists/{list_uuid}/items/", params={"filters": filters})
+    assert sorted(r["data"][num] for r in above.json()) == [10, 100]
+
+    ordered = await client.get(
+        f"/api/lists/{list_uuid}/items/", params={"sort_by": num}
+    )
+    # The unparseable row has no value; the rest come back in numeric order.
+    assert [r["data"][num] for r in ordered.json() if r["data"][num] is not None] == [
+        9,
+        10,
+        100,
+    ]
