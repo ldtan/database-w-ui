@@ -22,6 +22,7 @@ import { useToast } from "../../lib/toast";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { DeletedWorkspacesDialog } from "./DeletedWorkspacesDialog";
+import { TransferWorkspaceDialog } from "./TransferWorkspaceDialog";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits — a client-side filter over one fetched page would
@@ -35,16 +36,24 @@ const ROWS = 12;
 function WorkspaceCard({
   workspace: ws,
   can,
+  owned,
   tour,
   onShare,
   onRename,
+  onTransfer,
   onDelete,
 }: {
   workspace: Workspace;
   can: (uuid: string, action: "share" | "configure" | "delete") => boolean;
+  /** Whether the caller owns this one. Transfer is the one control effective
+   *  actions cannot answer for: it is owner-only server-side, and no grant —
+   *  not even `manage` — qualifies, so it is gated on ownership instead. The
+   *  two grids know this without asking, being split on `shared` already. */
+  owned: boolean;
   tour?: boolean;
   onShare: (ws: Workspace) => void;
   onRename: (ws: Workspace) => void;
+  onTransfer: (ws: Workspace) => void;
   onDelete: (ws: Workspace) => void;
 }) {
   return (
@@ -88,6 +97,13 @@ function WorkspaceCard({
               label: "Rename workspace",
               visible: !ws.is_system && can(ws.uuid, "configure"),
               onClick: () => onRename(ws),
+            },
+            {
+              key: "transfer",
+              icon: "pi pi-send",
+              label: "Transfer workspace",
+              visible: !ws.is_system && owned,
+              onClick: () => onTransfer(ws),
             },
             {
               key: "delete",
@@ -212,6 +228,7 @@ export function WorkspacesPage() {
   });
 
   const [sharing, setSharing] = useState<Workspace | null>(null);
+  const [transferring, setTransferring] = useState<Workspace | null>(null);
   const [renaming, setRenaming] = useState<Workspace | null>(null);
   const [names, setNames] = useState({ displayName: "", name: "" });
   const rename = useMutation({
@@ -322,9 +339,11 @@ export function WorkspacesPage() {
               key={ws.uuid}
               workspace={ws}
               can={can}
+              owned
               tour={i === 0}
               onShare={setSharing}
               onRename={startRename}
+              onTransfer={setTransferring}
               onDelete={confirmDelete}
             />
           ))}
@@ -381,8 +400,11 @@ export function WorkspacesPage() {
                   key={ws.uuid}
                   workspace={ws}
                   can={can}
+                  // Shared with the caller, so never theirs to hand on.
+                  owned={false}
                   onShare={setSharing}
                   onRename={startRename}
+                  onTransfer={setTransferring}
                   onDelete={confirmDelete}
                 />
               ))}
@@ -490,6 +512,15 @@ export function WorkspacesPage() {
           />
         </div>
       </AppDialog>
+
+      <TransferWorkspaceDialog
+        workspace={transferring}
+        onHide={() => setTransferring(null)}
+        onDone={() => {
+          setTransferring(null);
+          invalidate();
+        }}
+      />
 
       <DeletedWorkspacesDialog
         visible={showDeleted}

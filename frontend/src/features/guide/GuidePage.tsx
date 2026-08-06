@@ -48,7 +48,7 @@ const SECTIONS: { id: string; title: string }[] = [
   { id: "forms", title: "Forms: shape the entry screen" },
   { id: "metrics", title: "Metrics: totals, averages and counts" },
   { id: "sharing", title: "Sharing and permissions" },
-  { id: "transfer", title: "Moving and giving a list away" },
+  { id: "transfer", title: "Moving and giving things away" },
   { id: "duplicate", title: "Duplicating a list" },
   { id: "people", title: "People, groups, and your profile" },
   { id: "import-export", title: "Import and export" },
@@ -1490,7 +1490,7 @@ export function GuidePage() {
         </Callout>
       </Section>
 
-      <Section id="transfer" title="Moving and giving a list away">
+      <Section id="transfer" title="Moving and giving things away">
         <p>
           A list doesn’t have to stay where you made it. Open a workspace to see its
           lists; each one has a <Ui>Move or transfer</Ui> button (the paper-plane
@@ -1530,11 +1530,22 @@ export function GuidePage() {
           your workspaces. You can’t rename or delete it — it’s just a landing spot — but
           the lists inside are yours to move elsewhere or remove.
         </Callout>
+        <p>
+          <strong>Give away a whole workspace.</strong> On the <Ui>Workspaces</Ui> page,
+          each workspace you own has its own <Ui>Transfer workspace</Ui> button behind the
+          same paper-plane icon. Every list inside goes with it in one step, and nothing
+          changes name or address on the way — no <Ui>Incoming</Ui> folder is involved,
+          because the workspace itself is the thing changing hands. As with a list, only
+          the owner can give one away, everyone you’d shared it with keeps their access,
+          and you lose yours. If the person already has a workspace by that name, the one
+          arriving is renamed rather than refused.
+        </p>
         <Callout tone="warn" title="Transferring is one-way">
-          After you transfer a list it belongs to the other person; getting it back means
-          asking them to transfer or share it to you. If you only want someone to help
-          with a list, <a href="#sharing" style={{ color: "var(--brand)" }}>share it</a>{" "}
-          with them instead of transferring it.
+          After you transfer a list — or a workspace, and all the lists in it — it belongs
+          to the other person; getting it back means asking them to transfer or share it to
+          you. If you only want someone to help with it,{" "}
+          <a href="#sharing" style={{ color: "var(--brand)" }}>share it</a> with them
+          instead of transferring it.
         </Callout>
       </Section>
 

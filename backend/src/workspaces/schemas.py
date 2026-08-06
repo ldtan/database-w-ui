@@ -25,6 +25,12 @@ class WorkspaceUpdate(BaseModel):
     settings: Optional[dict] = None
 
 
+class WorkspaceTransfer(BaseModel):
+    # The user to hand the workspace to. They become its owner, and with it the
+    # owner of every list inside. Owner-only (enforced in the router).
+    user_uuid: UUID
+
+
 class WorkspaceRead(WorkspaceBase):
     uuid: UUID
     # True only for the per-user "Incoming" workspace transferred lists land in. The

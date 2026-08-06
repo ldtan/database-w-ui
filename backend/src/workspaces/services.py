@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-from typing import Optional, Sequence, Union
+from typing import TYPE_CHECKING, Optional, Sequence, Union
 from uuid import UUID
 
 from sqlalchemy import func, or_, select, text
@@ -13,6 +13,9 @@ from src.lists.purge import drain_records
 
 from .models import Workspace
 from .schemas import WorkspaceCreate, WorkspaceUpdate
+
+if TYPE_CHECKING:
+    from src.auth.users.models import User
 
 # The reserved name/label of every user's "Incoming" workspace — the immutable drop
 # point transferred lists land in (see get_or_create_inbox). The name is reserved so
@@ -234,6 +237,78 @@ class WorkspaceService:
         db.add(inbox)
         await db.flush()
         return inbox
+
+    @staticmethod
+    async def _free_name_for_owner(
+        db: AsyncSession, owner_id: int, base: str, exclude_id: int
+    ) -> str:
+        """A workspace ``name`` free among ``owner_id``'s live workspaces.
+
+        Returns ``base`` when it is free, else ``base_2``, ``base_3``, … — used when a
+        transfer hands a workspace to someone who already has one of that name, so a
+        transfer never fails on the per-owner unique index. The suffix keeps the
+        NameSlug shape (lowercase letters/digits/underscores). ``INBOX_NAME`` is taken
+        as occupied whether or not the recipient has an inbox yet, so a transfer can
+        never squat the slot ``get_or_create_inbox`` needs."""
+        rows = await db.execute(
+            select(Workspace.name).where(
+                Workspace.owner_id == owner_id,
+                Workspace.deleted_at.is_(None),
+                Workspace.id != exclude_id,
+            )
+        )
+        taken = set(rows.scalars().all()) | {INBOX_NAME}
+        if base not in taken:
+            return base
+        n = 2
+        while f"{base}_{n}" in taken:
+            n += 1
+        return f"{base}_{n}"
+
+    @classmethod
+    async def transfer_to_user(
+        cls, db: AsyncSession, uuid: Union[str, UUID], recipient: "User"
+    ) -> Optional[Workspace]:
+        """Hand a workspace, and everything in it, to another user.
+
+        Ownership of a workspace is the ``owner_id`` column itself, so unlike a list
+        transfer there is no inbox to move into — the row changes hands where it
+        stands. Its lists come along without being touched: a list belongs to whoever
+        owns its workspace, so re-owning the workspace re-owns them all, and every
+        uuid in the tree survives (bookmarks and links keep working).
+
+        Grants are deliberately left untouched, exactly as ``ListService.transfer_to_user``
+        leaves them: a grant points at the workspace by ``resource_id``, which does not
+        change, so everyone the giver shared with keeps their access. The giver's own
+        access was the implicit owner short-circuit and ends here — there is no grant to
+        revoke, and none is left behind.
+
+        The transfers inbox is refused: it is the recipient's own fixture, not a thing
+        to pass on.
+
+        Note the giver keeps any *other* workspace, so a lookup column pointing from a
+        transferred list into a retained one becomes cross-owner — buildable but not
+        writable (see docs/known-gaps.md). Whole-workspace transfers keep lookup graphs
+        intact only when the graph lived inside the one workspace.
+        """
+        workspace = await cls.get_any_by_uuid(db, uuid)
+        if workspace is None:
+            return None
+        cls._guard_system_workspace(workspace)
+
+        # A workspace name is unique per owner; auto-suffix so the landing never 409s.
+        workspace.name = await cls._free_name_for_owner(
+            db, recipient.id, workspace.name, exclude_id=workspace.id
+        )
+        # Assign the relationship rather than the bare owner_id: a loaded many-to-one
+        # overwrites a plain FK change on flush, which is what silently left a moved
+        # list in place until ListService started doing the same.
+        workspace.owner = recipient
+
+        await db.flush()
+        target_uuid = workspace.uuid
+        await db.commit()
+        return await cls.get_any_by_uuid(db, target_uuid)
 
     @classmethod
     async def update(

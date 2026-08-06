@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.auth.dependencies import get_current_user
 from src.auth.users.models import User
+from src.auth.users.services import UserService
 from src.core.exceptions import ConflictError
 from src.infrastructure.database import get_db
 from src.permissions.enums import Action, ResourceType
@@ -16,6 +17,7 @@ from .schemas import (
     DeletedWorkspaceRead,
     WorkspaceCreate,
     WorkspaceRead,
+    WorkspaceTransfer,
     WorkspaceUpdate,
 )
 from .services import WorkspaceService
@@ -125,6 +127,55 @@ async def update_workspace(
     if workspace is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found")
     return workspace
+
+
+@router.post("/{workspace_uuid}/transfer", response_model=WorkspaceRead)
+async def transfer_workspace(
+    workspace_uuid: UUID,
+    payload: WorkspaceTransfer,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Hand a workspace, and every list in it, to another user.
+
+    Owner-only, on the same reasoning as the list transfer: ownership is what is being
+    given away, so the only thing that can authorize it is holding it — a `manage`
+    grant does not qualify. Unlike a list there is no inbox involved; a workspace *is*
+    the ownership boundary, so the row simply changes hands and its lists follow.
+    Existing shares survive; the giver's implicit owner access ends with the transfer
+    (see WorkspaceService.transfer_to_user).
+    """
+    workspace = await WorkspaceService.get_any_by_uuid(db, workspace_uuid)
+    if workspace is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
+    if workspace.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the workspace's owner can transfer it",
+        )
+
+    recipient = await UserService.get_by_uuid(db, payload.user_uuid)
+    if recipient is None or not recipient.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="user_uuid does not reference an active user",
+        )
+    if recipient.id == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot transfer a workspace to yourself",
+        )
+
+    transferred = await WorkspaceService.transfer_to_user(
+        db, workspace_uuid, recipient
+    )
+    if transferred is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Workspace not found"
+        )
+    return transferred
 
 
 @router.delete("/{workspace_uuid}", status_code=status.HTTP_204_NO_CONTENT)

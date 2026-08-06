@@ -275,6 +275,18 @@ its owner. Owner-only; the giver's implicit access ends with the move; existing 
 deleting it. See `ListService.transfer_to_user`, `WorkspaceService.get_or_create_inbox`, and
 `tests/test_list_transfer.py`; UI is the "Transfer to user" mode of `MoveOrTransferDialog`.
 
+**Whole workspaces transfer too**, via `POST /workspaces/{uuid}/transfer` `{ user_uuid }`. This
+is the simpler half of the same feature: a workspace is the ownership boundary itself, so the
+transfer reassigns `owner_id` in place and its lists follow untouched — nothing moves, no inbox
+is needed, and no uuid changes. Same three rules (owner-only, shares survive, giver's implicit
+access ends), same auto-suffix on a landing name clash (`team` → `team_2`, and `incoming` counts
+as taken). The inbox itself is refused: it is the recipient's own fixture. See
+`WorkspaceService.transfer_to_user`, `tests/test_workspace_transfer.py`, and
+`TransferWorkspaceDialog` on the Workspaces page. One caveat worth knowing: a lookup pointing
+from a transferred list into a list the giver **kept** becomes cross-owner, which builds but
+cannot be written (see [known gaps](known-gaps.md)) — transferring a workspace only keeps a
+lookup graph intact if the whole graph lived inside it.
+
 The decisions taken (from the three the design flagged): **email model** (anyone who owns a list
 can send it; no accept flow), **owner-only** to give, **shares preserved** / giver loses access.
 The consent tradeoff is documented in [known gaps](known-gaps.md). The design rationale below is
