@@ -155,6 +155,15 @@ are the wrong question — a blank source cell is ordinary, and a duplicate only
 the column is real — so a backfill that leaves holes still reports cleanly, and the commit
 is what refuses. A failed gate leaves the conversion in progress to be fixed and retried.
 
+**Archived and binned records convert too.** The backfill walks every row of
+`list_items` for the list, not the rows a reader can see — no `deleted_at` filter, for the
+reason `reconcile_shapes` has none (a restore must not hand back a value in the old type),
+and no `archived_at` filter for the same reason one step earlier: an unarchive that
+returned an old-type value would be a hole in the very invariant the cutover exists to
+establish. The row ceiling is measured against that same unfiltered count, so a list whose
+bulk is archived does not get a cheaper conversion — archiving buys back read cost
+(known-gaps, capacity-and-performance), never rewrite cost.
+
 **A reference → `text` conversion is refused outright when the caller cannot read the
 target.** The export writes uuids in that case, which is right for an export — it shows one
 caller what that caller may see — but a conversion writes the answer down permanently and
@@ -167,7 +176,29 @@ answers *what fields does a record have* now filters on. Two readers deliberatel
 the reference scrub and the shape reconcile, because being invisible does not exempt a
 column's stored uuids from cleanup.
 
-**Not built:** a UI. The whole feature is API-only so far.
+**The UI is two dialogs, and the second one is the whole reason the feature works this
+way.** *Change type* is its own action beside *Edit* on the Columns tab rather than an
+unlocked type dropdown inside the edit form, because it is a different kind of change:
+editing a column adjusts how it behaves, converting rewrites every record's value. Step
+one reuses `ColumnDialog` in `mode="convert"` — a target type's settings *are* a column's
+settings, and the conversion validates its config from scratch anyway, so there was
+nothing type-specific left for a second form to draw, including the lookup target pickers
+that would have been the expensive part to duplicate. What convert mode drops is the
+identity: a conversion keeps the column's name and uuid, so the name fields are gone
+rather than disabled. Config seeds blank, since the old type's keys mean nothing to the
+new one and the server does not merge them — except `required` and `unique`, which are
+about the field rather than its type. The type dropdown greys out what this column cannot
+become and says those need two steps through Text; `canConvert` in `lib/columnTypes.ts`
+mirrors `is_supported` and has to stay in step with it, since a drift shows up as a 400
+rather than a disabled option. Step two is `ConversionReportDialog`: the backfill has
+already run at that point, into a column no view or formula can see, so the counts and the
+individual failures are read while the list is still exactly as it was. Applying asks once
+more and names where the originals go; discarding costs nothing, and **closing the dialog
+any other way discards too** — a conversion left in progress would block the next attempt
+with a 409 naming a scratch column the person never knew existed. Duplicating (§2) is the
+same pair in `mode="duplicate"`: it keeps the source's settings, because that is what
+makes it a copy, and prefills the one thing it cannot keep, the name (`<name>_copy`, the
+suffix cloning a list already uses).
 
 ---
 
@@ -184,8 +215,9 @@ these two features share an engine and should ship together.
 
 **The same delivery decisions as feature 1**, which are settled above: Python engine, chunked and
 committed per batch like `reconcile_shapes`, run inline below a row-count ceiling and from the
-maintenance workflow above it. Include soft-deleted records, per the same reasoning
-`reconcile_shapes` uses (it does, so a restore doesn't resurrect a stale shape).
+maintenance workflow above it. Include soft-deleted **and archived** records, per the same
+reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a stale shape)
+— see §1's note on the two lifecycle flags, which the shared engine already honours.
 
 **Two edges that will bite:**
 - **`unique` on the target.** Copying a source with repeats into a `unique` target creates
@@ -209,6 +241,14 @@ The duplicate inherits the source's `position`, which sounds like "next to it" a
 nothing in the UI sets `position`, so every column is 0 and the order falls through to `id`. A
 duplicate therefore appears last, like any new column. Placing it adjacent means renumbering
 every column after it, which is a reordering feature and not this one.
+
+That is now less of a problem than it reads, because the surfaces where a person goes
+looking have each grown an order of their own. The Columns tab sorts by `display_name`
+through `compareValues`, so `orders_copy` lands beside `orders` there whatever `position`
+says; a view's `column_order` and a form's `fields` are drag-reorderable, so where the
+copy shows up in either is the user's to say. What is still unordered is the list's
+*default* column order — the one `position` alone decides, which the grid falls back to
+and which nothing in the UI writes.
 
 **Still not built: copying into an already existing column.** `start` always creates its target,
 so that needs a target parameter and the overwrite policy below.
@@ -461,10 +501,13 @@ refused-when-unviewable).
 someone else creates, edits or deletes shows up without a manual reload. It is one hook,
 `useLiveList(listUuid)` (`frontend/src/lib/useLiveList.ts`), spread into the list's items
 `useQuery` in `ListDetailPage`. Today its body hands react-query a `refetchInterval` of
-`LIVE_REFRESH_SECONDS` (`lib/config.ts`, from `VITE_LIVE_REFRESH_SECONDS`, default **5s**,
-`0` disables). Two guardrails hold the idle cost at zero: polling is **paused while the tab
-is hidden** (`refetchIntervalInBackground: false`), *and* **paused after `IDLE_AFTER_MS`
-(5 min) with no user activity on a still-visible tab** — a list left open on screen stops
+`LIVE_REFRESH_SECONDS` (`lib/config.ts`, from `VITE_LIVE_REFRESH_SECONDS`, default **10s**,
+`0` disables; the Render deploy sets 60). A caller whose query is dearer than a page of
+rows raises its own interval through the hook's `minSeconds` argument — the metric strip
+passes `METRIC_REFRESH_SECONDS` (60) — which can only ever slow a query down and cannot
+revive polling that `0` turned off. Two guardrails hold the idle cost at zero: polling is
+**paused while the tab is hidden** (`refetchIntervalInBackground: false`), *and* **paused
+after `IDLE_AFTER_MS` (5 min) with no user activity on a still-visible tab** — a list left open on screen stops
 refetching (and, on the free tier, stops keeping the instance awake) until the next
 interaction.
 
@@ -563,6 +606,19 @@ chain is topologically sorted and its cycles refused at save time, while a metri
 - **Permissions.** The scan runs through `item_view_filter`, so two readers with different
   grants correctly get different numbers. Pinned by
   `tests/test_metrics.py::test_two_readers_get_the_totals_of_what_each_can_see`.
+- **Archived records leave the total, and nothing here had to be told about them.**
+  `ListItemService._select` gained `archived_at IS NULL` beside `deleted_at IS NULL`, and
+  since the scan runs over `visible_stmt` — as does the compiled SQL, which builds on the
+  statement it returns — the cards and the grid agreed about the new lifecycle axis for
+  free, which is the payoff of having extracted that statement in the first place.
+- **What a metric may *name* stayed narrower than what a formula may name, on purpose.** A
+  calculated column can now reference a `choice` (whose cell stores the label) or a `date`
+  (which travels as ISO text, with `AGE`, `DT_FORMAT` and `INT` to read it), while the
+  metric language still takes only `number`, `text` and `calculated`. Both are reachable
+  from here anyway — *through* a calculated column that reads one — and routing them that
+  way keeps the pushdown question in one place: `metrics/pushdown.py` refuses to read a
+  calculated cell at all, because its stored value is an index that may lag, so anything
+  arriving by that route correctly falls back to the scan that recomputes.
 - **Bounded.** `METRIC_ROW_LIMIT` (50,000), streaming `data` alone in batches of 1,000,
   with `truncated` in the response and a note on the card. A metric is recomputed per
   request *and* re-asked on a timer, so an unbounded scan was a way to spend the whole
@@ -609,8 +665,9 @@ chain is topologically sorted and its cycles refused at save time, while a metri
   permission boundary — a live signal never carries record data, so every client re-reads
   through the endpoint that already enforces `item_view_filter`.
 - **9** inherits that same boundary — a total is a permissioned read of the records, which
-  is why it goes through the grid's own statement — and rides **8**'s refresh interval, so
-  the cards stay in step with the rows they describe. Its formula language extends the one
+  is why it goes through the grid's own statement — and rides **8**'s polling seam, at its
+  own floor, so the cards stay in step with the rows they describe without a full scan
+  running as often as a page query. Its formula language extends the one
   `calculated` columns already had rather than adding a second, which is the reverse of the
   **1 + 2** relationship: those two share an engine because they do the same thing to
   different columns; this shares an engine because it does a *different* thing to the same

@@ -73,7 +73,7 @@ services:
       # "Live records" polling interval in seconds: an open list refetches this
       # often to pick up other people's row changes (paused while the tab is
       # hidden). Baked in at build time (Vite), so a change needs a redeploy.
-      # Optional — the app defaults to 5s if unset. `0` disables polling. Lower is
+      # Optional — the app defaults to 10s if unset. `0` disables polling. Lower is
       # snappier but more requests; on the free tier a focused open tab polling
       # keeps the single instance awake. See docs/planned-features.md #8.
       #
