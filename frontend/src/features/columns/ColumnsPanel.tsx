@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
@@ -14,6 +14,7 @@ import type {
   RecomputeReport,
 } from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
+import { compareValues } from "../records/sortRows";
 import { ColumnDialog } from "./ColumnDialog";
 import { ConversionReportDialog } from "./ConversionReportDialog";
 
@@ -51,6 +52,23 @@ export function ColumnsPanel({
     report: ConversionReport;
   } | null>(null);
   const [showDeleted, setShowDeleted] = useState(false);
+
+  // Alphabetical, because this panel is an *inventory* — you come here to find a
+  // named field among fifty and change it. The API returns `position, id` order,
+  // which is the list's default *display* order and is what the grid and the form
+  // editor want; here it degrades to creation order, since nothing in the UI ever
+  // writes `position` (known-gaps.md), and hunting through it by eye is the problem.
+  // Sorting only what is shown: the grid's order is not this component's business.
+  //
+  // `compareValues` rather than a bare localeCompare, so "Item 2" precedes
+  // "Item 10" here exactly as it does when the records themselves are sorted.
+  const sorted = useMemo(
+    () =>
+      [...columns].sort((a, b) =>
+        compareValues(a.display_name, b.display_name, 1),
+      ),
+    [columns],
+  );
 
   const remove = useMutation({
     mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/columns/${uuid}`),
@@ -136,7 +154,7 @@ export function ColumnsPanel({
         />
       )}
 
-      {columns.map((column) => (
+      {sorted.map((column) => (
         <div
           key={column.uuid}
           className="flex items-center gap-3 border-b pb-2"
