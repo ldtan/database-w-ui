@@ -449,6 +449,96 @@ That design is now written up in **[search-design.md](search-design.md)**, which
 uuid problem by indexing values without keys and the reference problem by indexing the uuids
 rather than the labels — so nothing it maintains depends on a row other than its own. Not built.
 
+## Archiving records, and the fraction at which it starts to pay
+
+Every fix above makes a question cheaper to ask. Archiving is the first one that asks about
+fewer rows: `archived_at` drops a record out of `ListItemService._select`, and
+`ix_list_items_list_id_id` is partial on both lifecycle flags so the index follows the
+predicate. What that is worth is not obvious in advance, because the planner decides whether
+to *use* the partial index, and it only does so when reaching rows through it beats walking
+the primary key in order.
+
+Measured 2026-08-06 against `paging_bench` — the 300,000-row table, list 1 holding 97,029 live
+records interleaved 50/50 with twenty other lists, 20 columns. Each fraction is
+`VACUUM (ANALYZE)`-ed then `EXPLAIN (ANALYZE, BUFFERS)`-ed twice, second run reported. The
+search is a term matching **nothing**, which is the expensive case (a `LIMIT` cannot stop a
+scan early when there is nothing to find):
+
+| archived | live | grid page | `items/count` | search (0 matches) | search's index |
+|---|---|---|---|---|---|
+| 0% | 97,029 | 0.11 ms | 12.6 ms | 104 ms | `ix_list_items_list_id` |
+| 50% | 49,509 | 0.34 ms | 12.1 ms | **141 ms** | `ix_list_items_list_id` |
+| 60% | 39,609 | 0.26 ms | 5.8 ms | **41 ms** | `ix_list_items_list_id_id` |
+| 70% | 29,709 | 0.07 ms | 4.2 ms | 32 ms | `ix_list_items_list_id_id` |
+| 80% | 19,809 | 0.10 ms | 4.0 ms | 30 ms | `ix_list_items_list_id_id` |
+| 90% | 9,905 | 0.08 ms | 1.7 ms | 13 ms | `ix_list_items_list_id_id` |
+| 99% | 1,981 | 0.13 ms | 0.5 ms | 3.7 ms | `ix_list_items_list_id_id` |
+
+**The count is the clean win and it is immediate.** It falls with the live row count from the
+first record archived — 25× by 99% — because it was already an index-only scan whose whole
+cost is visiting matching entries, and archiving removes entries.
+
+**Search has a cliff, not a slope, and it sits between 50% and 60% archived.** Below it
+archiving buys *nothing*: the planner stays on the plain `list_id` index, still reaches every
+row of the list, and the `archived_at IS NULL` test is far too cheap to matter next to the
+ILIKE fan-out it precedes — 141 ms at 50% archived against 104 ms at none is noise, not a
+regression. Above it the planner switches to the partial index, and search steps down 3.4× in
+one move and then improves roughly with the live count. So **half a list archived is the
+threshold that matters for the app's most expensive read**, and anything less is not worth
+doing for search alone.
+
+**The grid page neither gains nor suffers**, which is the result to keep in mind when someone
+proposes archiving to "speed up the list". It is 0.1 ms throughout: already flat, already
+independent of list size, and the operation people perform most.
+
+Two caveats, both measured:
+
+- **A list whose rows sit at one end of the table can get slower.** Repeating this against
+  list 23 — 100,000 rows appended after the other 200,000 rather than interleaved — the page
+  never leaves the primary key and goes **129 ms → 208 ms** from 0% to 99% archived, because
+  the scan must walk further through discarded rows to find 100 live ones. The 129 ms baseline
+  is the pre-existing sparsity cost described in "Two indexes for the questions actually
+  asked"; archiving makes it worse rather than better. Sparsity decides this, as it decides
+  everything else about that index.
+- **The heap and the GIN index on `data` do not shrink.** The rows are still there. That is
+  the ceiling of the flag approach: a list heading for millions of records outgrows it, and
+  the version without the ceiling is a separate `list_items_archive` table that the rows
+  physically move to. Every read already funnels through `visible_stmt`, so that migration
+  stays open.
+
+### When to archive
+
+Archiving only helps the operations whose cost **scales with the live row count** — search,
+`count(*)`, filters and sorts, metrics that fall back to the Python scan, and deep `skip`
+paging. It does nothing for the default paged listing. So the question is not "is this list
+big" but "is this list big *and* is anyone doing those things to it".
+
+On the free tier's 0.1 CPU, where wall time is ~10× the CPU figures above:
+
+| Live records in one list | What starts to hurt |
+|---|---|
+| < 10k | Nothing. Do not archive for performance. |
+| 10k–25k | Search crosses ~1 s of wall time (~7.7 µs per row on a 20-column list). Deep `skip` paging is already 27 ms at page 50 of a 10k list. |
+| 25k–50k | Metrics that do not compile cost ~20 µs a record — ~1 s of CPU, ~10 s of wall — and 50k is `METRIC_ROW_LIMIT`, where they truncate. |
+| 50k–100k | Search is 4–8 s of wall time; `count(*)` ~120 ms; a sort or a group re-sorts the whole matching set on *every* page (~105 ms of Postgres at 100k). |
+| 100k+ | Search is unusable on the free tier. Archiving is maintenance, not tuning. |
+| ~500k | The 1 GB free database is full at ~1.9 kB a record — a limit archiving does not move, since the rows stay. |
+
+Three qualifiers belong with that table:
+
+- **Column count drives search cost as much as row count.** Search ORs one `ILIKE` per column,
+  so a 40-column list costs roughly twice per row what a 20-column one does. 25,000 assumes
+  about twenty.
+- **A bigger instance buys 10× on the app-CPU half only** — search and non-compiled metrics —
+  and nothing on the Postgres-side sorting and counting. Those thresholds do not move with the
+  plan.
+- **A workspace with many lists is worse per list, not better**, since sparsity is what decides
+  whether the planner takes `ix_list_items_list_id_id` at all.
+
+`VITE_ARCHIVE_HINT_THRESHOLD` (default 25,000, `0` disables) is where the first row of that
+table is wired into the app: past it, a list offers the archive to anyone holding `delete`,
+and only when the record count is the whole list's rather than a filtered subset's.
+
 ## Login was 30× a page load, and most of it was waste
 
 The 717 ms breaks into three parts:
@@ -580,6 +670,9 @@ is locked out, because old hashes are still verifiable on their own terms.
   month and always-on is ~730, so it fits, but it consumes nearly the whole workspace
   budget.
 - **Search is still the expensive read** at ~106 ms. It has not been a problem at demo
-  scale; it is the first thing to look at if list views get slow.
+  scale; it is the first thing to look at if list views get slow. Archiving is now a partial
+  answer to it, but only past roughly half a list — below that the planner does not take the
+  partial index and search costs the same. The real fix is still
+  [search-design.md](search-design.md).
 - **The free database is still deleted 30 days after creation**, which remains the single
   largest reliability risk in the deployment and the first thing worth paying for.

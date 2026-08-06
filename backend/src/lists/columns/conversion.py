@@ -216,6 +216,10 @@ async def distinct_text_values(db, list_id: int, column: Column) -> list[str]:
 
     Ordered so the option list is stable between runs — a set's iteration order is
     not something to write into a column's config.
+
+    Archived rows count, unlike every read that serves the grid. A conversion
+    rewrites the whole column, archived rows included, so an option they hold must
+    exist or unarchiving one would surface a value the column no longer allows.
     """
     cell = ListItem.data[str(column.uuid)].astext
     rows = await db.execute(

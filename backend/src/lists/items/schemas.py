@@ -27,6 +27,19 @@ class BulkDeleteResult(BaseModel):
     deleted: int
 
 
+class BulkArchiveRequest(BaseModel):
+    # Same cap as a bulk delete, and the same knob: both do one UPDATE over the
+    # uuids given, so there is no reason for the two to disagree about how many is
+    # too many, and one number is one thing for the frontend to mirror.
+    uuids: list[UUID] = Field(
+        default_factory=list, max_length=settings.BULK_DELETE_MAX
+    )
+
+
+class BulkArchiveResult(BaseModel):
+    archived: int
+
+
 class ListItemCountRead(BaseModel):
     total: int
 
@@ -56,3 +69,9 @@ class DeletedListItemRead(ListItemRead):
     # When the record was binned, so the UI can show "deleted 3 days ago" and how
     # much of the retention window is left. Always set for a bin listing.
     deleted_at: datetime
+
+
+class ArchivedListItemRead(ListItemRead):
+    # When the record was archived. There is no retention window to count down, so
+    # this is only ever "archived 3 days ago". Always set for an archive listing.
+    archived_at: datetime

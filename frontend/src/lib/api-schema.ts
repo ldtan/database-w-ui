@@ -986,6 +986,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/archived": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Archived Items */
+        get: operations["list_archived_items_api_lists__list_uuid__items_archived_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/bulk-archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bulk Archive Items */
+        post: operations["bulk_archive_items_api_lists__list_uuid__items_bulk_archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/{uuid}": {
         parameters: {
             query?: never;
@@ -1034,6 +1068,40 @@ export interface paths {
         post?: never;
         /** Purge Item */
         delete: operations["purge_item_api_lists__list_uuid__items__uuid__permanent_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/{uuid}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Item */
+        post: operations["archive_item_api_lists__list_uuid__items__uuid__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/{uuid}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Unarchive Item */
+        post: operations["unarchive_item_api_lists__list_uuid__items__uuid__unarchive_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1513,6 +1581,28 @@ export interface components {
          * @enum {string}
          */
         Action: "view" | "create" | "edit" | "delete" | "configure" | "share" | "manage" | "lookup";
+        /** ArchivedListItemRead */
+        ArchivedListItemRead: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Data */
+            data: {
+                [key: string]: unknown;
+            };
+            /**
+             * Permissions Inherit
+             * @default true
+             */
+            permissions_inherit: boolean;
+            /**
+             * Archived At
+             * Format: date-time
+             */
+            archived_at: string;
+        };
         /** BatchUserError */
         BatchUserError: {
             /** Row */
@@ -1626,6 +1716,16 @@ export interface components {
              * Format: password
              */
             client_secret?: string | null;
+        };
+        /** BulkArchiveRequest */
+        BulkArchiveRequest: {
+            /** Uuids */
+            uuids?: string[];
+        };
+        /** BulkArchiveResult */
+        BulkArchiveResult: {
+            /** Archived */
+            archived: number;
         };
         /** BulkDeleteRequest */
         BulkDeleteRequest: {
@@ -1952,6 +2052,11 @@ export interface components {
             sorts?: components["schemas"]["SortSpec"][];
             /** Limit */
             limit?: number | null;
+            /**
+             * Include Archived
+             * @default false
+             */
+            include_archived: boolean;
         };
         /** FilterCondition */
         FilterCondition: {
@@ -2279,6 +2384,11 @@ export interface components {
              * @default false
              */
             deleted: boolean;
+            /**
+             * Archived
+             * @default false
+             */
+            archived: boolean;
         };
         /**
          * MetricConfig
@@ -4768,6 +4878,75 @@ export interface operations {
             };
         };
     };
+    list_archived_items_api_lists__list_uuid__items_archived_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ArchivedListItemRead"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_archive_items_api_lists__list_uuid__items_bulk_archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkArchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkArchiveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_item_api_lists__list_uuid__items__uuid__get: {
         parameters: {
             query?: never;
@@ -4916,6 +5095,68 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_item_api_lists__list_uuid__items__uuid__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    unarchive_item_api_lists__list_uuid__items__uuid__unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ListItemRead"];
+                };
             };
             /** @description Validation Error */
             422: {

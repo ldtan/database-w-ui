@@ -83,6 +83,14 @@ services:
       # the value below therefore speeds up records alone, which is the intent.
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "60"
+      # How many live records a list may hold before the app suggests archiving,
+      # or `0` to never suggest it. Optional — the app defaults to 25000, which is
+      # roughly where search and non-compiled metrics start to be felt on 0.1 CPU.
+      # It is a suggestion about the reads that scale with the row count, not a
+      # general "your list is big" warning; the paged listing is flat at any size.
+      # See docs/capacity-and-performance.md § "When to archive".
+      - key: VITE_ARCHIVE_HINT_THRESHOLD
+        value: "25000"
     routes:
       # src/lib/api.ts builds every call as a relative `/api/...` — there is no configurable
       # base URL — so the SPA and the API must share an origin. This rewrite is what makes
