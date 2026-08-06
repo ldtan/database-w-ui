@@ -19,7 +19,7 @@ export interface ViewControlsState {
   columns: Column[]; // in display order
   hiddenColumns: string[];
   onToggleColumn: (uuid: string, visible: boolean) => void;
-  onMoveColumn: (index: number, delta: number) => void;
+  onReorderColumn: (from: number, to: number) => void;
   groupBy: string | null;
   onGroupBy: (uuid: string | null) => void;
   filterCount: number;

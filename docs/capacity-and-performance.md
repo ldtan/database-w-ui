@@ -523,9 +523,14 @@ reliability problem, never a capacity one. Storage will not be what makes you up
 ## The frontend needs nothing
 
 The SPA is a static site on a CDN — already free, and no paid tier makes it faster. The
-build is ~374 KB of gzipped JS, 36 KB of CSS and ~726 KB of fonts, so roughly 1.2 MB on a
+build is ~398 KB of gzipped JS, 36 KB of CSS and ~726 KB of fonts, so roughly 1.2 MB on a
 cold visit and effectively zero on repeat visits, since Vite's hashed asset names are
 immutably cacheable. Against 100 GB/month that is ~85,000 first-time visits.
+
+(The JS was ~374 KB before drag-reordering; `@dnd-kit/core` and `@dnd-kit/sortable` are
+~24 KB gzipped between them. They sit in the main chunk because `ViewControls` is on the
+list page itself, not behind a dialog — worth knowing if the entry bundle ever needs
+trimming, though at 6% it is not where the weight is.)
 
 The tempting "consolidation" — serving `dist/` from FastAPI with `StaticFiles` to run one
 service instead of two — is a **downgrade**. It moves work that a CDN does for free onto
