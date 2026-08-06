@@ -7,11 +7,10 @@ import { Button } from "primereact/button";
 import { AppDialog } from "../../components/AppDialog";
 import { api, ApiError } from "../../lib/api";
 import { Field } from "../../components/Field";
-import { useCurrentUser } from "../../lib/auth";
-import { useDebounced } from "../../lib/useDebounced";
+import { UserPicker } from "../../components/UserPicker";
 import { useToast } from "../../lib/toast";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
-import type { ApiUser, ListRead, Workspace } from "../../lib/types";
+import type { ListRead, Workspace } from "../../lib/types";
 
 interface Props {
   list: ListRead | null;
@@ -43,12 +42,9 @@ export function MoveOrTransferDialog({
   onDone,
 }: Props) {
   const toast = useToast();
-  const me = useCurrentUser();
   const [mode, setMode] = useState<"move" | "transfer">("move");
   const [targetWorkspace, setTargetWorkspace] = useState<string | null>(null);
   const [targetUser, setTargetUser] = useState<string | null>(null);
-  const [userSearch, setUserSearch] = useState("");
-  const q = useDebounced(userSearch);
 
   const active = !!list;
 
@@ -71,21 +67,9 @@ export function MoveOrTransferDialog({
     .filter((w) => canWs(w.uuid, "configure"))
     .map((w) => ({ label: w.display_name, value: w.uuid }));
 
-  // Server-side search, and never offer yourself — a self-transfer is rejected.
-  const users = useQuery({
-    queryKey: ["users", "transfer-search", q],
-    queryFn: () =>
-      api.get<ApiUser[]>(`/auth/users/?limit=50&q=${encodeURIComponent(q.trim())}`),
-    enabled: active && mode === "transfer",
-  });
-  const userOptions = (users.data ?? [])
-    .filter((u) => u.uuid !== me?.uuid)
-    .map((u) => ({ label: u.username, value: u.uuid }));
-
   function reset() {
     setTargetWorkspace(null);
     setTargetUser(null);
-    setUserSearch("");
   }
   function close() {
     reset();
@@ -195,18 +179,10 @@ export function MoveOrTransferDialog({
             label="New owner"
             hint="It moves into their Incoming workspace and becomes theirs — you lose access, but everyone you shared it with keeps theirs."
           >
-            <Dropdown
+            <UserPicker
               value={targetUser}
-              options={userOptions}
-              onChange={(e) => setTargetUser(e.value)}
-              placeholder="Select a user…"
-              filter
-              // Drive the server-side search; options are already narrowed.
-              filterMatchMode="contains"
-              onFilter={(e) => setUserSearch(e.filter)}
-              resetFilterOnHide
-              emptyFilterMessage="No matching users"
-              className="w-full"
+              onChange={setTargetUser}
+              enabled={active && mode === "transfer"}
             />
           </Field>
         )}

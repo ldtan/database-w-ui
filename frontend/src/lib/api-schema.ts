@@ -438,6 +438,33 @@ export interface paths {
         patch: operations["update_workspace_api_workspaces__workspace_uuid__patch"];
         trace?: never;
     };
+    "/api/workspaces/{workspace_uuid}/transfer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Transfer Workspace
+         * @description Hand a workspace, and every list in it, to another user.
+         *
+         *     Owner-only, on the same reasoning as the list transfer: ownership is what is being
+         *     given away, so the only thing that can authorize it is holding it — a `manage`
+         *     grant does not qualify. Unlike a list there is no inbox involved; a workspace *is*
+         *     the ownership boundary, so the row simply changes hands and its lists follow.
+         *     Existing shares survive; the giver's implicit owner access ends with the transfer
+         *     (see WorkspaceService.transfer_to_user).
+         */
+        post: operations["transfer_workspace_api_workspaces__workspace_uuid__transfer_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/workspaces/{workspace_uuid}/restore": {
         parameters: {
             query?: never;
@@ -2938,6 +2965,14 @@ export interface components {
              */
             is_system: boolean;
         };
+        /** WorkspaceTransfer */
+        WorkspaceTransfer: {
+            /**
+             * User Uuid
+             * Format: uuid
+             */
+            user_uuid: string;
+        };
         /** WorkspaceUpdate */
         WorkspaceUpdate: {
             /** Name */
@@ -3839,6 +3874,41 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["WorkspaceUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    transfer_workspace_api_workspaces__workspace_uuid__transfer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceTransfer"];
             };
         };
         responses: {

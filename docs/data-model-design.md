@@ -132,7 +132,7 @@ The tenancy container. A user owns workspaces; lists live inside them.
 | Field          | Type            | Notes |
 |----------------|-----------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
-| `owner_id`     | FK → `users.id` | **Required.** Who owns the workspace. |
+| `owner_id`     | FK → `users.id` | **Required.** Who owns the workspace. Reassigned by `POST /workspaces/{uuid}/transfer` (see the notes below) — the only thing a workspace transfer changes. |
 | `name`         | `str(120)`      | Code-facing slug (D6). Unique **per owner**, ignoring soft-deleted rows. |
 | `display_name` | `str(255)`      | UI label (D6). Not unique. |
 | `description`  | `Text` nullable | Optional. |
@@ -170,6 +170,17 @@ Notes:
   unchanged `resource_id`); the giver's implicit access ends. Both must assign the
   `workspace` **relationship**, not the `workspace_id` FK — see
   [known gaps](known-gaps.md). Details in [planned features §3–4](planned-features.md).
+- A **whole workspace** can be transferred the same way, via
+  `POST /workspaces/{uuid}/transfer`. Because a workspace *is* the ownership boundary,
+  this reassigns `owner_id` in place rather than moving anything: every list inside
+  follows without being touched, and every uuid in the tree survives. No inbox is
+  involved — the inbox exists to give a *list* somewhere to land, and a workspace needs
+  nowhere. Owner-only, shares survive, giver's implicit access ends — the same three
+  rules as the list transfer. A clash with a workspace the recipient already owns
+  auto-suffixes on the per-owner unique name (`team` → `team_2`), and the `incoming`
+  slot is treated as occupied so a transfer can never squat it. The `is_system` inbox
+  itself cannot be transferred. See `WorkspaceService.transfer_to_user` and
+  `tests/test_workspace_transfer.py`.
 - A list can be **cloned** via `POST /lists/{uuid}/clone` `{ with_records }` — a copy in
   the same workspace, structure always, records optionally. Because records are keyed by
   column **uuid** (D2), the clone's new columns get new uuids and every reference is
