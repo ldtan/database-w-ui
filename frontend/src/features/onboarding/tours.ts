@@ -185,6 +185,7 @@ const list: Tour = {
       body: "One row at a time. Fields marked with a star are required, and an empty cell shows as a dash rather than a blank. Click a record later to edit it.",
       points: [
         "The small arrow beside it fills the form from a QR code, or saves a record per scan — built for working through a queue of badges.",
+        "For a run of records, Edit cells on the toolbar adds a row at the foot of the grid instead — type across it and press the tick. Where the record then appears is up to the sort and filter you are using, so it may well not be this page.",
       ],
     },
     {

@@ -992,6 +992,30 @@ a {
   text-decoration: underline dotted;
   text-underline-offset: 3px;
 }
+/* The row being typed into, which is not a record yet. Marked rather than left to
+   look like the rows above it: everything else in the grid is stored, and a row
+   that vanishes on discard should never have read as one that was saved. The
+   dashed rule is the same language `.cell-editable` uses for "this is editable",
+   drawn round the whole row because the whole row is. */
+.data-grid .p-datatable-tbody > tr.grid-row-new > td {
+  background: var(--surface-2);
+  border-top: 1px dashed var(--brand);
+  border-bottom: 1px dashed var(--brand);
+}
+/* Striping alternates on row index, so the draft's tint would come and go as rows
+   are added. This wins over both. */
+.p-datatable.p-datatable-striped
+  .p-datatable-tbody
+  > tr.grid-row-new:nth-child(even)
+  > td {
+  background: var(--surface-2);
+}
+/* The footer is one text button and nothing else, sitting where the next row
+   would go rather than centred under the table like a caption. */
+.data-grid .p-datatable-footer {
+  padding: 0.25rem 0.5rem;
+  text-align: left;
+}
 /* An open editor keeps the row the height it was: the padding a value needs is
    not the padding an input needs, and left alone every row would jump as its
    cell opened. */
