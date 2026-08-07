@@ -705,6 +705,24 @@ immediately visible to everyone holding list `view`. There is no "every new row 
 list starts unique" mode. If per-record access is meant to be a list's default posture,
 that needs building.
 
+**A record added from the grid usually vanishes, and that is the view working.** "Edit
+cells" grows a draft row at the foot of the grid; pressing ✓ posts it and then refetches
+the page. Where the record lands is decided server-side by the same filter, sort, grouping
+and `skip` the page was fetched with, so a record made just now under `created_at asc` on
+page 1 of 40 belongs at the end of page 40 and is simply not in the answer. The toast says
+so ("Not on this page — the current sort or filter puts it elsewhere") rather than leaving
+it to be read as a lost write. Nothing is written into the cache optimistically for exactly
+this reason: the browser cannot know where the row goes, so it asks.
+
+**A required column the draft row cannot reach refuses the record from the server.** The
+draft row's cells are the *create* form's fields (`resolveFields(cols, createForm)`)
+intersected with the columns the view is showing, so a column that is required but excluded
+from the create form, hidden by the view, or of a type with no cell-sized editor (rich text,
+multiline) has nowhere to be typed. ✓ then 400s with "Column 'x' is required" — correct, but
+you meet it as a server error rather than as a disabled button, because the client does not
+evaluate `required` itself. The row's "Open in the record form" action is the way out: it
+hands everything typed so far to the Add dialog, which lays out every field the form has.
+
 **Breaking inheritance is reversible.** Flipping `permissions_inherit` back to `true`
 re-joins the parent chain, and grants made while the child was independent are kept and
 simply re-union with the inherited ones.

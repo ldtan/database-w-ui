@@ -44,8 +44,9 @@ import {
   type CellEditKind,
 } from "../records/cellEdit";
 import { InlineCellEditor } from "../records/inlineEdit";
+import { isNewRow, landedOnPage, newRowItem } from "../records/newRow";
 import { recordCountKey, recordPagesKey } from "../records/recordKeys";
-import { resolveFields } from "../records/recordValues";
+import { buildRecordData, deserialize, resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
 import { collectLookupUuids } from "../lookups/LookupControls";
@@ -127,6 +128,12 @@ const QrSubmitSession = lazy(() =>
  * endpoint's default 100 rows and sorted only the rows that happened to be inside
  * it. Grouping pins the sort to the group column, because the server orders by it
  * first to keep a group's rows adjacent.
+ *
+ * That is also why a record *added* from the grid may vanish the moment it is
+ * saved. The draft row (see `newRow.ts`) posts the whole record at once and then
+ * refetches; where it lands is the server's answer, not this page's, and page 1 of
+ * an ascending sort is the wrong end of the list for a record made just now. The
+ * toast says so, because a row that disappears without explanation reads as a bug.
  */
 export function ListDetailPage() {
   const { listUuid = "" } = useParams();
@@ -190,15 +197,28 @@ export function ListDetailPage() {
   // reaching for localStorage or the view config for one boolean would be the
   // first of those rather than a use of one.
   const [showMetrics, setShowMetrics] = useState(false);
-  // "Edit cells": the grid's values become editable in place. Page state for the
-  // same reason `showMetrics` is — it is how you are working right now, not a
-  // property of the list or of the view, and it deliberately does not survive a
-  // reload: editing rows by accident is worse than turning the mode on again.
+  // "Edit cells": the grid's values become editable in place, and a row can be
+  // added at the foot of it. Page state for the same reason `showMetrics` is — it
+  // is how you are working right now, not a property of the list or of the view,
+  // and it deliberately does not survive a reload: editing rows by accident is
+  // worse than turning the mode on again.
   const [inlineEdit, setInlineEdit] = useState(false);
   // What the open cell editor holds. A ref rather than state: it changes on every
   // keystroke, and re-rendering a hundred-row grid for each one would be a real
   // cost for a value nothing on screen reads until the edit is committed.
   const cellDraft = useRef<CellDraft | null>(null);
+  // The record being typed at the foot of the grid, or null when there is none.
+  // Held in *stored* form — the shape a record's `data` has — so the draft row
+  // renders and edits through exactly the same code every other row does.
+  const [newRow, setNewRow] = useState<Record<string, unknown> | null>(null);
+  // The same value, readable synchronously. "Add record" has to flush whatever
+  // cell editor is still open and then post the result, and a `setState` between
+  // those two would not have landed by the time the post reads it.
+  const newRowRef = useRef<Record<string, unknown> | null>(null);
+  const writeNewRow = (next: Record<string, unknown> | null) => {
+    newRowRef.current = next;
+    setNewRow(next);
+  };
   const [hiddenColumns, setHiddenColumns] = useState<string[]>([]);
   const [columnOrder, setColumnOrder] = useState<string[]>([]);
 
@@ -214,23 +234,28 @@ export function ListDetailPage() {
   // Spread first so the query's own keys/fn win; today it supplies a polling
   // `refetchInterval`, later an SSE subscription (see useLiveList).
   const live = useLiveList(listUuid);
+  // Everything that decides *which* records come back is part of the key, because
+  // every one of them is applied server-side: the page, the order, the view and
+  // the search each produce a different set of rows, not a rearrangement of one
+  // the browser already has.
+  //
+  // Named rather than written inline because adding a record reads it back: the
+  // only way to learn whether the new row belongs on the page in front of you is to
+  // look at the page the refetch brought back, and that means naming it exactly.
+  const itemsKey = [
+    ...recordPagesKey(listUuid),
+    activeViewUuid,
+    q,
+    first,
+    pageSize,
+    sortField,
+    sortOrder,
+    groupBy,
+    filters,
+  ];
   const items = useQuery({
     ...live,
-    // Everything that decides *which* records come back is part of the key, because
-    // every one of them is applied server-side: the page, the order, the view and
-    // the search each produce a different set of rows, not a rearrangement of one
-    // the browser already has.
-    queryKey: [
-      ...recordPagesKey(listUuid),
-      activeViewUuid,
-      q,
-      first,
-      pageSize,
-      sortField,
-      sortOrder,
-      groupBy,
-      filters,
-    ],
+    queryKey: itemsKey,
     queryFn: () =>
       api.get<ListItem[]>(
         `/lists/${listUuid}/items/?${recordParams({
@@ -268,13 +293,23 @@ export function ListDetailPage() {
   });
   const rows = items.data ?? [];
   const total = count.data?.total ?? 0;
+  // The records, plus the one being typed. Everything that *draws* a row reads
+  // this — the grid, the cells, the reference uuids they resolve — because a draft
+  // that rendered differently from a record would be a second grid rather than a
+  // row at the end of one. Everything that *asks the server about* a row reads
+  // `rows`: the draft's uuid names nothing, so it must never reach a request.
+  const gridRows = useMemo(
+    () => (newRow ? [...rows, newRowItem(newRow)] : rows),
+    [rows, newRow],
+  );
   // The rows the grid is *currently* showing, for the cell editor to open from.
   // PrimeReact hands its `editor` a snapshot of the row rather than the row, so
   // an editor opened after a poll would otherwise be seeded from what the record
-  // held when its cell first rendered — see `InlineCellEditor`'s `row`.
+  // held when its cell first rendered — see `InlineCellEditor`'s `row`. The draft
+  // is in here for the same reason, one step sharper: its values live nowhere else.
   const rowByUuid = useMemo(
-    () => new Map(rows.map((row) => [row.uuid, row])),
-    [rows],
+    () => new Map(gridRows.map((row) => [row.uuid, row])),
+    [gridRows],
   );
   const views = useQuery({
     queryKey: ["views", listUuid],
@@ -463,6 +498,48 @@ export function ListDetailPage() {
     // has one answer per burst of edits rather than one per cell.
     onSettled: scheduleSettle,
   });
+  /**
+   * The draft row, posted as one record.
+   *
+   * Deliberately *not* optimistic, which is the one place this differs from
+   * `saveCell` above. Where the new record belongs is the server's answer — the
+   * filter, the sort, the grouping and the page are all applied there — so writing
+   * it into the page cache would be this page guessing, and guessing wrong every
+   * time an ascending sort puts a record made just now at the far end of the list.
+   * The refetch *is* the feature.
+   *
+   * The whole `["items", listUuid]` namespace goes, not just the pages: the
+   * paginator's total and the metric cards above the grid have all moved too.
+   */
+  const addRecord = useMutation({
+    mutationFn: (data: Record<string, unknown>) =>
+      api.post<ListItem>(`/lists/${listUuid}/items/`, { data }),
+    onSuccess: async (saved) => {
+      // A fresh draft rather than none: adding records is something you do several
+      // of, and making the next one cost a trip back to "New record" is what makes
+      // a grid feel like a form. The empty row is visibly a draft and its ✕ is
+      // right there, so an unwanted one costs a click to be rid of.
+      writeNewRow({});
+      // Resolves once the refetches it triggered have landed, which is what makes
+      // reading the page back on the next line mean anything.
+      await queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.success(
+        "Record added",
+        landedOnPage(queryClient.getQueryData<ListItem[]>(itemsKey), saved.uuid)
+          ? undefined
+          : "Not on this page — the current sort or filter puts it elsewhere.",
+      );
+    },
+    // The draft stays on screen holding everything that was typed. That is the
+    // whole reason adding is an explicit ✓ rather than something that happens when
+    // you look away: a required column left empty, or a value that clashes with a
+    // unique one, is fixable where you are standing.
+    onError: (err) =>
+      toast.error(
+        "Could not add record",
+        err instanceof ApiError ? err.message : undefined,
+      ),
+  });
   const setListInherit = useMutation({
     mutationFn: (value: boolean) =>
       api.patch(`/lists/${listUuid}`, { permissions_inherit: value }),
@@ -599,14 +676,16 @@ export function ListDetailPage() {
 
   // The reference uuids this page of records holds. The cells resolve them (one
   // shared request per column — see renderCell); the page only has to gather them,
-  // so that the query key covers the whole page rather than a single row.
+  // so that the query key covers the whole page rather than a single row. Gathered
+  // from `gridRows` so a lookup picked in the draft row shows its label rather than
+  // the uuid that was stored for it.
   const principalUuids = useMemo(
-    () => collectPrincipalUuids(cols, rows),
-    [cols, rows],
+    () => collectPrincipalUuids(cols, gridRows),
+    [cols, gridRows],
   );
   const lookupUuids = useMemo(
-    () => collectLookupUuids(cols, rows),
-    [cols, rows],
+    () => collectLookupUuids(cols, gridRows),
+    [cols, gridRows],
   );
 
   const formList = forms.data ?? [];
@@ -659,7 +738,7 @@ export function ListDetailPage() {
           : null;
 
   /**
-   * A cell edit, on its way to the server.
+   * A cell edit, on its way to the server — or into the record being typed.
    *
    * PrimeReact calls this when the cell leaves edit mode by any route that means
    * "keep it" — Enter, Tab, a click elsewhere — and never on Escape, which is what
@@ -671,6 +750,9 @@ export function ListDetailPage() {
    * that different record. The draft knows which record and which column it was
    * typed into, and a row moving on screen is no reason to throw away what
    * somebody typed.
+   *
+   * The draft row goes nowhere: there is no record to PATCH yet, so the same patch
+   * `cellPatch` builds is merged into what will be posted when the row is added.
    */
   function commitCell() {
     const draft = cellDraft.current;
@@ -681,18 +763,154 @@ export function ListDetailPage() {
     const column = cols.find((c) => c.uuid === draft.columnUuid);
     if (!column) return;
     const patch = cellPatch(cols, column, draft);
-    if (patch) saveCell.mutate({ uuid: draft.rowUuid, patch });
+    if (!patch) return;
+    if (isNewRow(draft.rowUuid)) {
+      writeNewRow({ ...(newRowRef.current ?? {}), ...patch });
+      return;
+    }
+    saveCell.mutate({ uuid: draft.rowUuid, patch });
   }
 
   // A QR code always creates, so it is always the "create" form it fills — which
   // is what decides the fields it may write, and their names. Resolving them here
   // (rather than reading `cols`) is what stops a code from filling a column the
   // form excludes or marks read-only.
+  //
+  // The draft row asks the same form, for the same reason: it is a record being
+  // created, and a column the create form excludes has no cell to type into.
   const createForm = formList.find((f) => f.type === "create") ?? null;
   const createFields = useMemo(
     () => resolveFields(cols, createForm),
     [cols, createForm],
   );
+  const createKinds = useMemo(() => cellEditKinds(createFields), [createFields]);
+
+  /** The draft as the API takes it: create semantics, so an untouched cell is
+   *  omitted rather than nulled and the column's default still applies. The values
+   *  are already in stored form, which is why `buildRecordData` serves here as it
+   *  does for the dialog — its serialize pass has nothing left to do. */
+  const newRowData = () =>
+    buildRecordData(createFields, newRowRef.current ?? {}, false);
+
+  function submitNewRow() {
+    // A cell editor may still be open — clicking ✓ is an outside click, and
+    // whether PrimeReact closes it before or after this handler runs is not ours
+    // to decide. Flushing it here settles that either way: `commitCell` writes
+    // through `newRowRef` synchronously, and a second call is a no-op.
+    commitCell();
+    const data = newRowData();
+    if (Object.keys(data).length === 0) return; // nothing typed; ✓ is disabled anyway
+    addRecord.mutate(data);
+  }
+
+  /**
+   * The draft, handed to the dialog that has room for it.
+   *
+   * Two things need this. A rich-text or multiline column has no cell-sized editor
+   * (`cellEditKinds` calls those "dialog"), and a **required** column that the
+   * create form excludes, or that is hidden from the grid, has no cell at all — so
+   * ✓ would refuse the record with no way to answer it from here. Either way the
+   * escape is the same: the form, already holding what was typed.
+   *
+   * The record **moves** rather than being copied: the draft row goes, and the
+   * dialog owns what was typed from here on. Leaving it in both places would leave
+   * two surfaces each able to create the same record, and Cancel in a dialog
+   * already means "not this record" everywhere else in the app.
+   *
+   * `prefill` is deserialized, because that is what the dialog's fields expect; the
+   * draft holds stored values so that the *grid* can render it.
+   */
+  function openNewRowInForm() {
+    commitCell();
+    const stored = newRowRef.current ?? {};
+    const prefill: Record<string, unknown> = {};
+    for (const column of cols) {
+      const raw = stored[column.uuid];
+      if (raw !== undefined && raw !== null) {
+        prefill[column.uuid] = deserialize(column, raw);
+      }
+    }
+    writeNewRow(null);
+    setRecordDialog({ open: true, item: null, prefill });
+  }
+
+  /** Give up on the row being typed. Anything in it asks first — it is the one
+   *  gesture here that destroys work, and it sits a few pixels from ✓. */
+  function discardNewRow() {
+    if (Object.keys(newRowData()).length === 0) {
+      writeNewRow(null);
+      return;
+    }
+    confirmDialog({
+      message: "Discard the record you were adding?",
+      header: "Discard record",
+      icon: "pi pi-exclamation-triangle",
+      accept: () => writeNewRow(null),
+    });
+  }
+
+  /**
+   * The draft row's own actions: send it, throw it away, or move it somewhere with
+   * more room.
+   *
+   * ✓ and ✕ stay inline at every width, unlike a record's, which collapse into a
+   * "⋮" on a narrow grid — they are the only way to finish the gesture, and a
+   * commit behind a menu is not one. ✓ is dead until something has been typed,
+   * because a record of nothing but defaults is not what the click meant.
+   */
+  function newRowActions() {
+    return (
+      <RowActions
+        size="small"
+        maxVisible={2}
+        actions={[
+          {
+            key: "add",
+            icon: "pi pi-check",
+            label: "Add record",
+            disabled:
+              addRecord.isPending || Object.keys(newRowData()).length === 0,
+            onClick: submitNewRow,
+          },
+          {
+            key: "discard",
+            icon: "pi pi-times",
+            label: "Discard new record",
+            onClick: discardNewRow,
+          },
+          {
+            key: "form",
+            icon: "pi pi-external-link",
+            label: "Open in the record form",
+            onClick: openNewRowInForm,
+          },
+        ]}
+      />
+    );
+  }
+
+  /** Leaving "Edit cells" takes the draft with it, so it asks on the way out for
+   *  the same reason ✕ does. */
+  function toggleInlineEdit() {
+    if (inlineEdit && newRow !== null) {
+      const drop = () => {
+        writeNewRow(null);
+        setInlineEdit(false);
+      };
+      if (Object.keys(newRowData()).length === 0) {
+        drop();
+        return;
+      }
+      confirmDialog({
+        message: "Discard the record you were adding?",
+        header: "Discard record",
+        icon: "pi pi-exclamation-triangle",
+        accept: drop,
+      });
+      return;
+    }
+    setInlineEdit((on) => !on);
+  }
 
   function openQr(mode: "fill" | "submit") {
     setQrError(null);
@@ -835,6 +1053,13 @@ export function ListDetailPage() {
 
   function groupHeader(row: ListItem) {
     if (!groupColumn) return null;
+    // The draft belongs to no group: it has no record behind it, and a subheader
+    // reading "Class: —" would announce a group that does not exist. Which group it
+    // *will* join is the server's answer once it is added, like everything else
+    // about where it lands.
+    if (isNewRow(row.uuid)) {
+      return <span className="font-semibold">New record</span>;
+    }
     return (
       <span className="font-semibold">
         {groupColumn.display_name}:{" "}
@@ -1021,18 +1246,21 @@ export function ListDetailPage() {
             other way round: a grid whose cells open an editor on every stray
             click is one you cannot skim. Offered only where there is a grid to
             edit — a phone renders cards, which have no cells — and only to
-            someone with a record on this page they may actually write to. It
-            survives its own condition while on, so turning it off never depends
-            on a filter that has hidden every editable row. */}
+            someone with a record on this page they may actually write to, or the
+            right to add one, which is a use for the mode on a list with no rows in
+            it yet. It survives its own condition while on, so turning it off never
+            depends on a filter that has hidden every editable row. */}
         {!small &&
-          (inlineEdit || rows.some((row) => canItem(row.uuid, "edit"))) && (
+          (inlineEdit ||
+            listActions.has("create") ||
+            rows.some((row) => canItem(row.uuid, "edit"))) && (
             <Button
               label="Edit cells"
               icon="pi pi-pencil"
               text
               className={inlineEdit ? "is-on" : undefined}
               aria-pressed={inlineEdit}
-              onClick={() => setInlineEdit((on) => !on)}
+              onClick={toggleInlineEdit}
             />
           )}
 
@@ -1130,7 +1358,7 @@ export function ListDetailPage() {
         />
       ) : (
         <DataTable
-          value={rows}
+          value={gridRows}
           loading={columns.isLoading || items.isLoading || count.isLoading}
           dataKey="uuid"
           // Bounds the wrapper's height so the header can stick to the top of it
@@ -1160,6 +1388,11 @@ export function ListDetailPage() {
           selectionMode="checkbox"
           selection={selection}
           onSelectionChange={(e) => setSelection(e.value)}
+          // The draft row has no record behind it, so it has nothing to select:
+          // every gesture a selection leads to — archive, delete — names uuids at
+          // the server, and this one names nothing. Also keeps "select all" from
+          // silently including it.
+          isDataSelectable={(e) => !isNewRow((e.data as ListItem).uuid)}
           // Set only while the mode is on: with no edit mode a column's `editor`
           // is inert, so this is the single switch that turns a grid of values
           // into a grid of cells. "cell", not "row" — one value is committed at a
@@ -1185,7 +1418,11 @@ export function ListDetailPage() {
           // needing a guard here (RowActions stops propagation regardless).
           onRowClick={(e) => rowOpener(e.data as ListItem)?.()}
           rowClassName={(row: ListItem) =>
-            rowOpener(row) ? "grid-row-opens" : ""
+            isNewRow(row.uuid)
+              ? "grid-row-new"
+              : rowOpener(row)
+                ? "grid-row-opens"
+                : ""
           }
           stripedRows
           // `lazy`: the grid holds one page, so it must not try to slice or sort
@@ -1241,6 +1478,25 @@ export function ListDetailPage() {
               }
             />
           }
+          // The way in to a new row, at the end of the rows — where the next one
+          // would go. Only while the mode is on, because outside it the grid is for
+          // reading and "Add record" in the header is the way to make one; and only
+          // when there is no draft already, since the draft row's own ✓ and ✕ are
+          // the affordance from then on.
+          footer={
+            inlineEdit &&
+            listActions.has("create") &&
+            cols.length > 0 &&
+            newRow === null ? (
+              <Button
+                label="New record"
+                icon="pi pi-plus"
+                text
+                size="small"
+                onClick={() => writeNewRow({})}
+              />
+            ) : undefined
+          }
         >
           <DataColumn
             selectionMode="multiple"
@@ -1255,14 +1511,28 @@ export function ListDetailPage() {
           {visibleCols.map((col) => {
             // Everything is "locked" while the mode is off, which is how a column
             // that is editable in principle still renders as a plain value.
-            const kind: CellEditKind = inlineEdit
-              ? (editKinds.get(col.uuid) ?? "locked")
-              : "locked";
+            //
+            // Per row rather than per column, because the draft row is a record
+            // being *created* and asks the create form, while every row above it is
+            // a record being edited and asks the update form. A list may well
+            // differ on the two — a column you fill in once and never touch again is
+            // exactly the case forms exist to express.
+            const kindFor = (row: ListItem): CellEditKind =>
+              !inlineEdit
+                ? "locked"
+                : isNewRow(row.uuid)
+                  ? (createKinds.get(col.uuid) ?? "locked")
+                  : (editKinds.get(col.uuid) ?? "locked");
             // One answer for the outline, the cell body and the gate on opening an
             // editor. Asked separately they could disagree about the same cell —
             // a cell drawn as editable that refuses to open, or the reverse.
+            //
+            // The draft row is gated by the mode itself: the footer that offers it
+            // appears only with list `create`, and there is no record yet for a
+            // per-record grant to speak about.
             const isEditable = (row: ListItem) =>
-              kind !== "locked" && canItem(row.uuid, "edit");
+              kindFor(row) !== "locked" &&
+              (isNewRow(row.uuid) || canItem(row.uuid, "edit"));
             return (
               <DataColumn
                 key={col.uuid}
@@ -1282,11 +1552,12 @@ export function ListDetailPage() {
                 bodyClassName={(row: ListItem) =>
                   !isEditable(row)
                     ? ""
-                    : kind === "inline"
+                    : kindFor(row) === "inline"
                       ? "cell-editable"
                       : "cell-opens-record"
                 }
                 body={(row: ListItem) => {
+                  const kind = kindFor(row);
                   const editing = isEditable(row);
                   const cell = renderCell(
                     col,
@@ -1304,7 +1575,12 @@ export function ListDetailPage() {
                   // click is off while the mode is on — leaving this the only route
                   // to those columns, and until now a mouse-only one.
                   if (kind !== "dialog" || !editing) return cell;
-                  const openRecord = () => setRecordDialog({ open: true, item: row });
+                  // On the draft row the record does not exist yet, so what opens
+                  // is the Add form, holding everything typed into the row so far.
+                  const openRecord = () =>
+                    isNewRow(row.uuid)
+                      ? openNewRowInForm()
+                      : setRecordDialog({ open: true, item: row });
                   const hint = `Edit ${col.display_name} in the record's own form`;
                   return (
                     <span
@@ -1324,8 +1600,13 @@ export function ListDetailPage() {
                     </span>
                   );
                 }}
+                // Present whenever *either* form opens this column in place —
+                // PrimeReact renders no editor at all for a column without one, so
+                // this cannot be decided per row. `onBeforeCellEditShow` below is
+                // the per-row gate, and it is the one that has to be right.
                 editor={
-                  kind === "inline"
+                  editKinds.get(col.uuid) === "inline" ||
+                  createKinds.get(col.uuid) === "inline"
                     ? (options) => {
                         // `rowData` is trusted for the record's identity and for
                         // nothing else; the values come from the cache.
@@ -1375,7 +1656,10 @@ export function ListDetailPage() {
             headerClassName="grid-pin-end"
             // RowActions stops click propagation itself, so an action never also
             // toggles the row's selection.
-            body={(row: ListItem) => (
+            body={(row: ListItem) =>
+              isNewRow(row.uuid) ? (
+                newRowActions()
+              ) : (
               <RowActions
                 size="small"
                 // Reading and editing a record are what a row is for; sharing and
@@ -1426,7 +1710,8 @@ export function ListDetailPage() {
                   },
                 ]}
               />
-            )}
+              )
+            }
           />
         </DataTable>
       )}

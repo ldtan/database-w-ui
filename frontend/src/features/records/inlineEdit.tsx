@@ -1,10 +1,17 @@
 /**
  * Editing values from the grid itself — the toolbar's "Edit cells" mode.
  *
- * The dialog remains the way to edit a *record*: it lays the fields out the way
- * the list's update form says, and it saves them together. This is the way to
- * edit a *value* — one cell, committed on its own, for the correction you make
- * while reading rows rather than the record you sit down to fill in.
+ * The dialog remains the way to fill in a *record*: it lays the fields out the way
+ * the list's form says, and it saves them together. This is the way to edit a
+ * *value* — one cell, committed on its own, for the correction you make while
+ * reading rows rather than the record you sit down to fill in.
+ *
+ * The mode also *adds* records now, through the draft row at the foot of the grid
+ * (`newRow.ts`). That row reuses this editor unchanged: it is a `ListItem` like any
+ * other, holding its values in stored form, and the only thing that differs is
+ * where a committed cell goes — into the record being built rather than into a
+ * `PATCH`. Which columns it opens is the *create* form's answer rather than the
+ * update form's, which is the page's business, not this file's.
  *
  * Three things make that a small feature rather than a second editor:
  *
