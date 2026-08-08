@@ -17,13 +17,11 @@ import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
+import { buildFormConfigPatch, type FormFieldRow } from "./formConfig";
 
-interface Row {
-  column_uuid: string;
+/** A `FormFieldRow` plus the column's label, which the editor shows but never saves. */
+interface Row extends FormFieldRow {
   display_name: string;
-  included: boolean;
-  enabled: boolean;
-  label_override: string;
 }
 
 // Seed editor rows from a form's stored fields, appending any columns not yet
@@ -134,17 +132,12 @@ export function FormsEditor({
   }, [activeForm?.uuid, columns]);
 
   const save = useMutation({
+    // Through `buildFormConfigPatch` rather than an object literal: the PATCH replaces
+    // `config` wholesale, so anything the editor does not model has to be carried
+    // across explicitly or saving the layout destroys it.
     mutationFn: () =>
       api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
-        config: {
-          fields: rows.map((r, i) => ({
-            column_uuid: r.column_uuid,
-            included: r.included,
-            enabled: r.enabled,
-            order: i,
-            label_override: r.label_override.trim() || null,
-          })),
-        },
+        config: buildFormConfigPatch(activeForm!, rows),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
