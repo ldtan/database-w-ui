@@ -972,6 +972,26 @@ that doesn't exist, so the `target_list_uuid` field can't be used to probe for a
 lists. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
 refused-when-unviewable.
 
+**Writing such a cell used to be impossible, and now is not.** For the whole life of the
+relaxation above, the *write* path disagreed with it: `ListItemService._lookup_target_id`
+resolved the target with `Workspace.owner_id == lst.workspace.owner_id`, so a lookup at
+another **owner's** list could be built, would resolve its labels, and then refused every
+value with `"points at a missing target list"` — buildable and unwritable. It survived
+because no test covered the cross-owner write, and it made the claim above true at config
+time and false the moment anyone used the column. The owner predicate is gone;
+liveness (`deleted_at IS NULL` on both list and workspace) is all that remains, and the
+session-scoped cache key lost its owner component with it.
+`tests/test_cross_owner_lookup.py` pins the write by uuid and by label, the repeat write
+that exercises the re-keyed cache, and — the guard on the fix itself — that a deleted
+target is still refused.
+
+Permission to write the cell is, as it always was, `create`/`edit` on the **referring**
+list, enforced at the router; writing a lookup value has never required anything on the
+target, and the target-side checks stay exactly where they were, on the paths that
+disclose the target's data. What is newly permitted is setting a cell to a uuid the writer
+cannot see — a 122-bit guess, on a column whose creator needed `lookup` on the target to
+build it at all.
+
 **Resolving a label means reading the target list, so it obeys the *target's* permissions,
 not the exported/edited list's.** `view` on a list must not hand over the contents of a
 different list it happens to point at. The options endpoint enforces this, and so does export

@@ -1665,8 +1665,26 @@ class ListItemService:
     async def _lookup_target_id(
         cls, db: AsyncSession, lst: List, column: Column, config: dict
     ) -> int:
+        """Which list does this lookup column point at.
+
+        Scoped by nothing but liveness, deliberately. This used to require the target
+        to share the referring list's workspace owner, which put the write path out of
+        step with everything around it: `ColumnService._validate_config` gates on the
+        creator's `lookup` permission, and every read path (`lookup_options`, export,
+        `_reference_matches`) re-checks the *reader's*. The result was a column that
+        could be built at another owner's list and would resolve its labels, but whose
+        every cell write failed with "points at a missing target list" — buildable and
+        unwritable, which is not a state anything wanted.
+
+        Permission to write the *cell* is the referring list's `create`/`edit`,
+        enforced at the router; writing a lookup value has never required anything on
+        the target, and the target-side checks stay exactly where they were, on the
+        paths that disclose the target's data. What this does newly permit is setting
+        a cell to a uuid the writer cannot see — a 122-bit guess, and only on a column
+        whose creator held `lookup` on the target to build it at all.
+        """
         cache = db.info.setdefault("lookup_target_ids", {})
-        cache_key = (lst.workspace.owner_id, str(config.get("target_list_uuid")))
+        cache_key = str(config.get("target_list_uuid"))
         if cache_key not in cache:
             cache[cache_key] = (
                 await db.execute(
@@ -1674,7 +1692,6 @@ class ListItemService:
                     .join(Workspace, List.workspace_id == Workspace.id)
                     .where(
                         List.uuid == coerce_uuid(config.get("target_list_uuid")),
-                        Workspace.owner_id == lst.workspace.owner_id,
                         List.deleted_at.is_(None),
                         Workspace.deleted_at.is_(None),
                     )
