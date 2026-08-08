@@ -10,6 +10,7 @@ from src.core.exceptions import ConflictError, UnknownReferenceError
 from src.core.utils import coerce_uuid
 
 from ..columns.models import Column, in_shape
+from ..items import mirror
 from ..models import List
 from .models import View
 from .schemas import ViewConfig, ViewCreate, ViewUpdate
@@ -124,26 +125,54 @@ class ViewService:
     async def _validate_config(
         db: AsyncSession, list_id: int, config: ViewConfig
     ) -> None:
-        """Ensure every column referenced by the view belongs to the list."""
-        referenced: set[UUID] = set()
-        referenced.update(c.column_uuid for c in config.filters.conditions)
-        referenced.update(s.column_uuid for s in config.sorts)
-        referenced.update(config.hidden_columns)
-        referenced.update(config.column_order)
+        """Ensure every column referenced by the view belongs to the list.
+
+        Filters, sorts and grouping may also name a **mirror key** — a copy of a linked
+        record's value that a merged form keeps beside the record (`items/mirror.py`).
+        Those are checked against this list's mirrors instead, because the column half
+        of the key belongs to the *other* list and would never be found here.
+
+        `hidden_columns` and `column_order` are deliberately **not** widened. They hold
+        this list's own uuids and are remapped verbatim on clone
+        (`ListService._remap_view_config`), so a mirror key in either would survive the
+        remap unmapped and hide the wrong column. Merged-column visibility is client
+        state; see the note in the data-model doc.
+        """
+        referenced: set[str] = set()
+        referenced.update(str(c.column_uuid) for c in config.filters.conditions)
+        referenced.update(str(s.column_uuid) for s in config.sorts)
         if config.group_by is not None:
-            referenced.add(config.group_by.column_uuid)
+            referenced.add(str(config.group_by.column_uuid))
+        own = {str(u) for u in config.hidden_columns} | {
+            str(u) for u in config.column_order
+        }
+        bad_placement = [k for k in own if mirror.is_mirror_key(k)]
+        if bad_placement:
+            raise UnknownReferenceError(
+                "A linked field cannot be hidden or reordered through a view: "
+                + ", ".join(sorted(bad_placement))
+            )
+        referenced |= own
         if not referenced:
             return
 
-        result = await db.execute(
-            select(Column.uuid).where(
-                Column.list_id == list_id,
-                Column.uuid.in_(referenced),
-                in_shape(),
+        mirrors = await mirror.mirror_columns(db, list_id)
+        plain = {k for k in referenced if not mirror.is_mirror_key(k)}
+        unknown_mirrors = [
+            k for k in referenced if mirror.is_mirror_key(k) and k not in mirrors
+        ]
+
+        found: set[str] = set()
+        if plain:
+            result = await db.execute(
+                select(Column.uuid).where(
+                    Column.list_id == list_id,
+                    Column.uuid.in_(plain),
+                    in_shape(),
+                )
             )
-        )
-        found = set(result.scalars().all())
-        missing = [str(u) for u in referenced if u not in found]
+            found = {str(u) for u in result.scalars().all()}
+        missing = sorted([u for u in plain if u not in found] + unknown_mirrors)
         if missing:
             raise UnknownReferenceError(
                 f"View references column(s) not on this list: {', '.join(missing)}"

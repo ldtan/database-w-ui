@@ -1,13 +1,29 @@
-from typing import Any, Literal, Optional
+from typing import Annotated, Any, Literal, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
 from src.core.schemas import NameSlug
 
 
+# What a filter, a sort or a grouping may name.
+#
+# A column's uuid, or a **mirror key** — `"<link column uuid>:<linked column uuid>"`,
+# the copy of a linked record's value that a merged form keeps beside the record (see
+# `items/mirror.py`). Both are keys into `list_items.data`, which is what these configs
+# have always really held; `filtering.py` looks the key up in a dict and never parses
+# it. Typed as `UUID` before mirrors existed, which read as tighter than it was — the
+# uuid is not resolved against anything here either way.
+#
+# The pattern is kept narrow on purpose. Accepting a bare string would let a view store
+# a key naming nothing, which `_condition` silently skips, so a filter would come back
+# saying it had filtered.
+_KEY = r"^[0-9a-fA-F-]{36}(:[0-9a-fA-F-]{36})?$"
+ColumnKey = Annotated[str, StringConstraints(pattern=_KEY)]
+
+
 class FilterCondition(BaseModel):
-    column_uuid: UUID
+    column_uuid: ColumnKey
     operator: str
     value: Any = None
 
@@ -18,12 +34,12 @@ class FilterGroup(BaseModel):
 
 
 class SortSpec(BaseModel):
-    column_uuid: UUID
+    column_uuid: ColumnKey
     direction: Literal["asc", "desc"] = "asc"
 
 
 class GroupBy(BaseModel):
-    column_uuid: UUID
+    column_uuid: ColumnKey
 
 
 class ViewConfig(BaseModel):

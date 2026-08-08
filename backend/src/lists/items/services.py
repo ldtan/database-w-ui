@@ -27,6 +27,7 @@ from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
+from . import mirror
 from .filtering import apply_filters, apply_sorts
 from .models import ListItem
 from .schemas import ListItemCreate, ListItemUpdate
@@ -144,6 +145,7 @@ def shape_values(
     computed: list[ChainStep],
     key_of_name: dict[str, str],
     data: dict,
+    mirrors: Optional[dict] = None,
 ) -> dict:
     """One record's stored `data` as a reader should see it.
 
@@ -179,7 +181,15 @@ def shape_values(
         for key, value in data.items()
         if key in columns
     }
-    return apply_formulas(computed, key_of_name, shaped)
+    shaped = apply_formulas(computed, key_of_name, shaped)
+    if mirrors:
+        # After the filter above, not before: a mirror key is deliberately not a column
+        # uuid, so it would be dropped by it. Spliced in here rather than left in
+        # `data` for the same reason the calculated cells are recomputed — the stored
+        # copy is an index and may lag the record it copies, and no reader should ever
+        # meet the lag. See `mirror.py`.
+        shaped.update(mirrors)
+    return shaped
 
 
 class ListItemService:
@@ -256,18 +266,33 @@ class ListItemService:
 
     @classmethod
     async def get_for_read(
-        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
+        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID], user=None
     ) -> Optional[ListItem]:
         """`get_by_uuid` for a caller that will *render* the record, so its values
-        come back in the shape their columns declare (see `coerce_shape`)."""
+        come back in the shape their columns declare (see `coerce_shape`).
+
+        ``user`` is who the record is being rendered *for*, and only the mirrored
+        cells need it — they are another list's values, so what may be shown depends
+        on the reader. Without one they come back blank rather than unfiltered."""
         item = await cls.get_by_uuid(db, list_id, uuid)
         if item is None:
             return None
-        cls._shape_for_read(await cls._columns_by_key(db, list_id), [item])
+        await cls._shape_for_read(
+            await cls._columns_by_key(db, list_id), [item],
+            db=db, list_id=list_id, user=user,
+        )
         return item
 
-    @staticmethod
-    def _shape_for_read(columns: dict[str, Column], items: Sequence[ListItem]) -> None:
+    @classmethod
+    async def _shape_for_read(
+        cls,
+        columns: dict[str, Column],
+        items: Sequence[ListItem],
+        *,
+        db: Optional[AsyncSession] = None,
+        list_id: Optional[int] = None,
+        user=None,
+    ) -> None:
         """Present each record in its columns' declared shape.
 
         Two things happen here: stored values are coerced to the shape their column
@@ -288,9 +313,29 @@ class ListItemService:
         deliberately rather than as a side effect of somebody looking.
         """
         computed, key_of_name = computed_columns(columns)
+        # One query per link column for the whole page, before the loop — a mirror
+        # needs the other list's rows, and asking per record would turn a page of 100
+        # into 100 round trips.
+        #
+        # Optional, because shaping is otherwise a pure function of the record and its
+        # schema: without a session there is no other list to read, so the mirrors are
+        # left as they are rather than the whole call becoming impossible. That keeps
+        # this usable as the plain shaper it has always been.
+        specs = await mirror.specs_for(db, list_id) if db is not None else []
+        linked = (
+            await mirror.fetch_map(db, list_id, [i.data or {} for i in items], user)
+            if specs
+            else {}
+        )
         for item in items:
             data = item.data or {}
-            shaped = shape_values(columns, computed, key_of_name, data)
+            shaped = shape_values(
+                columns,
+                computed,
+                key_of_name,
+                data,
+                mirror.resolve(specs, linked, data) if specs else None,
+            )
             if shaped != data:
                 set_committed_value(item, "data", shaped)
 
@@ -481,10 +526,44 @@ class ListItemService:
                 if group_by is None:
                     group_by = config.get("group_by")
 
-        stmt = apply_filters(
-            stmt, saved_filters if filters is None else filters, columns
+        effective = saved_filters if filters is None else filters
+        # Mirrors are not columns, so `columns` alone cannot answer a filter or a sort
+        # on one. `filter_columns` adds a stand-in per referenced mirror key — and
+        # refuses the request outright when the caller has no access to the list the
+        # values come from. That check is the whole reason the augmentation is here,
+        # in the statement every reader shares, rather than at each call site.
+        columns = await cls.filter_columns(
+            db, lst.id, user, columns, cls._referenced_keys(effective, sorts, group_by)
         )
+        stmt = apply_filters(stmt, effective, columns)
         return stmt, sorts, group_by
+
+    @staticmethod
+    def _referenced_keys(filters, sorts, group_by) -> list[str]:
+        """Every column key a request names, wherever it names it."""
+        keys: list[str] = []
+        for cond in (filters or {}).get("conditions") or []:
+            if isinstance(cond, dict) and cond.get("column_uuid"):
+                keys.append(str(cond["column_uuid"]))
+        for spec in sorts or []:
+            if isinstance(spec, dict) and spec.get("column_uuid"):
+                keys.append(str(spec["column_uuid"]))
+        if isinstance(group_by, dict) and group_by.get("column_uuid"):
+            keys.append(str(group_by["column_uuid"]))
+        return keys
+
+    @classmethod
+    async def filter_columns(
+        cls, db: AsyncSession, list_id: int, user, columns: dict, keys
+    ) -> dict:
+        """``columns`` plus a stand-in for each mirror key the request names.
+
+        A separate dict from the one `_validate_data` reads, deliberately: a mirror has
+        exactly one writer, and putting a settable stand-in into the schema is how that
+        would quietly stop being true. This one is only ever handed to `filtering.py`.
+        """
+        fields = await mirror.referenced_fields(db, list_id, user, keys)
+        return {**columns, **fields} if fields else columns
 
     @classmethod
     async def _after_id(
@@ -603,20 +682,26 @@ class ListItemService:
         stmt, sorts, group_by = await cls.visible_stmt(
             db, lst, user, columns, view_uuid, q, filters, group_by
         )
+        asked = (
+            [{"column_uuid": sort_by, "direction": sort_dir}] if sort_by else []
+        ) if sort_by is not None else sorts
+        # The sort keys get the same treatment the filter keys got inside
+        # `visible_stmt`: a stand-in per mirror, and a refusal if the caller may not
+        # read the list the values come from. Without this a grid header on a borrowed
+        # column would order by nothing and look like the data was already sorted.
+        ordering = await cls.filter_columns(
+            db, lst.id, user, columns, cls._referenced_keys(None, asked, group_by)
+        )
         if sort_by is not None:
-            sorts = (
-                [{"column_uuid": sort_by, "direction": sort_dir}]
-                if sort_by in columns
-                else []
-            )
+            sorts = asked if sort_by in ordering else []
         if after is not None:
             stmt = stmt.where(
                 ListItem.id > await cls._after_id(db, lst, after, sorts, group_by, skip)
             )
             skip = 0
-        stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
+        stmt = apply_sorts(stmt, sorts, ordering, group_by).offset(skip).limit(limit)
         items = (await db.execute(stmt)).scalars().all()
-        cls._shape_for_read(columns, items)
+        await cls._shape_for_read(columns, items, db=db, list_id=lst.id, user=user)
         return items
 
     @classmethod
@@ -684,7 +769,7 @@ class ListItemService:
         await db.commit()
         # get_for_read, not get_by_uuid: the response renders the record, so it
         # carries coerced values and any calculated column's computed value.
-        return await cls.get_for_read(db, lst.id, new_uuid)
+        return await cls.get_for_read(db, lst.id, new_uuid, user)
 
     @classmethod
     async def update_uncommitted(
@@ -726,6 +811,11 @@ class ListItemService:
         item.data = merged
         if payload.permissions_inherit is not None:
             item.permissions_inherit = payload.permissions_inherit
+        # This record may be mirrored into other lists; push the new values out inside
+        # the same transaction, so a copy can never be committed apart from what it
+        # copies. Nothing to do on create — a record nothing has linked to yet has no
+        # copies — which is why only the update path carries this.
+        await cls.refresh_mirrors_of(db, lst.id, item.uuid, merged)
         return item
 
     @classmethod
@@ -742,7 +832,7 @@ class ListItemService:
             return None
         await db.commit()
         # get_for_read: see the note in create() — the response is a rendered record.
-        return await cls.get_for_read(db, lst.id, uuid)
+        return await cls.get_for_read(db, lst.id, uuid, user)
 
     @classmethod
     async def delete(
@@ -844,7 +934,7 @@ class ListItemService:
 
     @classmethod
     async def list_deleted(
-        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100
+        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100, user=None
     ) -> Sequence[ListItem]:
         """The list's bin, most recently deleted first, shaped for rendering so its
         reference and calculated cells read the same as in the live grid."""
@@ -856,7 +946,7 @@ class ListItemService:
             .limit(limit)
         )
         items = (await db.execute(stmt)).scalars().all()
-        cls._shape_for_read(columns, items)
+        await cls._shape_for_read(columns, items, db=db, list_id=lst.id, user=user)
         return items
 
     @classmethod
@@ -909,7 +999,12 @@ class ListItemService:
             return False
 
         item_id = item.id
-        # References into this row go first: once it is gone the cells pointing at it
+        # Copies of this row held by other lists, blanked rather than left showing a
+        # record that no longer exists. **Strictly before the scrub below**, which
+        # nulls the very link cell this matches on — run the other way round it would
+        # find nothing and silently leave every copy behind.
+        await cls.refresh_mirrors_of(db, lst.id, item.uuid, None)
+        # References into this row next: once it is gone the cells pointing at it
         # would be unresolvable, and nothing else would clean them.
         await cls._scrub_lookup_references(db, lst.uuid, item.uuid)
         # Grants before the row: they point at it polymorphically, so hard-deleting
@@ -1024,7 +1119,7 @@ class ListItemService:
 
     @classmethod
     async def list_archived(
-        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100
+        cls, db: AsyncSession, lst: List, skip: int = 0, limit: int = 100, user=None
     ) -> Sequence[ListItem]:
         """The list's archive, most recently archived first, shaped for rendering so
         its reference and calculated cells read the same as in the live grid."""
@@ -1036,7 +1131,7 @@ class ListItemService:
             .limit(limit)
         )
         items = (await db.execute(stmt)).scalars().all()
-        cls._shape_for_read(columns, items)
+        await cls._shape_for_read(columns, items, db=db, list_id=lst.id, user=user)
         return items
 
     @classmethod
@@ -1110,6 +1205,56 @@ class ListItemService:
         """
     )
 
+    # One statement per mirrored column, matched by the link cell rather than by a
+    # row list — so the fan-out costs the same whether one record points here or a
+    # thousand, and no row becomes a Python object on the way. Same shape and the same
+    # reasoning as `_SCRUB_SQL` above; see its comment for why that matters.
+    _MIRROR_SQL = sa.text(
+        """
+        UPDATE list_items
+           SET data = jsonb_set(data, ARRAY[:mirror_key], CAST(:value AS jsonb))
+         WHERE list_id = :list_id
+           AND deleted_at IS NULL
+           AND data ->> :link_key = :target
+        """
+    )
+
+    @classmethod
+    async def refresh_mirrors_of(
+        cls, db: AsyncSession, target_list_id: int, target_uuid, data: Optional[dict]
+    ) -> None:
+        """Push a record's new values into every copy of it held elsewhere.
+
+        The half of the mirror bargain that a `calculated` column never needs: a
+        formula only falls behind a *schema* change, which the app can see coming,
+        while a mirror falls behind whenever the record it copies is edited — in
+        another list, possibly by another person, on a write that knows nothing about
+        the lists watching it.
+
+        ``data`` is ``None`` when the record has gone, which blanks the copies rather
+        than leaving them showing a record that no longer exists. Does not commit; the
+        caller's transaction carries it, so the copy and the original can never land
+        apart.
+        """
+        import json
+
+        referrers = await mirror.referring_specs(db, target_list_id)
+        if not referrers:
+            return
+        await db.flush()  # Core UPDATEs: land the ORM change they read around first.
+        for list_id, spec in referrers:
+            for key, value in mirror.values_from(spec, data).items():
+                await db.execute(
+                    cls._MIRROR_SQL,
+                    {
+                        "list_id": list_id,
+                        "mirror_key": key,
+                        "link_key": spec.link_key,
+                        "target": str(target_uuid),
+                        "value": json.dumps(value),
+                    },
+                )
+
     @classmethod
     async def _drop_reference(
         cls, db: AsyncSession, columns: Sequence[Column], target: str
@@ -1172,6 +1317,17 @@ class ListItemService:
         for key, value in incoming.items():
             column = columns.get(key)
             if column is None:
+                if mirror.is_mirror_key(key):
+                    # A mirror has exactly one writer, like a calculated cell: it is a
+                    # copy of the linked record, so setting it here would either be
+                    # overwritten on the next read or quietly disagree with the record
+                    # it copies. Say which, rather than "unknown column" — the key is
+                    # one this list's own payloads carry, so a client echoing a record
+                    # back would otherwise be told its own data is invalid.
+                    raise ValidationError(
+                        f"'{key}' holds a copy of a linked record and cannot be set "
+                        f"here; edit the linked record instead"
+                    )
                 raise ValidationError(f"Unknown column '{key}' for this list")
             if column.type in COMPUTED_TYPES:
                 # A calculated cell is derived on read and stores nothing, so there
@@ -1258,6 +1414,11 @@ class ListItemService:
         # `columns/backfill.py` is what brings it back.
         plan, key_of_name = build_chain(columns)
         apply_formulas(plan, key_of_name, result)
+
+        # And every mirrored cell, on the same terms: a copy of the linked record's
+        # values so Postgres can filter and sort on them, recomputed on every read so
+        # nobody is ever shown the copy. See `mirror.py`.
+        await mirror.apply(db, lst.id, result)
 
         return result
 

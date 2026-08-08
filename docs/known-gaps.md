@@ -244,6 +244,56 @@ The remaining edges:
 
 ---
 
+## 5b. A merged form's borrowed values are a second stored index, one list further away
+
+A merged form (data-model §8) borrows columns from the list its link column points at,
+and each borrowed value is **also written into the referring record** under a mirror key
+`"<link column uuid>:<linked column uuid>"` (`items/mirror.py`). Postgres is what filters
+and sorts, and the values live in another list, so without the copy neither would work
+at all.
+
+It is the same bargain §5 describes for a calculated cell, and it keeps the same safety
+property: `shape_values` recomputes every mirror on read and overwrites the stored copy,
+so a stale one misplaces a row in a sorted or filtered view and can never put a wrong
+value on a screen. `test_a_hand_broken_mirror_never_reaches_a_reader` pins exactly that.
+
+What is *different*, and worse, is how it goes stale. A formula only falls behind a
+**schema** change, which the app can notice and offer a re-index for. A mirror falls
+behind whenever the linked record is edited — a different list, possibly a different
+person, on a write that knows nothing about the rows watching it. So the write path fans
+out (`ListItemService.refresh_mirrors_of`, one `UPDATE … jsonb_set` per mirrored column,
+no rows into Python) and `maintenance/reconcile_mirrors.py` is the nightly backstop.
+
+The edges worth knowing:
+
+- **Filtering or sorting by a mirror requires `view` on the linked list, and is refused
+  without it.** This is the one genuinely new disclosure surface in the feature. Blanking
+  the *displayed* value is not enough, because a filter is answered by Postgres against
+  the stored copy — so without the gate someone holding `view` here and nothing there
+  could binary-search the other list's contents. It refuses rather than ignoring: a
+  filter silently not applied returns rows the caller believes were excluded, and they
+  cannot tell. `lookup` is deliberately not enough, for the same reason it is not enough
+  to configure the form.
+- **Search does not match mirrored values, and should not be "fixed" to.** `_apply_search`
+  iterates live columns, so mirror keys are naturally outside it. Searching by a linked
+  *label* already works, through `_reference_matches`, which re-checks the target's
+  permissions per caller — widening search to the raw copies would route around that.
+- **Export drops them.** `shape_values` is called there without a mirror map, so a CSV of
+  a list with a merged form has the borrowed columns missing, even though the grid shows
+  and sorts them. Not wrong, but inconsistent, and the fix needs a header convention the
+  first cut did not settle: a mirror is not a column, so it has no `name` to put in the
+  header row that would import back. Metrics drop them too, and that one *is* right —
+  formulas reference columns by name and a mirror has none.
+- **`hidden_columns` and `column_order` refuse a mirror key.** They hold this list's own
+  uuids and are remapped verbatim on clone, so a mirror key there would survive the remap
+  unmapped and hide the wrong column. Merged-column visibility is client state.
+- **A clone strips them**, rather than remapping. The link half names a column the clone
+  re-created under a new uuid; remapping would need the key format understood a second
+  time, in SQL, where a mistake is silent. The next write rebuilds them.
+- **`FilterCondition.column_uuid` is no longer a `UUID`.** It is a uuid *or* a mirror key,
+  under a narrow pattern — deliberately not a free string, since a key naming nothing is
+  skipped by `_condition` and would let a filter come back claiming it had filtered.
+
 ## 6. Trash is done everywhere, and every bin now has a surface
 
 Soft delete already destroys nothing (see "Soft delete destroys nothing" below): deleting a

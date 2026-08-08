@@ -245,7 +245,7 @@ async def list_deleted_items(
     response.headers["X-Total-Count"] = str(
         await ListItemService.count_deleted(db, lst)
     )
-    return await ListItemService.list_deleted(db, lst, skip=skip, limit=limit)
+    return await ListItemService.list_deleted(db, lst, skip=skip, limit=limit, user=current_user)
 
 
 @router.post("/bulk-delete", response_model=BulkDeleteResult)
@@ -298,7 +298,7 @@ async def list_archived_items(
     response.headers["X-Total-Count"] = str(
         await ListItemService.count_archived(db, lst)
     )
-    return await ListItemService.list_archived(db, lst, skip=skip, limit=limit)
+    return await ListItemService.list_archived(db, lst, skip=skip, limit=limit, user=current_user)
 
 
 @router.post("/bulk-archive", response_model=BulkArchiveResult)
@@ -332,7 +332,7 @@ async def get_item(
 ):
     # get_for_read, not get_by_uuid: this record is about to be rendered, so its
     # values come back in the shape their columns declare (see `coerce_shape`).
-    item = await ListItemService.get_for_read(db, lst.id, uuid)
+    item = await ListItemService.get_for_read(db, lst.id, uuid, current_user)
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     await PermissionService.require(

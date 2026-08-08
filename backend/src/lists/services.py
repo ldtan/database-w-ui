@@ -58,6 +58,14 @@ CLONE_CHUNK = 1_000
 # `archived_at` is carried across rather than cleared. A clone with records is asked
 # for to get the data, and dropping the archived rows — or bringing them back live —
 # would both be the clone quietly disagreeing with the source about what it holds.
+#
+# **Mirror keys are dropped** — the `position(':' …)` clause. A mirror key is
+# `"<link column uuid>:<linked column uuid>"` (items/mirror.py), and the link half names
+# a column of *this* list, which the clone re-created under a new uuid. Carried across
+# it would name a link that no longer exists; remapped, it would need the key format
+# understood in a second place, in SQL, where getting it wrong is silent. Dropping is
+# both simpler and self-correcting: the first write rebuilds them, the nightly
+# `reconcile_mirrors` is the backstop, and until then reads recompute them anyway.
 _COPY_RECORDS = text("""
     INSERT INTO list_items (uuid, list_id, data, permissions_inherit, archived_at, created_at, updated_at)
     SELECT b.new_uuid,
@@ -65,7 +73,8 @@ _COPY_RECORDS = text("""
            COALESCE(
                (SELECT jsonb_object_agg(
                            COALESCE(CAST(:col_map AS jsonb) ->> kv.key, kv.key), kv.value)
-                  FROM jsonb_each(src.data) AS kv),
+                  FROM jsonb_each(src.data) AS kv
+                 WHERE position(':' in kv.key) = 0),
                '{}'::jsonb
            ),
            true,

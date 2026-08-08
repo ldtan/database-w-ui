@@ -374,7 +374,7 @@ async def test_a_formula_nested_too_deeply_is_rejected(client, list_uuid):
     assert "nest" in resp.text.lower()
 
 
-def test_a_stored_formula_that_no_longer_parses_blanks_its_own_cell():
+async def test_a_stored_formula_that_no_longer_parses_blanks_its_own_cell():
     # Built directly rather than over the API, because the API now refuses this
     # formula — the point is a column saved *before* the bounds tightened. Such a
     # column must cost its own cell and nothing else: parsing it while shaping a
@@ -400,7 +400,7 @@ def test_a_stored_formula_that_no_longer_parses_blanks_its_own_cell():
     }
     item = ListItem(data={qty: 21})
 
-    ListItemService._shape_for_read(columns, [item])
+    await ListItemService._shape_for_read(columns, [item])
 
     assert item.data[live] == 42  # the healthy sibling still computes
     assert item.data.get(stale) is None  # and the stale one is simply blank

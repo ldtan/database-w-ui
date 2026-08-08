@@ -599,6 +599,26 @@ The linked record is staged first because this side needs its uuid, and both hal
 share **one commit**, so a refusal here leaves nothing behind on the other side. That
 is what `ListItemService.create_uncommitted`/`update_uncommitted` exist for.
 
+**The borrowed values are also stored here, as a query index.** Postgres is what filters
+and sorts, and the values live in the other list — so each borrowed value is written into
+the referring record under a **mirror key**, `"<link column uuid>:<linked column uuid>"`
+(`items/mirror.py`). That makes a filter or a sort on a borrowed column an ordinary
+`data ->> key`, which is why `filtering.py` needed no changes at all: a stand-in whose
+`uuid` *is* the mirror key, carrying the borrowed column's type and config, is all it
+takes.
+
+The stored copy is an index and never the answer — `shape_values` recomputes every mirror
+on read and overwrites it, exactly as it does a `calculated` cell (§5), so a stale copy
+can misplace a row in a sorted view and can never put a wrong value on a screen. Writes
+keep it current from both ends: setting the link mirrors the record, and editing the
+*linked* record fans out to every row holding a copy, in one `UPDATE` per column with no
+rows read into Python. `maintenance/reconcile_mirrors.py` is the nightly backstop.
+
+**Filtering or sorting by a mirror needs `view` on the linked list and is refused
+without it** — the copy sits in this list's rows, so nothing else would stop a reader
+here from binary-searching a list they were never granted. See [known gaps §5b](known-gaps.md)
+for that and the rest of the edges (search, export, clone, `hidden_columns`).
+
 Permissions follow each list separately: `create` here, `view` on the target always,
 plus `create` there to mint a record or `edit` on that **record** to write through to
 one that already exists (`update_linked`, off by default so a create cannot silently

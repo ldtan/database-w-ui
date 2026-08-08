@@ -690,6 +690,38 @@ export function ListDetailPage() {
   );
 
   const formList = forms.data ?? [];
+
+  // A merged form's borrowed fields, shown after this list's own columns. Taken from
+  // whichever form carries the block — the editor writes create and update together,
+  // so either answers, and a list with no merged form does no work here at all.
+  const mergeConfig =
+    formList.find((f) => f.config.merge?.link_column_uuid)?.config.merge ?? null;
+  const mergedListUuid =
+    cols.find((c) => c.uuid === mergeConfig?.link_column_uuid)?.config
+      .target_list_uuid ?? null;
+  // `retry: false`: a 403 means this caller may read the list but not the one it
+  // borrows from, and the right answer is to show no borrowed columns rather than
+  // to keep asking.
+  const mergedColumns = useQuery({
+    queryKey: ["columns", mergedListUuid],
+    queryFn: () => api.get<Column[]>(`/lists/${mergedListUuid}/columns/`),
+    enabled: !!mergedListUuid,
+    retry: false,
+  });
+  const mergedCols = useMemo(() => {
+    if (!mergeConfig || !mergedColumns.data) return [];
+    const byUuid = new Map(mergedColumns.data.map((c) => [c.uuid, c]));
+    return mergeConfig.fields
+      .filter((f) => f.included)
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map((f) => ({
+        key: `${mergeConfig.link_column_uuid}:${f.column_uuid}`,
+        column: byUuid.get(f.column_uuid),
+      }))
+      .filter((x): x is { key: string; column: Column } => !!x.column);
+  }, [mergeConfig, mergedColumns.data]);
+
   const sharingItem =
     rows.find((i) => i.uuid === sharingItemUuid) ?? null;
   // Editing uses the "update" form; creating uses the "create" form.
@@ -1651,6 +1683,38 @@ export function ListDetailPage() {
               />
             );
           })}
+          {/*
+            The linked list's fields, after this list's own. Read-only: their values
+            belong to another record, so the way to change one is to open this record
+            and edit the linked half — which is what the merged dialog is for.
+
+            `field` carries the mirror key, so a header click sends it as `sort_by`
+            and the server orders by the copy it keeps. There is no client-side
+            sorting to arrange: the borrowed value is a real cell in the payload, the
+            same as any other.
+          */}
+          {mergedCols.map(({ key, column }) => (
+            <DataColumn
+              key={key}
+              field={`data.${key}`}
+              sortable={!groupColumn}
+              header={column.display_name}
+              body={(row: ListItem) =>
+                renderCell(
+                  // The borrowed column, and the list it belongs to — `renderCell`
+                  // already takes both, so a linked lookup or user cell resolves
+                  // against the right list with no special case here.
+                  { ...column, uuid: key },
+                  row,
+                  mergedListUuid ?? listUuid,
+                  principalUuids,
+                  lookupUuids,
+                  "compact",
+                  false,
+                )
+              }
+            />
+          ))}
           <DataColumn
             header=""
             style={{ width: `${actionsWidth}rem` }}

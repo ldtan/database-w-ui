@@ -297,11 +297,11 @@ class MergedItemService:
         from src.permissions.enums import Action, ResourceType
         from src.permissions.services import PermissionService
 
-        item = await ListItemService.get_for_read(db, lst.id, item_uuid)
+        item = await ListItemService.get_for_read(db, lst.id, item_uuid, user)
         linked = None
         if linked_uuid is not None:
             candidate = await ListItemService.get_for_read(
-                db, link.target.id, linked_uuid
+                db, link.target.id, linked_uuid, user
             )
             if candidate is not None and await PermissionService.has(
                 db, user, ResourceType.item, candidate.id, Action.view
