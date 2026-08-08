@@ -24,7 +24,11 @@ from .schemas import (
     ListItemCreate,
     ListItemRead,
     ListItemUpdate,
+    MergedItemCreate,
+    MergedItemRead,
+    MergedItemUpdate,
 )
+from .merged import MergedItemService
 from .services import ListItemService
 
 
@@ -49,6 +53,41 @@ async def create_item(
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except (ValidationError, UnknownReferenceError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+# Declared before `/{uuid}`: FastAPI matches on path shape and validates afterwards,
+# so `merged` would otherwise be captured there and rejected as a malformed uuid —
+# the same reason `count`, `deleted` and `archived` sit where they do.
+@router.post(
+    "/merged", response_model=MergedItemRead, status_code=status.HTTP_201_CREATED
+)
+async def create_merged_item(
+    payload: MergedItemCreate,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a record here and one in the linked list, in a single transaction.
+
+    A separate route rather than a flag on `POST /` because the two cannot share a
+    body — `_validate_data` refuses a key that is not a column of the list it is
+    validating, so the sides have to be split before validation — and because this one
+    needs up to three permission checks where that one needs a single `create`. The
+    rest of them live in `MergedItemService`, which is also what the linked list's are
+    about; only this list's belongs here.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.create
+    )
+    try:
+        item, linked = await MergedItemService.create(
+            db, lst, payload, user=current_user
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValidationError, UnknownReferenceError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return MergedItemRead(item=item, linked_item=linked)
 
 
 @router.get("/", response_model=list[ListItemRead])
@@ -330,6 +369,44 @@ async def update_item(
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
     return item
+
+
+@router.patch("/{uuid}/merged", response_model=MergedItemRead)
+async def update_merged_item(
+    uuid: UUID,
+    payload: MergedItemUpdate,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Save both sides of an existing pair.
+
+    `edit` on this record is checked here; `edit` on the linked one is checked in the
+    service, per **item** rather than per list, because a record in the other list can
+    be shared on its own and holding `edit` there does not follow from holding it here.
+    """
+    item = await ListItemService.get_by_uuid(db, lst.id, uuid)
+    if item is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    await PermissionService.require(
+        db, current_user, ResourceType.item, item.id, Action.edit
+    )
+    if payload.permissions_inherit is not None:
+        await PermissionService.require(
+            db, current_user, ResourceType.item, item.id, Action.share
+        )
+    try:
+        pair = await MergedItemService.update(
+            db, lst, uuid, payload, user=current_user
+        )
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValidationError, UnknownReferenceError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if pair is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Item not found")
+    return MergedItemRead(item=pair[0], linked_item=pair[1])
 
 
 @router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)

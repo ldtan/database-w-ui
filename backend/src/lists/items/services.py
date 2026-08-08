@@ -1374,12 +1374,24 @@ class ListItemService:
         makes `unarchive` incapable of conflicting: nothing could have taken the
         value while the row was away. It is the one asymmetry with the bin, where a
         binned row *does* release its value and `restore` can therefore 409.
+
+        **A merged form's 1:1 link is enforced here too, and that is the point.** Its
+        `allow_shared: false` says a linked record may be reached by at most one row of
+        this list, which is a uniqueness rule about the link cell and nothing more — so
+        it reuses the lock, the containment query and the `exclude_id` handling below
+        rather than growing a second mechanism beside them. Enforcing it on the merged
+        route instead would leave the invariant true only for writes that happened to
+        go through a form: an inline cell edit, a CSV import or a QR fill could break it
+        without the form being involved. A form is a layout and cannot be the authority
+        on what the data may say.
         """
         unique_columns = {
             key: column
             for key, column in columns.items()
             if (column.config or {}).get("unique")
         }
+        for key in await cls._exclusive_link_keys(db, list_id, columns, data):
+            unique_columns.setdefault(key, columns[key])
         if not unique_columns:
             return
 
@@ -1412,9 +1424,69 @@ class ListItemService:
                         f"Column '{column.name}' must be unique; this record computes "
                         f"{value!r}, which another record already has"
                     )
+                if key in await cls._exclusive_link_keys(db, list_id, columns, data):
+                    # Not "that value already exists": the writer picked a *record*,
+                    # and the complaint is about how many rows may point at it. Naming
+                    # the toggle is what makes the refusal actionable.
+                    raise ConflictError(
+                        f"That record is already linked through '{column.name}'. Turn "
+                        f"on shared linking for this form to let several rows share one "
+                        f"linked record"
+                    )
                 raise ConflictError(
                     f"Column '{column.name}' must be unique; that value already exists"
                 )
+
+    @classmethod
+    async def _exclusive_link_keys(
+        cls,
+        db: AsyncSession,
+        list_id: int,
+        columns: dict[str, Column],
+        data: dict,
+    ) -> frozenset[str]:
+        """Link columns whose merged form says one linked record, one row.
+
+        Guarded twice before it will run a query, because it sits on every write of
+        every list and almost none of them have a merged form. First: the write must
+        actually set a lookup cell — a record that does not touch a link cannot break a
+        rule about links. Second: the answer is cached on the session, which is scoped
+        to one request, so a 200-row import asks once rather than 200 times.
+        """
+        candidates = {
+            key
+            for key, column in columns.items()
+            if column.type == ColumnType.lookup
+            and key in data
+            and not (column.config or {}).get("unique")
+        }
+        if not candidates:
+            return frozenset()
+
+        cache = db.info.setdefault("exclusive_link_keys", {})
+        if list_id not in cache:
+            from ..forms.models import Form
+
+            rows = (
+                await db.execute(
+                    select(Form.config).where(
+                        Form.deleted_at.is_(None),
+                        Form.list_id == list_id,
+                        Form.config["merge"].isnot(None),
+                    )
+                )
+            ).scalars().all()
+            exclusive = set()
+            for config in rows:
+                merge = (config or {}).get("merge") or {}
+                if merge.get("allow_shared"):
+                    continue
+                link = merge.get("link_column_uuid")
+                if link:
+                    exclusive.add(str(link))
+            cache[list_id] = frozenset(exclusive)
+
+        return frozenset(cache[list_id] & candidates)
 
     @staticmethod
     def _is_empty(value) -> bool:
