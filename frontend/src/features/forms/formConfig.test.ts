@@ -63,4 +63,28 @@ describe("buildFormConfigPatch", () => {
     const { fields } = buildFormConfigPatch(form({ fields: stale }), rows);
     expect(fields.map((f) => f.column_uuid)).toEqual(["c1", "c2"]);
   });
+
+  /**
+   * `undefined` and `null` are different answers. The first says "the editor is not
+   * managing merge", so whatever is stored stands; the second says "the editor turned
+   * it off". Collapsing them would make every save from a surface that does not show
+   * the merge editor silently un-merge the form.
+   */
+  it("leaves a stored merge alone when no merge argument is given", () => {
+    const merge = { link_column_uuid: "L", fields: [], allow_shared: false };
+    const patch = buildFormConfigPatch(form({ merge } as never), rows);
+    expect((patch as never as { merge: unknown }).merge).toEqual(merge);
+  });
+
+  it("clears a stored merge when explicitly passed null", () => {
+    const merge = { link_column_uuid: "L", fields: [], allow_shared: false };
+    const patch = buildFormConfigPatch(form({ merge } as never), rows, null);
+    expect((patch as never as { merge: unknown }).merge).toBeNull();
+  });
+
+  it("writes a new merge block when given one", () => {
+    const next = { link_column_uuid: "L2", fields: [], allow_shared: true };
+    const patch = buildFormConfigPatch(form(), rows, next);
+    expect((patch as never as { merge: unknown }).merge).toEqual(next);
+  });
 });

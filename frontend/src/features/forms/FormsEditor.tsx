@@ -12,12 +12,13 @@ import { NameFields } from "../../components/NameFields";
 import { DRAG_GRIP_WIDTH, SortableList } from "../../components/SortableList";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
-import type { Column, Form } from "../../lib/types";
+import type { Column, Form, MergeConfig } from "../../lib/types";
 import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
 import { buildFormConfigPatch, type FormFieldRow } from "./formConfig";
+import { MergeEditor } from "./MergeEditor";
 
 /** A `FormFieldRow` plus the column's label, which the editor shows but never saves. */
 interface Row extends FormFieldRow {
@@ -83,6 +84,9 @@ export function FormsEditor({
   const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  // null is a real value here — "this form does not merge" — so it is sent on save
+  // rather than being left to the stored config (see `buildFormConfigPatch`).
+  const [merge, setMerge] = useState<MergeConfig | null>(null);
   const [sharing, setSharing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [names, setNames] = useState({ displayName: "", name: "" });
@@ -131,13 +135,17 @@ export function FormsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeForm?.uuid, columns]);
 
+  useEffect(() => {
+    setMerge(activeForm?.config.merge ?? null);
+  }, [activeForm?.uuid, activeForm?.config.merge]);
+
   const save = useMutation({
     // Through `buildFormConfigPatch` rather than an object literal: the PATCH replaces
     // `config` wholesale, so anything the editor does not model has to be carried
     // across explicitly or saving the layout destroys it.
     mutationFn: () =>
       api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
-        config: buildFormConfigPatch(activeForm!, rows),
+        config: buildFormConfigPatch(activeForm!, rows, merge),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
@@ -317,6 +325,21 @@ export function FormsEditor({
           {rows.length === 0 && <p>Add a column to configure this form.</p>}
         </div>
         </div>
+
+        {/* A view form displays one record and writes nothing, so there is no second
+            record for it to write either — merging is a property of a form that
+            collects, like `showsEnabled` above. */}
+        {showsEnabled && (
+          <div className="flex flex-col gap-2 border-t pt-4">
+            <span className="field-label">Linked list</span>
+            <MergeEditor
+              columns={columns}
+              value={merge}
+              disabled={!canEdit}
+              onChange={setMerge}
+            />
+          </div>
+        )}
 
         {/* "Save layout", not "Save" — the dialog's own footer is a few pixels
             below this one, and two buttons that both say Save do not obviously

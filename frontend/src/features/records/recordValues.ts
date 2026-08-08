@@ -9,7 +9,7 @@
  * serialized), so the answers live here rather than inside the dialog.
  */
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
-import type { Column, Form, TextMode } from "../../lib/types";
+import type { Column, Form, MergeConfig, TextMode } from "../../lib/types";
 
 export interface ResolvedField {
   column: Column;
@@ -90,6 +90,48 @@ export function resolveFields(
     enabled: writable(c),
     label: c.display_name,
   }));
+}
+
+/**
+ * The fields a merged form borrows from the list its link column points at.
+ *
+ * A sibling of `resolveFields` rather than an option on it, because the two disagree
+ * about the one thing that function's rules are built around. There, an empty config
+ * means *every* column and a column the config has never heard of is appended — both
+ * right for a form over its own list, where a new column should show up on its own.
+ *
+ * Here empty means **none**, and an unlisted column stays unlisted. The other list is
+ * not this form's to enumerate: "all of them" would silently widen as the target
+ * gained columns, putting fields on screen that nobody chose and that the form's author
+ * may not even be able to see. The backend refuses to imply them for the same reason,
+ * so the two ends agree.
+ *
+ * `columns` is the *linked* list's schema, which the caller may not have — a 403 on
+ * that list's columns is how a merged form degrades — so an empty array yields no
+ * fields rather than throwing.
+ */
+export function resolveMergedFields(
+  columns: Column[],
+  merge: MergeConfig | null | undefined,
+): ResolvedField[] {
+  if (!merge || merge.fields.length === 0) return [];
+  const byUuid = new Map(columns.map((c) => [c.uuid, c]));
+  return merge.fields
+    .filter((f) => f.included)
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((f) => {
+      const column = byUuid.get(f.column_uuid);
+      // A borrowed column that is gone, or on a list this caller cannot read, simply
+      // does not render. There is nothing to show and nothing to write.
+      if (!column) return null;
+      return {
+        column,
+        enabled: f.enabled !== false && writable(column),
+        label: (f.label_override && f.label_override.trim()) || column.display_name,
+      };
+    })
+    .filter((x): x is ResolvedField => x !== null);
 }
 
 export function serialize(column: Column, value: unknown): unknown {

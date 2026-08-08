@@ -5,6 +5,7 @@ import {
   clearedNested,
   needsFullEditor,
   resolveFields,
+  resolveMergedFields,
   textMode,
   toStored,
 } from "./recordValues";
@@ -116,5 +117,89 @@ describe("resolveFields and server-stamped columns", () => {
 
   it("leaves an ordinary column alone", () => {
     expect(resolveFields([name], null)[0].enabled).toBe(true);
+  });
+});
+
+describe("resolveMergedFields", () => {
+  const cols = [
+    column({ uuid: "a1", display_name: "Name" }),
+    column({ uuid: "a2", display_name: "Age", type: "number" }),
+  ];
+  const field = (uuid: string, over = {}) => ({
+    column_uuid: uuid,
+    included: true,
+    enabled: true,
+    order: 0,
+    ...over,
+  });
+
+  it("resolves borrowed fields in configured order", () => {
+    const merge = {
+      link_column_uuid: "L",
+      allow_shared: false,
+      fields: [field("a2", { order: 0 }), field("a1", { order: 1 })],
+    };
+    expect(resolveMergedFields(cols, merge).map((f) => f.column.uuid)).toEqual([
+      "a2",
+      "a1",
+    ]);
+  });
+
+  /**
+   * The inverse of `resolveFields`, and the reason this is a separate function.
+   * The linked list is not this form's to enumerate — "all of them" would widen
+   * silently as that list gained columns.
+   */
+  it("treats an empty field list as none, not all", () => {
+    const merge = { link_column_uuid: "L", allow_shared: false, fields: [] };
+    expect(resolveMergedFields(cols, merge)).toEqual([]);
+  });
+
+  it("does not append columns the config never mentions", () => {
+    const merge = {
+      link_column_uuid: "L",
+      allow_shared: false,
+      fields: [field("a1")],
+    };
+    expect(resolveMergedFields(cols, merge).map((f) => f.column.uuid)).toEqual([
+      "a1",
+    ]);
+  });
+
+  it("drops excluded fields", () => {
+    const merge = {
+      link_column_uuid: "L",
+      allow_shared: false,
+      fields: [field("a1", { included: false }), field("a2")],
+    };
+    expect(resolveMergedFields(cols, merge).map((f) => f.column.uuid)).toEqual([
+      "a2",
+    ]);
+  });
+
+  /** How a merged form degrades when the linked list's schema is a 403. */
+  it("yields nothing when the linked schema is unavailable", () => {
+    const merge = {
+      link_column_uuid: "L",
+      allow_shared: false,
+      fields: [field("a1")],
+    };
+    expect(resolveMergedFields([], merge)).toEqual([]);
+  });
+
+  it("yields nothing when the form is not merged", () => {
+    expect(resolveMergedFields(cols, null)).toEqual([]);
+    expect(resolveMergedFields(cols, undefined)).toEqual([]);
+  });
+
+  it("applies a label override and honours enabled", () => {
+    const merge = {
+      link_column_uuid: "L",
+      allow_shared: false,
+      fields: [field("a1", { label_override: " Full name ", enabled: false })],
+    };
+    const [only] = resolveMergedFields(cols, merge);
+    expect(only.label).toBe("Full name");
+    expect(only.enabled).toBe(false);
   });
 });

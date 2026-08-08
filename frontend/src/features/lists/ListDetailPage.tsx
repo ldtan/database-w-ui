@@ -32,6 +32,7 @@ import type {
 import { ListSettingsDialog } from "./ListSettingsDialog";
 import { MetricBar, useMetrics } from "../metrics/MetricBar";
 import { RecordCards } from "../records/RecordCards";
+import { MergedRecordFormDialog } from "../records/MergedRecordFormDialog";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { RecordViewDialog } from "../records/RecordViewDialog";
 import { ArchiveHint, isWholeListScope } from "../records/ArchiveHint";
@@ -1069,8 +1070,15 @@ export function ListDetailPage() {
   }
 
   function confirmDeleteItem(row: ListItem) {
+    // A merged record is half of a pair, and deleting it only bins this half — an
+    // action in this list must not destroy a record in another one. Said here rather
+    // than after the fact, because the moment to know is before you agree to it.
+    const mergeLink = recordForm?.config.merge?.link_column_uuid;
+    const linked = mergeLink ? row.data?.[mergeLink] : undefined;
     confirmDialog({
-      message: "Delete this record?",
+      message: linked
+        ? "Delete this record? The record it is linked to stays where it is — delete that one from its own list if you want it gone."
+        : "Delete this record?",
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => deleteItem.mutate(row.uuid),
@@ -1805,16 +1813,33 @@ export function ListDetailPage() {
         visible={viewItem !== null}
         onHide={() => setViewItem(null)}
       />
-      <RecordFormDialog
-        listUuid={listUuid}
-        columns={cols}
-        form={recordForm}
-        item={recordDialog.item}
-        prefill={recordDialog.prefill}
-        notes={recordDialog.notes}
-        visible={recordDialog.open}
-        onHide={() => setRecordDialog({ open: false, item: null })}
-      />
+      {/*
+        A merged form writes a record in this list *and* one in the list its link
+        column points at, so it needs its own dialog and its own route. A QR prefill
+        never reaches it: the scanner fills a single-list record, and `recordDialog`
+        only carries a prefill when the plain dialog is the one opening.
+      */}
+      {recordForm?.config.merge ? (
+        <MergedRecordFormDialog
+          listUuid={listUuid}
+          columns={cols}
+          form={recordForm}
+          item={recordDialog.item}
+          visible={recordDialog.open}
+          onHide={() => setRecordDialog({ open: false, item: null })}
+        />
+      ) : (
+        <RecordFormDialog
+          listUuid={listUuid}
+          columns={cols}
+          form={recordForm}
+          item={recordDialog.item}
+          prefill={recordDialog.prefill}
+          notes={recordDialog.notes}
+          visible={recordDialog.open}
+          onHide={() => setRecordDialog({ open: false, item: null })}
+        />
+      )}
       <Suspense fallback={null}>
         {qrMode === "fill" && (
           <QrScanDialog

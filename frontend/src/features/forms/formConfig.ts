@@ -12,7 +12,7 @@
  * lose in a refactor, which is why it lives in a pure function with a test rather than
  * inline in a mutation body.
  */
-import type { Form, FormConfig } from "../../lib/types";
+import type { Form, FormConfig, MergeConfig } from "../../lib/types";
 
 /** One row of the form editor: a column, and what the form does with it. */
 export interface FormFieldRow {
@@ -33,10 +33,11 @@ export interface FormFieldRow {
 export function buildFormConfigPatch(
   form: Form,
   rows: FormFieldRow[],
+  merge?: MergeConfig | null,
 ): FormConfig {
   return {
-    // Everything the editor does not model — today `merge`, tomorrow whatever else —
-    // survives the save. Do not replace this with a bare object literal.
+    // Everything the editor does not model survives the save. Do not replace this
+    // with a bare object literal — that is the bug this function exists to prevent.
     ...form.config,
     fields: rows.map((row, i) => ({
       column_uuid: row.column_uuid,
@@ -45,5 +46,9 @@ export function buildFormConfigPatch(
       order: i,
       label_override: row.label_override.trim() || null,
     })),
+    // `undefined` means "the editor is not managing this", which is different from
+    // `null`, meaning "the editor turned merging off". Only the second may overwrite
+    // what is stored, so the spread above stands when the argument is omitted.
+    ...(merge === undefined ? {} : { merge }),
   };
 }

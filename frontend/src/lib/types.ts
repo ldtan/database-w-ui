@@ -161,8 +161,28 @@ export interface FormField {
   label_override?: string | null;
 }
 
+/** One field a merged form borrows from the list its link column points at. */
+export interface MergedField {
+  column_uuid: string;
+  included: boolean;
+  enabled: boolean;
+  order: number;
+  label_override?: string | null;
+}
+
+export interface MergeConfig {
+  /** The lookup column on *this* list through which the other one is reached. */
+  link_column_uuid: string;
+  /** Empty means no borrowed fields — never "all of them", unlike `FormConfig.fields`. */
+  fields: MergedField[];
+  /** False is 1:1: a linked record may be reached by at most one row of this list. */
+  allow_shared: boolean;
+}
+
 export interface FormConfig {
   fields: FormField[];
+  /** Absent on an ordinary single-list form, which is most of them. */
+  merge?: MergeConfig | null;
 }
 
 /** The generated shape, with its untyped `config` replaced by the one the UI reads. */

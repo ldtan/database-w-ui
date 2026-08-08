@@ -947,6 +947,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/merged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Merged Item
+         * @description Create a record here and one in the linked list, in a single transaction.
+         *
+         *     A separate route rather than a flag on `POST /` because the two cannot share a
+         *     body — `_validate_data` refuses a key that is not a column of the list it is
+         *     validating, so the sides have to be split before validation — and because this one
+         *     needs up to three permission checks where that one needs a single `create`. The
+         *     rest of them live in `MergedItemService`, which is also what the linked list's are
+         *     about; only this list's belongs here.
+         */
+        post: operations["create_merged_item_api_lists__list_uuid__items_merged_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/count": {
         parameters: {
             query?: never;
@@ -1064,6 +1091,30 @@ export interface paths {
         head?: never;
         /** Update Item */
         patch: operations["update_item_api_lists__list_uuid__items__uuid__patch"];
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/{uuid}/merged": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Merged Item
+         * @description Save both sides of an existing pair.
+         *
+         *     `edit` on this record is checked here; `edit` on the linked one is checked in the
+         *     service, per **item** rather than per list, because a record in the other list can
+         *     be shared on its own and holding `edit` there does not follow from holding it here.
+         */
+        patch: operations["update_merged_item_api_lists__list_uuid__items__uuid__merged_patch"];
         trace?: never;
     };
     "/api/lists/{list_uuid}/items/{uuid}/restore": {
@@ -2112,6 +2163,7 @@ export interface components {
         FormConfig: {
             /** Fields */
             fields?: components["schemas"]["FormField"][];
+            merge?: components["schemas"]["MergeConfig"] | null;
         };
         /** FormCreate */
         FormCreate: {
@@ -2416,6 +2468,122 @@ export interface components {
              * @default false
              */
             archived: boolean;
+        };
+        /**
+         * MergeConfig
+         * @description Lays a second list's fields onto this form, reached through one lookup column.
+         *
+         *     Only `link_column_uuid` is stored about the other list. Which list it is comes
+         *     from that column's own `target_list_uuid` on every read, so retargeting the lookup
+         *     cannot leave a stale pointer here to disagree with it.
+         */
+        MergeConfig: {
+            /**
+             * Link Column Uuid
+             * Format: uuid
+             */
+            link_column_uuid: string;
+            /** Fields */
+            fields?: components["schemas"]["MergedField"][];
+            /**
+             * Allow Shared
+             * @default false
+             */
+            allow_shared: boolean;
+        };
+        /**
+         * MergedField
+         * @description One field of the *linked* list on a merged form.
+         *
+         *     Structurally a `FormField`, and deliberately not one. Records are keyed by column
+         *     uuid and these uuids belong to a different list, so anything that iterates "this
+         *     form's fields" and reaches for a column of this list must not be handed them by
+         *     accident. A separate class makes that a type error rather than a puzzle.
+         */
+        MergedField: {
+            /**
+             * Column Uuid
+             * Format: uuid
+             */
+            column_uuid: string;
+            /**
+             * Included
+             * @default true
+             */
+            included: boolean;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Order
+             * @default 0
+             */
+            order: number;
+            /** Label Override */
+            label_override?: string | null;
+        };
+        /**
+         * MergedItemCreate
+         * @description One submit that writes a record here and a record in the linked list.
+         *
+         *     The two sides are separate blobs rather than one, because `_validate_data` refuses
+         *     a key that is not a column of the list it is validating — a guard worth keeping, so
+         *     the split has to happen before validation rather than inside it.
+         */
+        MergedItemCreate: {
+            /**
+             * Form Uuid
+             * Format: uuid
+             */
+            form_uuid: string;
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+            /** Linked Data */
+            linked_data?: {
+                [key: string]: unknown;
+            };
+            /** Linked Uuid */
+            linked_uuid?: string | null;
+            /**
+             * Update Linked
+             * @default false
+             */
+            update_linked: boolean;
+        };
+        /** MergedItemRead */
+        MergedItemRead: {
+            item: components["schemas"]["ListItemRead"];
+            linked_item?: components["schemas"]["ListItemRead"] | null;
+        };
+        /**
+         * MergedItemUpdate
+         * @description Edit both sides of an existing pair.
+         *
+         *     No `linked_uuid`: which record this row is paired with is the link cell's job, and
+         *     moving it is an ordinary edit of that cell. Letting a merged update re-point the
+         *     link *and* write through it in one request would make "whose values are these"
+         *     depend on the order the server happened to apply them in.
+         */
+        MergedItemUpdate: {
+            /**
+             * Form Uuid
+             * Format: uuid
+             */
+            form_uuid: string;
+            /** Data */
+            data?: {
+                [key: string]: unknown;
+            };
+            /** Linked Data */
+            linked_data?: {
+                [key: string]: unknown;
+            };
+            /** Permissions Inherit */
+            permissions_inherit?: boolean | null;
         };
         /**
          * MetricConfig
@@ -4841,6 +5009,41 @@ export interface operations {
             };
         };
     };
+    create_merged_item_api_lists__list_uuid__items_merged_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergedItemCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergedItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     count_items_api_lists__list_uuid__items_count_get: {
         parameters: {
             query?: {
@@ -5102,6 +5305,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListItemRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_merged_item_api_lists__list_uuid__items__uuid__merged_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                uuid: string;
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MergedItemUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MergedItemRead"];
                 };
             };
             /** @description Validation Error */
