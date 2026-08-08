@@ -19,10 +19,8 @@ import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
 import { downloadBlob, downloadFile } from "../../lib/download";
 import type { Column, FilterCondition } from "../../lib/types";
-import {
-  FilterConditionsEditor,
-  cleanConditions,
-} from "../views/FilterConditionsEditor";
+import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
+import { cleanConditions } from "../views/operators";
 
 interface Props {
   listUuid: string;

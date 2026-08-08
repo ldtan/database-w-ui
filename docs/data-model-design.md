@@ -527,7 +527,14 @@ and whether each is enabled. Field layout is JSONB (D5).
   "fields": [
     {"column_uuid": "a4f0…", "included": true,  "enabled": true,  "order": 0, "label_override": null},
     {"column_uuid": "9d1c…", "included": true,  "enabled": true,  "order": 1},
-    {"column_uuid": "b7e2…", "included": false, "enabled": true,  "order": 2}
+    {"column_uuid": "b7e2…", "included": false, "enabled": true,  "order": 2},
+    // Conditional: shown only when another cell of the same record says so.
+    {"column_uuid": "3c88…", "included": true,  "enabled": true,  "order": 3,
+     "condition": {
+       "when": {"conjunction": "and",
+                "conditions": [{"column_uuid": "a4f0…", "operator": "is", "value": "Rejected"}]},
+       "effect": "hide"
+     }}
   ]
 }
 ```
@@ -558,6 +565,38 @@ nothing** — nothing on it is editable. `resolveFields`
 (`frontend/src/features/records/recordValues.ts`) takes an `includeCalculated` option
 for the first; `RecordViewDialog` ignores `enabled` for the second, and the form editor
 hides the checkbox rather than saving a setting no one reads.
+
+### `condition` — a field that depends on another field
+
+A field may carry a `condition`, which decides whether it applies to the record being
+filled in. Unmet, it is either hidden or shown read-only (`effect`).
+
+- **`when` is a view's `FilterGroup`** (§7), borrowed rather than reinvented: the same
+  operators over the same columns, asked of one record instead of every record. So the
+  filter editor is reused verbatim to build it, and `_remap_form_config` remaps the
+  uuids inside it on clone exactly as `_remap_view_config` does for a view's filters.
+- **Empty `when.conditions` means *always*.** The same thing an empty filter group does
+  to a view, and the reason a block left half-built in the editor is inert rather than
+  hiding the field it was meant to reveal. The editor collapses one to `null` on save,
+  so "unconditional" has one representation rather than two.
+- **A condition may not name the field's own column** (`FormService._validate_config`).
+  Not a cycle — evaluation is one pass over the draft's raw values, so a field hidden
+  by another field's condition is still readable by a third — but a field that hides on
+  its own value keeps that value, so it would never come back.
+- **Conditions read the *draft*, and only in the add and edit dialogs.** The grid's cell
+  editing and the new-row footer compute one editability map for the whole grid rather
+  than per row, so they ignore conditions; so does `RecordViewDialog`.
+- **Conditions are stored per form**, so `create` and `update` may differ. The editor
+  offers a "Copy conditions to…" action rather than mirroring automatically, because
+  two forms with different conditions are configured, not broken.
+- **Nothing on the server reads them.** `_validate_data` enforces `required` and
+  `unique` whatever a form says — see known-gaps §12, which is the boundary this
+  feature must not be mistaken for.
+
+The client-side evaluator is `frontend/src/features/forms/conditions.ts`, and it is a
+second implementation of `items/filtering.py::_condition`'s operator vocabulary. The
+two are meant to be edited together; a table-driven test over the filter editor's
+`OPERATORS` fails the moment one grows and the other does not.
 
 ---
 

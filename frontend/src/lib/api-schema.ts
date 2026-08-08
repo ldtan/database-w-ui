@@ -2085,6 +2085,33 @@ export interface components {
              */
             include_archived: boolean;
         };
+        /**
+         * FieldCondition
+         * @description When a field applies, and what happens to it when it does not.
+         *
+         *     ``when`` is a view's `FilterGroup`, borrowed rather than reinvented. It is the same
+         *     question over the same columns — "which records match these conditions?" asked of
+         *     the one record being filled in — so it gets the same operators, the same stored
+         *     shape and the same editor. A second condition language for the same job would only
+         *     be a second place for the two to disagree.
+         *
+         *     An empty ``when.conditions`` means **always**, matching `apply_filters`, which
+         *     filters nothing when handed no conditions. So a block left half-built in the editor
+         *     is inert rather than hiding the field it was meant to reveal.
+         *
+         *     Nothing on the server reads this. `ListItemService._validate_data` enforces
+         *     ``required``, ``unique`` and the rest whatever a form says, and CSV import, a QR fill
+         *     and a direct API write have no form at all — see docs/known-gaps.md.
+         */
+        FieldCondition: {
+            when?: components["schemas"]["FilterGroup"];
+            /**
+             * Effect
+             * @default hide
+             * @enum {string}
+             */
+            effect: "hide" | "disable";
+        };
         /** FilterCondition */
         FilterCondition: {
             /**
@@ -2152,6 +2179,7 @@ export interface components {
             order: number;
             /** Label Override */
             label_override?: string | null;
+            condition?: components["schemas"]["FieldCondition"] | null;
         };
         /** FormRead */
         FormRead: {

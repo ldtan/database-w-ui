@@ -1,11 +1,38 @@
-from typing import Optional
+from typing import Literal, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.schemas import NameSlug
 
+from ..views.schemas import FilterGroup
 from .enums import FormType
+
+
+class FieldCondition(BaseModel):
+    """When a field applies, and what happens to it when it does not.
+
+    ``when`` is a view's `FilterGroup`, borrowed rather than reinvented. It is the same
+    question over the same columns — "which records match these conditions?" asked of
+    the one record being filled in — so it gets the same operators, the same stored
+    shape and the same editor. A second condition language for the same job would only
+    be a second place for the two to disagree.
+
+    An empty ``when.conditions`` means **always**, matching `apply_filters`, which
+    filters nothing when handed no conditions. So a block left half-built in the editor
+    is inert rather than hiding the field it was meant to reveal.
+
+    Nothing on the server reads this. `ListItemService._validate_data` enforces
+    ``required``, ``unique`` and the rest whatever a form says, and CSV import, a QR fill
+    and a direct API write have no form at all — see docs/known-gaps.md.
+    """
+
+    when: FilterGroup = Field(default_factory=FilterGroup)
+    # What an unmet condition does. Hiding is the default because that is the ordinary
+    # want — a field that does not apply is not asked for.
+    effect: Literal["hide", "disable"] = "hide"
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class FormField(BaseModel):
@@ -14,6 +41,9 @@ class FormField(BaseModel):
     enabled: bool = True
     order: int = 0
     label_override: Optional[str] = None
+    # Absent means unconditional, which is every field that existed before conditions
+    # did — so old configs validate unchanged and none of this needs a migration.
+    condition: Optional[FieldCondition] = None
 
 
 class FormConfig(BaseModel):

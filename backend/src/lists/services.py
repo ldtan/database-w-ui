@@ -477,15 +477,35 @@ class ListService:
 
     @staticmethod
     def _remap_form_config(config: dict, col_map: dict[str, str]) -> dict:
-        """Rewrite each ``fields[].column_uuid`` in a form's config through
-        ``col_map`` (forms/schemas.FormConfig), for the same reason views are
-        remapped. Unmapped references are left untouched."""
+        """Rewrite every column reference in a form's config through ``col_map``
+        (forms/schemas.FormConfig), for the same reason views are remapped. Unmapped
+        references are left untouched.
+
+        Two references per field, not one: the field's own column, and the columns its
+        ``condition`` compares against — the same conditions a view's ``filters`` holds,
+        and remapped here exactly as ``_remap_view_config`` remaps those. Missed, a
+        cloned form's conditions quietly go on testing the *source* list's columns, so
+        the fields they govern show or hide according to a list nobody is looking at.
+        """
         cfg = deepcopy(config or {})
+
+        def remap(value):
+            return col_map.get(value, value)
+
         for field in cfg.get("fields", []) or []:
-            if isinstance(field, dict) and "column_uuid" in field:
-                field["column_uuid"] = col_map.get(
-                    field["column_uuid"], field["column_uuid"]
-                )
+            if not isinstance(field, dict):
+                continue
+            if "column_uuid" in field:
+                field["column_uuid"] = remap(field["column_uuid"])
+            condition = field.get("condition")
+            if not isinstance(condition, dict):
+                continue
+            when = condition.get("when")
+            if not isinstance(when, dict):
+                continue
+            for cond in when.get("conditions", []) or []:
+                if isinstance(cond, dict) and "column_uuid" in cond:
+                    cond["column_uuid"] = remap(cond["column_uuid"])
         return cfg
 
     @classmethod

@@ -272,6 +272,69 @@ async def test_clone_remaps_form_config(make_client, session_factory):
         assert myform["config"]["fields"][0]["column_uuid"] == clone_col_uuid
 
 
+async def test_clone_remaps_a_fields_condition(make_client, session_factory):
+    """A field's `condition` names columns too, and they are remapped like any other.
+
+    Left out, the clone's conditions go on testing the *source* list's columns: they
+    resolve to nothing there, so every conditional field shows unconditionally — a
+    quiet failure, which is why both uuids below are ones the map actually mentions.
+    """
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        status_uuid = await _add_column(client, list_uuid, "status")
+        reason_uuid = await _add_column(client, list_uuid, "reason")
+        f = await client.post(
+            f"/api/lists/{list_uuid}/forms/",
+            json={
+                "name": "myform",
+                "display_name": "My Form",
+                "config": {
+                    "fields": [
+                        {"column_uuid": status_uuid, "order": 0},
+                        {
+                            "column_uuid": reason_uuid,
+                            "order": 1,
+                            "condition": {
+                                "when": {
+                                    "conjunction": "and",
+                                    "conditions": [
+                                        {
+                                            "column_uuid": status_uuid,
+                                            "operator": "is",
+                                            "value": "Rejected",
+                                        }
+                                    ],
+                                },
+                                "effect": "hide",
+                            },
+                        },
+                    ]
+                },
+            },
+        )
+        assert f.status_code == 201, f.text
+
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": False}
+        )
+        clone_uuid = resp.json()["uuid"]
+        clone_cols = (await client.get(f"/api/lists/{clone_uuid}/columns/")).json()
+        clone_status = _column_named(clone_cols, "status")["uuid"]
+        clone_reason = _column_named(clone_cols, "reason")["uuid"]
+        assert clone_status != status_uuid  # the map really does move it
+
+        forms = (await client.get(f"/api/lists/{clone_uuid}/forms/")).json()
+        myform = next(f for f in forms if f["name"] == "myform")
+        field = next(
+            f for f in myform["config"]["fields"] if f["column_uuid"] == clone_reason
+        )
+        assert field["condition"]["when"]["conditions"][0]["column_uuid"] == clone_status
+
+
 async def test_clone_remaps_primary_column(make_client, session_factory):
     async with session_factory() as db:
         owner = await _make_user(db, "owner")

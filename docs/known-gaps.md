@@ -670,6 +670,38 @@ buys and what it costs are both worth knowing before extending it.
   always creates its target, so that needs a target parameter and a decision the planned-features
   doc still lists as open: overwrite the target, or only fill cells where it is empty.
 
+## 12. A form field's condition is an affordance, not a restriction
+
+A field may be hidden or disabled when a condition over the record's other cells is unmet
+(data-model §8). **The server never reads it.** `ListItemService._validate_data` enforces
+`required`, `unique`, `min`/`max` and the rest from the *column's* config whatever any form
+says, and it has no form to consult in the first place — the write path is shared with CSV
+import, the QR scanner, the grid's inline cell editing and any direct API call.
+
+So the following all hold, and none of them is a bug:
+
+- **A hidden field's column can still be written**, by importing a file, scanning a code,
+  editing the cell in the grid, or `POST /items/`. The form editor's own hint says so, at
+  the control, because "hidden" reads like "protected" and here it is not.
+- **A required column hidden by its condition makes the record unsaveable.** The write is
+  refused with `Column 'x' is required` and there is no field on screen to answer it — unless
+  the column has a default. The editor warns when a condition is put on a required column;
+  it does not refuse, because "required exactly when it is shown" is the ordinary case.
+  Making `required` conditional server-side is the real fix and a much larger one: the write
+  path would have to pick a form, and three of its five callers have none.
+- **Conditions do not reach the grid.** "Edit cells" and the new-row draft resolve one
+  editability map for the whole grid rather than one per row, so a conditionally-disabled
+  field is still editable in a cell. Per-row would be possible; a column that is editable on
+  some rows and not others is a worse grid, so it was not done.
+- **A condition naming a deleted column is ignored, and the field shows.** `_condition`
+  drops an unresolvable clause rather than failing the query, and the client matches it —
+  hiding a field on the strength of a question nobody can answer leaves nothing on screen to
+  explain why. The form editor prunes such a condition the next time it seeds, which is what
+  keeps `_validate_config` from making the form unsaveable; until then it simply sits there.
+- **A condition on a `calculated` column reads as empty while *creating*.** The value is
+  computed on write, so a new record has none yet; on edit it is present and compares
+  normally. Nothing prevents such a condition, since the edit case is legitimate.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

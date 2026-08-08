@@ -1,11 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Dropdown } from "primereact/dropdown";
 import { Checkbox } from "primereact/checkbox";
 import { AppDialog } from "../../components/AppDialog";
-import { InputText } from "primereact/inputtext";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
+import { OverlayPanel } from "primereact/overlaypanel";
 
 import { api, ApiError } from "../../lib/api";
 import { NameFields } from "../../components/NameFields";
@@ -17,13 +17,19 @@ import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
+import { FieldSettingsPanel, rowIsCustomised } from "./FieldSettingsPanel";
+import {
+  buildFormConfigPatch,
+  prunedCondition,
+  sameConditions,
+  siblingForm,
+  withCopiedConditions,
+  type FormFieldRow,
+} from "./formConfig";
 
-interface Row {
-  column_uuid: string;
+/** A `FormFieldRow` plus the column's label, which the editor shows but never saves. */
+interface Row extends FormFieldRow {
   display_name: string;
-  included: boolean;
-  enabled: boolean;
-  label_override: string;
 }
 
 // Seed editor rows from a form's stored fields, appending any columns not yet
@@ -31,6 +37,7 @@ interface Row {
 // "all columns", which this naturally produces.
 function seedRows(form: Form, columns: Column[]): Row[] {
   const byUuid = new Map(columns.map((c) => [c.uuid, c]));
+  const live = new Set(byUuid.keys());
   const rows: Row[] = [];
   const seen = new Set<string>();
   const stored = [...(form.config.fields ?? [])].sort((a, b) => a.order - b.order);
@@ -43,6 +50,7 @@ function seedRows(form: Form, columns: Column[]): Row[] {
       included: field.included,
       enabled: field.enabled,
       label_override: field.label_override ?? "",
+      condition: prunedCondition(field.condition, live),
     });
     seen.add(col.uuid);
   }
@@ -54,6 +62,7 @@ function seedRows(form: Form, columns: Column[]): Row[] {
       included: true,
       enabled: true,
       label_override: "",
+      condition: null,
     });
   }
   return rows;
@@ -85,6 +94,10 @@ export function FormsEditor({
   const toast = useToast();
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
+  // One panel for every row, and the index of the row it is currently showing. A
+  // panel per row would mount a condition editor per column of the list.
+  const settingsPanel = useRef<OverlayPanel>(null);
+  const [settingsFor, setSettingsFor] = useState<number | null>(null);
   const [sharing, setSharing] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [names, setNames] = useState({ displayName: "", name: "" });
@@ -103,8 +116,11 @@ export function FormsEditor({
   const canShare = !!activeForm && canForm(activeForm.uuid, "share");
   // A view form displays a record, it does not collect one, so per-field
   // "editable" has nothing to say — and a control that is saved but ignored is
-  // worse than no control. Shown, order and label still apply.
+  // worse than no control. Shown, order and label still apply. Conditions are the
+  // same: they are read when a record is filled in, so a view form has none.
   const showsEnabled = activeForm?.type !== "view";
+  // The other half of the add/edit pair, or null — a view or custom form has none.
+  const sibling = activeForm ? siblingForm(activeForm, forms) : null;
 
   const setInherit = useMutation({
     mutationFn: (value: boolean) =>
@@ -134,22 +150,47 @@ export function FormsEditor({
   }, [activeForm?.uuid, columns]);
 
   const save = useMutation({
+    // Through `buildFormConfigPatch` rather than an object literal: the PATCH replaces
+    // `config` wholesale, so anything the editor does not model has to be carried
+    // across explicitly or saving the layout destroys it.
     mutationFn: () =>
       api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
-        config: {
-          fields: rows.map((r, i) => ({
-            column_uuid: r.column_uuid,
-            included: r.included,
-            enabled: r.enabled,
-            order: i,
-            label_override: r.label_override.trim() || null,
-          })),
-        },
+        config: buildFormConfigPatch(activeForm!, rows),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
       toast.success("Form saved", activeForm?.display_name);
     },
+  });
+
+  /**
+   * Put this form's conditions on the other half of the pair.
+   *
+   * Conditions are stored per form, so the add and edit forms may differ — which is
+   * often what you want, and is why this is a button rather than something saving does
+   * on its own. What it copies is only the conditions: which columns each form shows,
+   * and in what order, is exactly what the two exist to differ on.
+   *
+   * It reads the *stored* sibling and the *stored* active form, so it applies what was
+   * last saved. Pressing "Save layout" first is the point of the disabled state below.
+   */
+  const copyConditions = useMutation({
+    mutationFn: async () => {
+      const target = siblingForm(activeForm!, forms)!;
+      await api.patch<Form>(`/lists/${listUuid}/forms/${target.uuid}`, {
+        config: withCopiedConditions(target, activeForm!, columns),
+      });
+      return target.display_name;
+    },
+    onSuccess: (name) => {
+      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      toast.success("Conditions copied", `Applied to “${name}”`);
+    },
+    onError: (err) =>
+      toast.error(
+        "Could not copy the conditions",
+        err instanceof ApiError ? err.message : undefined,
+      ),
   });
 
   const rename = useMutation({
@@ -247,24 +288,20 @@ export function FormsEditor({
           {binButton}
         </div>
 
-        {/* Order + field + two checkboxes + a label box is about 460px of columns
-            that have to stay in step with the header above them. Rather than reflow
-            them on a phone and lose that alignment, the block keeps its width and
-            scrolls sideways within the dialog. */}
-        <div className="overflow-x-auto">
-        <div className="flex flex-col gap-1" style={{ minWidth: 460 }}>
+        {/* Order + field + Shown + a gear now fits a phone, so the sideways scroll
+            this block used to need has gone with the controls that caused it. */}
+        <div className="flex flex-col gap-1">
           <div className="flex items-center gap-2 text-sm text-muted px-1">
             {/* Indented past the drag grip so the headers sit over their columns. */}
             <span style={{ width: DRAG_GRIP_WIDTH, flexShrink: 0 }} />
             <span style={{ width: 64 }}>Order</span>
             <span className="flex-1">Field</span>
             <span style={{ width: 70 }}>Shown</span>
-            {showsEnabled && <span style={{ width: 76 }}>Editable</span>}
-            <span style={{ width: 150 }}>Label</span>
+            <span style={{ width: 44 }} />
           </div>
           {/* Drag by the grip or step with the chevrons — and the grip is why the
-              row is not itself draggable: these rows hold checkboxes and a text
-              input, all of which a draggable row would swallow the pointer for.
+              row is not itself draggable: these rows hold a checkbox and buttons,
+              all of which a draggable row would swallow the pointer for.
               `disabled` for a reader, who has nothing to reorder. */}
           <SortableList
             items={rows}
@@ -302,33 +339,52 @@ export function FormsEditor({
                     onChange={(e) => update(i, { included: !!e.checked })}
                   />
                 </span>
-                {showsEnabled && (
-                  <span style={{ width: 76 }}>
-                    <Checkbox
-                      checked={row.enabled}
-                      disabled={!canEdit || !row.included}
-                      onChange={(e) => update(i, { enabled: !!e.checked })}
-                    />
-                  </span>
-                )}
-                <InputText
-                  value={row.label_override}
-                  onChange={(e) => update(i, { label_override: e.target.value })}
-                  placeholder={row.display_name}
-                  disabled={!canEdit}
-                  style={{ width: 150 }}
+                {/* The dot is what keeps a collapsed setting from being an invisible
+                    one: a label override or a condition has to be readable from the
+                    list, or the only way to find one is to open every row. */}
+                <Button
+                  icon="pi pi-cog"
+                  text
+                  size="small"
+                  aria-label={`Settings for ${row.display_name}`}
+                  className={
+                    rowIsCustomised(row, showsEnabled) ? "is-on" : undefined
+                  }
+                  badge={rowIsCustomised(row, showsEnabled) ? " " : undefined}
+                  badgeClassName="p-badge-dot"
+                  onClick={(e) => {
+                    setSettingsFor(i);
+                    settingsPanel.current?.show(e, e.currentTarget);
+                  }}
                 />
               </>
             )}
           </SortableList>
           {rows.length === 0 && <p>Add a column to configure this form.</p>}
         </div>
-        </div>
 
         {/* "Save layout", not "Save" — the dialog's own footer is a few pixels
             below this one, and two buttons that both say Save do not obviously
             mean "keep this form's fields" and "close the settings". */}
-        <div className="flex justify-end gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
+          {canEdit && sibling && (
+            <Button
+              label={`Copy conditions to “${sibling.display_name}”`}
+              icon="pi pi-copy"
+              text
+              onClick={() => copyConditions.mutate()}
+              loading={copyConditions.isPending}
+              // Nothing to copy, or the two already agree. It reads the *stored*
+              // forms, so unsaved edits are not what it would send — which is why
+              // "Save layout" comes first and this settles afterwards.
+              disabled={!activeForm || sameConditions(activeForm, sibling)}
+              tooltip={
+                "Conditions are stored per form. This applies the ones you last " +
+                "saved here to the other form, leaving its own field layout alone."
+              }
+              tooltipOptions={{ position: "top" }}
+            />
+          )}
           {canEdit && (
             <Button
               label="Save layout"
@@ -340,6 +396,24 @@ export function FormsEditor({
           )}
         </div>
       </div>
+
+      {/* One panel, re-anchored to whichever gear was pressed. Rendered outside the
+          list so a re-order cannot unmount it while it is open. */}
+      <OverlayPanel ref={settingsPanel} onHide={() => setSettingsFor(null)}>
+        {settingsFor !== null && rows[settingsFor] && (
+          <FieldSettingsPanel
+            listUuid={listUuid}
+            columns={columns}
+            column={columns.find(
+              (c) => c.uuid === rows[settingsFor].column_uuid,
+            )}
+            row={rows[settingsFor]}
+            showsEnabled={showsEnabled}
+            disabled={!canEdit}
+            onChange={(patch) => update(settingsFor, patch)}
+          />
+        )}
+      </OverlayPanel>
 
       <AppDialog
         header={activeForm ? `Rename “${activeForm.display_name}”` : ""}
