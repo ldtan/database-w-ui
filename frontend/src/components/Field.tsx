@@ -57,28 +57,66 @@ export function FieldRow({ children }: { children: ReactNode }) {
 }
 
 /**
- * A titled group of fields.
+ * A titled group of fields, optionally one you have to open.
  *
  * The dialogs' section headings used to be the same `text-sm font-medium` as
  * their field labels, so "Export options" and "Limit" carried identical weight
  * and the grouping existed only in the author's head.
+ *
+ * `collapsible` is for the settings a form has to offer but that most people filling
+ * it in do not need to read. Two rules go with it, and both are the caller's to keep:
+ *
+ * - **Nothing a Save button validates may go inside one.** A dialog that refuses to
+ *   save, with the control that would fix it folded away, reads as broken rather than
+ *   as incomplete.
+ * - **It must be open when what it holds is not the default**, or a setting that is
+ *   set becomes a setting that is invisible. `open` is controlled rather than seeded
+ *   here precisely so the caller can answer that from the thing being edited — a
+ *   dialog reopened on a different record does not remount, so a state this component
+ *   owned would still be showing the last one's answer.
  */
 export function FormSection({
   title,
   description,
+  collapsible,
+  open,
+  onOpenChange,
   children,
 }: {
   title: string;
   description?: ReactNode;
+  collapsible?: boolean;
+  open?: boolean;
+  onOpenChange?: (next: boolean) => void;
   children: ReactNode;
 }) {
+  if (!collapsible) {
+    return (
+      <section className="form-section">
+        <div className="form-section-head">
+          <h3 className="form-section-title">{title}</h3>
+          {description && <p className="field-hint">{description}</p>}
+        </div>
+        <div className="flex flex-col gap-3">{children}</div>
+      </section>
+    );
+  }
   return (
     <section className="form-section">
-      <div className="form-section-head">
-        <h3 className="form-section-title">{title}</h3>
-        {description && <p className="field-hint">{description}</p>}
-      </div>
-      <div className="flex flex-col gap-3">{children}</div>
+      {/* A button rather than <details>/<summary>: the open state has to be driven
+          from outside (see above), and a controlled <details> needs an onToggle
+          round trip to stay in step with it. */}
+      <button
+        type="button"
+        className="form-section-toggle"
+        aria-expanded={!!open}
+        onClick={() => onOpenChange?.(!open)}
+      >
+        <i className={`pi pi-chevron-${open ? "down" : "right"}`} aria-hidden />
+        <span className="form-section-title">{title}</span>
+      </button>
+      {description && open && <p className="field-hint">{description}</p>}
+      {open && <div className="flex flex-col gap-3">{children}</div>}
     </section>
   );
 }
