@@ -645,9 +645,25 @@ class ListItemService:
         return await db.scalar(select(func.count()).select_from(stmt.subquery())) or 0
 
     @classmethod
-    async def create(
+    async def create_uncommitted(
         cls, db: AsyncSession, lst: List, payload: ListItemCreate, user=None
     ) -> ListItem:
+        """Validate and insert one record, flushed but **not committed**.
+
+        The seam exists so a caller can write to two lists atomically — see
+        `MergedItemService`, which creates the linked record and then this one and
+        commits once. Composing the committing `create` twice would not do: the first
+        write would land before the second was even validated, so a failure on the
+        second would leave the first orphaned with nothing to roll back to.
+
+        The `flush` is load-bearing rather than tidiness. A subsequent write in the
+        same transaction may reference this row by uuid, and `_validate_lookup`
+        re-resolves that uuid with a SELECT — which would not see an unflushed insert
+        even from the session that made it.
+
+        Public despite being a seam: `merged.py` is a sibling module, and a leading
+        underscore reachable from another file tells the next reader the wrong thing.
+        """
         columns = await cls._columns_by_key(db, lst.id)
         data = await cls._validate_data(
             db, lst, columns, payload.data, existing=None, user=user
@@ -657,6 +673,13 @@ class ListItemService:
         item = ListItem(list_id=lst.id, data=data)
         db.add(item)
         await db.flush()
+        return item
+
+    @classmethod
+    async def create(
+        cls, db: AsyncSession, lst: List, payload: ListItemCreate, user=None
+    ) -> ListItem:
+        item = await cls.create_uncommitted(db, lst, payload, user=user)
         new_uuid = item.uuid
         await db.commit()
         # get_for_read, not get_by_uuid: the response renders the record, so it
@@ -664,7 +687,7 @@ class ListItemService:
         return await cls.get_for_read(db, lst.id, new_uuid)
 
     @classmethod
-    async def update(
+    async def update_uncommitted(
         cls,
         db: AsyncSession,
         lst: List,
@@ -672,6 +695,16 @@ class ListItemService:
         payload: ListItemUpdate,
         user=None,
     ) -> Optional[ListItem]:
+        """Validate and apply one record's changes, **not committed**.
+
+        The counterpart to `create_uncommitted`, and the same reason: see its
+        docstring. Returns the mutated instance so the caller can read its uuid
+        before committing, or `None` when there is no such record.
+
+        A caller taking this lock for two records must always take them in the same
+        order — `MergedItemService` sorts by list id — or two merged writes touching
+        the same pair deadlock.
+        """
         # Locked, because the merge below is a read-modify-write of a single JSONB
         # blob: two writers touching *different* columns of the same record would
         # otherwise both build `merged` from the value they read before either
@@ -693,6 +726,20 @@ class ListItemService:
         item.data = merged
         if payload.permissions_inherit is not None:
             item.permissions_inherit = payload.permissions_inherit
+        return item
+
+    @classmethod
+    async def update(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        uuid: Union[str, UUID],
+        payload: ListItemUpdate,
+        user=None,
+    ) -> Optional[ListItem]:
+        item = await cls.update_uncommitted(db, lst, uuid, payload, user=user)
+        if item is None:
+            return None
         await db.commit()
         # get_for_read: see the note in create() — the response is a rendered record.
         return await cls.get_for_read(db, lst.id, uuid)
