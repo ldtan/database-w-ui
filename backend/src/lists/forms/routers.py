@@ -54,7 +54,7 @@ async def create_form(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     try:
-        return await FormService.create(db, lst, payload)
+        return await FormService.create(db, lst, payload, user=current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except UnknownReferenceError as exc:
@@ -119,7 +119,7 @@ async def update_form(
             db, current_user, ResourceType.form, form.id, Action.share
         )
     try:
-        form = await FormService.update(db, lst, form.uuid, payload)
+        form = await FormService.update(db, lst, form.uuid, payload, user=current_user)
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except UnknownReferenceError as exc:

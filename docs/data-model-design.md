@@ -548,6 +548,64 @@ and whether each is enabled. Field layout is JSONB (D5).
   leave the Add/Edit dialog on a freshly provisioned list empty ("Add a column first"),
   since its seeded config names the audit columns and nothing else.
 
+### Merged forms — one submit, two lists
+
+A form may carry an optional **`merge`** block, which lays a *second* list's fields
+beside this list's own. Submitting it writes a record here **and** a record there, in
+one transaction, linked. It is a form feature rather than a column type because no
+column type can create a record in another list or lay out another list's fields.
+
+```jsonc
+{
+  "fields": [ /* this list's, as above */ ],
+  "merge": {
+    "link_column_uuid": "a4f0…",   // a lookup column ON THIS LIST
+    "fields": [ {"column_uuid": "<a column of the linked list>", …} ],
+    "allow_shared": false
+  }
+}
+```
+
+Only the link column is stored about the other list — which list it is comes from that
+column's own `target_list_uuid` on every read, so retargeting the lookup can never
+leave a stale pointer here to disagree with it. The rules, all enforced in
+`FormService._validate_merge`:
+
+- **The link must be a live `lookup` on this list, single-valued and un-nested.** One
+  merged row pairs with one linked record, so a `multiple` link has no single record to
+  write into; a nested one's options depend on a sibling cell that a merged create has
+  not written when it needs the target.
+- **The target needs `view`, never merely `lookup`.** `lookup` exists to disclose a
+  display column and nothing else (§12); a merged form puts *arbitrary* columns of the
+  target on screen and writes to them. Accepting `lookup` here would turn the narrowest
+  action in the model into full access to someone else's list. Refused
+  indistinguishably from a missing list, so it cannot be used to probe.
+- **An empty `merge.fields` means *no* borrowed fields** — the inverse of
+  `config.fields`, where empty means every column. The other list is not this form's to
+  enumerate: "all of them" would silently widen as the target gained columns.
+- **`allow_shared: false` (the default) is 1:1** — a linked record may be reached by at
+  most one row of this list. It is a uniqueness rule about the link cell and is
+  enforced as one, inside `ListItemService._enforce_unique`, so an inline cell edit, a
+  CSV import and a QR fill all obey it. Putting it on the merged route instead would
+  have made a form the authority on what the data may say. Turning it off later leaves
+  existing shared links in place, exactly as turning `unique` on leaves duplicates
+  (known-gaps §5).
+
+Writes go through `POST /lists/{uuid}/items/merged` and
+`PATCH /lists/{uuid}/items/{uuid}/merged` (`items/merged.py`), never the ordinary item
+routes: `_validate_data` refuses a key that is not a column of the list it is
+validating — a guard worth keeping — so the two sides must be split before validation.
+The linked record is staged first because this side needs its uuid, and both halves
+share **one commit**, so a refusal here leaves nothing behind on the other side. That
+is what `ListItemService.create_uncommitted`/`update_uncommitted` exist for.
+
+Permissions follow each list separately: `create` here, `view` on the target always,
+plus `create` there to mint a record or `edit` on that **record** to write through to
+one that already exists (`update_linked`, off by default so a create cannot silently
+rewrite a record other rows may be showing). Deleting a merged record bins **this** half
+only — an action in one list must not destroy a record in another — and the UI says so
+before you agree to it.
+
 **`view` forms are display-only, and two rules follow from it.** A view form lays a
 record out for *reading* — it exists so a grid view can stay narrow (a dozen columns is
 a dozen slivers) while every field stays one click away. So it **may include

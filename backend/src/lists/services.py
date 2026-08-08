@@ -479,13 +479,29 @@ class ListService:
     def _remap_form_config(config: dict, col_map: dict[str, str]) -> dict:
         """Rewrite each ``fields[].column_uuid`` in a form's config through
         ``col_map`` (forms/schemas.FormConfig), for the same reason views are
-        remapped. Unmapped references are left untouched."""
+        remapped. Unmapped references are left untouched.
+
+        **A merged form's two kinds of column reference are remapped differently, and
+        the asymmetry is the whole point.** ``merge.link_column_uuid`` names a lookup
+        column of *this* list, which the clone re-created under a new uuid, so it is
+        remapped like any other. ``merge.fields[].column_uuid`` names columns of the
+        **linked** list, which was not cloned and whose uuids are therefore still
+        correct — remapping those would silently point the borrowed fields at this
+        list's columns, and the merged form would render blanks with nothing to
+        explain why. Both mistakes are quiet, so both are pinned in
+        tests/test_list_clone.py.
+        """
         cfg = deepcopy(config or {})
         for field in cfg.get("fields", []) or []:
             if isinstance(field, dict) and "column_uuid" in field:
                 field["column_uuid"] = col_map.get(
                     field["column_uuid"], field["column_uuid"]
                 )
+        merge = cfg.get("merge")
+        if isinstance(merge, dict) and "link_column_uuid" in merge:
+            merge["link_column_uuid"] = col_map.get(
+                merge["link_column_uuid"], merge["link_column_uuid"]
+            )
         return cfg
 
     @classmethod

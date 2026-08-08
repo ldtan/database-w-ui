@@ -146,6 +146,9 @@ class ColumnService:
                 # references this column — the filter column no longer points
                 # where the pairing assumed. Un-nest the dependents.
                 await cls._clear_dependent_nesting(db, column)
+                # And a merged form linking through this column is now borrowing
+                # fields from a list it no longer reaches.
+                await cls._clear_merged_fields(db, column)
             data.pop("config")
         if data.get("name") is None:
             data.pop("name", None)
@@ -680,3 +683,47 @@ class ColumnService:
             config["target_filter_column_uuid"] = None
             # Reassigned, not mutated, so SQLAlchemy sees the JSONB change.
             dependent.config = config
+
+    @staticmethod
+    async def _clear_merged_fields(db: AsyncSession, column: Column) -> None:
+        """Drop the borrowed fields of every merged form linking through ``column``.
+
+        Called when a lookup is **retargeted**, and deliberately not when it is
+        deleted. The borrowed uuids name columns of the list the link used to point
+        at, so after a retarget they name columns of a list this form no longer
+        reaches — kept, they would resolve to nothing and the form would render blank
+        fields with no way to tell why. `link_column_uuid` stays, so the form is still
+        a merged form and simply has nothing borrowed yet.
+
+        Deleting the link column leaves all of it alone instead, which is what makes
+        restoring the column restore the merge with it. A deleted link reads as an
+        inert merge everywhere (`_validate_merge` is skipped when the block has not
+        changed), so nothing has to be undone on the way back — the asymmetry
+        `RestoredColumnRead` exists to apologise for elsewhere is avoided here rather
+        than reported.
+
+        Same-list only: a merged form and the lookup it links through are both the
+        list's own, so this needs none of the global scan `_clear_dependent_nesting`
+        does.
+        """
+        from ..forms.models import Form
+
+        uuid_text = str(column.uuid)
+        forms = (
+            await db.execute(
+                select(Form).where(
+                    Form.deleted_at.is_(None),
+                    Form.list_id == column.list_id,
+                    Form.config["merge"]["link_column_uuid"].astext == uuid_text,
+                )
+            )
+        ).scalars().all()
+        for form in forms:
+            config = dict(form.config or {})
+            merge = dict(config.get("merge") or {})
+            if not merge.get("fields"):
+                continue
+            merge["fields"] = []
+            config["merge"] = merge
+            # Reassigned, not mutated, so SQLAlchemy sees the JSONB change.
+            form.config = config

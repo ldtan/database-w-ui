@@ -272,6 +272,149 @@ async def test_clone_remaps_form_config(make_client, session_factory):
         assert myform["config"]["fields"][0]["column_uuid"] == clone_col_uuid
 
 
+async def test_clone_remaps_a_merged_forms_link_but_not_its_borrowed_fields(
+    make_client, session_factory
+):
+    """A merged form holds two kinds of column reference and only one of them moves.
+
+    `merge.link_column_uuid` names a lookup column of the list being cloned, which the
+    clone re-created under a new uuid — so it is remapped like any other. The uuids in
+    `merge.fields` name columns of the **linked** list, which was not cloned and whose
+    uuids are therefore still correct. Remapping those would point the borrowed fields
+    at this list's columns and the form would render blanks, which is exactly the class
+    of silent breakage this file exists for.
+    """
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, people = await _seed_list(client, "people")
+        people_uuid = people["uuid"]
+        borrowed = await _add_column(client, people_uuid, "fullname")
+
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        link = await _add_column(
+            client,
+            list_uuid,
+            "person",
+            type="lookup",
+            config={"target_list_uuid": people_uuid},
+        )
+        made = await client.post(
+            f"/api/lists/{list_uuid}/forms/",
+            json={
+                "name": "merged",
+                "display_name": "Merged",
+                "config": {
+                    "fields": [],
+                    "merge": {
+                        "link_column_uuid": link,
+                        "fields": [
+                            {
+                                "column_uuid": borrowed,
+                                "included": True,
+                                "enabled": True,
+                                "order": 0,
+                            }
+                        ],
+                    },
+                },
+            },
+        )
+        assert made.status_code == 201, made.text
+
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": False}
+        )
+        clone_uuid = resp.json()["uuid"]
+        clone_cols = (await client.get(f"/api/lists/{clone_uuid}/columns/")).json()
+        clone_link = _column_named(clone_cols, "person")["uuid"]
+
+        forms = (await client.get(f"/api/lists/{clone_uuid}/forms/")).json()
+        merged = next(f for f in forms if f["name"] == "merged")["config"]["merge"]
+
+        # The link moved with the clone...
+        assert clone_link != link
+        assert merged["link_column_uuid"] == clone_link
+        # ...and the borrowed column, which belongs to a list nobody cloned, did not.
+        assert [f["column_uuid"] for f in merged["fields"]] == [borrowed]
+
+
+async def test_a_self_merged_form_keeps_borrowing_from_the_original(
+    make_client, session_factory
+):
+    """The case where the borrowed-field rule can actually be got wrong.
+
+    In the test above the borrowed uuid belongs to a list outside the clone, so it is
+    absent from `col_map` and would survive a careless remap by luck rather than by
+    rule. A merged form whose link targets *its own list* is the case that tells the
+    two apart: the borrowed column is now in the map, so remapping it would visibly
+    rewrite it.
+
+    It must not be rewritten, and that follows from a decision this file already pins.
+    A self-referencing lookup is deliberately left pointing at the **original** list
+    (`test_self_lookup_keeps_pointing_at_original`), so the clone's merged form still
+    reaches the original's records — and the columns it borrows are the original's
+    columns. Remapping them to the clone's would name columns of a list the link does
+    not point at.
+    """
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+
+    async with make_client(owner) as client:
+        _, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        title = await _add_column(client, list_uuid, "title")
+        link = await _add_column(
+            client,
+            list_uuid,
+            "parent_task",
+            type="lookup",
+            config={"target_list_uuid": list_uuid},
+        )
+        made = await client.post(
+            f"/api/lists/{list_uuid}/forms/",
+            json={
+                "name": "merged",
+                "display_name": "Merged",
+                "config": {
+                    "fields": [],
+                    "merge": {
+                        "link_column_uuid": link,
+                        "fields": [
+                            {
+                                "column_uuid": title,
+                                "included": True,
+                                "enabled": True,
+                                "order": 0,
+                            }
+                        ],
+                    },
+                },
+            },
+        )
+        assert made.status_code == 201, made.text
+
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": False}
+        )
+        clone_uuid = resp.json()["uuid"]
+        clone_cols = (await client.get(f"/api/lists/{clone_uuid}/columns/")).json()
+        clone_link = _column_named(clone_cols, "parent_task")["uuid"]
+        clone_title = _column_named(clone_cols, "title")["uuid"]
+
+        forms = (await client.get(f"/api/lists/{clone_uuid}/forms/")).json()
+        merged = next(f for f in forms if f["name"] == "merged")["config"]["merge"]
+
+        # Both uuids are in `col_map` here, so both *could* have been rewritten.
+        assert clone_title != title
+        assert merged["link_column_uuid"] == clone_link
+        # The link still targets the original list, so the borrowed column is the
+        # original's. This assertion fails the moment someone remaps merge.fields.
+        assert [f["column_uuid"] for f in merged["fields"]] == [title]
+
+
 async def test_clone_remaps_primary_column(make_client, session_factory):
     async with session_factory() as db:
         owner = await _make_user(db, "owner")
