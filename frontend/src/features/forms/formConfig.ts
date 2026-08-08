@@ -14,6 +14,40 @@
  */
 import type { Form, FormConfig, MergeConfig } from "../../lib/types";
 
+/**
+ * The form whose `merge` block has to move in step with this one.
+ *
+ * Merging is a property of the *pair*, not of one form, because the grid picks which
+ * form to render by what you are doing: `f.type === (item ? "update" : "create")`. So
+ * a merge block on the create form alone gets you a merged Add dialog and a plain Edit
+ * one — the borrowed fields simply vanish when you reopen the record, with nothing on
+ * screen to say why. That is the shape of bug this codebase spends most of its comments
+ * avoiding, so the editor writes both rather than leaving it to be discovered.
+ *
+ * Only `create` and `update` pair up. A `view` form displays a record and writes
+ * nothing, so it has no second record to write either; a `custom` one is not reached by
+ * the grid's picker at all.
+ *
+ * Field *layout* is deliberately not mirrored — which columns a form shows, in what
+ * order, is exactly what the two forms exist to differ on.
+ */
+export function mergeSibling(active: Form, forms: Form[]): Form | null {
+  const want =
+    active.type === "create" ? "update" : active.type === "update" ? "create" : null;
+  if (!want) return null;
+  const candidates = forms.filter((f) => f.type === want && f.uuid !== active.uuid);
+  // A list can hold more than one form of a type; the grid reaches for the default.
+  return candidates.find((f) => f.is_default) ?? candidates[0] ?? null;
+}
+
+/** Whether two merge blocks say the same thing, so an unchanged one is not re-sent. */
+export function sameMerge(
+  a: MergeConfig | null | undefined,
+  b: MergeConfig | null | undefined,
+): boolean {
+  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+}
+
 /** One row of the form editor: a column, and what the form does with it. */
 export interface FormFieldRow {
   column_uuid: string;

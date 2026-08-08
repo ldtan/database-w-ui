@@ -108,7 +108,9 @@ export function MergeEditor({ columns, value, disabled, onChange }: Props) {
           className="w-full sm:w-64"
         />
         <small className="field-hint">
-          Submitting this form writes a record here and one in the linked list.
+          Submitting this form writes a record here and one in the linked list. Saving
+          applies this to both the add and edit forms, so a record looks the same
+          whichever way you open it.
         </small>
       </div>
 

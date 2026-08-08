@@ -17,7 +17,12 @@ import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
-import { buildFormConfigPatch, type FormFieldRow } from "./formConfig";
+import {
+  buildFormConfigPatch,
+  mergeSibling,
+  sameMerge,
+  type FormFieldRow,
+} from "./formConfig";
 import { MergeEditor } from "./MergeEditor";
 
 /** A `FormFieldRow` plus the column's label, which the editor shows but never saves. */
@@ -143,13 +148,38 @@ export function FormsEditor({
     // Through `buildFormConfigPatch` rather than an object literal: the PATCH replaces
     // `config` wholesale, so anything the editor does not model has to be carried
     // across explicitly or saving the layout destroys it.
-    mutationFn: () =>
-      api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+    mutationFn: async () => {
+      await api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
         config: buildFormConfigPatch(activeForm!, rows, merge),
-      }),
-    onSuccess: () => {
+      });
+
+      // Merging is a property of the create/update *pair* — see `mergeSibling`. The
+      // layout stays this form's own; only the merge block is carried across.
+      const sibling = mergeSibling(activeForm!, forms);
+      if (!sibling || sameMerge(sibling.config.merge, merge)) return null;
+      try {
+        await api.patch<Form>(`/lists/${listUuid}/forms/${sibling.uuid}`, {
+          config: { ...sibling.config, merge },
+        });
+        return null;
+      } catch {
+        // A form carries its own grants, so `configure` here does not imply it there.
+        // The save that was asked for already landed; report the half that did not
+        // rather than rolling back a change the user can see took effect.
+        return sibling.display_name;
+      }
+    },
+    onSuccess: (unmirrored) => {
       queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
-      toast.success("Form saved", activeForm?.display_name);
+      if (unmirrored) {
+        toast.warn(
+          "Saved, but not applied to “" + unmirrored + "”",
+          "You cannot configure that form, so adding and editing records will not " +
+            "match until someone who can applies the same linked list to it.",
+        );
+      } else {
+        toast.success("Form saved", activeForm?.display_name);
+      }
     },
   });
 
