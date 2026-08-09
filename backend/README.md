@@ -305,6 +305,7 @@ minus, `< <= > >= == !=`, and `and` / `or` / `not`.
 | `DT_FORMAT` | `date, pattern` | Renders a date; see the directives below. | `DT_FORMAT(due, "%d %b %Y")` → `06 Aug 2026` |
 | `IF` | `condition, then, otherwise` | Picks a branch. | `IF(qty > 100, "Bulk", "Standard")` |
 | `IS_NULL` | `value` | `1` when the value is missing, `0` when present. | `IF(IS_NULL(discount), price, price - discount)` |
+| `DEFAULT` | `value, fallback` | The value, or the fallback when it is null or empty. | `DEFAULT(nickname, full_name)` → `Ada` |
 
 `DT_FORMAT` directives — rendered from an explicit table rather than handed to
 `datetime.strftime`, so the answer never depends on the host's locale or C library:
@@ -317,8 +318,13 @@ so its time directives read as midnight.
 Two behaviours worth knowing before writing one:
 
 - **A missing operand blanks the whole result** rather than reading as zero or `""` — an
-  incomplete row should look incomplete. `IS_NULL` is the single exception, and is the only
-  way to ask about a blank at all.
+  incomplete row should look incomplete. `IS_NULL` and `DEFAULT` are the two exceptions,
+  and between them the only way to ask about a blank at all. They disagree about `""` on
+  purpose: `IS_NULL("")` is `0` (a value is present), while `DEFAULT` substitutes for it,
+  taking "empty" to mean what the filter language's `is_empty` means — `IS NULL OR = ''`,
+  untrimmed, so `DEFAULT(TRIM(notes), "—")` is how you also cover a cell holding a space.
+  `DEFAULT` does not evaluate its fallback unless it needs it, so
+  `DEFAULT(total, price / qty)` is safe on a row where `qty` is 0.
 - **`AGE` reads the clock**, so an unchanged record's answer differs the morning after a
   birthday. What is displayed is always recomputed and therefore current; only a *sort or
   filter* can lag, until `recompute_calculated` runs (below) or somebody presses **Refresh

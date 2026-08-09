@@ -28,11 +28,14 @@ over three rows, one of them empty, is the average of two. Over *no* values,
 ``AVG``/``MIN``/``MAX``/``MEDIAN`` answer blank, because there is no such number
 to invent.
 
-``IS_NULL`` is therefore useful at both levels, and means the same thing at each:
-inside an aggregate it asks about one record's cell (``SUM(IS_NULL(owner))`` is
-the count ``EMPTY(owner)`` gives), and outside it asks about an aggregate's own
-result — ``IF(IS_NULL(AVG(cost)), 0, AVG(cost))`` puts a number on a card that
-would otherwise be blank because there was nothing to average.
+``IS_NULL`` and ``DEFAULT`` are therefore useful at both levels, and mean the same
+thing at each. Inside an aggregate they are about one record's cell:
+``SUM(IS_NULL(owner))`` is the count ``EMPTY(owner)`` gives, and ``AVG(DEFAULT(qty,
+0))`` fills each gap *before* the average is taken, so the blanks drag it down
+instead of being skipped — a different number from ``AVG(qty)``, and sometimes the
+wanted one. Outside, they are about the aggregate's own result: ``DEFAULT(AVG(cost),
+0)`` puts a number on a card that would otherwise be blank because there was nothing
+to average.
 """
 import ast
 from typing import Optional, Sequence, Union

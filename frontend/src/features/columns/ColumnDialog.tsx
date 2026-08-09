@@ -907,9 +907,10 @@ export function ColumnDialog({
                     <code>RIGHT</code>, <code>REPLACE</code>. Dates:{" "}
                     <code>AGE(date)</code> for years old, and{" "}
                     <code>DT_FORMAT(date, "%d %b %Y")</code> to write one out. And{" "}
-                    <code>IF(cond, a, b)</code> with{" "}
-                    <code>IS_NULL(x)</code> for an empty cell —{" "}
-                    <code>IF(IS_NULL(discount), price, price - discount)</code>.
+                    <code>IF(cond, a, b)</code>, with{" "}
+                    <code>DEFAULT(x, fallback)</code> to fill an empty cell —{" "}
+                    <code>price - DEFAULT(discount, 0)</code> — and{" "}
+                    <code>IS_NULL(x)</code> to ask about one.
                     {referenceableNames.length > 0
                       ? ` Columns you can reference: ${referenceableNames.join(", ")}.`
                       : " Add a number, text, choice or date column first — a formula references those."}

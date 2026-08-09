@@ -140,8 +140,8 @@ export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
                 ordinary per-record expression, so <code>SUM(qty * price)</code>{" "}
                 multiplies first and totals after. Results combine with{" "}
                 <code>+ - * /</code> — <code>SUM(revenue) - SUM(cost)</code>.{" "}
-                <code>IS_NULL(x)</code> asks whether something came out blank:{" "}
-                <code>IF(IS_NULL(AVG(cost)), 0, AVG(cost))</code>.
+                <code>DEFAULT(x, fallback)</code> puts a number on a card that would
+                come out blank: <code>DEFAULT(AVG(cost), 0)</code>.
                 {referenceable.length > 0
                   ? ` Columns you can aggregate: ${referenceable.join(", ")}.`
                   : " Add a number or text column first — a metric aggregates those."}

@@ -662,7 +662,8 @@ Notes:
   100k records becomes indistinguishable from zero. Everything else streams the records
   and folds them in Python. Only the *aggregate call* ever compiles: the arithmetic around
   it (`ROUND(SUM(a) / COUNT(), 2)`) is folded by `aggregate.fold` either way, so the two
-  paths share one implementation of `IF`, `IS_NULL` and the blank-propagation rules.
+  paths share one implementation of `IF`, `IS_NULL`, `DEFAULT` and the blank-propagation
+  rules.
 - **The Python path is bounded at `METRIC_ROW_LIMIT` (50,000) records**, past which the
   response sets `truncated` and the card says so; a compiled request has nothing to bound
   and answers over all of them. Compiling is all-or-nothing per request so two cards can

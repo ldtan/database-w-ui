@@ -122,7 +122,8 @@ const FUNCTIONS: {
   { name: "DT_FORMAT", params: "date, pattern", what: "Writes a date out however you like — see the pattern pieces above.", example: 'DT_FORMAT(due, "%d %b %Y")', gives: "06 Aug 2026" },
   // Choosing
   { name: "IF", params: "condition, then, otherwise", what: "The second value when the condition holds, the third when it doesn’t.", example: 'IF(qty > 100, "Bulk", "Standard")', gives: "Bulk" },
-  { name: "IS_NULL", params: "value", what: "1 when there’s nothing there, 0 when there is. The only thing that can look at an empty cell.", example: "IF(IS_NULL(discount), price, price - discount)", gives: "the full price" },
+  { name: "IS_NULL", params: "value", what: "1 when there’s nothing there, 0 when there is. One of the two things that can look at an empty cell.", example: "IF(IS_NULL(discount), price, price - discount)", gives: "the full price" },
+  { name: "DEFAULT", params: "value, fallback", what: "The value, or the second one when it’s empty. The short way to fill a gap.", example: 'DEFAULT(nickname, full_name)', gives: "Ada" },
 ];
 
 /** The reference table itself. Scrolls sideways on a narrow screen rather than
@@ -1012,31 +1013,58 @@ export function GuidePage() {
           should look incomplete.
         </p>
         <p>
-          When you’d rather fill the gap in, <Code>IS_NULL(x)</Code> is the one
-          thing that can look at an empty cell without going blank itself. It gives{" "}
-          <Code>1</Code> when there’s nothing there and <Code>0</Code> when there
-          is, so pair it with <Code>IF</Code>:
+          When you’d rather fill the gap in, <Code>DEFAULT(x, fallback)</Code> is
+          the shortest way to say it: the value, or the second thing when the first
+          is empty.
         </p>
         <ul className="flex flex-col gap-1">
           <li>
-            <Code>IF(IS_NULL(discount), price, price - discount)</Code> — no
-            discount means full price.
+            <Code>DEFAULT(nickname, full_name)</Code> — the first of these that has
+            been filled in.
           </li>
           <li>
-            <Code>IF(IS_NULL(nickname), full_name, nickname)</Code> — the first of
-            these that has been filled in.
+            <Code>DEFAULT(discount, 0)</Code> — no discount means nothing off, so{" "}
+            <Code>price - DEFAULT(discount, 0)</Code> gives a figure on every row
+            instead of blanking the ones nobody discounted.
           </li>
           <li>
-            <Code>IS_NULL(email) + IS_NULL(phone)</Code> — how many contact details
-            are still missing, as a number you can sort by.
+            <Code>DEFAULT(nickname, DEFAULT(first_name, "friend"))</Code> — work
+            down a list until something has been filled in.
+          </li>
+          <li>
+            <Code>DEFAULT(notes, "—")</Code> — a dash where a cell is blank, so the
+            column reads as answered rather than unfinished.
           </li>
         </ul>
         <p style={{ color: "var(--text-muted)" }}>
           It also covers a sum that can’t be worked out, which is the tidy way to
-          head off dividing by nothing:{" "}
-          <Code>IF(IS_NULL(total / qty), 0, total / qty)</Code>. Note that empty is
-          not the same as zero — a <em>Quantity</em> of 0 is a value someone typed,
-          so <Code>IS_NULL(qty)</Code> is <Code>0</Code> for it.
+          head off dividing by nothing: <Code>DEFAULT(total / qty, 0)</Code>. And it
+          only reaches for the fallback when it has to, so{" "}
+          <Code>DEFAULT(total, price / qty)</Code> is safe on a row where{" "}
+          <em>Quantity</em> is nothing.
+        </p>
+        <p>
+          The other one is <Code>IS_NULL(x)</Code>, for when you want to{" "}
+          <em>ask</em> about an empty cell rather than fill it in. It gives{" "}
+          <Code>1</Code> when there’s nothing there and <Code>0</Code> when there
+          is:
+        </p>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <Code>IS_NULL(email) + IS_NULL(phone)</Code> — how many contact details
+            are still missing, as a number you can sort by.
+          </li>
+          <li>
+            <Code>IF(IS_NULL(sent_on), "Draft", "Sent")</Code> — a status worked out
+            from whether a date has been filled in.
+          </li>
+        </ul>
+        <p style={{ color: "var(--text-muted)" }}>
+          Empty is not the same as zero — a <em>Quantity</em> of 0 is a value
+          someone typed, so <Code>IS_NULL(qty)</Code> is <Code>0</Code> for it and{" "}
+          <Code>DEFAULT(qty, 99)</Code> leaves it alone. The two differ over a cell
+          that has been emptied to nothing: <Code>DEFAULT</Code> counts that as a
+          gap and fills it, <Code>IS_NULL</Code> counts it as an answer.
         </p>
 
         <h3 className="font-semibold pt-1">A few worked examples</h3>
@@ -1052,6 +1080,10 @@ export function GuidePage() {
           <li>
             <Code>IF(IS_NULL(notes), "—", "Has notes")</Code> — a tidy flag
             column.
+          </li>
+          <li>
+            <Code>CONCAT(DEFAULT(nickname, first_name), " ", last_name)</Code> —
+            what to call someone, whether or not they gave a nickname.
           </li>
           <li>
             <Code>MAX(0, total - paid)</Code> — what’s still owed, never negative.
@@ -1413,8 +1445,8 @@ export function GuidePage() {
         <p style={{ color: "var(--text-muted)" }}>
           An average of <em>nothing</em> is blank rather than 0, since there is no
           such number to show. If you’d rather see a figure,{" "}
-          <Code>IS_NULL</Code> works here as it does in a formula:{" "}
-          <Code>IF(IS_NULL(AVG(cost)), 0, AVG(cost))</Code>.
+          <Code>DEFAULT</Code> works here as it does in a formula:{" "}
+          <Code>DEFAULT(AVG(cost), 0)</Code>.
         </p>
         <Callout tone="tip" title="If a card shows a warning">
           A metric finds its columns by their short name. Rename a column it uses and

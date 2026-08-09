@@ -16,9 +16,9 @@ can at worst return a wrong number or nothing.
 Supported: the four arithmetic operators and parentheses, unary minus, numeric
 **and** quoted-string literals, comparisons (for conditions), ``and``/``or``/``not``,
 and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``INT``, ``IF(cond, then,
-else)``, ``IS_NULL(x)``, the string functions ``CONCAT``, ``UPPER``, ``LOWER``,
-``TRIM``, ``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``, and the two date functions
-``AGE`` and ``DT_FORMAT``.
+else)``, ``IS_NULL(x)``, ``DEFAULT(x, fallback)``, the string functions ``CONCAT``,
+``UPPER``, ``LOWER``, ``TRIM``, ``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``, and the
+two date functions ``AGE`` and ``DT_FORMAT``.
 
 Every function name is ALL CAPS, and a column name is a slug that must start with
 a lowercase letter — so the two namespaces cannot overlap and no formula is ever
@@ -45,12 +45,22 @@ Missing data propagates as "no value": if any referenced cell is empty, the
 result is ``None`` (the cell renders blank) rather than a silent zero or an empty
 string — an incomplete row should read as incomplete.
 
-``IS_NULL(x)`` is the one function that does not propagate it, and the only way
-to ask about a blank at all: every other way of looking at one blanks the whole
-formula, so ``IF(notes == "", …)`` can never be true. It answers ``1`` when its
-argument has no value and ``0`` when it has one — which makes ``IF(IS_NULL(x),
-0, x)`` the "treat blank as zero" a spreadsheet writes as IFNULL/COALESCE, and
-``IS_NULL(a) + IS_NULL(b)`` a count of how many of them are missing.
+``IS_NULL(x)`` and ``DEFAULT(x, fallback)`` are the two functions that do not
+propagate it, and the only way to ask about a blank at all: every other way of
+looking at one blanks the whole formula, so ``IF(notes == "", …)`` can never be
+true.
+
+``IS_NULL`` answers ``1`` when its argument has no value and ``0`` when it has one,
+which makes ``IS_NULL(a) + IS_NULL(b)`` a count of how many of them are missing.
+``DEFAULT`` is the IFNULL/COALESCE a spreadsheet has: ``DEFAULT(x, 0)`` is the value
+or zero, and it says in one place what ``IF(IS_NULL(x), 0, x)`` says by naming ``x``
+twice — which matters beyond brevity, because the two mentions can drift apart under
+an edit and because a chain of fallbacks written that way (``DEFAULT(nickname,
+DEFAULT(first_name, "friend"))``) is unreadable in the long form. It differs from
+``IS_NULL`` in one place, deliberately: an **empty string counts as missing**, in
+exactly the sense the filter language's ``is_empty`` means it (``IS NULL OR = ''``,
+untrimmed), because a fallback that fired for a blank cell and not for an emptied one
+is a bug reported as "sometimes it shows nothing".
 
 This grammar is *row-scoped*: every name it resolves is one cell of one record.
 List **metrics** layer a second, aggregate-level grammar on top of it
@@ -85,6 +95,7 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "INT": (1, 1),
     "IF": (3, 3),
     "IS_NULL": (1, 1),
+    "DEFAULT": (2, 2),
     "CONCAT": (2, None),
     "UPPER": (1, 1),
     "LOWER": (1, 1),
@@ -560,6 +571,27 @@ def _eval(node: ast.AST, values: dict[str, object]):
                 return None
             branch = node.args[1] if cond else node.args[2]
             return _eval(branch, values)
+        if name == "DEFAULT":
+            # Evaluated before the "any argument missing blanks the call" rule
+            # below, for the same reason IS_NULL is: a missing first argument is
+            # the case this exists to answer, not a case that blanks it.
+            #
+            # An arithmetic error counts as missing, matching IS_NULL, so
+            # `DEFAULT(total / qty, 0)` covers a zero quantity as well as an empty
+            # one — the two ways that expression has no value.
+            try:
+                value = _eval(node.args[0], values)
+            except ARITHMETIC_ERRORS:
+                value = None
+            # An empty string counts too, and "empty" means exactly what the filter
+            # language's `is_empty` means by it — `field IS NULL OR field = ''` —
+            # rather than anything cleverer. Untrimmed, so a cell holding a space is
+            # a value here as it is there, and `DEFAULT(TRIM(notes), "—")` is how you
+            # say otherwise. `0` and `False` are values, not blanks, which is why
+            # these are explicit tests and not a truthiness check.
+            if value is None or value == "":
+                return _eval(node.args[1], values)
+            return value
         if name == "IS_NULL":
             # Evaluated before the "any argument missing blanks the call" rule
             # below, because being missing is the whole question. Arithmetic
