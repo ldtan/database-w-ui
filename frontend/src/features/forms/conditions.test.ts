@@ -312,3 +312,59 @@ describe("applyFieldConditions", () => {
     expect(applyFieldConditions(fields, null, {}, columns)).toEqual(fields);
   });
 });
+
+/**
+ * The browser half of `resolve_filter_token`.
+ *
+ * Same substitution, same place in the evaluation, against this browser's clock
+ * rather than the account's recorded zone — which is a cache of it, so the two agree
+ * about what day it is. Dates are computed here rather than written out, because a
+ * literal would be wrong tomorrow, which is the property the tokens exist for.
+ */
+describe("today and now in a condition", () => {
+  const DUE = column({ uuid: "due", name: "due", type: "date" });
+  const AT = column({ uuid: "at", name: "at", type: "datetime" });
+
+  function on(col: Column, operator: string, value: unknown, cell: unknown) {
+    return evaluateCondition(
+      { column_uuid: col.uuid, operator, value },
+      { [col.uuid]: cell },
+      [col],
+    );
+  }
+
+  const day = 24 * 60 * 60 * 1000;
+  const iso = (d: Date) =>
+    `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+      d.getDate(),
+    ).padStart(2, "0")}`;
+  const today = new Date();
+
+  it("compares a date column against the day it is asked on", () => {
+    expect(on(DUE, ">=", "today", iso(today))).toBe(true);
+    expect(on(DUE, ">=", "today", iso(new Date(+today + day)))).toBe(true);
+    expect(on(DUE, ">=", "today", iso(new Date(+today - day)))).toBe(false);
+    expect(on(DUE, "is", "today", iso(today))).toBe(true);
+  });
+
+  /** "today" is midnight on a datetime, so the morning is already behind it. */
+  it("separates midnight from the current reading on a datetime column", () => {
+    expect(on(AT, ">=", "today", `${iso(today)}T00:00:01`)).toBe(true);
+    expect(on(AT, ">=", "today", `${iso(new Date(+today - day))}T23:59:59`)).toBe(
+      false,
+    );
+    expect(on(AT, ">=", "now", `${iso(new Date(+today + day))}T09:00:00`)).toBe(
+      true,
+    );
+  });
+
+  /**
+   * Keyed by column type, not by the value — so a text cell really holding the word
+   * still compares as that word. The whole reason the substitution is not a blanket
+   * string swap.
+   */
+  it("leaves the word alone on a column that does not accept it", () => {
+    expect(met("is", "today", "today")).toBe(true);
+    expect(on(DUE, "is", "now", "now")).toBe(true);
+  });
+});

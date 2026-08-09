@@ -17,6 +17,11 @@
  *   `multiple` (`_field`, and the reason that function exists: records outlive the
  *   `multiple` setting that shaped them).
  * - `contains` is case-insensitive, because `ilike` is.
+ * - A temporal condition written against **"today" or "now"** resolves against the
+ *   clock at the moment it is asked, not against the moment it was saved
+ *   (`resolve_filter_token`). Here that is the browser's clock and there it is the
+ *   account's recorded zone, which is a cache of this browser's — so the two agree
+ *   about what day it is.
  * - `>`/`<` compare **numbers** on a number column and text everywhere else. Text
  *   ordering on numbers puts "9" after "10", which is the wrong answer `_numeric` was
  *   written to avoid.
@@ -30,6 +35,7 @@
  * record, so a hidden field's column is still required if it says it is, and CSV
  * import, a QR fill and a direct API write see no conditions at all.
  */
+import { resolveFilterToken } from "../../lib/temporal";
 import type {
   Column,
   FieldCondition,
@@ -96,7 +102,13 @@ export function evaluateCondition(
   if (!column) return null;
 
   const field = fieldText(column, values[column.uuid]);
-  const { operator, value } = condition;
+  const { operator } = condition;
+  // "today"/"now" on a temporal column stand for a reading of the clock, not for
+  // themselves — `filtering._condition` resolves them where it builds the WHERE and
+  // this is the same substitution, in the same place, against the browser's clock.
+  // Left alone for every other column and value, so a `text` cell really holding the
+  // word "today" still compares as that word.
+  const value = resolveFilterToken(column.type, condition.value);
   const wanted = asText(value);
 
   switch (operator) {

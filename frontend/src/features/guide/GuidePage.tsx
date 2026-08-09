@@ -1253,6 +1253,15 @@ export function GuidePage() {
           calendar, and choice/people/linked columns give you a picker. Comparisons
           like <Ui>is empty</Ui> need no value at all.
         </p>
+        <Callout tone="tip" title="“Today” and “Now” move with the calendar">
+          On a date, time or date &amp; time column the value box offers{" "}
+          <Ui>Today</Ui> or <Ui>Now</Ui> as well as a date you pick. Choose one and
+          the filter is worked out afresh every time you look — so{" "}
+          <Ui>Due</Ui> <Ui>≥</Ui> <Ui>Today</Ui> saved into a view still means{" "}
+          <em>today</em> next month, where a date you typed in would still mean the
+          day you typed it. On a date &amp; time column, <Ui>Today</Ui> means from
+          midnight and <Ui>Now</Ui> means from this minute.
+        </Callout>
         <Callout tone="warn" title="Nothing sticks until you save it">
           Searching, sorting, grouping, and choosing columns change only how{" "}
           <em>you</em> are looking right now. To keep an arrangement, save it into a

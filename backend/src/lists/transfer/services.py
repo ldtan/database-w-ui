@@ -312,7 +312,7 @@ async def export_rows(
         # leaves the app and archiving must not be able to strand records here.
         if not include_archived:
             stmt = stmt.where(ListItem.archived_at.is_(None))
-        stmt = apply_filters(stmt, filters, all_columns)
+        stmt = apply_filters(stmt, filters, all_columns, user)
         stmt = apply_sorts(stmt, sorts, all_columns)
         if limit is not None:
             stmt = stmt.limit(limit)

@@ -58,6 +58,55 @@ export function parseTemporal(type: ColumnType, raw: unknown): Date | null {
   return new Date(+y, +mo - 1, +da, h ? +h : 0, mi ? +mi : 0, se ? +se : 0);
 }
 
+/**
+ * The dynamic values a *filter* on a temporal column may be written against.
+ *
+ * A condition holds a literal, so "due this month or earlier" is a date somebody
+ * typed and a view saved in January still filters on January in March. These two
+ * words are resolved when the question is asked instead — by
+ * `columns/validation.resolve_filter_token` on the server, which owns this table,
+ * and by `resolveFilterToken` below for the one filter the browser evaluates itself
+ * (a form field's condition).
+ *
+ * A `datetime` column takes both, "today" meaning this morning's midnight: an ISO
+ * date-time sorts lexically and every reading of today is at or after it, so
+ * `>= today` is the rest of the day. `date` and `time` each have only the one word
+ * that means anything to them.
+ */
+export const FILTER_TOKENS: Readonly<Record<string, readonly string[]>> = {
+  date: ["today"],
+  time: ["now"],
+  datetime: ["now", "today"],
+};
+
+export function filterTokens(type: ColumnType): readonly string[] {
+  return FILTER_TOKENS[type] ?? [];
+}
+
+/** How a token reads on a control: "today" -> "Today". */
+export function filterTokenLabel(token: string): string {
+  return token === "today" ? "Today" : "Now";
+}
+
+/**
+ * A filter value with any token resolved against this browser's clock; anything
+ * else passed straight through.
+ *
+ * The local clock rather than UTC, matching the server: these columns hold a
+ * wall-clock reading, and the account's stored zone is a cache of this browser's
+ * (see `timezoneSync`), so the two agree about what day it is.
+ */
+export function resolveFilterToken(type: ColumnType, value: unknown): unknown {
+  if (typeof value !== "string" || !filterTokens(type).includes(value)) {
+    return value;
+  }
+  const now = new Date();
+  if (type === "date") return fmtDate(now);
+  if (type === "time") return fmtTime(now);
+  if (value === "today") return `${fmtDate(now)}T00:00:00`;
+  return `${fmtDate(now)}T${fmtTime(now)}`;
+}
+
 /** Stored string -> what a grid cell shows. Seconds are dropped unless meaningful. */
 export function displayTemporal(type: ColumnType, raw: unknown): string {
   const d = parseTemporal(type, raw);
