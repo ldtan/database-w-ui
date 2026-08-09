@@ -547,6 +547,11 @@ export function GuidePage() {
             blank.
           </li>
           <li>
+            Hold a value inside a range — <Ui>Min</Ui> and <Ui>Max</Ui> on a number,{" "}
+            <Ui>Earliest</Ui> and <Ui>Latest</Ui> on a date, time or date &amp; time.
+            Fill in one and the column is bounded on that side only.
+          </li>
+          <li>
             Have date, time, or user columns stamp themselves automatically when a
             record is created or edited.
           </li>

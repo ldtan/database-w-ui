@@ -345,6 +345,63 @@ async def test_number_range_and_integer_only(client, list_uuid, add_column):
     assert (await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col: 5.5}})).status_code == 400
 
 
+async def test_temporal_range_enforced(client, list_uuid, add_column):
+    """A date, time or datetime column may be bounded on either side.
+
+    One test over all three because the bound is the same pair of config keys read
+    through the type's own parser, and the interesting part is that each type's
+    parser is the one doing the comparing — "09:00" is not a date and "2026-08-09"
+    is not a time.
+    """
+    cases = [
+        ("date", {"min": "2026-01-01", "max": "2026-12-31"}, "2026-08-09", "2025-12-31"),
+        ("time", {"min": "09:00:00", "max": "17:00:00"}, "12:30:00", "08:59:00"),
+        (
+            "datetime",
+            {"min": "2026-01-01T00:00:00", "max": "2026-12-31T23:59:59"},
+            "2026-08-09T14:30:00",
+            "2027-01-01T00:00:00",
+        ),
+    ]
+    for type_, config, inside, outside in cases:
+        col = await add_column(
+            list_uuid, name=f"when_{type_}", display_name=type_, type=type_,
+            config=config,
+        )
+        ok = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: inside}}
+        )
+        assert ok.status_code == 201, ok.text
+        bad = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: outside}}
+        )
+        assert bad.status_code == 400, bad.text
+
+
+async def test_temporal_range_must_be_well_formed(client, list_uuid):
+    """The column itself is refused, rather than one that can never be filled in."""
+    async def add(config):
+        return await client.post(
+            f"/api/lists/{list_uuid}/columns/",
+            json={
+                "name": "due", "display_name": "Due", "type": "date",
+                "config": config,
+            },
+        )
+
+    backwards = await add({"min": "2026-12-31", "max": "2026-01-01"})
+    assert backwards.status_code == 400
+    assert "cannot exceed" in backwards.json()["detail"]
+
+    unparseable = await add({"min": "the first of January"})
+    assert unparseable.status_code == 400
+
+    # A default outside the column's own bounds is refused for the same reason:
+    # every record it created would be invalid the moment anyone edited it.
+    outside = await add({"min": "2026-01-01", "default": "2025-06-01"})
+    assert outside.status_code == 400
+
+
 async def test_choice_shorthand_expands_and_validates(client, list_uuid, add_column):
     col = await add_column(
         list_uuid, name="status", display_name="Status", type="choice",

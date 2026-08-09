@@ -138,6 +138,12 @@ export function ColumnDialog({
   const [maxLength, setMaxLength] = useState<number | null>(null);
   const [min, setMin] = useState<number | null>(null);
   const [max, setMax] = useState<number | null>(null);
+  // The same two config keys as `min`/`max` above, held as Dates because a
+  // temporal bound is picked on a calendar rather than typed as a number. One
+  // pair of keys, two pieces of state, and only the pair matching `type` is read
+  // when the config is built — the same split the default value already uses.
+  const [minDate, setMinDate] = useState<Date | null>(null);
+  const [maxDate, setMaxDate] = useState<Date | null>(null);
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
   // Choice: whether a record may answer with something not on the list. What gets
@@ -207,6 +213,8 @@ export function ColumnDialog({
       setMaxLength(null);
       setMin(null);
       setMax(null);
+      setMinDate(null);
+      setMaxDate(null);
       setIntegerOnly(false);
       setChoices("");
       setAllowOther(false);
@@ -234,6 +242,8 @@ export function ColumnDialog({
       setMaxLength(null);
       setMin(null);
       setMax(null);
+      setMinDate(null);
+      setMaxDate(null);
       setIntegerOnly(false);
       setChoices("");
       setAllowOther(false);
@@ -262,6 +272,12 @@ export function ColumnDialog({
     setMaxLength((config.max_length as number) ?? null);
     setMin((config.min as number) ?? null);
     setMax((config.max as number) ?? null);
+    // The same keys read the other way round. `parseTemporal` answers null for a
+    // bound this column has not got, and for one stored in a shape it cannot
+    // read — a malformed bound leaves the picker empty rather than showing an
+    // "Invalid Date", exactly as a malformed cell does.
+    setMinDate(parseTemporal(column.type, config.min));
+    setMaxDate(parseTemporal(column.type, config.max));
     setIntegerOnly(!!config.integer_only);
     setChoices(((config.options as string[]) ?? []).join(";"));
     setAllowOther(!!config.allow_other);
@@ -486,6 +502,12 @@ export function ColumnDialog({
         config.min = min;
         config.max = max;
         config.integer_only = integerOnly;
+      }
+      if (isTemporal(type)) {
+        // Always sent, like `unique`: a config PATCH merges, so clearing a bound
+        // means writing an explicit null rather than omitting the key.
+        config.min = minDate ? serializeTemporal(type, minDate) : null;
+        config.max = maxDate ? serializeTemporal(type, maxDate) : null;
       }
       if (type === "choice") {
         config.choices = choices;
@@ -974,6 +996,45 @@ export function ColumnDialog({
                 label="Integers only"
               />
             </>
+          )}
+
+          {isTemporal(type) && (
+            <FieldRow>
+              {/* "Earliest"/"Latest" rather than the number column's "Min"/"Max":
+                  they mean the same thing to the same two config keys, and this is
+                  how a person says it about a date. Leaving one empty bounds the
+                  column on one side only. */}
+              <Field
+                label={type === "time" ? "Earliest time" : "Earliest"}
+                htmlFor="col-min"
+                optional
+              >
+                <Calendar
+                  inputId="col-min"
+                  value={minDate}
+                  onChange={(e) => setMinDate((e.value as Date) ?? null)}
+                  dateFormat="yy-mm-dd"
+                  timeOnly={type === "time"}
+                  showTime={type === "datetime"}
+                  showButtonBar
+                />
+              </Field>
+              <Field
+                label={type === "time" ? "Latest time" : "Latest"}
+                htmlFor="col-max"
+                optional
+              >
+                <Calendar
+                  inputId="col-max"
+                  value={maxDate}
+                  onChange={(e) => setMaxDate((e.value as Date) ?? null)}
+                  dateFormat="yy-mm-dd"
+                  timeOnly={type === "time"}
+                  showTime={type === "datetime"}
+                  showButtonBar
+                />
+              </Field>
+            </FieldRow>
           )}
 
           {type === "choice" && (
