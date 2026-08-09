@@ -1016,6 +1016,24 @@ that doesn't exist, so the `target_list_uuid` field can't be used to probe for a
 lists. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
 refused-when-unviewable.
 
+**Writing a lookup cell obeys the target's permissions too, and for a while it did not.**
+The relaxation above was applied to the config-time check and not to the write path, which
+went on resolving the target scoped to the owner of the list holding the column
+(`ListItemService._lookup_target_id`). The two disagreed exactly where it mattered: a
+cross-owner target the config-time check accepted produced a column that created cleanly and
+then refused every value with "points at a missing target list" — reads fine, writes never.
+The owner scope is now gone, replaced by `lookup` on the target, the same action the read
+path takes. That check is not redundant with the read path's: `_validate_lookup` resolves a
+row by its **label** as well as its uuid, so an unguarded write is a way to probe an
+unreadable list by guessing. It is skipped only where there is no caller to check — a column
+conversion re-validating stored data, and the demo seeder. `test_lookup_grants.py` pins both
+halves: `test_a_cross_owner_lookup_accepts_a_write` and
+`test_writing_a_lookup_takes_lookup_on_the_target`. Note the tightening in that second one:
+a grantee who may edit the host list but was never given anything on the target can no longer
+write that cell. They could not see the picker either way — the options endpoint always
+required `lookup` — so this makes the write agree with the read rather than taking anything
+away that was usable.
+
 **Resolving a label means reading the target list, so it obeys the *target's* permissions,
 not the exported/edited list's.** `view` on a list must not hand over the contents of a
 different list it happens to point at. The options endpoint enforces this, and so does export

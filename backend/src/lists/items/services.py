@@ -1169,7 +1169,7 @@ class ListItemService:
             # which is a fine way to lock a list. A *new* reference to a deleted
             # target is still refused.
             kept = _as_set((existing or {}).get(key))
-            result[key] = await cls._validate_value(db, lst, column, value, kept)
+            result[key] = await cls._validate_value(db, lst, column, value, kept, user)
 
         # Apply defaults / on-update stamps and enforce required, over the merged
         # record. `coerce_shape` so a resolved token lands in the column's declared
@@ -1198,7 +1198,9 @@ class ListItemService:
         # Nested lookups are a cross-cell rule, so they are checked over the
         # merged record rather than per column — whichever order the cells
         # arrived in, parent and child are both settled by now.
-        await cls._enforce_nested_lookups(db, lst, columns, result, incoming, existing)
+        await cls._enforce_nested_lookups(
+            db, lst, columns, result, incoming, existing, user
+        )
 
         # Every calculated cell, last, over the settled record: defaults have been
         # applied and every operand is in its final form, so a formula sees what the
@@ -1223,6 +1225,7 @@ class ListItemService:
         result: dict,
         incoming: dict,
         existing: Optional[dict],
+        user=None,
     ) -> None:
         """Reject a nested lookup value that does not belong to the parent's.
 
@@ -1251,7 +1254,7 @@ class ListItemService:
             parent = columns.get(parent_key)
             if parent is None or parent.type != ColumnType.lookup:
                 continue
-            target_list_id = await cls._lookup_target_id(db, lst, column, config)
+            target_list_id = await cls._lookup_target_id(db, column, config, user)
             if not await cls._nested_filter_live(db, target_list_id, filter_key):
                 continue
 
@@ -1410,7 +1413,13 @@ class ListItemService:
 
     @classmethod
     async def _validate_value(
-        cls, db: AsyncSession, lst: List, column: Column, value, kept: set = frozenset()
+        cls,
+        db: AsyncSession,
+        lst: List,
+        column: Column,
+        value,
+        kept: set = frozenset(),
+        user=None,
     ):
         """Validate a value and return what should be stored (usually the value
         itself; reference types normalize to a uuid string).
@@ -1420,7 +1429,7 @@ class ListItemService:
         """
         # References need the database; every other type is a pure scalar check.
         if column.type == ColumnType.lookup:
-            return await cls._validate_lookup(db, lst, column, value, kept)
+            return await cls._validate_lookup(db, lst, column, value, kept, user)
         if column.type in PRINCIPAL_TYPES:
             return await cls._validate_principal(db, column, value, kept)
         if column.type == ColumnType.link and isinstance(value, str):
@@ -1509,7 +1518,13 @@ class ListItemService:
 
     @classmethod
     async def _validate_lookup(
-        cls, db: AsyncSession, lst: List, column: Column, value, kept: set = frozenset()
+        cls,
+        db: AsyncSession,
+        lst: List,
+        column: Column,
+        value,
+        kept: set = frozenset(),
+        user=None,
     ):
         """Resolve a lookup cell to target-row uuid(s).
 
@@ -1528,7 +1543,7 @@ class ListItemService:
         if not raws:
             return [] if multiple else None
 
-        target_list_id = await cls._lookup_target_id(db, lst, column, config)
+        target_list_id = await cls._lookup_target_id(db, column, config, user)
 
         parsed = [(raw, cls._as_uuid(raw)) for raw in raws]
         uuids = [uuid for _, uuid in parsed if uuid is not None]
@@ -1616,23 +1631,57 @@ class ListItemService:
     # Cache them on the session, which is scoped to exactly one request.
     @classmethod
     async def _lookup_target_id(
-        cls, db: AsyncSession, lst: List, column: Column, config: dict
+        cls, db: AsyncSession, column: Column, config: dict, user=None
     ) -> int:
+        """The target list's id, once the caller is known to be allowed it.
+
+        Deliberately *not* scoped to the owner of the list holding the column. It
+        was, left over from when a lookup could only be created against a list you
+        own — but `ColumnService._validate_config` has since been relaxed to "any
+        list you can `lookup`" (docs/known-gaps.md), and the two never met in the
+        middle. The result was that a cross-owner lookup the config-time check
+        accepts had the column created fine and then refused every cell write.
+
+        What that join was really supplying is access control: owning both lists
+        makes a leak impossible. Removing it means saying so directly instead, with
+        the check the read path already makes (`ColumnService.lookup_options`) —
+        `lookup` on the target. It is load-bearing, because the resolution below
+        matches a row by its **label** as well as its uuid, so an unguarded write
+        would let a caller probe a list they cannot read by guessing labels.
+
+        ``user`` is None on the trusted internal paths that have no caller to check
+        — a column conversion re-validating stored data, and the demo seeder — and
+        the check is skipped for them, as it is for the dynamic defaults above.
+        """
         cache = db.info.setdefault("lookup_target_ids", {})
-        cache_key = (lst.workspace.owner_id, str(config.get("target_list_uuid")))
+        # Keyed by the caller rather than by the holding list's owner: what varies
+        # between two resolutions of the same target within one session is who is
+        # asking. The entry is only written once that caller has been authorised,
+        # so a hit means "resolved *and* allowed" and the permission query runs
+        # once per caller and target — not once per row of an import.
+        cache_key = (getattr(user, "id", None), str(config.get("target_list_uuid")))
         if cache_key not in cache:
-            cache[cache_key] = (
+            target_id = (
                 await db.execute(
                     select(List.id)
                     .join(Workspace, List.workspace_id == Workspace.id)
                     .where(
                         List.uuid == coerce_uuid(config.get("target_list_uuid")),
-                        Workspace.owner_id == lst.workspace.owner_id,
                         List.deleted_at.is_(None),
                         Workspace.deleted_at.is_(None),
                     )
                 )
             ).scalars().first()
+            if target_id is not None and user is not None:
+                # Deferred like the other permission call sites: a module-level
+                # import cycles back through auth/workspaces services.
+                from src.permissions.enums import Action, ResourceType
+                from src.permissions.services import PermissionService
+
+                await PermissionService.require(
+                    db, user, ResourceType.list, target_id, Action.lookup
+                )
+            cache[cache_key] = target_id
 
         target_list_id = cache[cache_key]
         if target_list_id is None:
