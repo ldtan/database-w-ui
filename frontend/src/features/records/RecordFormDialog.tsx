@@ -7,6 +7,7 @@ import { Message } from "primereact/message";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
+import { applyFieldConditions } from "../forms/conditions";
 import { RecordFields } from "./RecordFields";
 import { buildRecordData, deserialize, resolveFields } from "./recordValues";
 
@@ -55,7 +56,15 @@ export function RecordFormDialog({
   const queryClient = useQueryClient();
   const toast = useToast();
   const [values, setValues] = useState<Record<string, unknown>>({});
-  const fields = resolveFields(columns, form);
+  // Recomputed every render, which is what makes a conditional field appear and
+  // disappear as the field driving it is typed into — no effect, no second copy of the
+  // draft. `resolveFields` stays pure and values-free so the surfaces that must not
+  // apply conditions (the grid's cell editing, the QR fill) go on calling it directly.
+  //
+  // Both answers are kept because "no fields" has two causes now, and telling somebody
+  // to add a column when the list has plenty is worse than saying nothing.
+  const laidOut = resolveFields(columns, form);
+  const fields = applyFieldConditions(laidOut, form, values, columns);
 
   useEffect(() => {
     if (!visible) return;
@@ -103,6 +112,8 @@ export function RecordFormDialog({
             icon={item ? "pi pi-check" : "pi pi-plus"}
             onClick={() => persist.mutate()}
             loading={persist.isPending}
+            // Either cause leaves nothing to write, and the hint in the body says
+            // which one it is.
             disabled={fields.length === 0}
           />
         </>
@@ -127,8 +138,17 @@ export function RecordFormDialog({
             }
           />
         )}
-        {fields.length === 0 && (
+        {laidOut.length === 0 && (
           <p className="field-hint">Add a column first.</p>
+        )}
+        {/* Every field this form has is conditional and none of them apply. Saying so
+            beats an empty dialog, and beats "add a column first" — the list has
+            columns, they just do not apply to the record as it stands. */}
+        {laidOut.length > 0 && fields.length === 0 && (
+          <p className="field-hint">
+            None of this form's fields apply yet. They appear as the record is filled
+            in elsewhere.
+          </p>
         )}
         <RecordFields
           listUuid={listUuid}

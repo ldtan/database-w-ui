@@ -9,32 +9,7 @@ import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal
 import type { Column, FilterCondition } from "../../lib/types";
 import { LookupFilterValue } from "../lookups/LookupControls";
 import { PrincipalFilterValue } from "../principals/PrincipalControls";
-
-export const OPERATORS = [
-  { label: "is", value: "is" },
-  { label: "is not", value: "is_not" },
-  { label: "contains", value: "contains" },
-  { label: "does not contain", value: "does_not_contain" },
-  { label: "is empty", value: "is_empty" },
-  { label: "is not empty", value: "is_not_empty" },
-  { label: ">", value: ">" },
-  { label: "≥", value: ">=" },
-  { label: "<", value: "<" },
-  { label: "≤", value: "<=" },
-];
-
-export const NO_VALUE_OPS = new Set(["is_empty", "is_not_empty"]);
-
-// Drop conditions that are incomplete so they don't get sent to the server.
-export function cleanConditions(conditions: FilterCondition[]): FilterCondition[] {
-  return conditions.filter(
-    (c) =>
-      c.column_uuid &&
-      c.operator &&
-      (NO_VALUE_OPS.has(c.operator) ||
-        (c.value !== undefined && c.value !== null && c.value !== "")),
-  );
-}
+import { NO_VALUE_OPS, OPERATORS } from "./operators";
 
 interface Props {
   listUuid: string;

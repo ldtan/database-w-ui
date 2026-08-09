@@ -35,6 +35,7 @@ import type {
   TextMode,
   Workspace,
 } from "../../lib/types";
+import { hasAdvancedConfig } from "./columnAdvanced";
 
 // The first two are what used to be the `text` and `long_text` column types.
 // "Rich text" is the one that changes what is stored — HTML, not plain text.
@@ -133,6 +134,7 @@ export function ColumnDialog({
   const [type, setType] = useState<ColumnType>("text");
   const [required, setRequired] = useState(false);
   const [unique, setUnique] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [maxLength, setMaxLength] = useState<number | null>(null);
   const [min, setMin] = useState<number | null>(null);
   const [max, setMax] = useState<number | null>(null);
@@ -217,6 +219,9 @@ export function ColumnDialog({
       setMultiple(false);
       setFormula("");
       setTextMode("single");
+      // The config starts blank, so the only advanced setting that can arrive here
+      // is the `unique` carried over just above.
+      setAdvancedOpen(hasAdvancedConfig({ unique: config.unique }));
       resetDefaults();
       return;
     }
@@ -241,6 +246,7 @@ export function ColumnDialog({
       setMultiple(false);
       setFormula("");
       setTextMode("single");
+      setAdvancedOpen(false);
       resetDefaults();
       return;
     }
@@ -250,6 +256,9 @@ export function ColumnDialog({
     setType(column.type);
     setRequired(!!config.required);
     setUnique(!!config.unique);
+    // A setting that is set must not be a setting that is invisible, so the section
+    // opens itself for a column that uses anything inside it.
+    setAdvancedOpen(hasAdvancedConfig(config));
     setMaxLength((config.max_length as number) ?? null);
     setMin((config.min as number) ?? null);
     setMax((config.max as number) ?? null);
@@ -599,14 +608,19 @@ export function ColumnDialog({
     });
   }
 
-  // Which type-specific configuration this column has, if any — the difference
-  // between an "Options" section and no section at all rather than an empty
-  // heading over nothing.
+  /**
+   * Which types have configuration that stays on screen — the difference between an
+   * "Options" section and no section at all rather than an empty heading over nothing.
+   *
+   * Narrower than it was, because most type-specific settings have moved behind
+   * "Advanced". What is left is what the type cannot be understood without, and — for
+   * a lookup and a calculated column — what the Save button refuses to proceed
+   * without. A number column's min and max, a link's display text and a principal
+   * column's "allow several" are all refinements of a type that reads fine without
+   * them, so those types no longer have an Options section at all.
+   */
   const hasOptions =
-    isCalculated ||
-    ["text", "number", "choice", "link", "user", "group", "lookup"].includes(
-      type,
-    );
+    isCalculated || ["text", "choice", "lookup"].includes(type);
 
   return (
     <AppDialog
@@ -754,103 +768,26 @@ export function ColumnDialog({
                     allowEmpty={false}
                   />
                 </Field>
-                <Field label="Max length" htmlFor="col-maxlen" optional>
-                  <InputNumber
-                    inputId="col-maxlen"
-                    value={maxLength}
-                    onValueChange={(e) => setMaxLength(e.value ?? null)}
-                    min={1}
-                    useGrouping={false}
-                  />
-                </Field>
-              </>
-            )}
-
-            {type === "number" && (
-              <>
-                <FieldRow>
-                  <Field label="Min" htmlFor="col-min" optional>
-                    <InputNumber
-                      inputId="col-min"
-                      value={min}
-                      onValueChange={(e) => setMin(e.value ?? null)}
-                      useGrouping={false}
-                    />
-                  </Field>
-                  <Field label="Max" htmlFor="col-max" optional>
-                    <InputNumber
-                      inputId="col-max"
-                      value={max}
-                      onValueChange={(e) => setMax(e.value ?? null)}
-                      useGrouping={false}
-                    />
-                  </Field>
-                </FieldRow>
-                <CheckboxField
-                  inputId="col-int"
-                  checked={integerOnly}
-                  onChange={setIntegerOnly}
-                  label="Integers only"
-                />
               </>
             )}
 
             {type === "choice" && (
-              <>
-                <Field
-                  label="Choices"
-                  htmlFor="col-choices"
-                  hint={
-                    editing
-                      ? 'Separated by ";". Renaming an option keeps records pointing at it; removing one leaves records holding a value the column no longer offers.'
-                      : 'Separated by ";".'
-                  }
-                >
-                  <InputText
-                    id="col-choices"
-                    value={choices}
-                    onChange={(e) => setChoices(e.target.value)}
-                    placeholder="Todo;Doing;Done"
-                  />
-                </Field>
-                <CheckboxField
-                  inputId="col-allow-other"
-                  checked={allowOther}
-                  onChange={setAllowOther}
-                  label="Allow an “Other” answer"
-                  hint={
-                    // Says what it stores, because that is the surprise: an "Other"
-                    // answer is not tagged as one anywhere. It is simply the words
-                    // that were typed, so it groups, filters and exports as its own
-                    // value rather than alongside the other write-ins.
-                    editing && allowOther
-                      ? "Records may answer with something not on the list, typed in a box below the choices. Turning this off leaves those answers on the records that hold them, but the next edit of such a record must pick one of the options."
-                      : "Records may answer with something not on the list, typed in a box below the choices. What they type is stored as the value itself, so two people writing the same thing differently stay two different values."
-                  }
-                />
-              </>
-            )}
-
-            {type === "link" && (
-              <Field label="Link text" htmlFor="col-linktext" optional>
+              <Field
+                label="Choices"
+                htmlFor="col-choices"
+                hint={
+                  editing
+                    ? 'Separated by ";". Renaming an option keeps records pointing at it; removing one leaves records holding a value the column no longer offers.'
+                    : 'Separated by ";".'
+                }
+              >
                 <InputText
-                  id="col-linktext"
-                  value={linkText}
-                  onChange={(e) => setLinkText(e.target.value)}
-                  placeholder="Shown instead of the URL"
+                  id="col-choices"
+                  value={choices}
+                  onChange={(e) => setChoices(e.target.value)}
+                  placeholder="Todo;Doing;Done"
                 />
               </Field>
-            )}
-
-            {(type === "user" || type === "group") && (
-              <CheckboxField
-                inputId="col-multi-principal"
-                checked={multiple}
-                onChange={setMultiple}
-                label={`Allow selecting multiple ${
-                  type === "user" ? "users" : "groups"
-                }`}
-              />
             )}
 
             {type === "lookup" && (
@@ -930,82 +867,6 @@ export function ColumnDialog({
                     />
                   </Field>
                 )}
-                {targetListUuid &&
-                  (parentOptions.length > 0 || parentColumnUuid) && (
-                    <>
-                      <Field
-                        label="Nest under"
-                        htmlFor="col-nest-parent"
-                        optional
-                        hint="What's selected there decides which rows this column offers — pick a country first, get only its cities."
-                      >
-                        <Dropdown
-                          inputId="col-nest-parent"
-                          value={parentColumnUuid}
-                          options={parentOptions.map((c) => ({
-                            label: c.display_name,
-                            value: c.uuid,
-                          }))}
-                          onChange={(e) => {
-                            const next = (e.value as string) ?? null;
-                            setParentColumnUuid(next);
-                            // The match column depends on the parent; re-derive
-                            // it, and save a click when only one column qualifies.
-                            const candidates = next
-                              ? targetLookups.filter((t) => {
-                                  const parent = parentOptions.find(
-                                    (c) => c.uuid === next,
-                                  );
-                                  return (
-                                    t.config.target_list_uuid ===
-                                    parent?.config.target_list_uuid
-                                  );
-                                })
-                              : [];
-                            setTargetFilterColumnUuid(
-                              candidates.length === 1
-                                ? candidates[0].uuid
-                                : null,
-                            );
-                          }}
-                          placeholder="Not nested"
-                          showClear
-                          className="w-full"
-                        />
-                      </Field>
-                      {parentColumnUuid && (
-                        <Field
-                          label="Match on"
-                          htmlFor="col-nest-match"
-                          hint={`The target list's column that links each row to a ${
-                            parentColumn?.display_name ?? "parent"
-                          } selection.`}
-                        >
-                          <Dropdown
-                            inputId="col-nest-match"
-                            value={targetFilterColumnUuid}
-                            options={matchOptions.map((c) => ({
-                              label: c.display_name,
-                              value: c.uuid,
-                            }))}
-                            onChange={(e) =>
-                              setTargetFilterColumnUuid(
-                                (e.value as string) ?? null,
-                              )
-                            }
-                            placeholder="Select a column…"
-                            className="w-full"
-                          />
-                        </Field>
-                      )}
-                    </>
-                  )}
-                <CheckboxField
-                  inputId="col-multiple"
-                  checked={multiple}
-                  onChange={setMultiple}
-                  label="Allow linking multiple rows"
-                />
               </>
             )}
 
@@ -1048,142 +909,13 @@ export function ColumnDialog({
           </FormSection>
         )}
 
-        {(showDefault || supportsOnUpdate) && (
-          <FormSection
-            title="Filling in"
-            description="What a new record starts with, and what the app keeps up to date on its own."
-          >
-            {showDefault && type === "checkbox" && (
-              <CheckboxField
-                inputId="col-default"
-                checked={defaultChecked}
-                onChange={setDefaultChecked}
-                label="New records start checked"
-              />
-            )}
-            {showDefault && type !== "checkbox" && (
-              <Field label="Default value" htmlFor="col-default" optional>
-                {/* The default is edited the way the cell itself will be, so a
-                    multiline column's default can actually contain line breaks.
-                    A rich column gets the plain box too rather than a second
-                    editor: a default is a starting sentence, not a formatted
-                    document, and it is sanitised on write like anything else. */}
-                {type === "text" && textMode !== "single" ? (
-                  <InputTextarea
-                    id="col-default"
-                    value={defaultText}
-                    onChange={(e) => setDefaultText(e.target.value)}
-                    rows={3}
-                    placeholder="Used when left blank"
-                  />
-                ) : (
-                  (type === "text" || type === "link") && (
-                    <InputText
-                      id="col-default"
-                      value={defaultText}
-                      onChange={(e) => setDefaultText(e.target.value)}
-                      placeholder={
-                        type === "link"
-                          ? "https://example.com"
-                          : "Used when left blank"
-                      }
-                    />
-                  )
-                )}
-                {type === "number" && (
-                  <InputNumber
-                    inputId="col-default"
-                    value={defaultNumber}
-                    onValueChange={(e) => setDefaultNumber(e.value ?? null)}
-                    useGrouping={false}
-                  />
-                )}
-                {type === "choice" && (
-                  // Typable when the column takes an answer of its own, because
-                  // then a default off the option list is as valid as a cell
-                  // holding one — the server judges it by the same rule.
-                  <Dropdown
-                    inputId="col-default"
-                    value={defaultChoice}
-                    options={choiceLabels.map((l) => ({ label: l, value: l }))}
-                    onChange={(e) => setDefaultChoice(e.value ?? null)}
-                    placeholder="No default"
-                    showClear
-                    editable={allowOther}
-                    className="w-full"
-                  />
-                )}
-                {isTemporal(type) && (
-                  <div className="flex flex-col gap-2">
-                    <Dropdown
-                      inputId="col-default"
-                      value={defaultTemporal}
-                      options={[
-                        { label: "No default", value: "" },
-                        {
-                          label: dynamicLabel(type),
-                          value: dynamicToken(type) as string,
-                        },
-                        { label: "Specific value…", value: SPECIFIC },
-                      ]}
-                      onChange={(e) => setDefaultTemporal(e.value)}
-                      className="w-full"
-                    />
-                    {defaultTemporal === SPECIFIC && (
-                      <Calendar
-                        value={defaultDate}
-                        onChange={(e) =>
-                          setDefaultDate((e.value as Date) ?? null)
-                        }
-                        dateFormat="yy-mm-dd"
-                        timeOnly={type === "time"}
-                        showTime={type === "datetime"}
-                        showButtonBar={type === "date"}
-                      />
-                    )}
-                  </div>
-                )}
-                {type === "user" && (
-                  <Dropdown
-                    inputId="col-default"
-                    value={defaultUser}
-                    options={[
-                      { label: "No default", value: "" },
-                      { label: "Current user", value: "current_user" },
-                    ]}
-                    onChange={(e) => setDefaultUser(e.value)}
-                    className="w-full"
-                  />
-                )}
-              </Field>
-            )}
-
-            {supportsOnUpdate && (
-              <Field
-                label="On update"
-                htmlFor="col-onupdate"
-                hint="Filled in automatically when a record is created and re-stamped on every edit; it isn't set by hand."
-              >
-                <Dropdown
-                  inputId="col-onupdate"
-                  value={onUpdate}
-                  options={[
-                    { label: "Off", value: "" },
-                    {
-                      label: dynamicLabel(type),
-                      value: dynamicToken(type) as string,
-                    },
-                  ]}
-                  onChange={(e) => setOnUpdate(e.value)}
-                  className="w-full"
-                />
-              </Field>
-            )}
-          </FormSection>
-        )}
-
-        <FormSection title="Validation">
-          {!isCalculated && (
+        {/* Required stays on screen while Unique folds away, and the split is not
+            arbitrary: "must be filled in" is a question nearly every column has an
+            answer to, and it is the one piece of validation that changes whether a
+            record can be saved at all. A calculated column has no say — its formula
+            is its only writer — so it gets no section rather than an empty one. */}
+        {!isCalculated && (
+          <FormSection title="Validation">
             <CheckboxField
               inputId="col-required"
               checked={required}
@@ -1191,7 +923,178 @@ export function ColumnDialog({
               label="Required"
               hint="A record cannot be saved with this one left blank."
             />
+          </FormSection>
+        )}
+
+        {/* Everything a column can be refined with, folded away by default.
+            Nothing the Save button validates is in here (see `columnAdvanced.ts`),
+            and the section opens itself for a column that already uses any of it. */}
+        <FormSection
+          title="Advanced"
+          collapsible
+          open={advancedOpen}
+          onOpenChange={setAdvancedOpen}
+        >
+          {type === "text" && (
+            <Field label="Max length" htmlFor="col-maxlen" optional>
+              <InputNumber
+                inputId="col-maxlen"
+                value={maxLength}
+                onValueChange={(e) => setMaxLength(e.value ?? null)}
+                min={1}
+                useGrouping={false}
+              />
+            </Field>
           )}
+
+          {type === "number" && (
+            <>
+              <FieldRow>
+                <Field label="Min" htmlFor="col-min" optional>
+                  <InputNumber
+                    inputId="col-min"
+                    value={min}
+                    onValueChange={(e) => setMin(e.value ?? null)}
+                    useGrouping={false}
+                  />
+                </Field>
+                <Field label="Max" htmlFor="col-max" optional>
+                  <InputNumber
+                    inputId="col-max"
+                    value={max}
+                    onValueChange={(e) => setMax(e.value ?? null)}
+                    useGrouping={false}
+                  />
+                </Field>
+              </FieldRow>
+              <CheckboxField
+                inputId="col-int"
+                checked={integerOnly}
+                onChange={setIntegerOnly}
+                label="Integers only"
+              />
+            </>
+          )}
+
+          {type === "choice" && (
+            <CheckboxField
+              inputId="col-allow-other"
+              checked={allowOther}
+              onChange={setAllowOther}
+              label="Allow an “Other” answer"
+              hint={
+                // Says what it stores, because that is the surprise: an "Other"
+                // answer is not tagged as one anywhere. It is simply the words
+                // that were typed, so it groups, filters and exports as its own
+                // value rather than alongside the other write-ins.
+                editing && allowOther
+                  ? "Records may answer with something not on the list, typed in a box below the choices. Turning this off leaves those answers on the records that hold them, but the next edit of such a record must pick one of the options."
+                  : "Records may answer with something not on the list, typed in a box below the choices. What they type is stored as the value itself, so two people writing the same thing differently stay two different values."
+              }
+            />
+          )}
+
+          {type === "link" && (
+            <Field label="Link text" htmlFor="col-linktext" optional>
+              <InputText
+                id="col-linktext"
+                value={linkText}
+                onChange={(e) => setLinkText(e.target.value)}
+                placeholder="Shown instead of the URL"
+              />
+            </Field>
+          )}
+
+          {(type === "user" || type === "group") && (
+            <CheckboxField
+              inputId="col-multi-principal"
+              checked={multiple}
+              onChange={setMultiple}
+              label={`Allow selecting multiple ${
+                type === "user" ? "users" : "groups"
+              }`}
+            />
+          )}
+
+          {type === "lookup" && (
+            <>
+              {targetListUuid &&
+                (parentOptions.length > 0 || parentColumnUuid) && (
+                  <>
+                    <Field
+                      label="Nest under"
+                      htmlFor="col-nest-parent"
+                      optional
+                      hint="What's selected there decides which rows this column offers — pick a country first, get only its cities."
+                    >
+                      <Dropdown
+                        inputId="col-nest-parent"
+                        value={parentColumnUuid}
+                        options={parentOptions.map((c) => ({
+                          label: c.display_name,
+                          value: c.uuid,
+                        }))}
+                        onChange={(e) => {
+                          const next = (e.value as string) ?? null;
+                          setParentColumnUuid(next);
+                          // The match column depends on the parent; re-derive
+                          // it, and save a click when only one column qualifies.
+                          const candidates = next
+                            ? targetLookups.filter((t) => {
+                                const parent = parentOptions.find(
+                                  (c) => c.uuid === next,
+                                );
+                                return (
+                                  t.config.target_list_uuid ===
+                                  parent?.config.target_list_uuid
+                                );
+                              })
+                            : [];
+                          setTargetFilterColumnUuid(
+                            candidates.length === 1 ? candidates[0].uuid : null,
+                          );
+                        }}
+                        placeholder="Not nested"
+                        showClear
+                        className="w-full"
+                      />
+                    </Field>
+                    {parentColumnUuid && (
+                      <Field
+                        label="Match on"
+                        htmlFor="col-nest-match"
+                        hint={`The target list's column that links each row to a ${
+                          parentColumn?.display_name ?? "parent"
+                        } selection.`}
+                      >
+                        <Dropdown
+                          inputId="col-nest-match"
+                          value={targetFilterColumnUuid}
+                          options={matchOptions.map((c) => ({
+                            label: c.display_name,
+                            value: c.uuid,
+                          }))}
+                          onChange={(e) =>
+                            setTargetFilterColumnUuid(
+                              (e.value as string) ?? null,
+                            )
+                          }
+                          placeholder="Select a column…"
+                          className="w-full"
+                        />
+                      </Field>
+                    )}
+                  </>
+                )}
+              <CheckboxField
+                inputId="col-multiple"
+                checked={multiple}
+                onChange={setMultiple}
+                label="Allow linking multiple rows"
+              />
+            </>
+          )}
+
           {!multiValued && (
             <CheckboxField
               inputId="col-unique"
@@ -1206,6 +1109,146 @@ export function ColumnDialog({
                     : "No two records may hold the same value."
               }
             />
+          )}
+          {(showDefault || supportsOnUpdate) && (
+            <div className="flex flex-col gap-3">
+              <div className="form-section-head">
+                <span className="field-label">Filling in</span>
+                <p className="field-hint">
+                  What a new record starts with, and what the app keeps up to
+                  date on its own.
+                </p>
+              </div>
+              {showDefault && type === "checkbox" && (
+                <CheckboxField
+                  inputId="col-default"
+                  checked={defaultChecked}
+                  onChange={setDefaultChecked}
+                  label="New records start checked"
+                />
+              )}
+              {showDefault && type !== "checkbox" && (
+                <Field label="Default value" htmlFor="col-default" optional>
+                  {/* The default is edited the way the cell itself will be, so a
+                      multiline column's default can actually contain line breaks.
+                      A rich column gets the plain box too rather than a second
+                      editor: a default is a starting sentence, not a formatted
+                      document, and it is sanitised on write like anything else. */}
+                  {type === "text" && textMode !== "single" ? (
+                    <InputTextarea
+                      id="col-default"
+                      value={defaultText}
+                      onChange={(e) => setDefaultText(e.target.value)}
+                      rows={3}
+                      placeholder="Used when left blank"
+                    />
+                  ) : (
+                    (type === "text" || type === "link") && (
+                      <InputText
+                        id="col-default"
+                        value={defaultText}
+                        onChange={(e) => setDefaultText(e.target.value)}
+                        placeholder={
+                          type === "link"
+                            ? "https://example.com"
+                            : "Used when left blank"
+                        }
+                      />
+                    )
+                  )}
+                  {type === "number" && (
+                    <InputNumber
+                      inputId="col-default"
+                      value={defaultNumber}
+                      onValueChange={(e) => setDefaultNumber(e.value ?? null)}
+                      useGrouping={false}
+                    />
+                  )}
+                  {type === "choice" && (
+                    // Typable when the column takes an answer of its own, because
+                    // then a default off the option list is as valid as a cell
+                    // holding one — the server judges it by the same rule.
+                    <Dropdown
+                      inputId="col-default"
+                      value={defaultChoice}
+                      options={choiceLabels.map((l) => ({
+                        label: l,
+                        value: l,
+                      }))}
+                      onChange={(e) => setDefaultChoice(e.value ?? null)}
+                      placeholder="No default"
+                      showClear
+                      editable={allowOther}
+                      className="w-full"
+                    />
+                  )}
+                  {isTemporal(type) && (
+                    <div className="flex flex-col gap-2">
+                      <Dropdown
+                        inputId="col-default"
+                        value={defaultTemporal}
+                        options={[
+                          { label: "No default", value: "" },
+                          {
+                            label: dynamicLabel(type),
+                            value: dynamicToken(type) as string,
+                          },
+                          { label: "Specific value…", value: SPECIFIC },
+                        ]}
+                        onChange={(e) => setDefaultTemporal(e.value)}
+                        className="w-full"
+                      />
+                      {defaultTemporal === SPECIFIC && (
+                        <Calendar
+                          value={defaultDate}
+                          onChange={(e) =>
+                            setDefaultDate((e.value as Date) ?? null)
+                          }
+                          dateFormat="yy-mm-dd"
+                          timeOnly={type === "time"}
+                          showTime={type === "datetime"}
+                          showButtonBar={type === "date"}
+                        />
+                      )}
+                    </div>
+                  )}
+                  {type === "user" && (
+                    <Dropdown
+                      inputId="col-default"
+                      value={defaultUser}
+                      options={[
+                        { label: "No default", value: "" },
+                        { label: "Current user", value: "current_user" },
+                      ]}
+                      onChange={(e) => setDefaultUser(e.value)}
+                      className="w-full"
+                    />
+                  )}
+                </Field>
+              )}
+
+              {supportsOnUpdate && (
+                <Field
+                  label="On update"
+                  htmlFor="col-onupdate"
+                  hint="Filled in automatically when a record is created and re-stamped on every edit; it isn't set by hand."
+                >
+                  <Dropdown
+                    inputId="col-onupdate"
+                    value={onUpdate}
+                    options={[
+                      { label: "Off", value: "" },
+                      {
+                        label: dynamicLabel(type),
+                        value: dynamicToken(type) as string,
+                      },
+                    ]}
+                    onChange={(e) => setOnUpdate(e.value)}
+                    className="w-full"
+                  />
+                </Field>
+              )}
+            </div>
           )}
         </FormSection>
       </div>

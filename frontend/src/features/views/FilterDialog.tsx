@@ -3,7 +3,8 @@ import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
 
 import type { Column, FilterCondition, FilterGroup } from "../../lib/types";
-import { FilterConditionsEditor, cleanConditions } from "./FilterConditionsEditor";
+import { FilterConditionsEditor } from "./FilterConditionsEditor";
+import { cleanConditions } from "./operators";
 
 interface Props {
   listUuid: string;

@@ -118,8 +118,37 @@ class FormService:
     async def _validate_config(
         db: AsyncSession, list_id: int, config: FormConfig
     ) -> None:
-        """Ensure every field references a column that belongs to the list."""
+        """Ensure every column a form names belongs to the list.
+
+        Two kinds of reference, checked by one query: the field itself, and the columns
+        its `condition` compares against. A condition naming a column of some other list
+        would simply never resolve when the form is filled in, and the field would show
+        unconditionally with nothing on screen to say why — so it is refused here, where
+        there is somebody to tell.
+        """
+        # A field that hides on its own value keeps that value, so the condition stays
+        # true and the field never comes back. Not a cycle — conditions are evaluated in
+        # one pass over the draft's raw values — but the result reads as a bug in the app
+        # rather than in the config, so it is refused rather than explained.
+        for field in config.fields:
+            if field.condition is None:
+                continue
+            if any(
+                cond.column_uuid == field.column_uuid
+                for cond in field.condition.when.conditions
+            ):
+                raise UnknownReferenceError(
+                    f"A field's condition cannot test the field's own column "
+                    f"({field.column_uuid})"
+                )
+
         referenced = {field.column_uuid for field in config.fields}
+        referenced |= {
+            cond.column_uuid
+            for field in config.fields
+            if field.condition is not None
+            for cond in field.condition.when.conditions
+        }
         if not referenced:
             return
 

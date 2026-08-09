@@ -2016,6 +2016,34 @@ a {
   text-transform: uppercase;
   color: var(--text-muted);
 }
+/* The heading of a section you have to open. Styled as its own title plus a
+   chevron rather than as a button, because it is the same heading — the only thing
+   the control adds is somewhere to click. Full width so that click is the whole
+   line and not just the two words. */
+.form-section-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+}
+.form-section-toggle i {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+.form-section-toggle:hover .form-section-title,
+.form-section-toggle:hover i {
+  color: var(--text);
+}
+.form-section-toggle:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
 
 /* A panel *inside* a dialog: the "add someone" form above the list of people it
    adds to. It has to read as one step, not as four more loose controls. */

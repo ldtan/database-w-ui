@@ -153,12 +153,31 @@ export interface ViewConfig {
   page_size?: number;
 }
 
+/** What an unmet condition does to the field it governs. */
+export type ConditionEffect = "hide" | "disable";
+
+/**
+ * When a form field applies.
+ *
+ * `when` is a view's `FilterGroup`, deliberately the same shape: the same operators
+ * over the same columns, asked of the one record being filled in rather than of every
+ * record. An empty `conditions` means **always**, matching what an empty filter group
+ * does to a view — so a half-built block is inert rather than hiding the field it was
+ * meant to reveal.
+ */
+export interface FieldCondition {
+  when: FilterGroup;
+  effect: ConditionEffect;
+}
+
 export interface FormField {
   column_uuid: string;
   included: boolean;
   enabled: boolean;
   order: number;
   label_override?: string | null;
+  /** Absent means unconditional, which is most fields. */
+  condition?: FieldCondition | null;
 }
 
 export interface FormConfig {
