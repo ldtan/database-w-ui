@@ -56,9 +56,58 @@ _DYNAMIC_DEFAULTS = {
 ONUPDATE_TYPES = frozenset(_DYNAMIC_DEFAULTS)
 
 
+# The same idea one step along: a value a *filter* may be written against, resolved
+# when the query runs rather than when the condition was saved. "Due on or after
+# today" is a question whose answer has to change overnight, and a stored ISO string
+# cannot express it — a view saved in January still filters on January in March.
+#
+# Deliberately a second table rather than a reuse of the one above, because the two
+# vocabularies differ in one place: a `datetime` column accepts both, where "today"
+# means this morning's midnight. A default cannot mean that (stamping a datetime
+# cell with midnight is not what anybody asking for "now" wanted), but a *bound* on
+# one reads perfectly — `due >= today` is every appointment left in the day.
+_FILTER_TOKENS = {
+    ColumnType.date: ("today",),
+    ColumnType.time: ("now",),
+    ColumnType.datetime: ("now", "today"),
+}
+
+
 def dynamic_tokens(column_type: ColumnType) -> set:
     """The dynamic default/onupdate tokens this column type accepts."""
     return _DYNAMIC_DEFAULTS.get(column_type, set())
+
+
+def filter_tokens(column_type: ColumnType) -> tuple[str, ...]:
+    """The dynamic values a filter on this column type may compare against."""
+    return _FILTER_TOKENS.get(column_type, ())
+
+
+def resolve_filter_token(column_type: ColumnType, value, user=None):
+    """Resolve a filter's "today"/"now" to an ISO string; else pass ``value`` through.
+
+    The clock is the acting user's, for the reason `_wall_clock_now` gives: these
+    columns hold a wall-clock reading, so "today" has to mean the date on the
+    calendar the rest of the row was typed against. A filter differs from a default
+    only in that nothing is written down — the comparison happens and is forgotten —
+    so the answer is allowed to depend on who is asking, which is exactly what makes
+    one saved view read correctly for a team spread across timezones.
+
+    "today" on a `datetime` column resolves to midnight, so `>= today` is the rest of
+    the day and `< today` is everything before it. That is the only resolution that
+    composes with the text comparison the filter actually performs: an ISO date-time
+    string sorts lexically, and every reading of today is at or after its midnight.
+    """
+    if not isinstance(value, str) or value not in filter_tokens(column_type):
+        return value
+    now = _wall_clock_now(user)
+    if column_type == ColumnType.date:
+        return now.date().isoformat()
+    if column_type == ColumnType.time:
+        return now.time().replace(microsecond=0).isoformat()
+    if value == "today":
+        return now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    return now.replace(microsecond=0).isoformat()
 
 
 def is_dynamic_default(column_type: ColumnType, default) -> bool:

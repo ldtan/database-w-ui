@@ -482,7 +482,7 @@ class ListItemService:
                     group_by = config.get("group_by")
 
         stmt = apply_filters(
-            stmt, saved_filters if filters is None else filters, columns
+            stmt, saved_filters if filters is None else filters, columns, user
         )
         return stmt, sorts, group_by
 

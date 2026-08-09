@@ -8,6 +8,11 @@ correctly as text.
 This is the one reader that cannot lean on ``coerce_shape`` — the comparison happens
 in Postgres, not in Python — so ``_field`` reproduces its rule in SQL. Get that wrong
 and a filter disagrees with the grid it filters.
+
+A condition's value is normally the literal it was saved with. The exception is a
+temporal column, where ``"today"`` and ``"now"`` are resolved *here*, against the
+clock, every time the statement is built — so a saved view means what it says the
+morning after it was saved.
 """
 from typing import Optional
 
@@ -15,6 +20,7 @@ from sqlalchemy import Numeric, and_, case, cast, func, or_
 
 from ..columns.enums import COMPUTED_TYPES, ColumnType
 from ..columns.models import Column
+from ..columns.validation import resolve_filter_token
 from .models import ListItem
 
 _COMPARATORS = {">", ">=", "<", "<=", "gt", "gte", "lt", "lte"}
@@ -86,14 +92,18 @@ def _numeric_comparable(column: Column, value: object) -> bool:
     )
 
 
-def _condition(cond: dict, columns: dict[str, Column]):
+def _condition(cond: dict, columns: dict[str, Column], user=None):
     key = str(cond.get("column_uuid"))
     column = columns.get(key)
     if column is None:
         return None
 
     op = cond.get("operator")
-    value = cond.get("value")
+    # "today"/"now" on a temporal column become the reading they name at the moment
+    # this query is built, in the acting user's zone. Resolved here rather than when
+    # the view was saved, because that is the whole point of writing one: a stored
+    # ISO string filters on the day somebody typed it forever.
+    value = resolve_filter_token(column.type, cond.get("value"), user)
     field = _field(column)
     is_number = _numeric_comparable(column, value)
 
@@ -122,12 +132,19 @@ def _condition(cond: dict, columns: dict[str, Column]):
     return None
 
 
-def apply_filters(stmt, filters: Optional[dict], columns: dict[str, Column]):
+def apply_filters(stmt, filters: Optional[dict], columns: dict[str, Column], user=None):
+    """Narrow ``stmt`` to the records matching ``filters``.
+
+    ``user`` is who is asking, and it is read for one thing only: a temporal
+    condition written against "today" or "now" resolves in their timezone (see
+    `columns.validation.resolve_filter_token`). Optional because a caller with
+    nobody to attribute the query to still gets a working filter, resolved in UTC.
+    """
     if not filters:
         return stmt
     clauses = []
     for cond in filters.get("conditions") or []:
-        clause = _condition(cond, columns)
+        clause = _condition(cond, columns, user)
         if clause is not None:
             clauses.append(clause)
     if not clauses:

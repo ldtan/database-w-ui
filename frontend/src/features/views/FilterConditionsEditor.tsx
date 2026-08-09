@@ -5,7 +5,13 @@ import { InputNumber } from "primereact/inputnumber";
 import { SelectButton } from "primereact/selectbutton";
 import { Button } from "primereact/button";
 
-import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
+import {
+  filterTokenLabel,
+  filterTokens,
+  isTemporal,
+  parseTemporal,
+  serializeTemporal,
+} from "../../lib/temporal";
 import type { Column, FilterCondition } from "../../lib/types";
 import { LookupFilterValue } from "../lookups/LookupControls";
 import { PrincipalFilterValue } from "../principals/PrincipalControls";
@@ -124,22 +130,10 @@ export function FilterConditionsEditor({
                   onChange={(v) => update(i, { value: v })}
                 />
               ) : col && isTemporal(col.type) ? (
-                // Otherwise this is a bare text box: you would have to hand-type the
-                // exact stored format, and a near-miss silently matches nothing.
-                <Calendar
-                  value={parseTemporal(col.type, cond.value)}
-                  onChange={(e) =>
-                    update(i, {
-                      value: e.value
-                        ? serializeTemporal(col.type, e.value as Date)
-                        : null,
-                    })
-                  }
-                  dateFormat="yy-mm-dd"
-                  timeOnly={col.type === "time"}
-                  showTime={col.type === "datetime"}
-                  showButtonBar
-                  style={{ width: 170 }}
+                <TemporalFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
                 />
               ) : (
                 <InputText
@@ -182,5 +176,69 @@ export function FilterConditionsEditor({
         />
       </div>
     </div>
+  );
+}
+
+// Sentinel for the temporal value selector meaning "a value I pick", spelled the
+// same way the column dialog's default-value dropdown spells it.
+const SPECIFIC = "__specific__";
+
+/**
+ * The value side of a condition on a `date`, `time` or `datetime` column.
+ *
+ * A calendar, because otherwise this is a bare text box: you would have to hand-type
+ * the exact stored format and a near-miss silently matches nothing. And, in front of
+ * it, the words this column understands instead of a fixed value — **Today** on a
+ * date, **Now** on a time, either on a date & time.
+ *
+ * Storing the word rather than the date it stands for is the entire feature. A
+ * condition holds a literal, so "due today or earlier" saved into a view means
+ * whatever day it was saved on, forever; the word is resolved when the query runs
+ * (`filtering._condition` on the server, `resolveFilterToken` for a form field's
+ * condition in the browser), so the same saved view answers today's question
+ * tomorrow.
+ */
+function TemporalFilterValue({
+  column,
+  value,
+  onChange,
+}: {
+  column: Column;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const tokens = filterTokens(column.type);
+  const token =
+    typeof value === "string" && tokens.includes(value) ? value : null;
+  return (
+    <>
+      <Dropdown
+        value={token ?? SPECIFIC}
+        options={[
+          ...tokens.map((t) => ({ label: filterTokenLabel(t), value: t })),
+          { label: "Specific…", value: SPECIFIC },
+        ]}
+        // Clearing the value on the way to "Specific…" leaves the condition
+        // incomplete, which `cleanConditions` drops — the same state a
+        // freshly-added condition is in, rather than a stale date left behind.
+        onChange={(e) => onChange(e.value === SPECIFIC ? null : e.value)}
+        style={{ width: 118 }}
+      />
+      {token === null && (
+        <Calendar
+          value={parseTemporal(column.type, value)}
+          onChange={(e) =>
+            onChange(
+              e.value ? serializeTemporal(column.type, e.value as Date) : null,
+            )
+          }
+          dateFormat="yy-mm-dd"
+          timeOnly={column.type === "time"}
+          showTime={column.type === "datetime"}
+          showButtonBar
+          style={{ width: 170 }}
+        />
+      )}
+    </>
   );
 }
