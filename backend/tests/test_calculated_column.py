@@ -614,8 +614,18 @@ async def test_filter_and_search_match_a_calculated_column(client, priced_list):
     import json
 
     lst, qty, price, total = priced_list.values()
+    # A price of 1000 rather than 10, so the totals are four-digit and the search
+    # below cannot be answered by the clock. `_apply_search` matches its term
+    # against *every* column, and every list carries `created_at` and `updated_at`
+    # as ordinary datetime columns holding an ISO string -- so a search for "30"
+    # also finds any record stamped at 18:30, or at :30 seconds, or on the 30th.
+    # Which made this test fail for two minutes in every hour, and only inside a
+    # run long enough to cross one. An ISO timestamp's only four-digit run is its
+    # year, so "3000" can match nothing but the total it is looking for.
     for q in (1, 2, 3):
-        await client.post(f"/api/lists/{lst}/items/", json={"data": {qty: q, price: 10}})
+        await client.post(
+            f"/api/lists/{lst}/items/", json={"data": {qty: q, price: 1000}}
+        )
     # One row the formula cannot answer for, so `is_empty` has something real to find.
     await client.post(f"/api/lists/{lst}/items/", json={"data": {qty: 9}})
 
@@ -626,12 +636,12 @@ async def test_filter_and_search_match_a_calculated_column(client, priced_list):
         return json.dumps({"conjunction": "and", "conditions": [cond]})
 
     exact = await client.get(
-        f"/api/lists/{lst}/items/", params={"filters": where("is", 20)}
+        f"/api/lists/{lst}/items/", params={"filters": where("is", 2000)}
     )
     assert [r["data"][qty] for r in exact.json()] == [2]
 
     above = await client.get(
-        f"/api/lists/{lst}/items/", params={"filters": where("gt", 15)}
+        f"/api/lists/{lst}/items/", params={"filters": where("gt", 1500)}
     )
     assert sorted(r["data"][qty] for r in above.json()) == [2, 3]
 
@@ -640,7 +650,7 @@ async def test_filter_and_search_match_a_calculated_column(client, priced_list):
     )
     assert [r["data"][qty] for r in blank.json()] == [9]
 
-    found = await client.get(f"/api/lists/{lst}/items/", params={"q": "30"})
+    found = await client.get(f"/api/lists/{lst}/items/", params={"q": "3000"})
     assert [r["data"][qty] for r in found.json()] == [3]
 
 
