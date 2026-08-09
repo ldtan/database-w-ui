@@ -22,10 +22,7 @@ import {
   buildFormConfigPatch,
   prunedCondition,
   rowIsCustomised,
-  sameConditions,
-  siblingForm,
   withAppliedSettings,
-  withCopiedConditions,
   type FormFieldRow,
   type FormSettingParts,
 } from "./formConfig";
@@ -129,8 +126,6 @@ export function FormsEditor({
   // worse than no control. Shown, order and label still apply. Conditions are the
   // same: they are read when a record is filled in, so a view form has none.
   const showsEnabled = activeForm?.type !== "view";
-  // The other half of the add/edit pair, or null — a view or custom form has none.
-  const sibling = activeForm ? siblingForm(activeForm, forms) : null;
   // Every other form this person may write to. "Apply to all forms" is only offered
   // when there is something to apply *to*, and it silently skipping a form somebody
   // cannot configure would be worse than not counting it.
@@ -198,42 +193,11 @@ export function FormsEditor({
   });
 
   /**
-   * Put this form's conditions on the other half of the pair.
-   *
-   * Conditions are stored per form, so the add and edit forms may differ — which is
-   * often what you want, and is why this is a button rather than something saving does
-   * on its own. What it copies is only the conditions: which columns each form shows,
-   * and in what order, is exactly what the two exist to differ on.
-   *
-   * It reads the *stored* sibling and the *stored* active form, so it applies what was
-   * last saved. Pressing "Save layout" first is the point of the disabled state below.
-   */
-  const copyConditions = useMutation({
-    mutationFn: async () => {
-      const target = siblingForm(activeForm!, forms)!;
-      await api.patch<Form>(`/lists/${listUuid}/forms/${target.uuid}`, {
-        config: withCopiedConditions(target, activeForm!, columns),
-      });
-      return target.display_name;
-    },
-    onSuccess: (name) => {
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
-      toast.success("Conditions copied", `Applied to “${name}”`);
-    },
-    onError: (err) =>
-      toast.error(
-        "Could not copy the conditions",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-
-  /**
    * Put the ticked parts of this form's settings on every other form of the list.
    *
-   * The general case of "Copy conditions to…", which stays because it is the one worth
-   * a button: this needs a dialog, since applying the *layout* to every form is exactly
-   * the thing add and edit forms exist to differ on, and a single button that did it
-   * would be a button nobody could safely press.
+   * It needs a dialog rather than being one button, because applying the *layout* to
+   * every form is exactly the thing the add and edit forms exist to differ on — a
+   * single button that did the lot would be one nobody could safely press.
    *
    * One PATCH per form, in sequence rather than at once — there is no endpoint that
    * takes them together, and a partial failure has to be reportable as one. So a form
@@ -382,6 +346,23 @@ export function FormsEditor({
               tooltipOptions={{ position: "bottom", showOnDisabled: true }}
             />
           )}
+          {/* Next to the button that saves, because the two are read together: this
+              sends what that one last wrote, and the dialog says so when the editor
+              is holding anything it has not. */}
+          {canEdit && others.length > 0 && (
+            <Button
+              label="Apply to all forms"
+              icon="pi pi-clone"
+              text
+              size="small"
+              onClick={() => setApplying(true)}
+              tooltip={
+                "Put the parts you choose of this form's saved settings on every " +
+                "other form of this list."
+              }
+              tooltipOptions={{ position: "bottom" }}
+            />
+          )}
           {canEdit && activeForm && (
             <Button
               label="Rename"
@@ -494,44 +475,6 @@ export function FormsEditor({
           {rows.length === 0 && <p>Add a column to configure this form.</p>}
         </div>
 
-        {/* What this form's settings do to the *other* forms. Both read what was
-            last saved rather than what is on screen, which is why they sit down
-            here, apart from the button that does the saving. */}
-        {canEdit && (sibling || others.length > 0) && (
-          <div className="flex flex-wrap justify-end gap-2">
-            {sibling && (
-              <Button
-                label={`Copy conditions to “${sibling.display_name}”`}
-                icon="pi pi-copy"
-                text
-                onClick={() => copyConditions.mutate()}
-                loading={copyConditions.isPending}
-                // Nothing to copy, or the two already agree. It reads the *stored*
-                // forms, so unsaved edits are not what it would send — which is why
-                // "Save layout" comes first and this settles afterwards.
-                disabled={!activeForm || sameConditions(activeForm, sibling)}
-                tooltip={
-                  "Conditions are stored per form. This applies the ones you last " +
-                  "saved here to the other form, leaving its own field layout alone."
-                }
-                tooltipOptions={{ position: "top" }}
-              />
-            )}
-            {others.length > 0 && (
-              <Button
-                label="Apply to all forms"
-                icon="pi pi-clone"
-                text
-                onClick={() => setApplying(true)}
-                tooltip={
-                  "Put the parts you choose of this form's settings on every " +
-                  "other form of this list."
-                }
-                tooltipOptions={{ position: "top" }}
-              />
-            )}
-          </div>
-        )}
       </div>
 
       {/* One panel, re-anchored to whichever gear was pressed. Rendered outside the
