@@ -11,16 +11,19 @@ and permission grants that make them worth looking at. Safe to re-run — see
 Three properties of the app, not of the school, shape the scenario. They are worth
 knowing before editing it, because each one is a wall you would otherwise walk into.
 
-**Everything a lookup graph touches must share an owner.** A lookup column may be
-*created* against any list its author can `lookup` — including another user's — and
-its labels resolve fine. But writing a cell re-resolves the target scoped to the
-owner of the list holding the column (`ListItemService._lookup_target_id` joins on
-`Workspace.owner_id == lst.workspace.owner_id`), so a cross-*owner* lookup accepts
-the column and then refuses every value with "points at a missing target list". The
-registrar therefore owns the four workspaces whose lists reference each other, and
-`operations` — the one estate that stands alone — is the IT admin's. Cross-owner
-access is expressed the way the permission model intends: with grants.
-`staff_directory.department` is the visible scar; see the note at that column.
+**A lookup across owners needs `lookup` on the target, from whoever writes the
+cell.** This used to be a hard wall: the column could be *created* against any list
+its author could `lookup`, its labels resolved fine, and then every cell write was
+refused with "points at a missing target list", because the write re-resolved the
+target scoped to the owner of the list holding the column. That owner scope is gone
+(`ListItemService._lookup_target_id`), replaced by the check the read path already
+made — so the shape below is no longer forced, only tidy. The registrar owns the
+four workspaces whose lists reference each other, and `operations` — the one estate
+that stands alone — is the IT admin's; cross-owner access is expressed the way the
+permission model intends, with grants. What still matters when editing: the account
+writing a cross-owner lookup cell must hold `lookup` on the target, which a grant
+of `view` also confers. `staff_directory.department` records where the old wall
+stood; see the note at that column.
 
 **Nothing links to a calculated column.** A calculated cell is derived on read and
 stores nothing, so a lookup pointing at one resolves to a blank label and a sort on
@@ -1672,9 +1675,11 @@ async def build_operations(w):
             {"name": "account", "display_name": "Account", "type": "user",
              "config": {"required": True,
                         "help_text": "The sign-in this row belongs to."}},
-            # A choice, not a lookup at reference/departments: that list has a
-            # different owner, and a cross-owner lookup accepts the column and then
-            # refuses every value. See the module docstring.
+            # A choice rather than a lookup at reference/departments, which has a
+            # different owner. That used to be forced — a cross-owner lookup took
+            # the column and then refused every value — and no longer is; it stays
+            # a choice because nothing here needs it to change. See the module
+            # docstring.
             {"name": "department", "display_name": "Department", "type": "choice",
              "config": {"options": [name for name, *_ in DEPARTMENTS]
                                    + ["Administration"]}},

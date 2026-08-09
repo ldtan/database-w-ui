@@ -223,6 +223,117 @@ async def test_lookup_only_lists_are_offered_to_the_target_picker(
         assert created.status_code == 201, created.text
 
 
+async def test_a_cross_owner_lookup_accepts_a_write(
+    client, make_client, session_factory, workspace_uuid, add_column
+):
+    """The counterpart to the test above: a column built on someone else's list is
+    not merely creatable, it is *writable*.
+
+    It used not to be. `ColumnService._validate_config` was relaxed to "any list you
+    can `lookup`", but `ListItemService._lookup_target_id` still resolved the target
+    scoped to the owner of the list holding the column — so the column was created
+    happily and every cell write failed with "points at a missing target list".
+    """
+    target, rows = await _target_with_rows(
+        client, workspace_uuid, add_column, ["Springfield High", "Shelbyville High"]
+    )
+    user, user_uuid = await _user(session_factory, "writer")
+    await _grant(client, "list", target, user_uuid, ["lookup"])
+
+    async with make_client(user) as writer:
+        ws = (
+            await writer.post(
+                "/api/workspaces/", json={"name": "ow", "display_name": "Own"}
+            )
+        ).json()["uuid"]
+        mine = (
+            await writer.post(
+                "/api/lists/",
+                json={"name": "mine", "display_name": "Mine", "workspace_uuid": ws},
+            )
+        ).json()["uuid"]
+        lookup = (
+            await writer.post(
+                f"/api/lists/{mine}/columns/",
+                json={
+                    "name": "school",
+                    "display_name": "School",
+                    "type": "lookup",
+                    "config": {"target_list_uuid": target},
+                },
+            )
+        ).json()["uuid"]
+
+        # By uuid, the way the UI sends it.
+        by_uuid = await writer.post(
+            f"/api/lists/{mine}/items/",
+            json={"data": {lookup: rows["Springfield High"]}},
+        )
+        assert by_uuid.status_code == 201, by_uuid.text
+        assert by_uuid.json()["data"][lookup] == rows["Springfield High"]
+
+        # And by label, the way an imported file carries it.
+        by_label = await writer.post(
+            f"/api/lists/{mine}/items/", json={"data": {lookup: "Shelbyville High"}}
+        )
+        assert by_label.status_code == 201, by_label.text
+        assert by_label.json()["data"][lookup] == rows["Shelbyville High"]
+
+
+async def test_writing_a_lookup_takes_lookup_on_the_target(
+    client, make_client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """Dropping the owner scope above removed what was, in effect, the write path's
+    access control — owning both lists made a leak impossible. This is the check
+    that replaces it, and it is not redundant with the read path: resolution matches
+    a row by its **label**, so an unguarded write is a way to probe the contents of a
+    list you cannot read by guessing at them.
+
+    The grantee here can create records on the host list and has no grant at all on
+    the list its lookup column points at.
+    """
+    target, rows = await _target_with_rows(
+        client, workspace_uuid, add_column, ["Springfield High"]
+    )
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target},
+    )
+    user, user_uuid = await _user(session_factory, "stranger")
+    await _grant(client, "list", list_uuid, user_uuid, ["create"])
+
+    async with make_client(user) as stranger:
+        refused = await stranger.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {lookup: rows["Springfield High"]}},
+        )
+        assert refused.status_code == 403, refused.text
+
+        # A guessed label is refused identically, and before it is resolved — so the
+        # response cannot be read as "that row exists" or "it does not".
+        probe = await stranger.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {lookup: "Springfield High"}},
+        )
+        assert probe.status_code == 403, probe.text
+        assert (
+            probe.json()["detail"]
+            == (
+                await stranger.post(
+                    f"/api/lists/{list_uuid}/items/",
+                    json={"data": {lookup: "No Such School"}},
+                )
+            ).json()["detail"]
+        )
+
+        # The record itself was creatable; only the lookup cell was the problem.
+        allowed = await stranger.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+        assert allowed.status_code == 201, allowed.text
+
+
 async def test_lookup_does_not_expose_the_targets_schema(
     client, make_client, session_factory, workspace_uuid, add_column
 ):
