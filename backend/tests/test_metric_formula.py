@@ -143,6 +143,23 @@ def test_is_null_sees_an_uncomputable_aggregate_expression_as_blank():
     assert value_of("IF(IS_NULL(SUM(a) / COUNT(owner)), 0, SUM(a) / COUNT(owner))", rows) == 0
 
 
+def test_default_works_at_both_levels_too():
+    """It came with the row language and reaches the aggregate one for free.
+
+    Outside an aggregate it is the short way to put a number on a card that would
+    otherwise be blank; inside one it fills a gap per record before the total is
+    taken, which is a different answer and sometimes the wanted one.
+    """
+    assert value_of("DEFAULT(AVG(qty), 0)", []) == 0
+    assert value_of("DEFAULT(AVG(qty), 0)", ROWS) == 7.5
+    assert value_of("DEFAULT(SUM(a) / COUNT(owner), 0)", [{"a": 5, "owner": None}]) == 0
+    # Per record: the blank counts as zero in the total rather than being skipped,
+    # so this differs from SUM(qty) — which is the reason to write it.
+    rows = [{"qty": 4}, {"qty": None}]
+    assert value_of("AVG(DEFAULT(qty, 0))", rows) == 2
+    assert value_of("AVG(qty)", rows) == 4
+
+
 def test_a_bare_column_name_is_refused():
     """The rule that makes the two levels unambiguous: `hours` is one value per
     record, and a metric is one value in total."""

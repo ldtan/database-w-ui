@@ -96,8 +96,8 @@ A `calculated` column carries a `formula` in its config — arithmetic over the 
 columns, string functions over its **text** and **choice** columns, date functions over its
 **date**/**datetime** columns, and references to other **calculated** columns, all by name
 (`min`/`max`/`round`/`abs`/`int`,
-`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`, `IF`, and
-`IS_NULL`). The result is a number
+`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`, `IF`,
+`IS_NULL` and `DEFAULT`). The result is a number
 or a string depending on the formula; the column has no fixed output type. The formula is parsed
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
@@ -107,12 +107,24 @@ an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
 
 A missing cell propagates as "no value" — any formula reading one is blank, never a silent zero.
-`IS_NULL(x)` is the **single exception**, and has to be: every other way of looking at a blank
-blanks the formula, so without it `IF(notes == "", …)` can never be true and there is no way to
-ask the question at all. It answers `1`/`0` rather than a boolean, so that `IS_NULL(a) +
-IS_NULL(b)` counts missing things instead of blanking (arithmetic here is numbers-only and a
-bool is not a number), and it treats an arithmetic failure as one more way of having no value,
-which is what makes `IF(IS_NULL(total / qty), 0, total / qty)` a working divide-by-zero guard.
+`IS_NULL(x)` and `DEFAULT(x, fallback)` are the **only two exceptions**, and there have to be
+some: every other way of looking at a blank blanks the formula, so without them
+`IF(notes == "", …)` can never be true and there is no way to ask the question at all. Both
+treat an arithmetic failure as one more way of having no value, which is what makes
+`DEFAULT(total / qty, 0)` a working divide-by-zero guard.
+
+`IS_NULL` answers `1`/`0` rather than a boolean, so that `IS_NULL(a) + IS_NULL(b)` counts
+missing things instead of blanking (arithmetic here is numbers-only and a bool is not a
+number). `DEFAULT` returns one of its two arguments, and **evaluates the second only if it
+needs it** — so an uncomputable fallback cannot blank a row whose first argument had a value.
+
+**The two disagree about `""`, on purpose, and it is the thing to know about them.**
+`IS_NULL("")` is `0` — a value is present — because it is a question about the cell and an
+empty string is an answer somebody gave. `DEFAULT` substitutes for `""`, taking "empty" to mean
+exactly what the filter language's `is_empty` means (`IS NULL OR = ''`, untrimmed) — because it
+is a *fallback*, and one that fired for a never-filled cell but not for an emptied one is a bug
+reported as "sometimes it shows nothing". A cell holding a space is a value to both;
+`DEFAULT(TRIM(notes), "—")` is how you say otherwise.
 
 **The load-bearing decision is that the value is written down *and* recomputed.**
 `_validate_data` (`items/services.py`) writes each calculated cell into the record on create and

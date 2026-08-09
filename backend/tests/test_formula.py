@@ -108,6 +108,76 @@ def test_is_null_reads_its_argument_as_a_column_reference():
     assert column_refs(parse("IF(IS_NULL(notes), 0, LEN(notes))")) == frozenset({"notes"})
 
 
+def test_default_substitutes_for_a_missing_value():
+    # The second of the two functions that answer about a blank rather than
+    # becoming one. What IF(IS_NULL(x), b, x) says by naming x twice.
+    assert calc("DEFAULT(nickname, full_name)", full_name="Ada") == "Ada"
+    assert calc("DEFAULT(nickname, full_name)", nickname="Ada L.", full_name="Ada") == (
+        "Ada L."
+    )
+    assert calc("DEFAULT(discount, 0)") == 0
+    assert calc("DEFAULT(discount, 0)", discount=15) == 15
+
+
+def test_default_treats_an_empty_string_as_missing():
+    # The one place it differs from IS_NULL, and the reason it is worth having
+    # separately: a blank cell and an emptied one are the same thing to whoever is
+    # reading the grid. "Empty" means what the filter language's `is_empty` means —
+    # null or "", untrimmed — so a space is a value here as it is there.
+    assert calc('DEFAULT(notes, "—")', notes="") == "—"
+    assert calc('DEFAULT(notes, "—")', notes=None) == "—"
+    assert calc('DEFAULT(notes, "—")', notes=" ") == " "
+    assert calc('DEFAULT(TRIM(notes), "—")', notes=" ") == "—"
+
+
+def test_default_keeps_a_value_that_is_merely_falsy():
+    # Nothing here is about truth: a Quantity of 0 is a number somebody typed.
+    assert calc("DEFAULT(qty, 99)", qty=0) == 0
+    assert calc("DEFAULT(rate, 1)", rate=0.0) == 0.0
+
+
+def test_default_covers_an_expression_that_cannot_be_computed():
+    # Same rule as IS_NULL: dividing by zero is one more way of having no value, so
+    # this is a guard you can put in front of the division without a second IF.
+    assert calc("DEFAULT(total / qty, 0)", total=10, qty=0) == 0
+    assert calc("DEFAULT(total / qty, 0)", total=10, qty=None) == 0
+    assert calc("DEFAULT(total / qty, 0)", total=10, qty=2) == 5
+
+
+def test_default_chains_and_nests():
+    # The form that reads badly in the long version: three fallbacks written with
+    # IF/IS_NULL names each column twice and nests two levels of condition.
+    source = 'DEFAULT(nickname, DEFAULT(first_name, "friend"))'
+    assert calc(source) == "friend"
+    assert calc(source, first_name="Ada") == "Ada"
+    assert calc(source, nickname="Ada L.", first_name="Ada") == "Ada L."
+    # And it composes with the rest of the language rather than sitting outside it.
+    assert calc('CONCAT("Hi ", DEFAULT(nickname, "there"))') == "Hi there"
+    assert calc("ROUND(DEFAULT(price, 0) * 1.1, 2)", price=10) == 11.0
+
+
+def test_default_does_not_evaluate_its_fallback_when_it_is_not_needed():
+    # A fallback that cannot be computed must not blank a formula whose first
+    # argument had a value all along — which is what would happen if this went
+    # through the ordinary "evaluate every argument first" path.
+    assert calc("DEFAULT(a, b / c)", a=5, b=1, c=0) == 5
+    assert calc("DEFAULT(a, b / c)", a=None, b=1, c=0) is None
+
+
+def test_default_takes_exactly_two_arguments():
+    for source in ("DEFAULT()", "DEFAULT(a)", "DEFAULT(a, b, c)"):
+        with pytest.raises(ValidationError):
+            parse(source)
+
+
+def test_default_reads_both_arguments_as_column_references():
+    # An ordinary row function in every respect but its blank handling, so both
+    # columns it names are still found and checked at save time.
+    assert column_refs(parse("DEFAULT(nickname, full_name)")) == frozenset(
+        {"nickname", "full_name"}
+    )
+
+
 def test_division_by_zero_and_nonfinite_are_blank_not_errors():
     assert calc("a / b", a=1, b=0) is None
     assert calc("a / (b - c)", a=1, b=3, c=3) is None
