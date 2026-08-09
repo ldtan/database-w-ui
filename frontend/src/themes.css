@@ -1849,6 +1849,41 @@ a {
   font-weight: 700;
 }
 
+/* The same "this control is holding something" signal as `.is-on` below, for a
+   gear that opens a panel of per-field settings — outside a toolbar, where that
+   rule does not reach.
+
+   The dot has to sit *on* the gear. PrimeReact gives a button's badge
+   `display: inline-block` and only positions it over the button when a
+   `.p-overlay-badge` wrapper is present, which `Button badge=""` is not — so the
+   default rendering is a gear with a circle next to it, which reads as two
+   controls rather than as one control that has something to say. */
+.p-button.settings-gear {
+  position: relative;
+}
+.p-button.settings-gear.is-set .p-button-icon {
+  color: var(--brand);
+}
+.p-button.settings-gear .p-badge {
+  position: absolute;
+  top: 0.25rem;
+  right: 0.25rem;
+  transform: none;
+  margin: 0;
+  /* Sized here rather than left to `.p-badge-dot`. That class sets .5rem inside
+     PrimeReact's `@layer primereact`, and the theme's own unlayered `.p-badge`
+     min-width/height beat a layer whatever the specificity — so the "dot" arrived
+     as a 1.5rem disc larger than the gear it belongs to. */
+  width: 0.45rem;
+  min-width: 0.45rem;
+  height: 0.45rem;
+  padding: 0;
+  border-radius: 50%;
+  /* Against the row behind it, so the dot stays legible where it overlaps the
+     gear's own strokes. */
+  box-shadow: 0 0 0 2px var(--surface);
+}
+
 /* A control holding a non-default setting (a filter, a grouping, hidden
    columns) says so without being read: it is the difference between "you can
    filter" and "you are filtering", which a plain button cannot express. */

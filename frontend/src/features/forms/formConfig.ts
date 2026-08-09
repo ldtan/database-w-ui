@@ -141,69 +141,175 @@ export function prunedCondition(
 }
 
 /**
- * `source`'s conditions laid over `target`, leaving the target's layout as it renders.
+ * Does this row hold anything other than the defaults?
  *
- * **It writes the target's layout down in full, and it has to.** A form provisioned
+ * Drives the dot on the row's gear, which is what keeps a collapsed setting from being
+ * an invisible one — without it the only way to find a label override or a condition is
+ * to open every row.
+ *
+ * A row the form does not include is answered `false` whatever else it holds, and that
+ * is the point rather than a shortcut. `FieldSettingsPanel` disables "editable" for such
+ * a row, because a field the form never renders cannot be filled in either way — so its
+ * stored `enabled` is not a setting anybody chose. The audit columns arrive excluded and
+ * not-editable, which had every list showing four dots against rows whose panel offers
+ * nothing to change, and a dot on every row is a dot that says nothing about any of them.
+ */
+export function rowIsCustomised(
+  row: FormFieldRow,
+  showsEnabled: boolean,
+): boolean {
+  if (!row.included) return false;
+  return (
+    row.label_override.trim() !== "" ||
+    (showsEnabled && !row.enabled) ||
+    settledCondition(row.condition) !== null
+  );
+}
+
+/**
+ * Which of a form's per-field settings an "apply" carries onto another form.
+ *
+ * Four parts rather than one switch because they are wanted separately. The add and
+ * edit forms exist to differ on `layout` — that is the whole reason a list has two —
+ * while a `conditions` rule or a renamed `label` is usually meant to hold for every
+ * form that shows the column. Copying the lot is what somebody means occasionally;
+ * copying one part is what they mean most of the time.
+ */
+export interface FormSettingParts {
+  /** Field order, and which fields the form includes at all. */
+  layout: boolean;
+  /** Per-field "editable". */
+  enabled: boolean;
+  /** Per-field label overrides. */
+  labels: boolean;
+  /** Per-field display conditions. */
+  conditions: boolean;
+}
+
+/** Nothing selected — spread over to name only the parts you mean. */
+export const NO_PARTS: FormSettingParts = {
+  layout: false,
+  enabled: false,
+  labels: false,
+  conditions: false,
+};
+
+/**
+ * The order `resolveFields` renders a form in: what its config names, by `order`, then
+ * every other live column in schema order.
+ *
+ * A stored field naming a column that is gone is dropped, as `seedRows` drops it —
+ * re-sending one is refused by `_validate_config`.
+ */
+function resolvedOrder(form: Form, columns: Column[]): string[] {
+  const live = new Set(columns.map((c) => c.uuid));
+  const configured = (form.config.fields ?? [])
+    .filter((f) => live.has(f.column_uuid))
+    .slice()
+    .sort((a, b) => a.order - b.order)
+    .map((f) => f.column_uuid);
+  const seen = new Set(configured);
+  return [
+    ...configured,
+    ...columns.filter((c) => !seen.has(c.uuid)).map((c) => c.uuid),
+  ];
+}
+
+/**
+ * `target`'s config with the named `parts` of `source` laid over it.
+ *
+ * **It writes the target's fields down in full, and it has to.** A form provisioned
  * with a list names only the audit columns, so every real column reaches the dialog
  * through `resolveFields`' "a column the config has never heard of is newer than the
- * config, not excluded by it" rule — not through the config at all. A condition
- * therefore has nowhere to live on such a form, and copying by mapping over the stored
- * fields reports success and changes nothing, which is how this was first written.
+ * config, not excluded by it" rule — not through the config at all. A setting
+ * therefore has nowhere to live on such a form, and applying by mapping over the
+ * stored fields reports success and changes nothing, which is how this was first
+ * written.
  *
- * Appending only the conditioned columns is the other tempting fix, and it is worse:
- * `resolveFields` renders configured fields before unlisted ones, so writing one
- * column down and not its neighbours moves it up the form. Emitting every column in
- * the order that function already produces is what makes this a copy of the
- * conditions and *only* the conditions.
+ * Writing down only the columns being changed is the other tempting fix, and it is
+ * worse: `resolveFields` renders configured fields before unlisted ones, so naming one
+ * column and not its neighbours moves it up the form. Emitting every column in the
+ * order that function already produces is what confines this to the parts asked for.
  *
- * A column the target excludes stays excluded, its label override survives, and a
- * column the source never mentions keeps whatever condition it had.
+ * The rule for each part is the same one: **applying it makes the target's rendered
+ * value match the source's**. So a column the source's config never names is applied
+ * as the defaults it renders with there — shown, editable, no override, no condition —
+ * rather than left alone. Leaving it alone is what this did when it only copied
+ * conditions, and it meant "Copy conditions" could report success and leave the two
+ * forms still disagreeing, with `sameConditions` re-enabling the button to say so.
+ * A part not named is not touched at all.
+ */
+export function withAppliedSettings(
+  target: Form,
+  source: Form,
+  parts: FormSettingParts,
+  columns: Column[],
+): FormConfig {
+  // A view form displays a record rather than collecting one, so per-field "editable"
+  // and the conditions read while a record is filled in have nothing to say on either
+  // end of the copy — see `showsEnabled` in the editor. Dropping them here rather than
+  // at the call site means no caller has to remember.
+  const collects = target.type !== "view" && source.type !== "view";
+  const takes: FormSettingParts = {
+    layout: parts.layout,
+    labels: parts.labels,
+    enabled: parts.enabled && collects,
+    conditions: parts.conditions && collects,
+  };
+  const from = new Map(
+    (source.config.fields ?? []).map((f) => [f.column_uuid, f]),
+  );
+  const own = new Map(
+    (target.config.fields ?? []).map((f) => [f.column_uuid, f]),
+  );
+  // Applying the layout means taking the source's order; otherwise the target keeps
+  // the one it already renders in.
+  const ordered = resolvedOrder(takes.layout ? source : target, columns);
+  const live = new Set(columns.map((c) => c.uuid));
+
+  return {
+    ...target.config,
+    fields: ordered.map((column_uuid, order) => {
+      const src = from.get(column_uuid);
+      const mine = own.get(column_uuid);
+      return {
+        column_uuid,
+        included: (takes.layout ? src?.included : mine?.included) ?? true,
+        enabled: (takes.enabled ? src?.enabled : mine?.enabled) ?? true,
+        order,
+        label_override:
+          (takes.labels ? src?.label_override : mine?.label_override) ?? null,
+        // Pruned on the way out, on both sides. This rewrites the target's config
+        // wholesale, so a condition naming a column deleted since it was written would
+        // 422 the write — the target's own stale condition just as surely as one
+        // arriving from the source. `seedRows` prunes for the same reason.
+        condition: prunedCondition(
+          takes.conditions ? src?.condition : mine?.condition,
+          live,
+        ),
+      };
+    }),
+  };
+}
+
+/**
+ * `source`'s conditions laid over `target`, leaving the target's layout as it renders.
+ *
+ * The "Copy conditions to…" button, which predates applying settings in general and is
+ * the one case of it worth a button of its own: conditions are the part two paired
+ * forms most often want to share.
  */
 export function withCopiedConditions(
   target: Form,
   source: Form,
   columns: Column[],
 ): FormConfig {
-  const bySource = new Map(
-    (source.config.fields ?? []).map((f) => [
-      f.column_uuid,
-      f.condition ?? null,
-    ]),
+  return withAppliedSettings(
+    target,
+    source,
+    { ...NO_PARTS, conditions: true },
+    columns,
   );
-  const stored = new Map(
-    (target.config.fields ?? []).map((f) => [f.column_uuid, f]),
-  );
-  // `resolveFields`' order: what the config names, by `order`, then everything else
-  // in schema order. A stored field naming a column that is gone is dropped, as
-  // `seedRows` drops it — re-sending one is refused by `_validate_config`.
-  const live = new Set(columns.map((c) => c.uuid));
-  const configured = (target.config.fields ?? [])
-    .filter((f) => live.has(f.column_uuid))
-    .slice()
-    .sort((a, b) => a.order - b.order)
-    .map((f) => f.column_uuid);
-  const seen = new Set(configured);
-  const ordered = [
-    ...configured,
-    ...columns.filter((c) => !seen.has(c.uuid)).map((c) => c.uuid),
-  ];
-
-  return {
-    ...target.config,
-    fields: ordered.map((column_uuid, order) => {
-      const field = stored.get(column_uuid);
-      return {
-        column_uuid,
-        included: field?.included ?? true,
-        enabled: field?.enabled ?? true,
-        order,
-        label_override: field?.label_override ?? null,
-        condition: bySource.has(column_uuid)
-          ? (bySource.get(column_uuid) ?? null)
-          : (field?.condition ?? null),
-      };
-    }),
-  };
 }
 
 /** Whether two forms already agree about every condition, so nothing need be sent. */
