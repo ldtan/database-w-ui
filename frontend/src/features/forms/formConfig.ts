@@ -57,33 +57,6 @@ export function settledCondition(
 }
 
 /**
- * The form whose conditions the "Copy conditions to…" action writes.
- *
- * Only `create` and `update` pair up, because the grid picks between exactly those two
- * by what you are doing — `f.type === (item ? "update" : "create")`. A `view` form
- * displays a record and collects nothing, and a `custom` one is not reached by that
- * picker at all.
- *
- * Unlike the field layout, which the two forms exist to differ on, a condition is
- * usually meant to hold for both — but only usually, which is why copying is an action
- * somebody takes rather than something saving does on its own.
- */
-export function siblingForm(active: Form, forms: Form[]): Form | null {
-  const want =
-    active.type === "create"
-      ? "update"
-      : active.type === "update"
-        ? "create"
-        : null;
-  if (!want) return null;
-  const candidates = forms.filter(
-    (f) => f.type === want && f.uuid !== active.uuid,
-  );
-  // A list can hold more than one form of a type; the grid reaches for the default.
-  return candidates.find((f) => f.is_default) ?? candidates[0] ?? null;
-}
-
-/**
  * The `config` to PATCH after editing `rows`.
  *
  * Array position becomes `order`, so nothing downstream needs to know *how* the order
@@ -292,34 +265,3 @@ export function withAppliedSettings(
   };
 }
 
-/**
- * `source`'s conditions laid over `target`, leaving the target's layout as it renders.
- *
- * The "Copy conditions to…" button, which predates applying settings in general and is
- * the one case of it worth a button of its own: conditions are the part two paired
- * forms most often want to share.
- */
-export function withCopiedConditions(
-  target: Form,
-  source: Form,
-  columns: Column[],
-): FormConfig {
-  return withAppliedSettings(
-    target,
-    source,
-    { ...NO_PARTS, conditions: true },
-    columns,
-  );
-}
-
-/** Whether two forms already agree about every condition, so nothing need be sent. */
-export function sameConditions(a: Form, b: Form): boolean {
-  const of = (form: Form) =>
-    JSON.stringify(
-      (form.config.fields ?? [])
-        .map((f) => [f.column_uuid, f.condition ?? null] as const)
-        .filter(([, condition]) => condition !== null)
-        .sort(([x], [y]) => (x < y ? -1 : x > y ? 1 : 0)),
-    );
-  return of(a) === of(b);
-}

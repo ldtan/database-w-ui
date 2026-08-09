@@ -11,11 +11,8 @@ import {
   NO_PARTS,
   prunedCondition,
   rowIsCustomised,
-  sameConditions,
   settledCondition,
-  siblingForm,
   withAppliedSettings,
-  withCopiedConditions,
   type FormFieldRow,
   type FormSettingParts,
 } from "./formConfig";
@@ -270,32 +267,9 @@ describe("prunedCondition", () => {
   });
 });
 
-describe("siblingForm", () => {
-  const create = form({ uuid: "c", type: "create" });
-  const update = form({ uuid: "u", type: "update" });
-  const view = form({ uuid: "v", type: "view", name: "view" });
-
-  it("pairs create with update, in both directions", () => {
-    expect(siblingForm(create, [create, update, view])?.uuid).toBe("u");
-    expect(siblingForm(update, [create, update, view])?.uuid).toBe("c");
-  });
-
-  it("has nothing to pair a view or custom form with", () => {
-    expect(siblingForm(view, [create, update, view])).toBeNull();
-    expect(siblingForm(form({ type: "custom" }), [create, update])).toBeNull();
-  });
-
-  it("prefers the default when a list has two forms of a type", () => {
-    const other = form({ uuid: "u2", type: "update", is_default: false });
-    expect(siblingForm(create, [create, other, update])?.uuid).toBe("u");
-  });
-
-  it("finds nothing when the pair is missing", () => {
-    expect(siblingForm(create, [create])).toBeNull();
-  });
-});
-
-describe("withCopiedConditions", () => {
+/** Conditions on their own — the case the "Copy conditions to…" button used to be,
+ *  now what ticking one box in "Apply to all forms" asks for. */
+describe("withAppliedSettings, conditions only", () => {
   const COLUMNS = ["status", "reason", "notes"].map(
     (uuid) => ({ uuid, name: uuid, display_name: uuid, type: "text", config: {} }) as Column,
   );
@@ -310,6 +284,12 @@ describe("withCopiedConditions", () => {
   });
   const of = (config: { fields: FormField[] }, uuid: string) =>
     config.fields.find((f) => f.column_uuid === uuid)!;
+  const withCopiedConditions = (
+    target: Form,
+    from: Form,
+    columns: Column[],
+  ) =>
+    withAppliedSettings(target, from, { ...NO_PARTS, conditions: true }, columns);
 
   it("copies a condition onto the matching column", () => {
     const target = form({
@@ -402,9 +382,11 @@ describe("withCopiedConditions", () => {
    * `resolveFields`' "newer than the config" rule — and renders unconditionally. So it
    * has a condition to copy, and that condition is "none".
    *
-   * This used to leave such a column alone, which made the button lie: it reported
-   * success and left the two forms disagreeing, and `sameConditions` then re-enabled
-   * it to say so. Pressing it twice did nothing the first time and nothing the second.
+   * This used to leave such a column alone, which reported success and left the two
+   * forms still disagreeing — so applying twice changed nothing either time.
+   *
+   * The second assertion is the one that matters: afterwards the two forms carry the
+   * same set of conditions, which is what "applied" has to mean.
    */
   it("clears a condition on a column the source never mentions", () => {
     const own: FieldCondition = { ...HIDE_UNLESS_REJECTED, effect: "disable" };
@@ -415,7 +397,14 @@ describe("withCopiedConditions", () => {
     });
     const patched = withCopiedConditions(target, source, COLUMNS);
     expect(of(patched, "notes").condition).toBeNull();
-    expect(sameConditions({ ...target, config: patched }, source)).toBe(true);
+    const conditionsOf = (fields: FormField[]) =>
+      fields
+        .filter((f) => f.condition)
+        .map((f) => [f.column_uuid, f.condition] as const)
+        .sort(([x], [y]) => (x < y ? -1 : 1));
+    expect(conditionsOf(patched.fields)).toEqual(
+      conditionsOf(source.config.fields!),
+    );
   });
 
   /** A condition naming a column deleted since it was written would 422 the write —
@@ -653,47 +642,5 @@ describe("withAppliedSettings", () => {
     expect(apply({}).fields).toEqual(
       target.config.fields!.map((f) => ({ condition: null, ...f })),
     );
-  });
-});
-
-describe("sameConditions", () => {
-  const a = form({
-    config: {
-      fields: [
-        field({ column_uuid: "reason", condition: HIDE_UNLESS_REJECTED }),
-      ],
-    },
-  });
-
-  it("ignores field order and unconditional fields", () => {
-    const b = form({
-      uuid: "u",
-      config: {
-        fields: [
-          field({ column_uuid: "zzz" }),
-          field({ column_uuid: "reason", condition: HIDE_UNLESS_REJECTED }),
-        ],
-      },
-    });
-    expect(sameConditions(a, b)).toBe(true);
-  });
-
-  it("notices a different effect", () => {
-    const b = form({
-      uuid: "u",
-      config: {
-        fields: [
-          field({
-            column_uuid: "reason",
-            condition: { ...HIDE_UNLESS_REJECTED, effect: "disable" },
-          }),
-        ],
-      },
-    });
-    expect(sameConditions(a, b)).toBe(false);
-  });
-
-  it("notices a condition that is missing entirely", () => {
-    expect(sameConditions(a, form({ uuid: "u" }))).toBe(false);
   });
 });
