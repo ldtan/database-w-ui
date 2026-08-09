@@ -17,25 +17,12 @@ import { Message } from "primereact/message";
 import { Field } from "../../components/Field";
 import type { Column, ConditionEffect, FieldCondition } from "../../lib/types";
 import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
-import { settledCondition, type FormFieldRow } from "./formConfig";
+import type { FormFieldRow } from "./formConfig";
 
 const EFFECTS = [
   { label: "Hide the field", value: "hide" },
   { label: "Show it, but not for editing", value: "disable" },
 ];
-
-/** Does this row hold anything other than the defaults? Drives the dot on the gear,
- *  which is what keeps a collapsed setting from being an invisible one. */
-export function rowIsCustomised(
-  row: FormFieldRow,
-  showsEnabled: boolean,
-): boolean {
-  return (
-    row.label_override.trim() !== "" ||
-    (showsEnabled && !row.enabled) ||
-    settledCondition(row.condition) !== null
-  );
-}
 
 interface Props {
   listUuid: string;

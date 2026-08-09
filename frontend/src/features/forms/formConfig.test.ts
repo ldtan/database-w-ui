@@ -8,12 +8,16 @@ import type {
 } from "../../lib/types";
 import {
   buildFormConfigPatch,
+  NO_PARTS,
   prunedCondition,
+  rowIsCustomised,
   sameConditions,
   settledCondition,
   siblingForm,
+  withAppliedSettings,
   withCopiedConditions,
   type FormFieldRow,
+  type FormSettingParts,
 } from "./formConfig";
 
 function form(over: Partial<Form> = {}): Form {
@@ -114,6 +118,46 @@ describe("buildFormConfigPatch", () => {
       fields: [],
       allow_shared: false,
     });
+  });
+});
+
+describe("rowIsCustomised", () => {
+  it("is false for a row holding only the defaults", () => {
+    expect(rowIsCustomised(row(), true)).toBe(false);
+  });
+
+  it("notices each of the three settings the panel holds", () => {
+    expect(rowIsCustomised(row({ label_override: "Name" }), true)).toBe(true);
+    expect(rowIsCustomised(row({ enabled: false }), true)).toBe(true);
+    expect(rowIsCustomised(row({ condition: HIDE_UNLESS_REJECTED }), true)).toBe(
+      true,
+    );
+  });
+
+  /** A view form displays a record and collects nothing, so "editable" is not a
+   *  setting it has — the editor does not offer it and the dot must not claim it. */
+  it("ignores editable on a form that collects nothing", () => {
+    expect(rowIsCustomised(row({ enabled: false }), false)).toBe(false);
+    expect(rowIsCustomised(row({ label_override: "Name" }), false)).toBe(true);
+  });
+
+  /**
+   * The four audit columns arrive excluded *and* not-editable, which lit a dot on
+   * every list against rows whose panel offers nothing to change. `enabled` on a row
+   * the form never renders is not a setting anybody chose — the panel disables the
+   * control for exactly that reason — and a dot on every row says nothing about any
+   * of them.
+   */
+  it("is false for an excluded row, whatever else it holds", () => {
+    expect(rowIsCustomised(row({ included: false, enabled: false }), true)).toBe(
+      false,
+    );
+    expect(
+      rowIsCustomised(
+        row({ included: false, condition: HIDE_UNLESS_REJECTED }),
+        true,
+      ),
+    ).toBe(false);
   });
 });
 
@@ -334,8 +378,7 @@ describe("withCopiedConditions", () => {
   });
 
   /** The layout is what two forms exist to differ on, so only conditions move. */
-  it("leaves a column the source never mentions alone", () => {
-    const own: FieldCondition = { ...HIDE_UNLESS_REJECTED, effect: "disable" };
+  it("leaves a column's layout and label alone", () => {
     const target = form({
       uuid: "u",
       type: "update",
@@ -345,15 +388,54 @@ describe("withCopiedConditions", () => {
             column_uuid: "notes",
             included: false,
             label_override: "Remarks",
-            condition: own,
           }),
         ],
       },
     });
     const patched = withCopiedConditions(target, source, COLUMNS);
-    expect(of(patched, "notes").condition).toEqual(own);
     expect(of(patched, "notes").included).toBe(false);
     expect(of(patched, "notes").label_override).toBe("Remarks");
+  });
+
+  /**
+   * A column the source's config never names still *renders* on the source — through
+   * `resolveFields`' "newer than the config" rule — and renders unconditionally. So it
+   * has a condition to copy, and that condition is "none".
+   *
+   * This used to leave such a column alone, which made the button lie: it reported
+   * success and left the two forms disagreeing, and `sameConditions` then re-enabled
+   * it to say so. Pressing it twice did nothing the first time and nothing the second.
+   */
+  it("clears a condition on a column the source never mentions", () => {
+    const own: FieldCondition = { ...HIDE_UNLESS_REJECTED, effect: "disable" };
+    const target = form({
+      uuid: "u",
+      type: "update",
+      config: { fields: [field({ column_uuid: "notes", condition: own })] },
+    });
+    const patched = withCopiedConditions(target, source, COLUMNS);
+    expect(of(patched, "notes").condition).toBeNull();
+    expect(sameConditions({ ...target, config: patched }, source)).toBe(true);
+  });
+
+  /** A condition naming a column deleted since it was written would 422 the write —
+   *  and this rewrites the whole config, so the target's own stale one would too. */
+  it("prunes a stale condition off both sides", () => {
+    const stale: FieldCondition = {
+      when: {
+        conjunction: "and",
+        conditions: [{ column_uuid: "gone", operator: "is", value: "x" }],
+      },
+      effect: "hide",
+    };
+    const target = form({
+      uuid: "u",
+      type: "update",
+      config: { fields: [field({ column_uuid: "notes", condition: stale })] },
+    });
+    expect(
+      of(withCopiedConditions(target, source, COLUMNS), "notes").condition,
+    ).toBeNull();
   });
 
   /** A stored field naming a deleted column is refused by `_validate_config`, so it
@@ -380,6 +462,197 @@ describe("withCopiedConditions", () => {
       COLUMNS,
     ) as unknown as Record<string, unknown>;
     expect(patched.merge).toEqual({ link_column_uuid: "link" });
+  });
+});
+
+describe("withAppliedSettings", () => {
+  const COLUMNS = ["status", "reason", "notes"].map(
+    (uuid) =>
+      ({
+        uuid,
+        name: uuid,
+        display_name: uuid,
+        type: "text",
+        config: {},
+      }) as Column,
+  );
+  const of = (config: { fields: FormField[] }, uuid: string) =>
+    config.fields.find((f) => f.column_uuid === uuid)!;
+
+  // Source: notes first, reason excluded and relabelled, status conditioned.
+  const source = form({
+    uuid: "c",
+    config: {
+      fields: [
+        field({ column_uuid: "notes", order: 0 }),
+        field({
+          column_uuid: "reason",
+          order: 1,
+          included: false,
+          enabled: false,
+          label_override: "Why",
+        }),
+        field({
+          column_uuid: "status",
+          order: 2,
+          condition: HIDE_UNLESS_REJECTED,
+        }),
+      ],
+    },
+  });
+  const target = form({
+    uuid: "u",
+    type: "update",
+    config: {
+      fields: [
+        field({ column_uuid: "status", order: 0, label_override: "State" }),
+        field({ column_uuid: "reason", order: 1 }),
+        field({ column_uuid: "notes", order: 2, included: false }),
+      ],
+    },
+  });
+  const apply = (parts: Partial<FormSettingParts>) =>
+    withAppliedSettings(target, source, { ...NO_PARTS, ...parts }, COLUMNS);
+
+  it("takes the source's order and inclusion for the layout, and nothing else", () => {
+    const patched = apply({ layout: true });
+    expect(patched.fields.map((f) => f.column_uuid)).toEqual([
+      "notes",
+      "reason",
+      "status",
+    ]);
+    expect(patched.fields.map((f) => f.order)).toEqual([0, 1, 2]);
+    expect(of(patched, "reason").included).toBe(false);
+    expect(of(patched, "notes").included).toBe(true);
+    // Not asked for, so untouched — the target's own label and its own "editable".
+    expect(of(patched, "status").label_override).toBe("State");
+    expect(of(patched, "reason").enabled).toBe(true);
+  });
+
+  it("keeps the target's own order when the layout is not applied", () => {
+    const patched = apply({ labels: true });
+    expect(patched.fields.map((f) => f.column_uuid)).toEqual([
+      "status",
+      "reason",
+      "notes",
+    ]);
+    expect(of(patched, "reason").label_override).toBe("Why");
+    // Cleared, because the source renders `status` under its own name.
+    expect(of(patched, "status").label_override).toBeNull();
+    expect(of(patched, "notes").included).toBe(false);
+  });
+
+  it("applies each part on its own", () => {
+    expect(of(apply({ enabled: true }), "reason").enabled).toBe(false);
+    expect(of(apply({ labels: true }), "reason").enabled).toBe(true);
+    expect(of(apply({ conditions: true }), "status").condition).toEqual(
+      HIDE_UNLESS_REJECTED,
+    );
+    expect(of(apply({ labels: true }), "status").condition).toBeNull();
+  });
+
+  it("applies everything at once", () => {
+    const patched = apply({
+      layout: true,
+      enabled: true,
+      labels: true,
+      conditions: true,
+    });
+    expect(patched.fields.map((f) => f.column_uuid)).toEqual([
+      "notes",
+      "reason",
+      "status",
+    ]);
+    expect(of(patched, "reason").label_override).toBe("Why");
+    expect(of(patched, "reason").enabled).toBe(false);
+    expect(of(patched, "status").condition).toEqual(HIDE_UNLESS_REJECTED);
+  });
+
+  /**
+   * A view form displays a record and collects nothing, so per-field "editable" and
+   * the conditions read while one is filled in are settings it cannot act on. Writing
+   * them would overwrite what it has with values that never run.
+   */
+  it("will not put editable or conditions on a view form", () => {
+    const view = form({
+      uuid: "v",
+      type: "view",
+      config: {
+        fields: [
+          field({ column_uuid: "status", label_override: "State" }),
+          field({ column_uuid: "reason", enabled: false }),
+        ],
+      },
+    });
+    const patched = withAppliedSettings(
+      view,
+      source,
+      { layout: true, enabled: true, labels: true, conditions: true },
+      COLUMNS,
+    );
+    expect(of(patched, "status").condition).toBeNull();
+    expect(of(patched, "reason").enabled).toBe(false);
+    // The parts a view form *can* take still land.
+    expect(of(patched, "reason").label_override).toBe("Why");
+    expect(patched.fields.map((f) => f.column_uuid)).toEqual([
+      "notes",
+      "reason",
+      "status",
+    ]);
+  });
+
+  it("takes neither from a view form either", () => {
+    const view = form({
+      uuid: "v",
+      type: "view",
+      config: {
+        fields: [field({ column_uuid: "status", condition: HIDE_UNLESS_REJECTED })],
+      },
+    });
+    const patched = withAppliedSettings(
+      target,
+      view,
+      { ...NO_PARTS, conditions: true },
+      COLUMNS,
+    );
+    expect(of(patched, "status").condition).toBeNull();
+  });
+
+  /** The same reason `withCopiedConditions` takes `columns` at all: a form provisioned
+   *  with a list names no real column, so there is nothing to hang a setting on. */
+  it("gives a column the target has never listed an entry to hold the setting", () => {
+    const bare = form({ uuid: "u2", type: "update", config: { fields: [] } });
+    const patched = withAppliedSettings(
+      bare,
+      source,
+      { ...NO_PARTS, labels: true, conditions: true },
+      COLUMNS,
+    );
+    expect(of(patched, "reason").label_override).toBe("Why");
+    expect(of(patched, "status").condition).toEqual(HIDE_UNLESS_REJECTED);
+  });
+
+  it("keeps a config key it does not model", () => {
+    const merged = form({
+      uuid: "u3",
+      type: "update",
+      config: { fields: [], merge: { link_column_uuid: "link" } } as never,
+    });
+    const patched = withAppliedSettings(
+      merged,
+      source,
+      { ...NO_PARTS, layout: true },
+      COLUMNS,
+    ) as unknown as Record<string, unknown>;
+    expect(patched.merge).toEqual({ link_column_uuid: "link" });
+  });
+
+  /** Normalised — an absent `condition` comes back as an explicit null — but not
+   *  otherwise changed. The dialog still refuses to send this. */
+  it("changes nothing when no part is named", () => {
+    expect(apply({}).fields).toEqual(
+      target.config.fields!.map((f) => ({ condition: null, ...f })),
+    );
   });
 });
 
