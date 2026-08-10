@@ -41,6 +41,9 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   // A nested lookup, which is set as a pair.
   "parent_column_uuid",
   "target_filter_column_uuid",
+  // A lookup's saved option filter. Stored as `undefined` when cleared rather
+  // than an empty group, since `isSet` counts any object as a choice made.
+  "option_filters",
   "default",
   "onupdate",
 ];

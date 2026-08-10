@@ -31,10 +31,13 @@ import type {
   Column,
   ColumnType,
   ConversionReport,
+  FilterCondition,
   ListRead,
   TextMode,
   Workspace,
 } from "../../lib/types";
+import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
+import { cleanConditions } from "../views/operators";
 import { hasAdvancedConfig } from "./columnAdvanced";
 
 // The first two are what used to be the `text` and `long_text` column types.
@@ -163,6 +166,10 @@ export function ColumnDialog({
   const [targetFilterColumnUuid, setTargetFilterColumnUuid] = useState<
     string | null
   >(null);
+  // A lookup's saved option filter, over the *target list's* columns. Held as the
+  // two halves the editor takes; recombined into a FilterGroup when saving.
+  const [optionConjunction, setOptionConjunction] = useState<"and" | "or">("and");
+  const [optionConditions, setOptionConditions] = useState<FilterCondition[]>([]);
   const [multiple, setMultiple] = useState(false);
   const [formula, setFormula] = useState("");
   const [textMode, setTextMode] = useState<TextMode>("single");
@@ -291,6 +298,8 @@ export function ColumnDialog({
     setTargetFilterColumnUuid(
       (config.target_filter_column_uuid as string) ?? null,
     );
+    setOptionConjunction(config.option_filters?.conjunction ?? "and");
+    setOptionConditions(config.option_filters?.conditions ?? []);
     setMultiple(!!config.multiple);
     setFormula((config.formula as string) ?? "");
     // Unset is single line — the shape every text column had before text_mode.
@@ -527,6 +536,14 @@ export function ColumnDialog({
         config.parent_column_uuid = parentColumnUuid;
         config.target_filter_column_uuid = parentColumnUuid
           ? targetFilterColumnUuid
+          : null;
+        // Always sent, for the same merge reason. `null` rather than an empty
+        // group when there is nothing to apply: `hasAdvancedConfig` counts any
+        // object as a setting somebody chose, so an empty one would open the
+        // advanced section on every lookup column forever.
+        const conditions = cleanConditions(optionConditions);
+        config.option_filters = conditions.length
+          ? { conjunction: optionConjunction, conditions }
           : null;
       }
 
@@ -864,6 +881,11 @@ export function ColumnDialog({
                       // A nesting pairing is specific to the old target list.
                       setParentColumnUuid(null);
                       setTargetFilterColumnUuid(null);
+                      // So is an option filter: its conditions name the old
+                      // target's columns, which the new one does not have. Kept
+                      // they would every one be dropped server-side, leaving a
+                      // filter that reads as set and offers everything.
+                      setOptionConditions([]);
                     }}
                     placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
                     filter
@@ -1148,6 +1170,28 @@ export function ColumnDialog({
                     )}
                   </>
                 )}
+              {/* Hidden when the target is shared as a lookup target only: its
+                  columns are refused (`targetSchemaHidden`), and there is no
+                  filter to build without them. Not worth working around — that
+                  refusal is what the `lookup` grant is, and a stored filter set
+                  by someone who *can* read the schema keeps applying regardless
+                  of who opens this dialog. */}
+              {targetListUuid && !targetSchemaHidden && (
+                <Field
+                  label="Limit options to"
+                  optional
+                  hint="Rows of the target list that don't match are never offered. Records already pointing at one keep it, and still show its name."
+                >
+                  <FilterConditionsEditor
+                    listUuid={targetListUuid}
+                    columns={targetColumns.data ?? []}
+                    conjunction={optionConjunction}
+                    onConjunctionChange={setOptionConjunction}
+                    conditions={optionConditions}
+                    onConditionsChange={setOptionConditions}
+                  />
+                </Field>
+              )}
               <CheckboxField
                 inputId="col-multiple"
                 checked={multiple}

@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
 
+from ..items.filtering import apply_filters
 from ..items.models import ListItem
 from ..models import List
 from .enums import (
@@ -209,13 +210,19 @@ class ColumnService:
         Sees exactly what the caller may see: `lookup` on the target list (which
         `view` confers), then the per-record filter. A picker must never offer a row
         its user cannot read.
+
+        A search is narrowed further by whatever the column saved in
+        `option_filters` — and only a search: resolving named uuids stays exempt,
+        so a cell keeps its label after the filter stops offering the row. Nothing
+        here reads a filter off the request. That asymmetry is the point; see the
+        field's note in `schemas.ColumnConfig`.
         """
         # Deferred like the other permission call sites: a module-level import
         # cycles back through auth/workspaces services.
         from src.permissions.enums import Action, ResourceType
         from src.permissions.services import PermissionService
 
-        from ..items.services import display_column_key
+        from ..items.services import ListItemService, display_column_key
 
         if column.type != ColumnType.lookup:
             raise ValidationError(f"Column '{column.name}' is not a lookup column")
@@ -289,6 +296,28 @@ class ColumnService:
                             postgresql.ARRAY(sa.Text),
                         )
                     )
+                )
+            # The column's saved option filter, over the target's own columns.
+            # Another `where` on the statement `item_view_filter` already
+            # constrains, so it composes with the nesting above and can only ever
+            # narrow — no arrangement of conditions reaches a row the caller was
+            # not already allowed. Resolving is exempt for the usual reason: a
+            # held value must keep its label even once the filter would no longer
+            # offer it. `user` is read only to resolve "today"/"now" in their zone.
+            #
+            # `_columns_by_key` rather than a local query for the target's
+            # columns, because it is the same map the grid filters through: it
+            # keys by uuid string as `apply_filters` expects, and it is scoped by
+            # `in_shape`, so a conversion's live-but-not-yet-a-field scratch
+            # column cannot be filtered on here while being invisible everywhere
+            # else.
+            option_filters = config.get("option_filters")
+            if option_filters:
+                stmt = apply_filters(
+                    stmt,
+                    option_filters,
+                    await ListItemService._columns_by_key(db, target.id),
+                    user,
                 )
         if q and q.strip() and key:
             stmt = stmt.where(
@@ -420,6 +449,7 @@ class ColumnService:
                         "target list"
                     )
 
+            await cls._validate_option_filters(db, user, data, target_list_id)
             await cls._validate_nesting(
                 db, lst, data, target_list_id, current_uuid
             )
@@ -548,6 +578,60 @@ class ColumnService:
             validate_scalar(type_, data, "default", default)
 
         return data
+
+    @staticmethod
+    async def _validate_option_filters(
+        db: AsyncSession,
+        user,
+        data: dict,
+        target_list_id: int,
+    ) -> None:
+        """Check a lookup's saved option filter names real columns of the target.
+
+        Worth checking at all because `apply_filters` *drops* a condition whose
+        column it cannot find rather than failing (filtering.py), so a mistyped
+        uuid would produce a filter that silently offers everything — the same
+        trap `views/operators.ts` warns about for operators.
+
+        Skipped when the caller cannot read the target's schema, which is the
+        whole point of a `lookup`-only grant: `GET /lists/{it}/columns/` refuses
+        them, so an error message that distinguishes "not a column of the target"
+        from "accepted" would answer, one uuid at a time, the question the refusal
+        exists to avoid. They keep the silent-drop behaviour instead — a worse
+        filter for them, rather than a schema oracle for everyone.
+        """
+        filters = data.get("option_filters")
+        if not filters:
+            return
+        # Deferred for the same reason as the other permission call sites.
+        from src.permissions.enums import Action, ResourceType
+        from src.permissions.services import PermissionService
+
+        if not await PermissionService.has(
+            db, user, ResourceType.list, target_list_id, Action.view
+        ):
+            return
+
+        referenced = {
+            str(cond.get("column_uuid"))
+            for cond in (filters.get("conditions") or [])
+            if cond.get("column_uuid") is not None
+        }
+        if not referenced:
+            return
+        found = await db.execute(
+            select(Column.uuid).where(
+                Column.list_id == target_list_id,
+                Column.uuid.in_([coerce_uuid(u) for u in referenced]),
+                in_shape(),
+            )
+        )
+        missing = referenced - {str(u) for u in found.scalars().all()}
+        if missing:
+            raise UnknownReferenceError(
+                "option_filters references a column that is not on the target "
+                f"list: {', '.join(sorted(missing))}"
+            )
 
     @staticmethod
     async def _validate_nesting(

@@ -121,6 +121,11 @@ export interface ColumnConfig {
    *  and the target-list lookup column the filter matches on. Set together. */
   parent_column_uuid?: string | null;
   target_filter_column_uuid?: string | null;
+  /** Lookup columns only. Narrows which target rows the picker offers, over the
+   *  *target list's* columns. Saved with the column and applied server-side; the
+   *  picker never sends one, because a caller-chosen predicate would make a
+   *  lookup-only target's hidden columns readable by elimination. */
+  option_filters?: FilterGroup | null;
   multiple?: boolean;
   allowed_schemes?: string[];
   label?: string;
