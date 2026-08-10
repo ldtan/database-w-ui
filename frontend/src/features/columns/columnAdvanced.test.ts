@@ -40,6 +40,16 @@ describe("hasAdvancedConfig", () => {
     expect(hasAdvancedConfig({ unique: false, multiple: false })).toBe(false);
     expect(hasAdvancedConfig({ label: "" })).toBe(false);
     expect(hasAdvancedConfig({ parent_column_uuid: null })).toBe(false);
+    expect(hasAdvancedConfig({ option_filters: null })).toBe(false);
+  });
+
+  /** Why the dialog sends `null` for a cleared option filter rather than an empty
+   *  group: `isSet` counts any object as a choice, so an empty one would fold the
+   *  section open on every lookup column that had ever had a filter. */
+  it("counts an empty option filter, which is why one is never stored", () => {
+    expect(
+      hasAdvancedConfig({ option_filters: { conjunction: "and", conditions: [] } }),
+    ).toBe(true);
   });
 
   /** A minimum of zero is a minimum. Falsiness alone would fold it away. */

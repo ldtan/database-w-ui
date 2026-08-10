@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from src.core.schemas import NameSlug
 
+from ..views.schemas import FilterGroup
 from .enums import ColumnType
 
 
@@ -70,6 +71,19 @@ class ColumnConfig(BaseModel):
     # Set and unset together; the service validates the pairing.
     parent_column_uuid: Optional[UUID] = None
     target_filter_column_uuid: Optional[UUID] = None
+    # Narrow which target rows the picker offers: a view's `FilterGroup`, borrowed
+    # rather than reinvented, asked of the *target list's* columns. Unlike the
+    # nested pair above it compares against literals, so it does not vary per
+    # record — "only Active schools", not "schools in this record's region".
+    #
+    # It comes from stored config and never from the caller, and that is a
+    # boundary rather than a convenience. `lookup` is the one action that hands
+    # over a row's label without opening the row (see permissions/enums.py), so a
+    # predicate the *caller* chose would make the target's hidden columns
+    # readable by elimination: ask `Salary > 50000`, halve, repeat. A stored
+    # filter can only ever remove rows from a set the caller was already entitled
+    # to, which is why it is safe and a query parameter would not be.
+    option_filters: Optional[FilterGroup] = None
     # calculated — an expression over other columns of this list, by name. The
     # column stores nothing; the value is computed on read. See columns/formula.py.
     formula: Optional[str] = None

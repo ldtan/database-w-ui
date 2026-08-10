@@ -1831,6 +1831,7 @@ export interface components {
             parent_column_uuid?: string | null;
             /** Target Filter Column Uuid */
             target_filter_column_uuid?: string | null;
+            option_filters?: components["schemas"]["FilterGroup"] | null;
             /** Formula */
             formula?: string | null;
         };

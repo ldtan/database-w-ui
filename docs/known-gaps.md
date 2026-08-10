@@ -438,7 +438,7 @@ authority to see the archive is the authority to have put things in it.
 
 ---
 
-## 7. Nested lookups: stale pairs survive, and the picker filter is advisory
+## 7. Narrowing a lookup's options: stale pairs survive, and both filters are advisory
 
 A nested lookup (planned-features #6) enforces its parent/child pairing **only on values
 being added**. That is the same deal choice options struck (gap 4): enabling nesting over a
@@ -459,6 +459,34 @@ Two consequences worth knowing before extending it:
   filter column cascade-clears the pairing (`_clear_dependent_nesting`), but if a stale one
   is ever encountered anyway (a race, a hand-edited config), the picker, the record dialog
   and the write validation all treat the column as a plain lookup rather than erroring.
+
+### The option filter is advisory too, and is the caller's business in no sense at all
+
+A lookup's `option_filters` (a view's `FilterGroup`, over the *target's* columns) narrows what
+the picker offers. It inherits both halves of the deal above: it applies to a **search** and
+never to resolution by uuid, so a cell keeps its label after the filter stops offering the
+row; and nothing enforces it on write, so turning one on over a populated column cannot make
+those records unsaveable. Conditions naming a column the target no longer has are dropped by
+`apply_filters` rather than raising — which is why `_validate_option_filters` checks them when
+the filter is *written*, since an unvalidated typo yields a filter that reads as set and
+offers everything.
+
+**Where it differs from `?parent_value=` is the part not to get wrong.** That param is
+caller-supplied and safe to be, because it can only name a row uuid the caller already holds.
+A general predicate is a different object: `lookup` is the action that hands over a row's
+label *without* opening the row, so a caller who chose the predicate could read the target's
+hidden columns by elimination — bisect `roll > n` to recover a number, walk `contains` a
+character at a time to recover a string. So `option_filters` is read from stored config and
+from nothing else. Do not add a filter query parameter to the options endpoint, and do not
+"generalise" the nesting param into one; both would quietly convert every lookup-only grant
+into a read of the whole target.
+
+The same asymmetry is why `_validate_option_filters` **skips** validation when the caller
+cannot `view` the target. A lookup-only grantee is refused `GET /lists/{it}/columns/` on
+purpose; an error that distinguished "not a column of the target" from "accepted" would answer
+that same question one uuid at a time. They get the silent drop instead — a worse filter for
+them, rather than a schema oracle for everyone. `tests/test_lookup_option_filters.py` pins
+all of it, `test_the_endpoint_takes_no_filter_from_the_caller` most of all.
 
 ## 8. Rich text is HTML in a cell, and some things treat it as text
 

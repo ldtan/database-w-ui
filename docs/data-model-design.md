@@ -234,7 +234,7 @@ Common `config` keys (all optional unless noted):
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?`; `allow_other?` |
-| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together) |
+| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns) |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
 | `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
@@ -292,6 +292,14 @@ Notes:
   `target_filter_column_uuid`, set together): the target list's filter column points back at
   the parent's target, and what the parent cell holds constrains which target rows the child
   may add (options filtering is opt-in per request; writes enforce). See planned-features #6.
+- `lookup` **option filters** — `option_filters` is a view's `FilterGroup` asked of the
+  *target list's* columns ("only Active schools"), narrowing what the picker offers. Unlike
+  the nesting pair it compares against literals, so it does not vary per record; unlike the
+  nesting pair it is **never taken from the request**. That is a boundary, not a style
+  choice: `lookup` grants a row's label without granting the row, so a caller-chosen
+  predicate would expose the target's other columns by elimination (known-gaps #7). It
+  narrows searches only — resolving a uuid still returns its label — and is not enforced on
+  write, so enabling one over a populated column leaves existing cells saveable.
 - `link` — **the scheme is a security boundary, not a preference.** The value is rendered as
   an anchor, so a `javascript:` or `data:` URL would be stored XSS. A value must parse as an
   absolute URL whose scheme is in the column's `allowed_schemes`, and a column may only
