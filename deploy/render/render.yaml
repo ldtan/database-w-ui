@@ -8,39 +8,53 @@
 # The shape:
 #   - the API as a plain Python web service (no container: Render's native runtime installs
 #     any released Python, and this app needs 3.14 — every entity's public id comes from
-#     uuid.uuid7 in src/core/mixins.py)
+#     uuid.uuid7 in src/core/mixins.py), on `starter` — $7/mo, always-on, and the plan that
+#     makes the pre-deploy migration hook available
 #   - the SPA as a static site, free and on a CDN, rewriting /api/* to the API so the two
 #     share an origin
-#   - a free Postgres, which Render DELETES about 30 days after it is created. Read the
-#     comment on the `databases` block before relying on it.
+#   - a Postgres on the smallest paid instance ($6/mo + storage), which is what buys the
+#     database a life longer than 30 days and gives it backups
 #
-# This is the free-tier configuration throughout. Every paid upgrade is marked "PAID:" and is
-# a one-line edit. See "Deployment" in the root README.
+# So: ~$13/mo plus storage and any bandwidth over the included 100 GB. Only the static site is
+# still free, and static sites have no paid tier to move to — so every "PAID:" note in this
+# file now reads "PAID, and taken", and there is no cheap upgrade left un-bought. What remains
+# is scaling (more instances, or a bigger plan for the 512 MB both free and starter share),
+# and the one thing that would break if this were scaled today is the login throttle, called
+# out where it is configured below. See "Deployment" in the root README.
 
 databases:
-  # A free Render database is deleted — not emptied, deleted — roughly 30 days after it is
-  # created. When that happens the app does not carry on with a blank database: DATABASE_URI
-  # names a host that no longer exists, `alembic upgrade head` fails in the start command, and
-  # the service never reaches uvicorn. It is DOWN, not empty, until someone creates a new
-  # database and re-points DATABASE_URI by hand.
+  # This was a free database, which Render deletes — not empties, deletes — roughly 30 days
+  # after it is created, taking the app down with it: DATABASE_URI names a host that no longer
+  # exists, so every request errors and the next deploy dies at the pre-deploy migration.
+  # DOWN, not blank. The paid plan below ends that clock. The note stays because the recovery
+  # is still the recovery for any lost database: create one, paste its internal URL into
+  # DATABASE_URI, redeploy — the pre-deploy migration builds it from empty and
+  # seed_initial_data recreates the superuser, so the app comes back blank and working.
   #
-  # Recovery is at least clean: the start command migrates a fresh database from empty and
-  # seed_initial_data recreates the superuser, so a new instance comes back blank and working.
-  # That is the deal being accepted here — a demo we are willing to rebuild.
-  #
-  # PAID: `plan: basic-256mb` (~$7/mo) removes the expiry and adds managed backups. It is the
-  # first thing to buy — before the web service — the moment the data starts mattering.
+  # PAID, and taken: `basic-256mb` is $6/mo for the instance plus storage (~$0.30/GB-month,
+  # billed on what is provisioned), so the bill is a little over $6 rather than exactly it.
+  # It removes the expiry above and turns on managed daily backups. This was the first thing
+  # to buy — before the web service — because losing the data is worse than being slow.
   - name: dbui-db
     databaseName: dbui
     user: dbui
-    plan: free
+    plan: basic-256mb
     region: oregon
 
 services:
   - type: web
     name: dbui-api
     runtime: python
-    plan: free
+    # PAID, and taken: `starter` is $7/mo for 0.5 CPU and 512 MB. Two things it buys, in order
+    # of how much they matter here:
+    #   - always-on. The free plan spun the instance down after 15 idle minutes and took 30–60 s
+    #     to answer the next request, which is the whole first impression of the app.
+    #   - a pre-deploy hook, which is what lets the migration move off startCommand below.
+    # It does NOT buy more memory — free and starter are both 512 MB — so nothing in
+    # docs/capacity-and-performance.md about memory changes. CPU goes 0.1 → 0.5: 5× on the
+    # app-CPU half (search, non-compiled metrics, argon2, RS256) and nothing on the
+    # Postgres-side sorting and counting, which was never the bottleneck.
+    plan: starter
     region: oregon
     rootDir: backend
     # Liveness only: it answers from the process, never the database, so a database blip
@@ -50,14 +64,22 @@ services:
     # Alembic owns the schema and the app refuses to boot against a database that is behind it
     # (src/infrastructure/schema_check.py), so the upgrade has to land before uvicorn does.
     #
-    # It belongs in a pre-deploy hook, not here: at boot, every instance races every other
-    # instance to run it. The free plan has no such hook and runs exactly one instance, so
-    # there is no race to lose — but this is the FIRST thing to move when the service is paid
-    # for or scaled.
+    # This used to be `alembic upgrade head && uvicorn ...` in startCommand, which was only safe
+    # because the free plan runs exactly one instance — at boot, every instance races every
+    # other instance to run the migration. Here it is instead, which is where it belongs and is
+    # a paid-plan feature (Render does not offer the hook on free instance types).
     #
-    # PAID: `plan: starter`, add `preDeployCommand: uv run alembic upgrade head`, and drop the
-    # alembic call from the line below.
-    startCommand: uv run alembic upgrade head && uv run uvicorn main:create_app --factory --host 0.0.0.0 --port $PORT
+    # It runs after the build and before anything is deployed, on a separate instance, and a
+    # failure fails the *deploy*: the currently running version carries on serving, untouched.
+    # A bad migration is therefore a red deploy and zero downtime, where before it was a new
+    # instance that could not boot. Note the separate instance also means filesystem changes
+    # here do not reach the service — this may only touch the database.
+    #
+    # numInstances is left unset (one instance), which the per-process login throttle in
+    # src/auth/tokens/throttle.py still depends on. Scaling is now possible; that counter is
+    # what to fix first if it happens.
+    preDeployCommand: uv run alembic upgrade head
+    startCommand: uv run uvicorn main:create_app --factory --host 0.0.0.0 --port $PORT
     envVars:
       - fromGroup: dbui
 
@@ -74,8 +96,10 @@ services:
       # often to pick up other people's row changes (paused while the tab is
       # hidden). Baked in at build time (Vite), so a change needs a redeploy.
       # Optional — the app defaults to 10s if unset. `0` disables polling. Lower is
-      # snappier but more requests; on the free tier a focused open tab polling
-      # keeps the single instance awake. See docs/planned-features.md #8.
+      # snappier but more requests. It used to have a second job on the free plan —
+      # a focused open tab kept the instance from spinning down — which `starter`
+      # makes moot, so this is now purely a freshness-vs-load dial and could come
+      # down from 60 if that is wanted. See docs/planned-features.md #8.
       #
       # The metric strip does not follow this down: it takes the greater of this and
       # VITE_METRIC_REFRESH_SECONDS (default 60), because a metric is a scan of the
@@ -84,8 +108,11 @@ services:
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "60"
       # How many live records a list may hold before the app suggests archiving,
-      # or `0` to never suggest it. Optional — the app defaults to 25000, which is
-      # roughly where search and non-compiled metrics start to be felt on 0.1 CPU.
+      # or `0` to never suggest it. Optional — the app defaults to 25000, which was
+      # measured as where search and non-compiled metrics start to be felt on 0.1
+      # CPU. At 0.5 CPU it is conservative by roughly 5×, but it is left alone
+      # deliberately: raising it is a claim about wall time nobody has measured on
+      # this plan, and the Postgres-side costs in the same table did not move at all.
       # It is a suggestion about the reads that scale with the row count, not a
       # general "your list is big" warning; the paged listing is flat at any size.
       # See docs/capacity-and-performance.md § "When to archive".
@@ -173,9 +200,10 @@ envVarGroups:
       # before login answers 429. Defaults (10 / 50 / 15 minutes) apply if unset; they are
       # named here because the seeded username is `admin` below and is not a secret.
       #
-      # The counters are per process (src/auth/tokens/throttle.py). That is exact while the
-      # free plan runs a single instance, and becomes N times looser the moment this service
-      # is scaled — the same boundary as the alembic note on startCommand above.
+      # The counters are per process (src/auth/tokens/throttle.py). That is exact while this
+      # runs a single instance (numInstances is unset), and becomes N times looser the moment
+      # it is scaled. It is now the ONLY thing that breaks on scaling — the alembic upgrade
+      # used to share this caveat and no longer does, having moved to preDeployCommand.
       #
       # If the per-address limit ever locks out real users, the cause is a proxy hop that
       # does not forward the original client address, making everyone share one bucket: set

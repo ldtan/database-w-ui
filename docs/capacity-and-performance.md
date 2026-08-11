@@ -8,6 +8,14 @@ records, 16 users) on an AMD Ryzen 7 5700U. That core is roughly a cloud vCPU an
 probably a little faster, so **treat every number here as a best case** — the same code
 on Render is likely 10–30% worse.
 
+> **Which plan is deployed.** Since 2026-08-11 the API runs on Render's `starter`: **0.5 CPU,
+> 512 MB, always-on**. This document was written against the free plan's 0.1 CPU and still
+> quotes it throughout, because the CPU-millisecond measurements are what was actually taken
+> and they do not change with the plan — only the wall times derived from them do. **Where a
+> figure below says "on the free tier", divide it by 5 for the plan in production.** That is
+> arithmetic, not a second measurement; nothing here has been re-measured on `starter`. The
+> memory ceiling did not move at all: both plans are 512 MB.
+
 ## Why CPU-time, and not latency
 
 Latency on a laptop tells you nothing about a 0.1-CPU instance. **CPU-milliseconds per
@@ -513,7 +521,11 @@ Archiving only helps the operations whose cost **scales with the live row count*
 paging. It does nothing for the default paged listing. So the question is not "is this list
 big" but "is this list big *and* is anyone doing those things to it".
 
-On the free tier's 0.1 CPU, where wall time is ~10× the CPU figures above:
+Thresholds below are stated on the free tier's 0.1 CPU, where wall time is ~10× the CPU figures
+above — that is how they were derived, and they are left in those terms so the table and the
+measurements stay in one unit. On the deployed 0.5 CPU, every *wall* figure in it is five times
+smaller and the app-CPU thresholds move up correspondingly; the Postgres-side ones do not move
+at all (see the second qualifier below).
 
 | Live records in one list | What starts to hurt |
 |---|---|
@@ -521,17 +533,19 @@ On the free tier's 0.1 CPU, where wall time is ~10× the CPU figures above:
 | 10k–25k | Search crosses ~1 s of wall time (~7.7 µs per row on a 20-column list). Deep `skip` paging is already 27 ms at page 50 of a 10k list. |
 | 25k–50k | Metrics that do not compile cost ~20 µs a record — ~1 s of CPU, ~10 s of wall — and 50k is `METRIC_ROW_LIMIT`, where they truncate. |
 | 50k–100k | Search is 4–8 s of wall time; `count(*)` ~120 ms; a sort or a group re-sorts the whole matching set on *every* page (~105 ms of Postgres at 100k). |
-| 100k+ | Search is unusable on the free tier. Archiving is maintenance, not tuning. |
-| ~500k | The 1 GB free database is full at ~1.9 kB a record — a limit archiving does not move, since the rows stay. |
+| 100k+ | Search is unusable on the free tier, and ~1 s on the deployed Starter — better, but a second of a single event loop that everyone else queues behind. Archiving is maintenance, not tuning. |
+| ~500k | 1 GB of database storage is full at ~1.9 kB a record — a limit archiving does not move, since the rows stay. On `basic-256mb` this one is buyable: storage is provisioned separately (~$0.30/GB-month) and can be raised. |
 
 Three qualifiers belong with that table:
 
 - **Column count drives search cost as much as row count.** Search ORs one `ILIKE` per column,
   so a 40-column list costs roughly twice per row what a 20-column one does. 25,000 assumes
   about twenty.
-- **A bigger instance buys 10× on the app-CPU half only** — search and non-compiled metrics —
-  and nothing on the Postgres-side sorting and counting. Those thresholds do not move with the
-  plan.
+- **A bigger instance buys its CPU multiple on the app-CPU half only** — search and non-compiled
+  metrics — and nothing on the Postgres-side sorting and counting. The Starter upgrade bought 5×
+  (0.1 → 0.5 CPU) on the first half and exactly nothing on the second: `count(*)` at ~120 ms and
+  the ~105 ms re-sort per page are Postgres's own work on its own instance, and they are
+  unchanged. Those thresholds do not move with the web plan.
 - **A workspace with many lists is worse per list, not better**, since sparsity is what decides
   whether the planner takes `ix_list_items_list_id_id` at all.
 
@@ -573,15 +587,16 @@ One person signing in made everyone else's app 13× slower. On 0.1 CPU, multiply
 
 **2. Concurrent logins exhaust the RAM before the CPU.** The process idles at ~146 MB,
 and every in-flight argon2 hash adds **64 MiB** on the default parameters. Six at once
-exceeds 512 MB and the instance is killed. This matters more than it sounds: Render's
-Free *and* Starter instances are both 512 MB, so paying $7 does not buy a way out of it.
-Only the argon2 parameters, or a 2 GB Standard instance, actually move this ceiling.
+exceeds 512 MB and the instance is killed. This matters more than it sounds, and the $7
+Starter upgrade did **not** help: Free and Starter are both 512 MB. It remains the sharpest
+edge in the deployment, and the only things that move it are the argon2 parameters or a 2 GB
+Standard instance at $25.
 
 ## What this means per plan
 
 Wall-clock floor per request with no contention at all:
 
-| | Free (0.1 CPU) | Starter (0.5 CPU) | Standard (1 CPU) |
+| | Free (0.1 CPU) | **Starter (0.5 CPU) — deployed** | Standard (1 CPU) |
 |---|---|---|---|
 | Open a list | ~1.0 s | ~0.20 s | ~0.10 s |
 | Poll / cell edit | ~230 ms | ~46 ms | ~23 ms |
@@ -597,8 +612,10 @@ loop queues badly above that.
 That steady-state row was never the real limit, though. **The limit was a login burst.**
 Thirty people arriving at once cost 30 × 717 ms = 21.5 s of CPU, which on the free tier
 meant **3.6 minutes** during which the app served nobody. After the fixes below the same
-burst costs 2.0 s of CPU — about **20 seconds** on the free tier, and nobody else's
-requests queue behind it. That single change is worth more than either paid upgrade.
+burst costs 2.0 s of CPU — about **20 seconds** on the free tier, **4 seconds** on the
+deployed Starter, and nobody else's requests queue behind it. That single change is still
+worth more than either paid upgrade: the login fix took 21.5 s to 2.0 s (11×), where
+Starter takes wall time to a fifth. Note the burst's *memory* cost is untouched by both.
 
 ## Data volume is not a constraint and probably never will be
 
@@ -667,17 +684,24 @@ is locked out, because old hashes are still verifiable on their own terms.
 ## What is still true after the fixes
 
 - **One instance, one worker.** The login throttle counters
-  (`src/auth/tokens/throttle.py`) and the `alembic upgrade` in `startCommand` are both
-  correct *only* because of that. Scaling the service breaks both; see the comments in
-  `deploy/render/render.yaml`.
-- **The free tier still spins down** after 15 minutes and takes about a minute to come
-  back. A pinger every 10 minutes avoids it — Render allows 750 free instance-hours a
-  month and always-on is ~730, so it fits, but it consumes nearly the whole workspace
-  budget.
+  (`src/auth/tokens/throttle.py`) are correct *only* because of that, and scaling the service
+  breaks them. The `alembic upgrade` that shared this caveat no longer does: it moved to
+  `preDeployCommand` with the Starter upgrade, so it now runs once per deploy no matter how
+  many instances there are. See the comments in `deploy/render/render.yaml`.
+- **The spin-down is gone.** It was the free plan's, not the app's: 15 idle minutes, then
+  about a minute to answer the next request. Starter is always-on, so the pinger that would
+  have papered over it is not needed and neither is the free-instance-hours budget it ate.
 - **Search is still the expensive read** at ~106 ms. It has not been a problem at demo
   scale; it is the first thing to look at if list views get slow. Archiving is now a partial
   answer to it, but only past roughly half a list — below that the planner does not take the
   partial index and search costs the same. The real fix is still
   [search-design.md](search-design.md).
-- **The free database is still deleted 30 days after creation**, which remains the single
-  largest reliability risk in the deployment and the first thing worth paying for.
+- **Nothing is on the free tier any more** except the static site, which does not have a paid
+  one. The database moved to `basic-256mb` ($6/mo plus storage), retiring what used to be the
+  single largest reliability risk here — a free Render database is deleted 30 days after it is
+  created, taking the app down with it — and adding managed backups. The API moved to `starter`
+  ($7/mo), which bought always-on, the pre-deploy hook, and 5× the CPU. About $13/mo in total.
+- **The 512 MB memory ceiling survived both upgrades**, so the six-concurrent-logins OOM is now
+  the sharpest edge in the deployment. Change 3 above (argon2 parameters, 64 MiB → 19 MiB per
+  in-flight hash) is what actually moved it; the next thing that would is a 2 GB Standard
+  instance at $25/mo, and there is no reason to buy it yet.

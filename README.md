@@ -79,7 +79,7 @@ for it — so a second platform is a new folder, not an edit to this file.
 
 | Target | Config | Notes |
 |--------|--------|-------|
-| [Render](deploy/render/) | [`deploy/render/render.yaml`](deploy/render/render.yaml) | Free tier: Python web service + static site + free Postgres. **The free database is deleted after ~30 days**, and the app goes down with it. |
+| [Render](deploy/render/) | [`deploy/render/render.yaml`](deploy/render/render.yaml) | **~$13/mo**: Postgres on `basic-256mb` ($6 + storage) so it is not deleted after 30 days, the API on `starter` ($7, always-on, and the plan that offers the pre-deploy migration hook), the SPA as a free static site. |
 
 Two facts that hold whatever the target is, because they come from the app rather than the
 host:

@@ -247,9 +247,9 @@ Each of these can sink the design, and each is cheap to check before any code is
    costs nothing. **Verify with `EXPLAIN` before anything else**, because it is exactly the sort
    of detail that leaves the whole design measurably useless while looking correct.
 
-3. **Index size against a 1 GB free tier.** A trigram GIN index commonly runs one to three times
+3. **Index size against 1 GB of storage.** A trigram GIN index commonly runs one to three times
    the size of the text it covers. At 100k records this could plausibly be 30–80 MB for one
-   list, against a tier that holds roughly 500k records for the *whole* tenant
+   list, against a gigabyte that holds roughly 500k records for the *whole* tenant
    (see [deployment](capacity-and-performance.md)). Measure `pg_relation_size` on the seeded
    list before committing. On this deployment it is entirely possible that disk, not time, is
    the binding constraint — which would not make the design wrong, but would make it something
