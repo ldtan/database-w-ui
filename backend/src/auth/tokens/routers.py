@@ -77,6 +77,29 @@ async def refresh_access_token(
         ) from exc
 
 
+@router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_refresh_token(
+    payload: RefreshRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """End a session server-side. What signing out has to call.
+
+    Clearing the tokens in the browser is not signing out: the refresh token stays
+    valid for REFRESH_TOKEN_EXPIRE_DAYS, so anything that recovers it afterwards —
+    a shared machine, a profile backup — still holds a working session that the
+    sign-out did nothing about. This is what makes the token stop working.
+
+    **Unauthenticated on purpose.** Presenting the token *is* the authorisation, and
+    requiring a live access token would make the one case that most needs this — a
+    session already past its 15 minutes — the one case that cannot use it.
+
+    Answers 204 whether or not the token existed. A caller signing out has nothing to
+    do with either answer, and distinguishing them would turn this into an oracle for
+    whether a stolen token is still live.
+    """
+    await TokenService.revoke(db, payload.refresh_token)
+
+
 @router.get("/jwks.json")
 async def get_public_key():
     """Expose the public key for other microservices to verify tokens."""

@@ -7,7 +7,12 @@ import {
 } from "react";
 import { useQuery } from "@tanstack/react-query";
 
-import { api, clearTokens, getAccessToken, login as apiLogin } from "./api";
+import {
+  api,
+  getAccessToken,
+  login as apiLogin,
+  logout as apiLogout,
+} from "./api";
 import { queryClient } from "./queryClient";
 import type { ApiUser } from "./types";
 
@@ -44,8 +49,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // The UI turns over immediately and the revoke settles behind it: `apiLogout`
+  // clears local storage in its own `finally`, so the session is over here whether or
+  // not the server was reachable, and awaiting it would only make sign-out sit on a
+  // network round trip to reach the same state.
   const logout = useCallback(() => {
-    clearTokens();
+    void apiLogout();
     setAuthenticated(false);
     queryClient.clear();
   }, []);
