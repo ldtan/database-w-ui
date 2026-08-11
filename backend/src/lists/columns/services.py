@@ -23,6 +23,7 @@ from .enums import (
     ColumnType,
 )
 from .models import Column, in_shape
+from .resanitize import resanitize_column, turns_rich
 from .schemas import ColumnConfig, ColumnCreate, ColumnUpdate
 from .validation import (
     ONUPDATE_TYPES,
@@ -123,6 +124,10 @@ class ColumnService:
             return None
 
         data = payload.model_dump(exclude_unset=True)
+        # Captured before `_validate_config` overwrites it: turning `text_mode` on is
+        # what makes every value already stored under this column renderable as HTML,
+        # and the only way to know that happened is to compare against what was there.
+        was = dict(column.config or {})
 
         if "config" in data:
             old_target = (column.config or {}).get("target_list_uuid")
@@ -157,6 +162,12 @@ class ColumnService:
 
         for field, value in data.items():
             setattr(column, field, value)
+
+        # In this transaction, so the column never reads as rich while a value written
+        # under the plain one is still stored — see resanitize.py for why that ordering
+        # is the whole point.
+        if turns_rich(column.type, was, column.config or {}):
+            await resanitize_column(db, lst.id, column.uuid)
 
         try:
             await db.flush()

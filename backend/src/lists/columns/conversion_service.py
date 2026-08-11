@@ -55,6 +55,8 @@ from ..models import List
 from .conversion import CellConverter, check_supported, mint_choice_options
 from .enums import ColumnType
 from .models import Column
+from .resanitize import resanitize_column
+from .richtext import is_rich
 from .schemas import ColumnConfig
 from .services import ColumnService
 from .validation import resolve_choice_options
@@ -332,6 +334,13 @@ class ConversionService:
                 for key, value in (target.config or {}).items()
                 if key not in (CONVERSION_OF, KEEP_SOURCE)
             }
+            # The backfill wrote these values without sanitising — nothing could read
+            # them, so there was nothing to protect. Making the column visible is the
+            # moment that stops being true, and for a rich one they become markup the
+            # grid renders. Unconditional rather than compared against a previous
+            # config: this column has never had one a reader could see.
+            if target.type == ColumnType.text and is_rich(target.config):
+                await resanitize_column(db, lst.id, target.uuid)
             await db.commit()
             await db.refresh(target)
             return target
@@ -357,6 +366,12 @@ class ConversionService:
         target.display_name = f"{source.display_name} (before conversion)"
         target.hidden = False
         target.deleted_at = datetime.now(timezone.utc)
+
+        # `text -> text` is a supported pair, so a conversion is one of the ways a
+        # column becomes rich — over values the backfill produced and never sanitised.
+        # After the swap, so it cleans what now sits under the source's own key.
+        if source.type == ColumnType.text and is_rich(new_config):
+            await resanitize_column(db, lst.id, source.uuid)
 
         await db.commit()
         await db.refresh(source)
