@@ -1746,6 +1746,14 @@ export function GuidePage() {
           skipped, the reason for each.
         </p>
         <p>
+          When rows are skipped you also get a <Ui>Download skipped rows</Ui> button.
+          It hands you back just those rows, exactly as you uploaded them, with the
+          reason in an extra <Ui>_error</Ui> column — so instead of hunting for line
+          47 of the original, you fix the cells it complains about and upload{" "}
+          <em>that</em> file. The <Ui>_row</Ui> and <Ui>_error</Ui> columns are
+          ignored when you do, so there’s no need to delete them first.
+        </p>
+        <p>
           Starting from nothing? Pick a <Ui>Template format</Ui> and click{" "}
           <Ui>Download template</Ui> on that same tab: you get an empty file with one
           heading per column, ready to fill in and upload straight back. Calculated

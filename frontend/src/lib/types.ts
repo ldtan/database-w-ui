@@ -85,6 +85,16 @@ export type BatchUserSummary = Omit<
   "created" | "errors"
 > & { created: CreatedUser[]; errors: BatchUserError[] };
 
+/** A row a record import skipped. `values` is the row as the uploaded file wrote it,
+ *  which is what makes a downloaded errors file worth re-uploading — see
+ *  `features/transfer/importErrors.ts`. */
+export type ImportRowError = Response<Schemas["ImportRowError"]>;
+/** The result of a record import. `errors` is re-spelled for the reason
+ *  `BatchUserSummary` re-spells its own arrays: `Response<>` is shallow. */
+export type ImportSummary = Omit<Response<Schemas["ImportSummary"]>, "errors"> & {
+  errors: ImportRowError[];
+};
+
 export type ColumnType = Schemas["ColumnType"];
 export type ConversionReport = Response<Schemas["ConversionReport"]>;
 export type ConversionFailure = Response<Schemas["ConversionFailure"]>;
