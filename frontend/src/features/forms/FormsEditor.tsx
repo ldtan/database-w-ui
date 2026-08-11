@@ -325,9 +325,11 @@ export function FormsEditor({
               not, because it changes what *other people* will see and should only
               draw the eye when pressing it would do that; disabled rather than
               hidden, so the "nothing to save" signal costs no discoverability; and
-              `showOnDisabled`, because a disabled button takes no pointer events and
-              its tooltip is the only thing that says why. A solid button here also
-              wrapped the row onto two lines at the dialog's 720px. */}
+              inert rather than `disabled`, because a disabled button takes no
+              pointer events and its tooltip is the only thing that says why — see
+              "Save view" in ViewBar for what PrimeReact's `showOnDisabled` does to
+              the DOM to work around that, and why nothing here may use it. A solid
+              button here also wrapped the row onto two lines at the dialog's 720px. */}
           {canEdit && (
             <Button
               label="Save layout"
@@ -335,15 +337,19 @@ export function FormsEditor({
               outlined={dirty}
               text={!dirty}
               size="small"
-              onClick={() => save.mutate()}
+              onClick={() => {
+                if (rows.length === 0 || !dirty) return; // inert, not disabled
+                save.mutate();
+              }}
               loading={save.isPending}
-              disabled={rows.length === 0 || !dirty}
+              className={rows.length === 0 || !dirty ? "is-inert" : undefined}
+              aria-disabled={rows.length === 0 || !dirty}
               tooltip={
                 dirty
                   ? "Save this form's field order, labels and conditions"
                   : "Nothing to save — this form already looks like this"
               }
-              tooltipOptions={{ position: "bottom", showOnDisabled: true }}
+              tooltipOptions={{ position: "bottom" }}
             />
           )}
           {/* Next to the button that saves, because the two are read together: this

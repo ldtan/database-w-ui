@@ -52,6 +52,15 @@ export function useEffectiveActionsMap(
           resource_uuid: uuid,
         })),
       }),
+    // Keep the last answer while a new one is in flight. The key is the *set* of
+    // uuids, so adding or removing a single row re-keys the whole query and every
+    // row would otherwise fall back to "no permissions" for the length of a round
+    // trip — a page of records losing its row actions each time one is deleted,
+    // and the toolbar's "Save view" vanishing and returning each time a view is
+    // created. Answers are looked up by uuid below, so a carried-over response is
+    // simply silent about a row it has never been asked about, which is what
+    // `fallbackActions` is for.
+    placeholderData: (prev) => prev,
   });
 
   const byUuid = new Map<string, ActionSet>();

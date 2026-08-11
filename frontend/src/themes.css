@@ -494,15 +494,15 @@ a {
     color var(--transition),
     transform var(--transition);
 }
-.p-button:enabled:hover,
-.p-button:not(button):not(a):not(.p-disabled):hover {
+.p-button:enabled:not(.is-inert):hover,
+.p-button:not(button):not(a):not(.p-disabled):not(.is-inert):hover {
   background: var(--brand-hover);
   border-color: var(--brand-hover);
   color: var(--brand-contrast);
 }
 /* A press that moves. One pixel is enough to feel like a button and not enough
    to shift what is beside it. */
-.p-button:enabled:active {
+.p-button:enabled:not(.is-inert):active {
   transform: translateY(1px);
 }
 .p-button:focus {
@@ -513,9 +513,19 @@ a {
    loading" — and a form's primary action is disabled most of the time it is on
    screen, so that was the first impression of nearly every dialog.
    `:not(.p-button-loading)` because PrimeReact disables a button while it is
-   busy too, and a spinner on a grey slab reads as an error. */
+   busy too, and a spinner on a grey slab reads as an error.
+
+   `.is-inert` is styled identically and deliberately so: it marks a button that
+   looks unavailable and refuses its own click, but is *not* `disabled` — so it
+   still takes hover and focus, and can therefore open the tooltip that says why
+   it is off. A `disabled` button takes no pointer events, and PrimeReact's
+   workaround for that (`tooltipOptions.showOnDisabled`) creates a wrapper <div>
+   and moves the button into it behind React's back, which React later fails to
+   remove and crashes the whole page over. Anything wearing this class has to
+   turn its own click away — see "Save view" in ViewBar. */
 .p-button:disabled:not(.p-button-loading),
-.p-button.p-disabled:not(.p-button-loading) {
+.p-button.p-disabled:not(.p-button-loading),
+.p-button.is-inert:not(.p-button-loading) {
   opacity: 1;
   background: var(--surface-2);
   border-color: var(--border);
@@ -523,7 +533,9 @@ a {
   cursor: not-allowed;
 }
 .p-button.p-button-text:disabled:not(.p-button-loading),
-.p-button.p-button-outlined:disabled:not(.p-button-loading) {
+.p-button.p-button-text.is-inert:not(.p-button-loading),
+.p-button.p-button-outlined:disabled:not(.p-button-loading),
+.p-button.p-button-outlined.is-inert:not(.p-button-loading) {
   background: transparent;
   color: var(--text-faint);
 }
@@ -531,10 +543,13 @@ a {
    around every unavailable icon button — the reorder chevrons at the ends of a
    list, most visibly. */
 .p-button.p-button-text:disabled:not(.p-button-loading),
-.p-button.p-button-link:disabled:not(.p-button-loading) {
+.p-button.p-button-text.is-inert:not(.p-button-loading),
+.p-button.p-button-link:disabled:not(.p-button-loading),
+.p-button.p-button-link.is-inert:not(.p-button-loading) {
   border-color: transparent;
 }
-.p-button.p-button-outlined:disabled:not(.p-button-loading) {
+.p-button.p-button-outlined:disabled:not(.p-button-loading),
+.p-button.p-button-outlined.is-inert:not(.p-button-loading) {
   border-color: var(--border);
 }
 /* Text / link / outlined buttons render the brand as foreground, not fill. */
