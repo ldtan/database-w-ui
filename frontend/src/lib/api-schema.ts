@@ -55,6 +55,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/auth/tokens/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Refresh Token
+         * @description End a session server-side. What signing out has to call.
+         *
+         *     Clearing the tokens in the browser is not signing out: the refresh token stays
+         *     valid for REFRESH_TOKEN_EXPIRE_DAYS, so anything that recovers it afterwards —
+         *     a shared machine, a profile backup — still holds a working session that the
+         *     sign-out did nothing about. This is what makes the token stop working.
+         *
+         *     **Unauthenticated on purpose.** Presenting the token *is* the authorisation, and
+         *     requiring a live access token would make the one case that most needs this — a
+         *     session already past its 15 minutes — the one case that cannot use it.
+         *
+         *     Answers 204 whether or not the token existed. A caller signing out has nothing to
+         *     do with either answer, and distinguishing them would turn this into an oracle for
+         *     whether a stolen token is still live.
+         */
+        post: operations["revoke_refresh_token_api_auth_tokens_revoke_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/auth/tokens/jwks.json": {
         parameters: {
             query?: never;
@@ -3113,6 +3146,37 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["TokenResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_refresh_token_api_auth_tokens_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RefreshRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

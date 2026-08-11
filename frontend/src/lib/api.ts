@@ -41,6 +41,39 @@ export function clearTokens(): void {
   }
 }
 
+// Sign out: tell the server to revoke the refresh token, *then* forget it locally.
+//
+// Both halves are needed and the order is the reason. Dropping the tokens from
+// storage ends the session only for this browser — the refresh token stays valid
+// server-side for REFRESH_TOKEN_EXPIRE_DAYS, so anything that recovers it later still
+// holds a live session. And the revoke has to be sent while the token is still
+// readable, which is why clearing comes second.
+//
+// Local storage is cleared *synchronously*, before the request goes out, and the
+// revoke is then fire-and-forget. Clearing afterwards — in a `.finally`, say — would
+// leave the tokens readable for as long as the round trip took, and would clobber the
+// tokens of a *new* sign-in that happened in the meantime: sign out, land on the login
+// page, sign in as someone else quickly, and the earlier revoke's cleanup would land
+// on the fresh pair and bounce them straight back out.
+//
+// A network error or a token the server has already forgotten cannot fail a sign-out,
+// which is the other half of the same ordering: by the time anything can go wrong,
+// this browser is already signed out.
+export async function logout(): Promise<void> {
+  const refresh = getRefreshToken();
+  clearTokens();
+  if (!refresh) return;
+  try {
+    await fetch("/api/auth/tokens/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refresh }),
+    });
+  } catch {
+    /* signing out locally is not conditional on reaching the server */
+  }
+}
+
 export class ApiError extends Error {
   constructor(
     public status: number,
