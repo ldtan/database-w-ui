@@ -18,7 +18,7 @@ Supported: the four arithmetic operators and parentheses, unary minus, numeric
 and the functions ``MIN``, ``MAX``, ``ROUND``, ``ABS``, ``INT``, ``IF(cond, then,
 else)``, ``IS_NULL(x)``, ``DEFAULT(x, fallback)``, the string functions ``CONCAT``,
 ``UPPER``, ``LOWER``, ``TRIM``, ``LEN``, ``LEFT``, ``RIGHT`` and ``REPLACE``, and the
-two date functions ``AGE`` and ``DT_FORMAT``.
+date functions ``AGE``, ``DT_FORMAT``, ``TODAY()`` and ``NOW()``.
 
 Every function name is ALL CAPS, and a column name is a slug that must start with
 a lowercase letter — so the two namespaces cannot overlap and no formula is ever
@@ -30,16 +30,19 @@ number or text depending on the formula; the column has no fixed output type.
 
 A value is a number, text, or nothing — those three and no more. **Dates travel as
 their ISO-8601 text**, which is what a `date` or `datetime` cell already stores, so
-they need no fourth kind: ``AGE`` and ``DT_FORMAT`` read that text, and because ISO
-sorts lexically, ``due > "2026-01-01"`` and ``MIN(start, end)``-by-comparison mean
-what they look like they mean. A *multiple* choice cell — the one column value that
-is neither scalar nor a reference — reads as its labels joined with ", ".
+they need no fourth kind: ``AGE`` and ``DT_FORMAT`` read that text, ``TODAY()`` and
+``NOW()`` produce it, and because ISO sorts lexically, ``due > "2026-01-01"``,
+``due < TODAY()`` and ``MIN(start, end)``-by-comparison mean what they look like they
+mean. A *multiple* choice cell — the one column value that is neither scalar nor a
+reference — reads as its labels joined with ", ".
 
-``AGE`` is the one function here that reads something outside the record: today's
-date. That makes a stored answer go stale with the calendar rather than only with a
-schema change — see `chain.py` on why the stored value is an index and
-`maintenance/recompute_calculated.py` on the sweep that catches up with it. What is
-on screen is always recomputed, so only a sort or filter can lag, and only by a day.
+``AGE``, ``TODAY()`` and ``NOW()`` are the functions here that read something outside
+the record: the clock. That makes a stored answer go stale with time rather than only
+with a schema change — see `chain.py` on why the stored value is an index and
+`maintenance/recompute_calculated.py` on the sweep that catches up with it. What is on
+screen is always recomputed, so only a sort or filter can lag: by a day for ``AGE`` and
+``TODAY()``, and continuously for ``NOW()``, whose index is stale the second after it
+is written. `docs/known-gaps.md` §5 is the fuller account of what that costs.
 
 Missing data propagates as "no value": if any referenced cell is empty, the
 result is ``None`` (the cell renders blank) rather than a silent zero or an empty
@@ -106,6 +109,10 @@ ROW_FUNCTIONS: dict[str, tuple[int, Optional[int]]] = {
     "REPLACE": (3, 3),
     "AGE": (1, 1),
     "DT_FORMAT": (2, 2),
+    # The two that take nothing. Written with their parentheses — `TODAY` on its own
+    # is a name, and `_check` says so rather than reading it as a missing column.
+    "TODAY": (0, 0),
+    "NOW": (0, 0),
 }
 
 _BINOPS = (ast.Add, ast.Sub, ast.Mult, ast.Div)
@@ -283,6 +290,16 @@ def _check(node: ast.AST, refs: set[str], depth: int) -> None:
     elif isinstance(node, ast.Name):
         # A bare name is a reference to another column. Function names are handled
         # above as Call.func and never reach here on their own.
+        if node.id in ROW_FUNCTIONS:
+            # ...except when somebody wrote one *as* a value, which `TODAY` and `NOW`
+            # invite: they take nothing, so the parentheses look optional. Saying so
+            # here beats the "unknown column 'TODAY'" the caller would otherwise
+            # report. This can never shadow a real column: every name in the table is
+            # ALL CAPS and a column slug starts with a lowercase letter, so a name
+            # spelled like this was never a column reference in the first place.
+            low, _high = ROW_FUNCTIONS[node.id]
+            call = f"{node.id}()" if low == 0 else f"{node.id}(…)"
+            raise ValidationError(f"'{node.id}' is a function — write {call}")
         refs.add(node.id)
 
     elif isinstance(node, ast.Constant):
@@ -427,21 +444,38 @@ def _to_datetime(v) -> Optional[datetime]:
         return None
 
 
-def _today() -> date:
-    """The date ``AGE`` counts up to.
+def _now() -> datetime:
+    """The clock every date function here reads, as a **naive** UTC reading.
 
-    UTC rather than the acting user's zone, unlike a stamped ``today`` default
-    (`validation._wall_clock_now`). `evaluate` is a pure function of one record's
-    values — that is what lets a single parsed formula serve every row, and what
-    lets the write path and the read path agree on an answer. Threading a user
-    through would make the *stored index* depend on whoever last saved the record
-    while a read recomputed it under whoever was reading, and the two would
-    disagree about the same cell. The cost is being a day out for a reader far from
-    UTC, on their birthday only.
+    Naive because that is the convention a `datetime` cell holds — a wall-clock
+    reading, not an instant (`validation._wall_clock_now`, and
+    frontend/src/lib/temporal.ts). This language compares dates as text, so a
+    ``NOW()`` carrying a ``+00:00`` suffix would sort and compare against a typed cell
+    on a different convention and quietly answer wrong.
 
-    A seam as much as a helper: a test pins today by replacing it.
+    UTC rather than the acting user's zone, unlike a stamped ``now`` default.
+    `evaluate` is a pure function of one record's values — that is what lets a single
+    parsed formula serve every row, and what lets the write path and the read path
+    agree on an answer. Threading a user through would make the *stored index* depend
+    on whoever last saved the record while a read recomputed it under whoever was
+    reading, and the two would disagree about the same cell. The cost is that a reader
+    far from UTC compares against a clock some hours from their own.
+
+    A seam as much as a helper: a test pins the clock by replacing it.
     """
-    return datetime.now(timezone.utc).date()
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _today() -> date:
+    """The date ``AGE`` counts up to, and the one ``TODAY()`` answers with.
+
+    Derived from `_now` rather than reading the clock again, so the two can never
+    straddle midnight and disagree — ``DT_FORMAT(NOW(), '%Y-%m-%d') == TODAY()`` holds.
+    See `_now` for why the zone is UTC.
+
+    A seam of its own as well: a test may pin the date without pinning the time.
+    """
+    return _now().date()
 
 
 def _age(v) -> Optional[int]:
@@ -629,6 +663,17 @@ def _eval(node: ast.AST, values: dict[str, object]):
             # Outside `_NUMERIC_FUNCTIONS` on purpose: that set is a gate that blanks
             # on a non-number, and reading a number out of text is what this is for.
             return _to_int(args[0])
+
+        if name == "TODAY":
+            # The text a `date` cell holds, so it compares and formats like one:
+            # `due < TODAY()`, `AGE(TODAY())` is 0, `DT_FORMAT(TODAY(), "%A")`.
+            return _today().isoformat()
+
+        if name == "NOW":
+            # Seconds and no zone suffix — exactly the text a `datetime` cell holds
+            # (`validation.resolve_dynamic_default` stamps the same shape), because
+            # comparing ISO strings only means anything among strings written alike.
+            return _now().replace(microsecond=0).isoformat()
 
         if name == "AGE":
             return _age(args[0])

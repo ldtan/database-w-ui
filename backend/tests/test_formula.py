@@ -4,7 +4,7 @@ This is the security boundary: the evaluator must never reach anything but the
 column values it is handed. These tests pin both halves — what it computes, and
 what it refuses to parse.
 """
-from datetime import date
+from datetime import date, datetime
 
 import pytest
 
@@ -26,6 +26,19 @@ def today(monkeypatch):
     """
     pinned = date(2026, 8, 6)
     monkeypatch.setattr(formula_module, "_today", lambda: pinned)
+    return pinned
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """Pin the reading `TODAY()` and `NOW()` answer with, and hand it back.
+
+    `_now` is the one seam: `_today` derives from it, so pinning this pins the date
+    as well and the two cannot be asserted against different moments. The pinned
+    value carries microseconds because `NOW()` is supposed to drop them.
+    """
+    pinned = datetime(2026, 8, 6, 13, 45, 7, 123456)
+    monkeypatch.setattr(formula_module, "_now", lambda: pinned)
     return pinned
 
 
@@ -454,6 +467,76 @@ def test_dt_format_cannot_grow_a_value_without_bound():
     # MAX_SOURCE. Measured before it is built, as CONCAT and REPLACE are.
     assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%B" * 2000) is None
     assert calc("DT_FORMAT(d, f)", d="2026-08-06", f="%B" * 10) == "August" * 10
+
+
+# -- TODAY / NOW -----------------------------------------------------------------
+
+
+def test_today_answers_the_text_a_date_cell_holds(clock):
+    assert calc("TODAY()") == "2026-08-06"
+
+
+def test_now_answers_the_text_a_datetime_cell_holds(clock):
+    # Seconds, and no zone suffix: a stamped `datetime` default is written this way
+    # (`validation.resolve_dynamic_default`), and comparing ISO strings only means
+    # anything among strings written alike.
+    assert calc("NOW()") == "2026-08-06T13:45:07"
+
+
+def test_today_and_now_read_one_clock(clock):
+    # Two readings could straddle midnight and disagree about the date, which is why
+    # `_today` derives from `_now` rather than asking the clock a second time.
+    assert calc("DT_FORMAT(NOW(), '%Y-%m-%d')") == calc("TODAY()")
+
+
+def test_they_compare_against_a_temporal_cell(clock):
+    # The whole point of answering in ISO text: it sorts lexically against the cell.
+    assert calc("IF(due < TODAY(), 'Overdue', 'Open')", due="2020-01-01") == "Overdue"
+    assert calc("IF(due < TODAY(), 'Overdue', 'Open')", due="2030-01-01") == "Open"
+    running = "IF(starts <= NOW(), 'Started', 'Later')"
+    assert calc(running, starts="2026-08-06T09:00:00") == "Started"
+    assert calc(running, starts="2026-08-06T18:00:00") == "Later"
+
+
+def test_they_feed_the_other_date_functions(clock):
+    assert calc("AGE(TODAY())") == 0
+    assert calc("AGE(NOW())") == 0
+    assert calc("DT_FORMAT(TODAY(), '%d %b %Y')") == "06 Aug 2026"
+    assert calc("DT_FORMAT(NOW(), '%H:%M')") == "13:45"
+    # And the string functions, since the answer is text like any other.
+    assert calc("LEFT(TODAY(), 4)") == "2026"
+
+
+def test_a_formula_that_only_reads_the_clock_references_no_column(clock):
+    # Nothing else in the language answers without a cell, so this is the one shape
+    # the column service's "every referenced column exists" loop sees empty.
+    assert column_refs(parse("TODAY()")) == frozenset()
+    assert column_refs(parse("CONCAT('as of ', NOW())")) == frozenset()
+
+
+def test_they_take_no_arguments():
+    with pytest.raises(ValidationError) as exc:
+        parse("TODAY(due)")
+    assert "0 argument(s), got 1" in str(exc.value)
+    with pytest.raises(ValidationError):
+        parse("NOW(1)")
+
+
+def test_writing_one_without_its_parentheses_says_so():
+    # The mistake these two invite, since they take nothing. Without this the caller
+    # reports "unknown column 'TODAY'", which sends the writer looking for a column.
+    with pytest.raises(ValidationError) as exc:
+        parse("TODAY")
+    assert "TODAY()" in str(exc.value)
+    with pytest.raises(ValidationError) as exc:
+        parse("due < NOW")
+    assert "NOW()" in str(exc.value)
+    # The same message for a function that does take arguments, spelled to match.
+    with pytest.raises(ValidationError) as exc:
+        parse("UPPER")
+    assert "UPPER(" in str(exc.value)
+    # A lowercase name is still a column reference, function-shaped or not.
+    assert column_refs(parse("today + now")) == frozenset({"today", "now"})
 
 
 # -- INT -------------------------------------------------------------------------
