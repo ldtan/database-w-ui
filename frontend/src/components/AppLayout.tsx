@@ -7,6 +7,7 @@ import { DESKTOP_SCREEN, useMediaQuery } from "../lib/useMediaQuery";
 import { HelpWidget } from "../features/onboarding/HelpWidget";
 import { OnboardingProvider } from "../features/onboarding/OnboardingProvider";
 import { AppSidebar } from "./AppSidebar";
+import { ErrorBoundary } from "./ErrorBoundary";
 
 /**
  * The shell: a navigation rail on the left, and the page beside it.
@@ -88,9 +89,18 @@ export function AppLayout() {
           )}
 
           {/* Keyed on the path so each page fades in on its own rather than the
-              new one inheriting the old one's finished animation. */}
+              new one inheriting the old one's finished animation. The key does a
+              second job now that a boundary is inside: a page that threw is reset
+              by navigating away from it, because that remounts the whole of this.
+
+              The boundary is *here*, around the page rather than around the app,
+              so a page that fails leaves the rail, the header and the help button
+              standing — there is somewhere to click next. Outside it, a single
+              render error still took the navigation down with the page. */}
           <main key={pathname} className="page-enter p-4 sm:p-6">
-            <Outlet />
+            <ErrorBoundary>
+              <Outlet />
+            </ErrorBoundary>
           </main>
         </div>
       </div>

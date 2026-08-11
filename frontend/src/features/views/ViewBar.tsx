@@ -178,9 +178,26 @@ export function ViewBar({
       {/* Outlined once there is something to save, and a plain text button while
           there is not: it is the odd control on the bar that changes what *other
           people* will see, so it should only draw the eye when pressing it would
-          actually do that. `showOnDisabled`, because a disabled button takes no
-          pointer events and its tooltip is the only thing that says why it is
-          disabled — without it the greyed-out state explains itself to nobody. */}
+          actually do that.
+
+          **Inert rather than `disabled`, and that distinction is load-bearing.**
+          The greyed-out state has to be able to explain itself, and a `disabled`
+          button takes no pointer events, so its own tooltip never opens. The
+          PrimeReact answer to that is `tooltipOptions.showOnDisabled`, and the way
+          it is implemented is that `Tooltip`'s `getTarget` creates a `<div>` and
+          moves the button inside it — DOM React did not build and does not know
+          about. React goes on believing this button is a child of the toolbar, so
+          the next time it unmounts one it removes it from the wrong parent, throws
+          `NotFoundError` inside the commit phase, and takes the entire page down
+          with it. That is not hypothetical here: `canSave` goes false for about a
+          second every time a view is created or deleted, because the batch
+          permission query below re-keys on the new set of view uuids and has no
+          answer for them while it is in flight.
+
+          `.is-inert` (see themes.css) is the same look and the same refusal
+          without the DOM surgery, and it leaves the button focusable — which is
+          where "why is this off?" was hardest to answer before, since a `disabled`
+          button is out of the tab order and its tooltip was mouse-only anyway. */}
       {canSave && (
         <Button
           label="Save view"
@@ -188,15 +205,19 @@ export function ViewBar({
           outlined={dirty === true}
           text={dirty !== true}
           size="small"
-          disabled={dirty === false}
-          onClick={confirmSave}
+          className={dirty === false ? "is-inert" : undefined}
+          aria-disabled={dirty === false}
+          onClick={() => {
+            if (dirty === false) return; // inert, not disabled — see above
+            confirmSave();
+          }}
           loading={save.isPending}
           tooltip={
             dirty === false
               ? "Nothing to save — this view already looks like this"
               : "Save the current sort, filter, grouping and columns to this view"
           }
-          tooltipOptions={{ position: "bottom", showOnDisabled: true }}
+          tooltipOptions={{ position: "bottom" }}
         />
       )}
       {showShare && canShare && (
