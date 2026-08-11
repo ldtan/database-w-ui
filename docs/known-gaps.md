@@ -96,8 +96,8 @@ A `calculated` column carries a `formula` in its config — arithmetic over the 
 columns, string functions over its **text** and **choice** columns, date functions over its
 **date**/**datetime** columns, and references to other **calculated** columns, all by name
 (`min`/`max`/`round`/`abs`/`int`,
-`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`, `IF`,
-`IS_NULL` and `DEFAULT`). The result is a number
+`CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`/`TODAY()`/
+`NOW()`, `IF`, `IS_NULL` and `DEFAULT`). The result is a number
 or a string depending on the formula; the column has no fixed output type. The formula is parsed
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
@@ -140,15 +140,28 @@ in an export. Full materialisation — trusting the stored copy on read — was 
 the obvious simplification available later, but it converts every missed invalidation into a
 plausible-looking wrong answer, which is the failure mode this arrangement exists to refuse.
 
-**`AGE` makes the clock a second thing that puts the index behind.** Every other way the stored
-copy falls out of date is a *schema* change — a formula edited, a referenced column renamed —
-which the app can notice and offer a re-index for. `AGE` needs no event at all: the answer for an
-unchanged record differs the morning after a birthday. The property above is what makes that
-tolerable rather than a bug, and `maintenance/recompute_calculated.py` already runs nightly for
-exactly this class of drift, so the window is one day on one row. Two consequences to keep in
-mind before adding another clock-reading function: a `unique` formula over `AGE` is judged
-against other rows' *stored* answers, which may have been computed on a different day; and a
-saved view filtered on an age range can miss a row for that same window.
+**The clock is a second thing that puts the index behind.** Every other way the stored copy
+falls out of date is a *schema* change — a formula edited, a referenced column renamed — which
+the app can notice and offer a re-index for. `AGE`, `TODAY()` and `NOW()` need no event at all:
+the answer for an unchanged record differs the morning after a birthday or a due date. The
+property above is what makes that tolerable rather than a bug, and
+`maintenance/recompute_calculated.py` already runs nightly for exactly this class of drift, so
+for the date-grained two the window is one day on one row. Three consequences:
+
+- A `unique` formula over `AGE` is judged against other rows' *stored* answers, which may have
+  been computed on a different day, and a saved view filtered on an age range can miss a row
+  for that same window.
+- **`NOW()` is the degenerate case, and is allowed anyway.** Its index is wrong a second after
+  it is written, so a column built on it is for *reading* — where every value is recomputed and
+  therefore exact — and not for sorting, filtering or `unique`, which read the stored copy. No
+  sweep can fix that, because there is no interval short enough; the nightly one merely restates
+  the answer as of 03:17 UTC. This is a real edge and not a bug only because of the property above: the
+  screen and the export are always right. If a filter on "changed in the last hour" is ever
+  wanted, it belongs on `updated_at`, which is a real timestamp, not on a formula.
+- **A `NOW()` column makes every re-index rewrite the whole list.** `recompute_records` skips
+  rows whose stored value already agrees, and with `NOW()` none ever do. That is bounded (a
+  nightly pass over one list) and was the price of not special-casing the function, but it is
+  worth knowing before putting one on a list of a million records.
 
 Reach is not the only thing a formula has to be bounded on. Because it runs once per record on
 every read *and* once per record per re-index, what it may *spend* is bounded too: `MAX_SOURCE`

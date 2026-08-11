@@ -120,6 +120,8 @@ const FUNCTIONS: {
   // Dates
   { name: "AGE", params: "date", what: "How many whole years have passed. Negative for a date still to come.", example: "AGE(birthday)", gives: "36" },
   { name: "DT_FORMAT", params: "date, pattern", what: "Writes a date out however you like — see the pattern pieces above.", example: 'DT_FORMAT(due, "%d %b %Y")', gives: "06 Aug 2026" },
+  { name: "TODAY", params: "—", what: "Today’s date. Takes nothing, so the brackets stay empty.", example: 'IF(due < TODAY(), "Overdue", "Open")', gives: "Overdue" },
+  { name: "NOW", params: "—", what: "The date and time right now. For a Date and time column.", example: 'IF(starts <= NOW(), "Running", "Not yet")', gives: "Running" },
   // Choosing
   { name: "IF", params: "condition, then, otherwise", what: "The second value when the condition holds, the third when it doesn’t.", example: 'IF(qty > 100, "Bulk", "Standard")', gives: "Bulk" },
   { name: "IS_NULL", params: "value", what: "1 when there’s nothing there, 0 when there is. One of the two things that can look at an empty cell.", example: "IF(IS_NULL(discount), price, price - discount)", gives: "the full price" },
@@ -950,6 +952,18 @@ export function GuidePage() {
             like. <Code>DT_FORMAT(enrolled, "%d %b %Y")</Code> gives{" "}
             <em>06 Aug 2026</em>.
           </li>
+          <li>
+            <Code>TODAY()</Code> and <Code>NOW()</Code> — today’s date, and this
+            moment. They take nothing, so the empty brackets are part of writing
+            them. Compare them against a date column the way you would compare two
+            columns: <Code>IF(due &lt; TODAY(), "Overdue", "Open")</Code>, or{" "}
+            <Code>IF(starts &lt;= NOW(), "Running", "Not yet")</Code>. Use{" "}
+            <Code>TODAY()</Code> against a <strong>Date</strong> column and{" "}
+            <Code>NOW()</Code> against a <strong>Date and time</strong> one — they
+            answer in the same shape as the column they belong with. They go inside
+            the other date functions too: <Code>DT_FORMAT(TODAY(), "%A")</Code> is
+            what day of the week it is.
+          </li>
         </ul>
         <p>The pieces you can put in a pattern:</p>
         <ul className="flex flex-col gap-1">
@@ -982,12 +996,15 @@ export function GuidePage() {
           leaving you a column full of blanks.
         </p>
         <p style={{ color: "var(--text-muted)" }}>
-          <Code>AGE</Code> is the one thing here that changes on its own: the same
-          formula gives a different answer tomorrow. What you see is always worked
-          out fresh, so the number on screen is right today. Sorting and filtering
-          read a stored copy that catches up overnight, so on somebody’s birthday
-          they can be a day behind — press <Ui>Refresh calculated</Ui> in the
-          columns panel if that matters.
+          <Code>AGE</Code>, <Code>TODAY()</Code> and <Code>NOW()</Code> are the
+          things here that change on their own: the same formula gives a different
+          answer tomorrow. What you see is always worked out fresh, so the answer on
+          screen is right. Sorting and filtering read a stored copy that catches up
+          overnight, so on somebody’s birthday — or the day a task falls due — they
+          can be a step behind. Press <Ui>Refresh calculated</Ui> in the columns
+          panel if that matters. A column built on <Code>NOW()</Code> feels this
+          most: it is right on screen and worth sorting on only just after a save,
+          so keep it for something you read rather than something you order by.
         </p>
 
         <h3 className="font-semibold pt-1">Choosing between two answers</h3>

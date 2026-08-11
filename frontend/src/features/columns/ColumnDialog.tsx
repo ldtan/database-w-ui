@@ -927,8 +927,10 @@ export function ColumnDialog({
                     <code>CONCAT</code>, <code>UPPER</code>, <code>LOWER</code>,{" "}
                     <code>TRIM</code>, <code>LEN</code>, <code>LEFT</code>,{" "}
                     <code>RIGHT</code>, <code>REPLACE</code>. Dates:{" "}
-                    <code>AGE(date)</code> for years old, and{" "}
-                    <code>DT_FORMAT(date, "%d %b %Y")</code> to write one out. And{" "}
+                    <code>AGE(date)</code> for years old,{" "}
+                    <code>DT_FORMAT(date, "%d %b %Y")</code> to write one out, and{" "}
+                    <code>TODAY()</code> / <code>NOW()</code> for the current date and
+                    time — <code>IF(due &lt; TODAY(), "Overdue", "Open")</code>. And{" "}
                     <code>IF(cond, a, b)</code>, with{" "}
                     <code>DEFAULT(x, fallback)</code> to fill an empty cell —{" "}
                     <code>price - DEFAULT(discount, 0)</code> — and{" "}

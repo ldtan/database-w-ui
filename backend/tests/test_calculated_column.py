@@ -839,6 +839,54 @@ async def test_a_written_out_format_that_makes_no_sense_is_refused_at_save(
     assert "%q" in resp.text
 
 
+async def test_a_formula_that_only_reads_the_clock_references_no_column(
+    client, list_uuid
+):
+    """`TODAY()`/`NOW()` are the one shape that names nothing, and it still saves.
+
+    Every other formula references a column, so the save path's "does each of these
+    exist, and may a formula read it" loop always had something to walk. These hand
+    it an empty set, and a record with no data at all still gets a value.
+    """
+    from datetime import datetime, timezone
+
+    calc = await _add_calculated(
+        client, list_uuid, "stamp", "CONCAT('as of ', TODAY())"
+    )
+    assert calc.status_code == 201, calc.text
+    stamp = calc.json()["uuid"]
+
+    resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert resp.status_code == 201, resp.text
+    # Against the real clock, as `test_age_over_a_date_column` is: `test_formula.py`
+    # pins the arithmetic and this is about the answer reaching a record at all. UTC
+    # because that is the zone the evaluator reads, which is not the runner's.
+    today = datetime.now(timezone.utc).date().isoformat()
+    assert resp.json()["data"][stamp] == f"as of {today}"
+
+
+async def test_today_compares_against_a_date_column(client, list_uuid, add_column):
+    """What the function is for: a cell that says whether this row is past its date."""
+    due = await add_column(list_uuid, name="due", display_name="Due", type="date")
+    calc = await _add_calculated(
+        client, list_uuid, "state", "IF(due < TODAY(), 'Overdue', 'Open')"
+    )
+    assert calc.status_code == 201, calc.text
+    state = calc.json()["uuid"]
+
+    # Decades either side, so which side of midnight the suite runs on cannot matter.
+    for value, expected in (("2000-01-01", "Overdue"), ("2099-01-01", "Open")):
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {due: value}}
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["data"][state] == expected
+
+    # An empty date is an empty answer, like every other missing operand.
+    blank = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    assert blank.json()["data"][state] is None
+
+
 async def test_int_makes_a_text_code_filterable_as_a_number(
     client, list_uuid, add_column
 ):
