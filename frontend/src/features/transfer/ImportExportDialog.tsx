@@ -18,7 +18,12 @@ import { Field, FieldRow, FormSection } from "../../components/Field";
 import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
 import { downloadBlob, downloadFile } from "../../lib/download";
-import type { Column, FilterCondition } from "../../lib/types";
+import type {
+  Column,
+  FilterCondition,
+  FilterGroup,
+  ViewSort,
+} from "../../lib/types";
 import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
 import { cleanConditions } from "../views/operators";
 
@@ -28,6 +33,14 @@ interface Props {
   columns: Column[];
   // Import writes records; export only reads them.
   canImport: boolean;
+  // The filter and sort the grid is reading through right now — the page's, which
+  // is the view's plus anything asked of it since. Copied into the export's own
+  // fields on request; see `applyCurrent` below.
+  currentFilters: FilterGroup;
+  currentSorts: ViewSort[];
+  // The search box's term, if any. Not a filter and not sendable as one, so it is
+  // named rather than applied — see the hint under the button.
+  currentSearch: string;
   visible: boolean;
   onHide: () => void;
 }
@@ -49,9 +62,11 @@ interface ImportResult {
  * reason, and import resolves those labels back, so a file round-trips.
  *
  * Export can be narrowed by a filter (the same `FilterConditionsEditor` the view's
- * Filter dialog uses). Import is offered only with `create` **and** `edit` on the
- * list, since a file can do both; it reports per-row errors rather than failing the
- * whole file.
+ * Filter dialog uses), and "Use current filters and sort" fills those fields in from
+ * what the grid is showing — so "export what I am looking at" is one click, and the
+ * conditions it applied are still on screen to read and to edit. Import is offered
+ * only with `create` **and** `edit` on the list, since a file can do both; it
+ * reports per-row errors rather than failing the whole file.
  *
  * Calculated columns are exported and sorted like any other; only the template
  * leaves them out — see `writable` below.
@@ -61,6 +76,9 @@ export function ImportExportDialog({
   listName,
   columns,
   canImport,
+  currentFilters,
+  currentSorts,
+  currentSearch,
   visible,
   onHide,
 }: Props) {
@@ -110,6 +128,41 @@ export function ImportExportDialog({
   }, [visible, columns]);
 
   const chosen = columns.filter((c) => selected.has(c.uuid));
+
+  // What "current" is, in the words the fields below use — so the button says what
+  // it is about to do rather than leaving you to press it and compare.
+  const currentSummary = useMemo(() => {
+    const count = currentFilters.conditions?.length ?? 0;
+    const sort = currentSorts[0];
+    const sortColumn = sort && columns.find((c) => c.uuid === sort.column_uuid);
+    return [
+      count === 0 ? "no filter" : `${count} filter${count === 1 ? "" : "s"}`,
+      sortColumn
+        ? `sorted by ${sortColumn.display_name} (${sort.direction === "asc" ? "ascending" : "descending"})`
+        : "sorted by record ID",
+    ].join(", ");
+  }, [currentFilters, currentSorts, columns]);
+
+  /**
+   * Copy the grid's filter and sort into the export's own fields.
+   *
+   * Copied rather than sent as a mode, because the fields are right there: what the
+   * export will do stays visible, and "the current filter plus one more condition"
+   * is then an ordinary edit instead of a second feature. Conditions are cloned, so
+   * editing one here cannot reach back into the page's filter.
+   *
+   * The grouping is deliberately not carried across. It orders the grid — group
+   * column first, sort within each group — but an export has one sort and no
+   * subheaders to keep records under, so copying it would change the order of the
+   * file to something the screen never showed.
+   */
+  function applyCurrent() {
+    setConjunction(currentFilters.conjunction ?? "and");
+    setConditions((currentFilters.conditions ?? []).map((c) => ({ ...c })));
+    const sort = currentSorts[0];
+    setSortColumn(sort?.column_uuid ?? null);
+    setSortDir(sort?.direction === "desc" ? "desc" : "asc");
+  }
 
   function toggle(uuid: string, on: boolean) {
     setSelected((prev) => {
@@ -305,6 +358,29 @@ export function ImportExportDialog({
             </FormSection>
 
             <FormSection title="Which records">
+              <Field
+                hint={
+                  <>
+                    The grid is showing {currentSummary}.
+                    {currentSearch.trim() && (
+                      <>
+                        {" "}
+                        Its search for “{currentSearch.trim()}” is not part of an
+                        export, so the file will hold the rows that search is
+                        hiding too.
+                      </>
+                    )}
+                  </>
+                }
+              >
+                <Button
+                  label="Use current filters and sort"
+                  icon="pi pi-filter"
+                  outlined
+                  size="small"
+                  onClick={applyCurrent}
+                />
+              </Field>
               <FieldRow>
                 <Field label="Limit" htmlFor="io-limit" optional>
                   <InputNumber

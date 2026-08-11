@@ -1842,6 +1842,12 @@ export function ListDetailPage() {
         listName={list.data?.name ?? "records"}
         columns={cols}
         canImport={listActions.has("create") && listActions.has("edit")}
+        // What the grid is reading through, so an export can be made to match it.
+        // `currentConfig`'s, not the view's: the page's filter and sort are the
+        // view's plus whatever has been asked of it since, saved or not.
+        currentFilters={filters}
+        currentSorts={currentConfig.sorts ?? []}
+        currentSearch={search}
         visible={showTransfer}
         onHide={() => setShowTransfer(false)}
       />

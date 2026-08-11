@@ -1730,6 +1730,16 @@ export function GuidePage() {
         </ol>
         <Figure name="import-export" />
         <p>
+          Already looking at exactly the rows you want? Click{" "}
+          <Ui>Use current filters and sort</Ui> under <Ui>Which records</Ui> and the
+          filter and sort you have on the grid are copied straight into those fields,
+          so the file matches the screen. They stay ordinary fields afterwards — add
+          a condition, or change the direction, before you export. The one thing it
+          can’t bring across is the search box: a search isn’t a filter, so the rows
+          it is hiding will be in the file unless you clear it or write the
+          equivalent condition yourself.
+        </p>
+        <p>
           <strong>To bring data in:</strong> under <Ui>Import</Ui>, click{" "}
           <Ui>Choose file</Ui> and pick a <em>.csv</em> or <em>.json</em> file. After
           it uploads you’ll see how many records were added and, if any rows were
