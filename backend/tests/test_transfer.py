@@ -208,6 +208,69 @@ async def test_import_json_typed_values(client, list_uuid, add_column):
     assert ages == [25, 30]  # numbers, not strings
 
 
+async def test_a_failed_row_comes_back_with_its_cells(client, list_uuid, add_column):
+    """The error carries the row as the file wrote it, so the caller can put the
+    failures in a file, fix them, and upload that."""
+    await _seed(client, list_uuid, add_column)
+    csv = "name,age,note\nAnn,30,ok\nBo,nonsense,keep me\n"
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("people.csv", csv, "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"] == 1
+    # `note` matches no column and is ignored on the way in — but it is still handed
+    # back, or the fix file would silently drop a column the person uploaded.
+    assert body["errors"][0]["values"] == {
+        "name": "Bo",
+        "age": "nonsense",
+        "note": "keep me",
+    }
+
+
+async def test_a_failed_json_row_comes_back_in_the_spelling_import_reads(
+    client, list_uuid, add_column
+):
+    """A JSON upload's typed cells are stringified the way export writes them, so the
+    fix file is a CSV that imports cleanly — `;` for a multi-value cell, not `['a']`."""
+    await _seed(client, list_uuid, add_column)
+    await add_column(
+        list_uuid, name="tags", display_name="Tags", type="choice",
+        config={"multiple": True, "options": ["red", "blue"]},
+    )
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={
+            "file": (
+                "people.json",
+                '[{"name": "Ann", "age": "nonsense", "tags": ["red", "blue"]}]',
+                "application/json",
+            )
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    values = resp.json()["errors"][0]["values"]
+    assert values["tags"] == "red;blue"
+    assert values["age"] == "nonsense"
+
+
+async def test_a_json_row_that_is_not_an_object_reports_without_cells(
+    client, list_uuid, add_column
+):
+    """There are no headers to hand back for a bare scalar, and the message says so.
+    The row must still be reported rather than taking the request down."""
+    await _seed(client, list_uuid, add_column)
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("people.json", '["just a string"]', "application/json")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"] == 0
+    assert body["errors"][0]["values"] == {}
+
+
 async def test_a_label_with_surrounding_space_round_trips(
     client, workspace_uuid, list_uuid, add_column
 ):

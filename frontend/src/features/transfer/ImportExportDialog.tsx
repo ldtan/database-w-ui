@@ -22,10 +22,12 @@ import type {
   Column,
   FilterCondition,
   FilterGroup,
+  ImportSummary,
   ViewSort,
 } from "../../lib/types";
 import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
 import { cleanConditions } from "../views/operators";
+import { importErrorsCsv } from "./importErrors";
 
 interface Props {
   listUuid: string;
@@ -47,10 +49,10 @@ interface Props {
 
 type Format = "csv" | "json";
 
-interface ImportResult {
-  created: number;
-  errors: { row: number; message: string }[];
-}
+// How many skipped rows are listed in the dialog. Past this the list stops being
+// something you read and starts being something you scroll — which is what the
+// downloaded file is for.
+const ERRORS_SHOWN = 20;
 
 /**
  * Get records out of a list, and back into one.
@@ -66,7 +68,8 @@ interface ImportResult {
  * what the grid is showing — so "export what I am looking at" is one click, and the
  * conditions it applied are still on screen to read and to edit. Import is offered
  * only with `create` **and** `edit` on the list, since a file can do both; it
- * reports per-row errors rather than failing the whole file.
+ * reports per-row errors rather than failing the whole file, and offers the skipped
+ * rows back as a file to correct and re-upload (see `importErrors.ts`).
  *
  * Calculated columns are exported and sorted like any other; only the template
  * leaves them out — see `writable` below.
@@ -93,7 +96,7 @@ export function ImportExportDialog({
   const [templateFormat, setTemplateFormat] = useState<Format>("csv");
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<ImportResult | null>(null);
+  const [result, setResult] = useState<ImportSummary | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   // Export query options.
   const [limit, setLimit] = useState<number | null>(null); // null = all rows
@@ -236,7 +239,7 @@ export function ImportExportDialog({
         "format",
         file.name.toLowerCase().endsWith(".json") ? "json" : "csv",
       );
-      const summary = await api.postForm<ImportResult>(
+      const summary = await api.postForm<ImportSummary>(
         `/lists/${listUuid}/import`,
         form,
       );
@@ -255,13 +258,35 @@ export function ImportExportDialog({
       setResult({
         created: 0,
         errors: [
-          { row: 0, message: err instanceof ApiError ? err.message : "Import failed" },
+          {
+            row: 0,
+            message: err instanceof ApiError ? err.message : "Import failed",
+            // Nothing was parsed, so there are no cells to hand back — which is
+            // also what keeps the download button off a failure like this one.
+            values: {},
+          },
         ],
       });
     } finally {
       setBusy(false);
     }
   }
+
+  /**
+   * The skipped rows, as a file to correct and upload again.
+   *
+   * Built from the summary rather than asked of the server, like the batch user
+   * importer's credentials file: the response already carries every failed row, and
+   * a second endpoint would have to hold the import's result somewhere to answer.
+   *
+   * Built once rather than per render, and null when there is nothing to download —
+   * which is also what the button's presence keys off, so the check cannot disagree
+   * with what the click produces.
+   */
+  const errorsCsv = useMemo(
+    () => (result ? importErrorsCsv(result.errors) : null),
+    [result],
+  );
 
   // Getting data out and putting data in are two jobs, and only one of them is
   // ever the one you opened this for. Stacked, the export half's four sections
@@ -473,14 +498,41 @@ export function ImportExportDialog({
                 />
               )}
               {result && result.errors.length > 0 && (
-                <ul className="text-sm text-danger m-0 pl-4 max-h-40 overflow-auto">
-                  {result.errors.map((e, i) => (
-                    <li key={i}>
-                      {e.row ? `Row ${e.row}: ` : ""}
-                      {e.message}
-                    </li>
-                  ))}
-                </ul>
+                <div className="flex flex-col gap-2">
+                  <ul className="text-sm text-danger m-0 pl-4 max-h-40 overflow-auto">
+                    {result.errors.slice(0, ERRORS_SHOWN).map((e, i) => (
+                      <li key={i}>
+                        {e.row ? `Row ${e.row}: ` : ""}
+                        {e.message}
+                      </li>
+                    ))}
+                  </ul>
+                  {result.errors.length > ERRORS_SHOWN && (
+                    <p className="field-hint m-0">
+                      and {result.errors.length - ERRORS_SHOWN} more — the file
+                      below has every one.
+                    </p>
+                  )}
+                  {/* Absent when no failure carried its cells: an upload that never
+                      parsed has nothing to put in a file. */}
+                  {errorsCsv && (
+                    <Field hint="The skipped rows, as you uploaded them, with the reason in an _error column. Fix the cells and import this file — the extra columns are ignored.">
+                      <Button
+                        label="Download skipped rows"
+                        icon="pi pi-download"
+                        outlined
+                        size="small"
+                        onClick={() =>
+                          downloadFile(
+                            `${listName}-import-errors.csv`,
+                            errorsCsv,
+                            "text/csv",
+                          )
+                        }
+                      />
+                    </Field>
+                  )}
+                </div>
               )}
             </div>
           </TabPanel>

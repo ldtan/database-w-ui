@@ -2285,19 +2285,32 @@ export interface components {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
         };
-        /** ImportError */
-        ImportError: {
+        /**
+         * ImportRowError
+         * @description A row the import skipped, and enough of it to fix and send back.
+         *
+         *     ``values`` is the row exactly as the file gave it — every header, including
+         *     ones this list has no column for — stringified the way `export` writes cells,
+         *     so a client can put the failures back into a file that imports cleanly once
+         *     the bad cells are corrected. Named for the row rather than for the error, and
+         *     not `ImportError`, which is a builtin.
+         */
+        ImportRowError: {
             /** Row */
             row: number;
             /** Message */
             message: string;
+            /** Values */
+            values?: {
+                [key: string]: string;
+            };
         };
         /** ImportSummary */
         ImportSummary: {
             /** Created */
             created: number;
             /** Errors */
-            errors?: components["schemas"]["ImportError"][];
+            errors?: components["schemas"]["ImportRowError"][];
         };
         /** ListClone */
         ListClone: {

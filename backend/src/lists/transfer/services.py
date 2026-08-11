@@ -442,6 +442,30 @@ def _parse_cell(column: Column, raw: object):
     return raw if isinstance(raw, str) else str(raw)
 
 
+def _error_values(raw_row: object) -> dict[str, str]:
+    """The row as the file gave it, ready to be written back out as a file.
+
+    Every header is kept, including ones this list has no column for: the point is
+    that the failures can be corrected and re-uploaded, and a file that quietly lost
+    the columns import ignores is not the file the person uploaded.
+
+    Cells are stringified through `_csv_cell`, the same function export writes with —
+    so a JSON upload's lists and booleans come back in the spelling `_parse_cell`
+    reads (`a;b`, `true`), and the fix file round-trips whichever format it came from.
+    Non-string keys are dropped: `csv.DictReader` files a row's surplus cells under
+    ``None``, and there is no header to give them back under.
+    """
+    if not isinstance(raw_row, dict):
+        # A JSON file whose elements are not objects. The row failed for that reason
+        # and the message says so; there are no cells to hand back.
+        return {}
+    return {
+        key: _csv_cell(value)
+        for key, value in raw_row.items()
+        if isinstance(key, str)
+    }
+
+
 async def import_records(
     db: AsyncSession,
     lst: List,
@@ -510,9 +534,21 @@ async def import_records(
                     db.expunge(committed)
                 batch.clear()
         except (ValidationError, ConflictError, UnknownReferenceError) as exc:
-            errors.append({"row": row_number, "message": str(exc)})
+            errors.append(
+                {
+                    "row": row_number,
+                    "message": str(exc),
+                    "values": _error_values(raw_row),
+                }
+            )
         except Exception as exc:  # pragma: no cover - defensive
-            errors.append({"row": row_number, "message": f"unexpected error: {exc}"})
+            errors.append(
+                {
+                    "row": row_number,
+                    "message": f"unexpected error: {exc}",
+                    "values": _error_values(raw_row),
+                }
+            )
 
     await db.commit()
     return {"created": created, "errors": errors}
