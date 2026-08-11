@@ -696,8 +696,8 @@ buys and what it costs are both worth knowing before extending it.
   succeed. A dry-run of the gates would.
 - **Above `ROW_CEILING` (50k) a conversion is refused in the request** and the caller is told
   to use the maintenance workflow. Nothing in that workflow runs it yet: the service function
-  is callable and chunked, but no entry point exists. A list that big cannot be created on the
-  current free tier, which is why it was left.
+  is callable and chunked, but no entry point exists. A list that big is still not plausible on
+  the deployed plans, which is why it was left.
 - **A duplicate inherits the source's `position`**, which reads as "next to it" and is not.
   Nothing in the UI ever sets `position`, so every column is 0 and the order falls through to
   `id` — a duplicate appears last, like any other new column. Placing it adjacent means
@@ -990,9 +990,10 @@ are easy to get wrong when this grows into server push (planned-features #8): a 
 must carry **only** "list changed," never record data (a fan-out of rows would bypass the
 per-record filter every subscriber is entitled to differently); and the future SSE stream
 must hold **no pooled DB connection** while open (see the two-connection rule below), or a
-long-lived subscriber pins a session for its whole life. One operational note: on Render's
-free tier a focused, open tab polling keeps the single instance awake — fine for a demo,
-but it spends free hours.
+long-lived subscriber pins a session for its whole life. One operational note that used to
+apply and no longer does: on Render's free tier a focused, open tab polling kept the single
+instance awake and spent free hours doing it. The API is on `starter` now, which is
+always-on, so the polling interval is a freshness-vs-load choice and nothing else.
 
 **A `user` cell must never resolve to a person's real name.** `/auth/users` is readable by
 any authenticated user (the Share dialog needs to list principals), but person records are

@@ -520,8 +520,7 @@ passes `METRIC_REFRESH_SECONDS` (60) — which can only ever slow a query down a
 revive polling that `0` turned off. Two guardrails hold the idle cost at zero: polling is
 **paused while the tab is hidden** (`refetchIntervalInBackground: false`), *and* **paused
 after `IDLE_AFTER_MS` (5 min) with no user activity on a still-visible tab** — a list left open on screen stops
-refetching (and, on the free tier, stops keeping the instance awake) until the next
-interaction.
+refetching until the next interaction.
 
 **The load-bearing principle: a live update carries no record data.** Each refresh is a
 normal, permissioned `GET /items/`, which re-applies `item_view_filter` — so a poll can
@@ -531,15 +530,16 @@ enough that the safe move is to never ship record data down a fan-out channel at
 signal "something changed," and each client re-reads through the endpoint that already knows
 what it may see.
 
-**Why polling first (the deliberate v1 trade).** On the free tier the API is a **single
-uvicorn process** (deploy/render/render.yaml), and react-query, the 401→refresh flow, and
-`keepPreviousData` are all already in place — so polling is ~an hour of work, is multi-worker
-correct *for free* (every poll is an independent permissioned request; there is no fan-out to
-get wrong), and sidesteps the auth friction below. The costs accepted: up to one interval of
-latency, and a wasted query per *focused, active* tab. One caveat to know: on Render's free
-tier an actively-used open tab polling **keeps the single instance awake** (it is traffic),
-which is fine for a demo but spends free hours — the idle guardrail above caps this to tabs
-someone is actually using, not ones merely left open.
+**Why polling first (the deliberate v1 trade).** The API is a **single uvicorn process**
+(deploy/render/render.yaml), and react-query, the 401→refresh flow, and `keepPreviousData` are
+all already in place — so polling is ~an hour of work, is multi-worker correct *for free*
+(every poll is an independent permissioned request; there is no fan-out to get wrong), and
+sidesteps the auth friction below. The costs accepted: up to one interval of latency, and a
+wasted query per *focused, active* tab. A caveat that has since expired: on the free plan an
+actively-used tab polling kept the instance awake and spent free hours, which the idle
+guardrail above capped. `starter` is always-on, so that side effect is gone and polling is
+now only a load question — at 60s and ~23 ms of CPU a poll, a hundred actively-used tabs is
+~38 ms of CPU per second, under 8% of the 0.5-CPU instance.
 
 **Planned (server push, near-instant).** When "live" needs to feel instant, or many viewers
 watch one list (where polling's idle queries add up), replace the hook's body with a

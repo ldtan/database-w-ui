@@ -1,12 +1,14 @@
-# Deploying to Render (free tier)
+# Deploying to Render (~$13/mo)
 
 [`render.yaml`](render.yaml) is the whole deployment. In Render: **New → Blueprint** → connect
 the repo → branch `main` → **Blueprint path: `deploy/render/render.yaml`** (the file does not
 have to sit at the repo root; `rootDir` inside it stays relative to the repo root regardless).
 
-It creates four things: a free Postgres (`dbui-db`), the API as a Python web service
-(`dbui-api`), the SPA as a free static site (`dbui-web`), and the environment group they
-share (`dbui`). Every paid upgrade is marked `PAID:` in the file and is a one-line edit.
+It creates four things: a Postgres on the smallest paid instance (`dbui-db`, `basic-256mb`, $6/mo
+plus storage), the API as a Python web service on `starter` (`dbui-api`, $7/mo, 0.5 CPU / 512 MB,
+always-on), the SPA as a free static site (`dbui-web`), and the environment group they share
+(`dbui`). Around **$13/mo** all told, plus storage and any bandwidth past the 100 GB included per
+service. The static site is the only free thing left, and it has no paid tier to move to.
 
 **Connect the repo through your GitHub account**, not the "public Git repository" URL option:
 Render only auto-deploys — and only auto-syncs a Blueprint — for a connected account. A pasted
@@ -46,18 +48,41 @@ so they need the **external** string — and therefore SSL. The parameter is **`
 never `sslmode=require`: asyncpg is not libpq, and raises an unexpected-keyword `TypeError`
 from a URL that looks perfectly correct.
 
-**The free database is deleted after ~30 days, and the app goes down with it.** Not emptied —
-deleted. `DATABASE_URI` then names a host that no longer exists, `alembic upgrade head` fails
-in the start command, and the service never reaches uvicorn. **Down, not blank.** Recovery is
-manual and takes minutes: create a new database, paste its internal URL, redeploy — the start
-command migrates it from empty and the superuser is seeded again. The clock starts the day the
-database is *created*. `plan: basic-256mb` (~$7/mo) ends the expiry and adds backups, and is
-the **first** thing to buy when the data starts mattering — before the web service.
+**The database is paid, and that is deliberate.** A *free* Render database is deleted — not
+emptied, deleted — about 30 days after it is created, and the app goes down with it:
+`DATABASE_URI` names a host that no longer exists, `alembic upgrade head` fails in the start
+command, and the service never reaches uvicorn. **Down, not blank.** `plan: basic-256mb` ($6/mo
+for the instance, plus storage at roughly $0.30/GB-month) ends that clock and adds managed
+backups. It was the **first** thing to buy — before the web service — because the web service
+being slow is survivable and the data vanishing is not. Recovery from a lost database, if it
+ever comes to that, is still manual and takes minutes: create one, paste its internal URL into
+`DATABASE_URI`, redeploy — the start command migrates it from empty and the superuser is seeded
+again.
 
-**The migration runs in the start command**, which is a compromise. It belongs in a pre-deploy
-hook, because at boot every instance races every other instance to run it — but the free plan
-has no such hook and runs exactly one instance, so there is no race to lose. It is the first
-thing to move when this is paid for or scaled; `render.yaml` says so at the point of change.
+`plan` is one of the few database fields Render *does* apply to an existing database on
+blueprint sync — most of the rest (`databaseName`, `user`, `postgresMajorVersion`) are fixed at
+creation. So the upgrade is this one-line edit plus a sync, and the data and the connection
+strings both survive it: nothing to re-paste into `DATABASE_URI`, which is just as well, since
+it is `sync: false` and hand-set. Render also allows a *lapsed* free database to be upgraded
+within 14 days of its expiry, which is the escape hatch if the clock is missed.
+
+**The migration runs in `preDeployCommand`**, which is the reason the API is on a paid plan as
+much as the always-on is: Render does not offer the hook on free instance types, and it used to
+sit in `startCommand` where every booting instance races every other one to run it. Now it runs
+after the build, before anything is deployed, on a separate instance — and if it fails, the
+*deploy* fails and the currently running version carries on serving. A bad migration is a red
+deploy instead of an instance that cannot boot. Two consequences worth knowing: the hook has a
+30-minute timeout, and because it runs on a separate instance, nothing it writes to the
+filesystem reaches the service — it may only touch the database.
+
+**One instance is still load-bearing.** `numInstances` is unset, and the login throttle counters
+in `backend/src/auth/tokens/throttle.py` are per process, so they are exact only while that
+holds. Scaling is now possible where it was not before; that counter is the first thing to fix
+if it happens, and the migration is already in the right place for it.
+
+**Always-on changes what the polling interval is for.** `VITE_LIVE_REFRESH_SECONDS` used to do
+double duty on the free plan — a focused tab polling kept the instance from spinning down. On
+`starter` there is no spin-down, so it is now purely a freshness-vs-load dial.
 
 **The SPA and the API share an origin by rewrite.** `frontend/src/lib/api.ts` calls a relative
 `/api/...` and has no configurable base URL, so the static site rewrites `/api/*` to the API
