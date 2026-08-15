@@ -23,7 +23,9 @@ class ColumnConfig(BaseModel):
     # Enforced: no two records may share the value. On a `calculated` column it is
     # the *computed answer* that may not repeat — a formula is how a key spanning
     # several columns is expressed — so the record refused is one whose operands
-    # were edited rather than one that typed the value.
+    # were edited rather than one that typed the value. Refused alongside
+    # `multiple`: `_enforce_unique` cannot compare a multi-valued cell, so the two
+    # together used to mean no constraint at all (`ColumnService._validate_config`).
     unique: bool = False
     placeholder: Optional[str] = None  # UI hint, not enforced
     read_only: bool = False  # UI hint, not enforced

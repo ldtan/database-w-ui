@@ -1330,6 +1330,10 @@ class ListItemService:
         makes `unarchive` incapable of conflicting: nothing could have taken the
         value while the row was away. It is the one asymmetry with the bin, where a
         binned row *does* release its value and `restore` can therefore 409.
+
+        **A multi-valued column is not checked at all**, which is why `unique` and
+        `multiple` may no longer be configured together — see the loop below and
+        `ColumnService._validate_config`.
         """
         unique_columns = {
             key: column
@@ -1348,6 +1352,13 @@ class ListItemService:
 
         for key, column in unique_columns.items():
             value = data.get(key)
+            # A list value is skipped because there is no single value to compare,
+            # and `ColumnService._validate_config` now refuses `unique` together
+            # with `multiple` for exactly that reason. This stays as the guard for
+            # columns configured before that check existed, and for a cell still
+            # holding the shape its column had before a `multiple` toggle — both of
+            # which reach here with a list under a column that says it is single.
+            # Silently doing nothing was the whole bug; it is now the residue of it.
             if cls._is_empty(value) or isinstance(value, list):
                 continue
             stmt = select(ListItem.id).where(

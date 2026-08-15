@@ -391,6 +391,26 @@ class ColumnService:
             for key, value in existing.items():
                 data.setdefault(key, value)
 
+        # `unique` and `multiple` together are refused, because together they do
+        # nothing. `_enforce_unique` (items/services.py) skips any cell holding a
+        # list, so a column carrying both accepted unlimited duplicates in silence
+        # — the worst shape a constraint can take, since the setting is on screen
+        # and the guarantee is absent. Refused here rather than made to work: the
+        # question a multi-valued unique column would have to answer is "may two
+        # records share *any* element", which is a different constraint needing its
+        # own query and its own index, and nobody has asked for it. A column must
+        # not claim something it does not do.
+        #
+        # Checked after the merge, so a PATCH turning either one on over a column
+        # that already has the other is caught. Existing columns holding both are
+        # left alone — there is no retro-validation, so the only thing that changes
+        # for them is that the next config PATCH has to resolve it.
+        if data.get("unique") and data.get("multiple"):
+            raise ValidationError(
+                "A column cannot be both 'unique' and 'multiple': uniqueness is "
+                "not enforced on a multi-valued column. Turn one of them off."
+            )
+
         if type_ == ColumnType.choice:
             # A cell stores the option itself, so a default must be one of them —
             # unless the column takes an answer of the record's own, in which case
