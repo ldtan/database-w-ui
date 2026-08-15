@@ -110,9 +110,10 @@ services:
       # a search, on a 100k list). Lowering the value below therefore speeds up the
       # records alone, which is the intent.
       #
-      # At the 60 set here both floors are already below it and neither is doing
-      # anything — they start to bite the moment this comes down, which is exactly
-      # when it matters that they exist.
+      # At the 60 set here neither floor is doing anything — the metric one is
+      # exactly equal to it and the count one is below, so both maxes come back 60.
+      # They start to bite the moment this comes down, which is exactly when it
+      # matters that they exist.
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "60"
       # How many live records a list may hold before the app suggests archiving,

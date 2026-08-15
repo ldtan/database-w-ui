@@ -122,13 +122,23 @@ class PermissionService:
         **Creating a group is deliberately not on that list**, and the distinction is
         the direction of the error rather than an oversight. A cached answer that is
         missing a group id matches *fewer* grants, so a session that resolved someone
-        before a group was created simply keeps its narrower view — fail-closed. The
-        three paths above all fail the other way: each can leave an id in the cache
-        that should no longer confer anything, and a deleted group is the sharp case,
-        because its membership rows survive the delete on purpose so a restore can
-        put it back whole. That makes the liveness join in `_group_ids` the only
+        before a group was created simply keeps its narrower view — fail-closed.
+
+        The rule is therefore "drop it wherever a stale answer could leave an id
+        conferring what it no longer should", and **two** of the three paths are like
+        that: removing members via `update`, and `delete`. `delete` is the sharp one,
+        because a group's membership rows survive it on purpose so a restore can put
+        the group back whole — which makes the liveness join in `_group_ids` the only
         thing standing between a deleted group and its grants, and caching in front
-        of it without dropping here would hand them back for the rest of the session.
+        of that without dropping here would hand them back for the rest of the
+        session.
+
+        `restore` is the exception in the list, and is here for symmetry rather than
+        because it fails open: it makes a cached answer *under*-report, exactly as
+        `create` does. It is dropped anyway because recomputing costs one query and
+        because a bin operation that left the session disagreeing with the database
+        is a trap for whoever wires the next thing into it — not because it would be
+        unsafe to skip. Do not read it as the example to generalise from.
 
         The whole map goes rather than one user's entry: a membership edit can move
         several accounts at once, and clearing everything is cheaper to keep correct
