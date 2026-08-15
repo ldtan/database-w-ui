@@ -445,6 +445,12 @@ class UserGroupService:
         data = payload.model_dump(exclude_unset=True)
         if "user_uuids" in data:
             group.users = await cls._resolve_users(db, data.pop("user_uuids"))
+            # `_group_ids` caches membership for the life of the session, so the
+            # answer it holds is now the one from before this edit. Deferred import:
+            # permissions.services imports this module, so a module-level one cycles.
+            from src.permissions.services import PermissionService
+
+            PermissionService.forget_group_ids(db)
         # Both are NOT NULL, and `exclude_unset` cannot tell an omitted key from one
         # explicitly set to null — so an explicit null would reach the database as a
         # constraint violation rather than as the no-op the caller plainly meant.
@@ -477,5 +483,10 @@ class UserGroupService:
         # UserRead.groups because the relationship filters it, and stops conferring
         # anything because PermissionService._group_ids checks the same thing — that
         # second one is why this is a security change and not only a cosmetic one.
+        # Which is exactly why the cache in front of that check has to be dropped
+        # here: it holds ids resolved while the group was still live.
+        from src.permissions.services import PermissionService
+
+        PermissionService.forget_group_ids(db)
         await db.commit()
         return True

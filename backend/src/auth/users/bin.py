@@ -131,6 +131,14 @@ async def restore(
 
     parsed = row.uuid
     row.deleted_at = None
+    # A restored group confers its grants again immediately, and `_group_ids` caches
+    # the answer to "which live groups is this person in" for the life of the
+    # session. Drop it, or a check later in this request still reads the group as
+    # deleted. Deferred import: permissions.services imports auth.users.services,
+    # which imports this package.
+    from src.permissions.services import PermissionService
+
+    PermissionService.forget_group_ids(db)
     await db.commit()
 
     # Re-read with the membership loaded: the caller serializes it, and the delete

@@ -17,7 +17,7 @@ from sqlalchemy import event, select
 
 from main import create_app
 from src.auth.dependencies import get_current_user
-from src.auth.users.schemas import UserCreate, UserGroupCreate
+from src.auth.users.schemas import UserCreate, UserGroupCreate, UserGroupUpdate
 from src.auth.users.services import UserGroupService, UserService
 from src.infrastructure import database as db_module
 from src.lists.forms.models import Form
@@ -327,6 +327,117 @@ async def test_effective_actions_bulk_does_not_query_per_resource(
         assert for_two == for_twelve, (
             f"{for_two} queries for 2 records but {for_twelve} for {len(refs)}"
         )
+
+
+@asynccontextmanager
+async def _counting(engine):
+    """Count statements issued while the block runs."""
+    counted: list[str] = []
+
+    def _count(conn, cursor, statement, params, context, many):
+        counted.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", _count)
+    try:
+        yield counted
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", _count)
+
+
+def _membership_queries(statements) -> int:
+    return sum(1 for s in statements if "user_group_association" in s)
+
+
+async def test_group_membership_is_resolved_once_per_session(
+    session_factory, engine
+):
+    """`_group_ids` is called by `effective_actions`, `effective_actions_bulk` and all
+    three collection filters, so one request used to spend four to six identical round
+    trips asking which groups the same person is in. It is cached per session now, for
+    the reason `_system_group_ids` beside it already was: the answer cannot change
+    under a request that is not itself changing it.
+
+    Counted by statement text rather than by total queries, so the assertion says
+    what it means and does not move when something unrelated on the path gains or
+    loses a query."""
+    async with session_factory() as db:
+        user = await _make_user(db, "member")
+
+        async with _counting(engine) as statements:
+            first = await PermissionService._group_ids(db, user.id)
+            after_one = _membership_queries(statements)
+            for _ in range(5):
+                await PermissionService._group_ids(db, user.id)
+            after_six = _membership_queries(statements)
+
+        assert after_one == 1, f"expected one membership query, got {after_one}"
+        assert after_six == 1, (
+            f"expected the five repeats to be served from cache, got {after_six}"
+        )
+        assert await PermissionService._group_ids(db, user.id) == first
+
+
+async def test_the_cache_is_keyed_by_user(session_factory, engine):
+    """A session is not always one caller's — the batch importer and the maintenance
+    jobs resolve many — so a single cached list would hand one person another's
+    groups. That is the failure this key exists to prevent, and it is a wrong
+    *authorization* answer rather than a slow one."""
+    async with session_factory() as db:
+        alice = await _make_user(db, "alice")
+        bob = await _make_user(db, "bob")
+        group = await UserGroupService.create(
+            db,
+            UserGroupCreate(
+                name="team", display_name="Team", user_uuids=[alice.uuid]
+            ),
+        )
+
+        alice_groups = await PermissionService._group_ids(db, alice.id)
+        bob_groups = await PermissionService._group_ids(db, bob.id)
+
+        assert group.id in alice_groups
+        assert group.id not in bob_groups
+
+
+async def test_editing_a_groups_membership_drops_the_cache(session_factory):
+    """The cache sits in front of an authorization answer, so it has to be dropped by
+    anything that changes what the answer is. Without this the session would go on
+    reporting the membership it read before the edit — and the cost of that being
+    wrong is somebody reaching what a grant no longer reaches them."""
+    async with session_factory() as db:
+        alice = await _make_user(db, "alice")
+        group = await UserGroupService.create(
+            db, UserGroupCreate(name="team", display_name="Team", user_uuids=[])
+        )
+        assert group.id not in await PermissionService._group_ids(db, alice.id)
+
+        await UserGroupService.update(
+            db, group.uuid, UserGroupUpdate(user_uuids=[alice.uuid])
+        )
+        assert group.id in await PermissionService._group_ids(db, alice.id)
+
+        await UserGroupService.update(db, group.uuid, UserGroupUpdate(user_uuids=[]))
+        assert group.id not in await PermissionService._group_ids(db, alice.id)
+
+
+async def test_deleting_a_group_drops_the_cache(session_factory):
+    """Deleting a group keeps its membership rows — that is what makes the restore a
+    real undo — so `_group_ids` is the only thing that stops it conferring, via its
+    join to a live `user_groups` row. A cache in front of that check therefore has to
+    be dropped here too, or the group goes on conferring for the rest of the session.
+    """
+    async with session_factory() as db:
+        alice = await _make_user(db, "alice")
+        group = await UserGroupService.create(
+            db,
+            UserGroupCreate(
+                name="team", display_name="Team", user_uuids=[alice.uuid]
+            ),
+        )
+        assert group.id in await PermissionService._group_ids(db, alice.id)
+
+        await UserGroupService.delete(db, group.uuid)
+        assert group.id not in await PermissionService._group_ids(db, alice.id)
 
 
 # --------------------------------------------------------------------------

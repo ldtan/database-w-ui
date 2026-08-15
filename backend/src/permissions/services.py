@@ -22,6 +22,10 @@ from .enums import ALL_ACTIONS, CONFERRED_BY, Action, ResourceType, expand_actio
 from .models import PermissionGrant
 from .schemas import GrantCreate, GrantRead
 
+# `db.info` key for the per-session group-membership cache (`_group_ids`). Named
+# here rather than inlined so `forget_group_ids` and the reader cannot drift apart.
+_GROUP_IDS_CACHE = "group_ids"
+
 # Maps a resource type to its ORM model (for id/uuid resolution).
 _MODELS = {
     ResourceType.workspace: Workspace,
@@ -104,6 +108,44 @@ class PermissionService:
             db.info["system_group_ids"] = cached
         return cached
 
+    @staticmethod
+    def forget_group_ids(db: AsyncSession) -> None:
+        """Drop this session's cached group memberships.
+
+        Called by the paths that can make a *stored* answer wrong: editing a group's
+        members, deleting a group, and restoring one. Nothing in the app both does
+        one of those and then resolves access in the same session — group
+        administration is `require_superuser` and touches no grant — but this is a
+        cache in front of an authorization answer, and the cost of it being wrong is
+        somebody reaching what they should not.
+
+        **Creating a group is deliberately not on that list**, and the distinction is
+        the direction of the error rather than an oversight. A cached answer that is
+        missing a group id matches *fewer* grants, so a session that resolved someone
+        before a group was created simply keeps its narrower view — fail-closed.
+
+        The rule is therefore "drop it wherever a stale answer could leave an id
+        conferring what it no longer should", and **two** of the three paths are like
+        that: removing members via `update`, and `delete`. `delete` is the sharp one,
+        because a group's membership rows survive it on purpose so a restore can put
+        the group back whole — which makes the liveness join in `_group_ids` the only
+        thing standing between a deleted group and its grants, and caching in front
+        of that without dropping here would hand them back for the rest of the
+        session.
+
+        `restore` is the exception in the list, and is here for symmetry rather than
+        because it fails open: it makes a cached answer *under*-report, exactly as
+        `create` does. It is dropped anyway because recomputing costs one query and
+        because a bin operation that left the session disagreeing with the database
+        is a trap for whoever wires the next thing into it — not because it would be
+        unsafe to skip. Do not read it as the example to generalise from.
+
+        The whole map goes rather than one user's entry: a membership edit can move
+        several accounts at once, and clearing everything is cheaper to keep correct
+        than working out who moved.
+        """
+        db.info.pop(_GROUP_IDS_CACHE, None)
+
     @classmethod
     async def _group_ids(cls, db: AsyncSession, user_id: int) -> list[int]:
         # Query membership directly rather than touching user.groups: under asyncpg
@@ -116,6 +158,20 @@ class PermissionService:
         # means the rows outlive the group and the liveness check has to happen here.
         # Without it, deleting a group would leave every grant it holds still reaching
         # its members.
+        #
+        # Cached per session for the same reason `_system_group_ids` is: every
+        # authorization read funnels through here, and one request asks repeatedly.
+        # `effective_actions`, `effective_actions_bulk` and the three collection
+        # filters each call it, so a single page of records used to spend four to six
+        # identical round trips resolving the same person's groups. Keyed by user
+        # because a session is not always one caller's — the batch importer and the
+        # maintenance jobs resolve many — which also bounds the map at the number of
+        # users that session actually asked about.
+        cache = db.info.setdefault(_GROUP_IDS_CACHE, {})
+        cached = cache.get(user_id)
+        if cached is not None:
+            return cached
+
         rows = await db.execute(
             select(user_group_association.c.group_id)
             .join(
@@ -132,6 +188,7 @@ class PermissionService:
         # Users". A grant to that group therefore reaches everyone, here and through
         # every collection filter that shares this helper.
         ids += await cls._system_group_ids(db)
+        cache[user_id] = ids
         return ids
 
     @staticmethod

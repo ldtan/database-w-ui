@@ -10,6 +10,7 @@ import { Message } from "primereact/message";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { COUNT_REFRESH_SECONDS } from "../../lib/config";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
@@ -234,6 +235,10 @@ export function ListDetailPage() {
   // Spread first so the query's own keys/fn win; today it supplies a polling
   // `refetchInterval`, later an SSE subscription (see useLiveList).
   const live = useLiveList(listUuid);
+  // The same seam on a slower clock for the total, which is a dearer question than
+  // the page it describes — see COUNT_REFRESH_SECONDS. A floor, so it can only ever
+  // slow the count down relative to the records, never speed it up.
+  const liveCount = useLiveList(listUuid, COUNT_REFRESH_SECONDS);
   // Everything that decides *which* records come back is part of the key, because
   // every one of them is applied server-side: the page, the order, the view and
   // the search each produce a different set of rows, not a rearrangement of one
@@ -277,9 +282,11 @@ export function ListDetailPage() {
   // every page of one query. Keyed on the view, the search and the filter alone
   // (see `recordCountKey`), so turning a page, sorting or grouping all read the
   // cached answer instead of making the server recount every matching record.
-  // Live like the pages are, since a record someone else adds changes it.
+  // Live like the pages are, since a record someone else adds changes it — but on
+  // its own floor, because it costs far more than a page and re-asking it is what
+  // an idle tab was mostly doing.
   const count = useQuery({
-    ...live,
+    ...liveCount,
     queryKey: recordCountKey(listUuid, activeViewUuid, q, filters),
     queryFn: () =>
       api.get<{ total: number }>(
