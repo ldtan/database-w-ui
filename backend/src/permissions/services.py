@@ -112,14 +112,27 @@ class PermissionService:
     def forget_group_ids(db: AsyncSession) -> None:
         """Drop this session's cached group memberships.
 
-        Called by the paths that *change* membership, so a request that edits a
-        group and then resolves access does not answer from what it read before the
-        edit. Nothing does both today — group administration is `require_superuser`
-        and touches no grant — but this is a cache in front of an authorization
-        answer, and the cost of it being wrong is somebody seeing what they should
-        not. The whole map goes rather than one user's entry: a membership edit can
-        move several accounts at once, and clearing everything is cheaper to keep
-        correct than working out who moved.
+        Called by the paths that can make a *stored* answer wrong: editing a group's
+        members, deleting a group, and restoring one. Nothing in the app both does
+        one of those and then resolves access in the same session — group
+        administration is `require_superuser` and touches no grant — but this is a
+        cache in front of an authorization answer, and the cost of it being wrong is
+        somebody reaching what they should not.
+
+        **Creating a group is deliberately not on that list**, and the distinction is
+        the direction of the error rather than an oversight. A cached answer that is
+        missing a group id matches *fewer* grants, so a session that resolved someone
+        before a group was created simply keeps its narrower view — fail-closed. The
+        three paths above all fail the other way: each can leave an id in the cache
+        that should no longer confer anything, and a deleted group is the sharp case,
+        because its membership rows survive the delete on purpose so a restore can
+        put it back whole. That makes the liveness join in `_group_ids` the only
+        thing standing between a deleted group and its grants, and caching in front
+        of it without dropping here would hand them back for the rest of the session.
+
+        The whole map goes rather than one user's entry: a membership edit can move
+        several accounts at once, and clearing everything is cheaper to keep correct
+        than working out who moved.
         """
         db.info.pop(_GROUP_IDS_CACHE, None)
 

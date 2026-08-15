@@ -101,10 +101,18 @@ services:
       # makes moot, so this is now purely a freshness-vs-load dial and could come
       # down from 60 if that is wanted. See docs/planned-features.md #8.
       #
-      # The metric strip does not follow this down: it takes the greater of this and
-      # VITE_METRIC_REFRESH_SECONDS (default 60), because a metric is a scan of the
-      # whole list per request while a page of rows is one indexed query. Lowering
-      # the value below therefore speeds up records alone, which is the intent.
+      # Two things on the page do not follow this down, each taking the greater of
+      # this and its own floor: the metric strip (VITE_METRIC_REFRESH_SECONDS,
+      # default 60) and the paginator's total (VITE_COUNT_REFRESH_SECONDS, default
+      # 30). Both are dearer questions than a page of rows, which is one indexed
+      # query stopped by LIMIT — a metric scans every record the caller can see, and
+      # the count has no limit to stop it either (12 ms unfiltered but 268 ms under
+      # a search, on a 100k list). Lowering the value below therefore speeds up the
+      # records alone, which is the intent.
+      #
+      # At the 60 set here both floors are already below it and neither is doing
+      # anything — they start to bite the moment this comes down, which is exactly
+      # when it matters that they exist.
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "60"
       # How many live records a list may hold before the app suggests archiving,
