@@ -1,9 +1,15 @@
-import { useMemo } from "react";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import {
+  keepPreviousData,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { api } from "../../lib/api";
 import { ReferencePicker } from "../references/ReferencePicker";
+import { useEffectiveActions } from "../permissions/useEffectiveActions";
 import type { Column, ListItem } from "../../lib/types";
+import { CreateTargetRowDialog } from "./CreateTargetRowDialog";
 
 // One row of a lookup's target list. The server derives `label` from the lookup's
 // display column (the same `display_column_key` export and import use), so a label
@@ -155,6 +161,7 @@ function LookupPicker({
   style,
   parentValues,
   parentLabel,
+  allowCreate,
 }: {
   listUuid: string;
   column: Column;
@@ -169,7 +176,12 @@ function LookupPicker({
   // An empty array means the parent is unset, so there is nothing to offer yet.
   parentValues?: string[];
   parentLabel?: string;
+  // Whether *this context* may create a missing target row. Decided by the
+  // caller, like `parentValues`: filling in a record can, choosing a filter
+  // value cannot — there is no record for the new row to belong to.
+  allowCreate?: boolean;
 }) {
+  const queryClient = useQueryClient();
   const uuids = useMemo(
     () => (multiple ? ((value as string[]) ?? []) : value ? [String(value)] : []),
     [value, multiple],
@@ -185,33 +197,82 @@ function LookupPicker({
     .map((u) => `parent_value=${u}&`)
     .join("");
 
+  const targetListUuid = column.config.target_list_uuid;
+  // The gate, and the reason this feature discloses nothing new: `create`
+  // confers `view`, so anyone this returns true for could already open the
+  // target list and read its columns. Resolved per caller rather than from the
+  // column's config, because whoever configured the lookup is routinely not
+  // whoever fills the form — and the target's own POST enforces it again.
+  const targetActions = useEffectiveActions("list", targetListUuid);
+  const canCreate =
+    !!allowCreate &&
+    !!column.config.allow_create &&
+    !!targetListUuid &&
+    !disabled &&
+    !awaitingParent &&
+    targetActions.has("create");
+
+  // The text the dialog was opened with. Null when it is shut — the dialog is
+  // keyed off it, so each attempt starts from a clean form rather than the last
+  // one's leftovers.
+  const [creating, setCreating] = useState<string | null>(null);
+
   return (
-    <ReferencePicker
-      uuids={uuids}
-      multiple={multiple}
-      labelFor={(uuid) => nameFor(resolved, uuid)}
-      search={async (term) => {
-        const q = term.trim() ? `q=${encodeURIComponent(term.trim())}&` : "";
-        const rows = await api.get<LookupOption[]>(
-          optionsUrl(
-            listUuid,
-            column.uuid,
-            `${q}${parentQuery}limit=${SUGGESTION_LIMIT}`,
-          ),
-        );
-        return rows.map((r) => ({
-          label: r.label || fallback(r.uuid),
-          value: r.uuid,
-        }));
-      }}
-      onChange={onChange}
-      placeholder={
-        awaitingParent ? `Select ${parentLabel ?? "the parent"} first` : "Search rows…"
-      }
-      disabled={disabled || awaitingParent}
-      inputId={inputId}
-      style={style}
-    />
+    <>
+      <ReferencePicker
+        uuids={uuids}
+        multiple={multiple}
+        labelFor={(uuid) => nameFor(resolved, uuid)}
+        search={async (term) => {
+          const q = term.trim() ? `q=${encodeURIComponent(term.trim())}&` : "";
+          const rows = await api.get<LookupOption[]>(
+            optionsUrl(
+              listUuid,
+              column.uuid,
+              `${q}${parentQuery}limit=${SUGGESTION_LIMIT}`,
+            ),
+          );
+          return rows.map((r) => ({
+            label: r.label || fallback(r.uuid),
+            value: r.uuid,
+          }));
+        }}
+        onChange={onChange}
+        placeholder={
+          awaitingParent ? `Select ${parentLabel ?? "the parent"} first` : "Search rows…"
+        }
+        disabled={disabled || awaitingParent}
+        inputId={inputId}
+        style={style}
+        create={
+          canCreate
+            ? { label: (term) => `Add “${term}”…`, onCreate: setCreating }
+            : undefined
+        }
+      />
+      {creating !== null && targetListUuid && (
+        <CreateTargetRowDialog
+          targetListUuid={targetListUuid}
+          term={creating}
+          displayColumnUuid={column.config.display_column_uuid}
+          filterColumnUuid={column.config.target_filter_column_uuid}
+          parentValues={parentValues}
+          visible
+          onHide={() => setCreating(null)}
+          onCreated={(uuid) => {
+            onChange(multiple ? [...uuids, uuid] : uuid);
+            // The new row's label is resolved by a *different* query than the
+            // one that just refetched — this column's, keyed by the uuid set it
+            // holds. Without this the cell shows a row stub until something else
+            // happens to change that set.
+            queryClient.invalidateQueries({
+              queryKey: ["lookup-labels", listUuid, column.uuid],
+            });
+            setCreating(null);
+          }}
+        />
+      )}
+    </>
   );
 }
 
@@ -223,6 +284,7 @@ export function LookupField({
   onChange,
   parentValues,
   parentLabel,
+  allowCreate = true,
 }: {
   listUuid: string;
   column: Column;
@@ -232,6 +294,9 @@ export function LookupField({
   /** See LookupPicker: undefined = not nested here, [] = parent unset. */
   parentValues?: string[];
   parentLabel?: string;
+  /** Off for a surface that cannot host a dialog over itself. The column's own
+   *  `allow_create` and the writer's access still both have to agree. */
+  allowCreate?: boolean;
 }) {
   return (
     <LookupPicker
@@ -244,11 +309,14 @@ export function LookupField({
       inputId={`field-${column.uuid}`}
       parentValues={parentValues}
       parentLabel={parentLabel}
+      allowCreate={allowCreate}
     />
   );
 }
 
-/** The value picker for a filter condition: always single-valued. */
+/** The value picker for a filter condition: always single-valued, and never
+ *  offers to create a row — a filter is a question about rows that exist, and
+ *  there is no record here for a new one to belong to. */
 export function LookupFilterValue({
   listUuid,
   column,

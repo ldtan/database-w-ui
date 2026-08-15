@@ -23,6 +23,15 @@ interface Props {
   notes?: string[];
   visible: boolean;
   onHide: () => void;
+  /** Overrides "Add record" / "Edit record" when the dialog is opened from
+   *  somewhere that has to say *which* list is being added to — a lookup
+   *  creating a row in its target. */
+  header?: string;
+  /** The record that was just created, for a caller that needs its uuid rather
+   *  than just the side effect. Runs before `onHide`; the toast and the `items`
+   *  invalidation happen either way, since the row is real whatever the caller
+   *  goes on to do with it. */
+  onCreated?: (item: ListItem) => void;
 }
 
 /**
@@ -52,6 +61,8 @@ export function RecordFormDialog({
   notes,
   visible,
   onHide,
+  header,
+  onCreated,
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -91,16 +102,17 @@ export function RecordFormDialog({
         ? api.patch<ListItem>(`/lists/${listUuid}/items/${item.uuid}`, { data })
         : api.post<ListItem>(`/lists/${listUuid}/items/`, { data });
     },
-    onSuccess: () => {
+    onSuccess: (saved) => {
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       toast.success(item ? "Record updated" : "Record added");
+      if (!item) onCreated?.(saved);
       onHide();
     },
   });
 
   return (
     <AppDialog
-      header={item ? "Edit record" : "Add record"}
+      header={header ?? (item ? "Edit record" : "Add record")}
       visible={visible}
       onHide={onHide}
       style={{ width: 480 }}

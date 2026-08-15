@@ -171,6 +171,10 @@ export function ColumnDialog({
   const [optionConjunction, setOptionConjunction] = useState<"and" | "or">("and");
   const [optionConditions, setOptionConditions] = useState<FilterCondition[]>([]);
   const [multiple, setMultiple] = useState(false);
+  // A lookup that may create its own target rows. Purely an affordance: the
+  // button it turns on is shown only to people who can already create rows in
+  // the target list, and the target's own route is what enforces that.
+  const [allowCreate, setAllowCreate] = useState(false);
   const [formula, setFormula] = useState("");
   const [textMode, setTextMode] = useState<TextMode>("single");
   // Default value — one piece of state per family of column type; only the one
@@ -232,6 +236,7 @@ export function ColumnDialog({
       setParentColumnUuid(null);
       setTargetFilterColumnUuid(null);
       setMultiple(false);
+      setAllowCreate(false);
       setFormula("");
       setTextMode("single");
       // The config starts blank, so the only advanced setting that can arrive here
@@ -261,6 +266,7 @@ export function ColumnDialog({
       setParentColumnUuid(null);
       setTargetFilterColumnUuid(null);
       setMultiple(false);
+      setAllowCreate(false);
       setFormula("");
       setTextMode("single");
       setAdvancedOpen(false);
@@ -301,6 +307,7 @@ export function ColumnDialog({
     setOptionConjunction(config.option_filters?.conjunction ?? "and");
     setOptionConditions(config.option_filters?.conditions ?? []);
     setMultiple(!!config.multiple);
+    setAllowCreate(!!config.allow_create);
     setFormula((config.formula as string) ?? "");
     // Unset is single line — the shape every text column had before text_mode.
     setTextMode(
@@ -531,6 +538,10 @@ export function ColumnDialog({
         config.target_list_uuid = targetListUuid;
         config.display_column_uuid = displayColumnUuid;
         config.multiple = multiple;
+        // Always sent, for the merge reason above: omitting it would leave a
+        // stored `true` in place and keep offering a button the dialog now says
+        // is off.
+        config.allow_create = allowCreate;
         // Always sent, like `unique`: a config PATCH merges, so un-nesting
         // requires explicit nulls rather than omitted keys.
         config.parent_column_uuid = parentColumnUuid;
@@ -1199,6 +1210,18 @@ export function ColumnDialog({
                 checked={multiple}
                 onChange={setMultiple}
                 label="Allow linking multiple rows"
+              />
+              {/* Shown for every lookup, including one whose target is shared as a
+                  lookup target only. Whether *you* can add rows over there is not
+                  the question this setting answers — it is offered to each person
+                  filling the form on their own access, which may well be wider
+                  than the access of whoever configured the column. */}
+              <CheckboxField
+                inputId="col-allow-create"
+                checked={allowCreate}
+                onChange={setAllowCreate}
+                label="Let people add a new row while filling this in"
+                hint="Only for people who can already create rows in the target list; everyone else just sees the search. Typing a name that doesn't exist still fails on import and in the API."
               />
             </>
           )}

@@ -1865,6 +1865,8 @@ export interface components {
             /** Target Filter Column Uuid */
             target_filter_column_uuid?: string | null;
             option_filters?: components["schemas"]["FilterGroup"] | null;
+            /** Allow Create */
+            allow_create?: boolean | null;
             /** Formula */
             formula?: string | null;
         };

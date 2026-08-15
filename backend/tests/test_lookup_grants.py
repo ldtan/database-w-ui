@@ -421,6 +421,146 @@ async def test_lookup_resolves_labels_when_searching_by_them(
         assert len(found.json()) == 1
 
 
+async def test_allow_create_round_trips_and_survives_a_merge_patch(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The toggle is stored config like any other, and a config PATCH *merges* —
+    so a later edit that says nothing about it must not switch it off."""
+    target, _ = await _target_with_rows(client, workspace_uuid, add_column, ["Alpha"])
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target, "allow_create": True},
+    )
+
+    stored = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    column = next(c for c in stored if c["uuid"] == lookup)
+    assert column["config"]["allow_create"] is True
+
+    # An unrelated edit, of the kind the dialog makes constantly.
+    patched = await client.patch(
+        f"/api/lists/{list_uuid}/columns/{lookup}",
+        json={"config": {"target_list_uuid": target, "multiple": True}},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["config"]["allow_create"] is True
+
+
+async def test_the_toggle_does_not_let_a_lookup_only_grantee_add_rows(
+    client, make_client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """The load-bearing one. `allow_create` is an affordance stored on the
+    *referring* column, and a column's config cannot be a grant on somebody
+    else's list — least of all this one, since `lookup` is the action that
+    deliberately hands over labels without opening the list.
+
+    The grantee here has exactly what the picker needs and nothing more.
+    """
+    user, target, rows, lookup = await _shared_and_lookup_target_scenario(
+        client, session_factory, workspace_uuid, list_uuid, add_column, "hopeful"
+    )
+    await client.patch(
+        f"/api/lists/{list_uuid}/columns/{lookup}",
+        json={"config": {"target_list_uuid": target, "allow_create": True}},
+    )
+
+    async with make_client(user) as hopeful:
+        # The picker still works — that is what they were given.
+        options = await hopeful.get(f"/api/lists/{list_uuid}/columns/{lookup}/options")
+        assert options.status_code == 200, options.text
+
+        # Adding to the target does not, and the target's schema stays refused,
+        # so there is nothing to build a row out of either.
+        label_col = (await client.get(f"/api/lists/{target}/columns/")).json()[0]["uuid"]
+        refused = await hopeful.post(
+            f"/api/lists/{target}/items/", json={"data": {label_col: "Ogdenville High"}}
+        )
+        assert refused.status_code == 403, refused.text
+        assert (await hopeful.get(f"/api/lists/{target}/columns/")).status_code == 403
+
+
+async def test_create_on_the_target_is_what_lets_a_row_be_added(
+    client, make_client, session_factory, workspace_uuid, list_uuid, add_column
+):
+    """The other half: with `create` on the target the row goes in, and the cell
+    that prompted it accepts the result.
+
+    Note what is *not* granted — nothing extra was written for the schema read.
+    `create` confers `view` (permissions/enums.py `_IMPLIES`), which is the whole
+    reason this feature discloses nothing: anyone who can be offered the button
+    could already have opened the target list and read its columns.
+    """
+    user, target, rows, lookup = await _shared_and_lookup_target_scenario(
+        client, session_factory, workspace_uuid, list_uuid, add_column, "adder"
+    )
+    await client.patch(
+        f"/api/lists/{list_uuid}/columns/{lookup}",
+        json={"config": {"target_list_uuid": target, "allow_create": True}},
+    )
+    user_uuid = str(user.uuid)
+    await _grant(client, "list", target, user_uuid, ["create"])
+    await _grant(client, "list", list_uuid, user_uuid, ["create"])
+
+    async with make_client(user) as adder:
+        # The schema arrives on the `view` that `create` carries, unasked for.
+        columns = await adder.get(f"/api/lists/{target}/columns/")
+        assert columns.status_code == 200, columns.text
+        label_col = columns.json()[0]["uuid"]
+
+        created = await adder.post(
+            f"/api/lists/{target}/items/", json={"data": {label_col: "Ogdenville High"}}
+        )
+        assert created.status_code == 201, created.text
+        new_row = created.json()["uuid"]
+
+        # And the cell the dialog was opened from takes it.
+        linked = await adder.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {lookup: new_row}}
+        )
+        assert linked.status_code == 201, linked.text
+        assert linked.json()["data"][lookup] == new_row
+
+
+async def test_the_toggle_never_reaches_the_write_path(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """`allow_create` is honoured by the pickers and by nothing else.
+
+    An unknown label is still an error on every write path — including the two
+    that have no user in front of them to click anything. Were it otherwise, one
+    mistyped column in a five-thousand-row file would silently mint five thousand
+    rows in somebody else's reference list.
+    """
+    target, _ = await _target_with_rows(client, workspace_uuid, add_column, ["Alpha"])
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target, "allow_create": True},
+    )
+
+    direct = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {lookup: "Nowhere High"}}
+    )
+    assert direct.status_code == 400, direct.text
+    assert "unknown row" in direct.json()["detail"]
+
+    imported = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", "school\nNowhere High\n", "text/csv")},
+    )
+    assert imported.status_code == 200, imported.text
+    body = imported.json()
+    assert body["created"] == 0
+    assert len(body["errors"]) == 1
+
+    # Nothing was added to the target on the way past.
+    assert len((await client.get(f"/api/lists/{target}/items/")).json()) == 1
+
+
 async def test_a_lookup_grant_on_a_workspace_hides_the_workspace_too(
     client, make_client, session_factory, workspace_uuid, add_column
 ):

@@ -501,6 +501,55 @@ that same question one uuid at a time. They get the silent drop instead — a wo
 them, rather than a schema oracle for everyone. `tests/test_lookup_option_filters.py` pins
 all of it, `test_the_endpoint_takes_no_filter_from_the_caller` most of all.
 
+### `allow_create` is a third advisory setting, and the one most likely to be misread
+
+A lookup may let the picker **add** a missing row to its target list rather than dead-end
+(data-model §5). It reads like a permission and is not one. The button appears only for a
+caller who holds `create` on the target, that is resolved per caller rather than from the
+column, and `POST /lists/{target}/items/` re-checks it regardless — so the flag can only ever
+surface a shortcut to somebody who could already have walked over to the target list and
+added the row by hand. It is not validated against the *configurer's* access either, because
+whoever configures a list is routinely not whoever fills its forms, and the target's grants
+move independently of the referring list's.
+
+The reason this does not reopen the hole the rest of this section guards: `create` confers
+`view` (`permissions/enums.py` `_IMPLIES`), so being eligible for the button already implies
+being able to read the target's schema. A lookup-only grantee is eligible for nothing, sees
+no button, and is still refused `GET /lists/{it}/columns/` — which is also why they could not
+fill in a create form even if one were somehow put in front of them.
+
+Three consequences, all of them the advisory deal again:
+
+- **Only the pickers honour it.** An unknown label is still `UnknownReferenceError` from CSV
+  import, from the QR fill and from a direct API write. `_validate_lookup` has no
+  side effects and must keep none: it runs once per row of an import, so auto-creating there
+  would turn one mistyped column into thousands of rows in somebody else's reference list.
+- **A created row need not satisfy `option_filters`,** which are not enforced on write. The
+  cell resolves and displays its label; no later search offers the row. Exactly the state a
+  filter turned on over populated data already produces.
+- **Nothing stops a duplicate label**, and duplicates are not free: `_validate_lookup` refuses
+  a label matching more than one row rather than guessing, so a second "Acme" costs everyone
+  the ability to name the first one in a CSV. The picker therefore offers to create only when
+  no suggestion matches the typed text exactly — a client-side courtesy, bounded by the
+  25-row suggestion cap, and not a guarantee. `unique` on the target's label column is the
+  only real defence.
+
+Two places it is deliberately switched off regardless of config: the filter-condition value
+editor (a filter asks about rows that exist, and there is no record for a new one to belong
+to) and the grid's inline cell editor (a `Dialog` portals outside the `data-pr-is-overlay`
+subtree `DataTable` checks, so the first click inside it would close the cell and unmount the
+dialog). Both are one prop, `allowCreate`, decided by the caller — the same shape
+`parentValues` uses for nesting. `tests/test_lookup_grants.py` pins the permission halves.
+
+**One PrimeReact trap, and it is the whole feature.** `AutoComplete` renders its overlay only
+when `suggestions` is non-empty, unless `showEmptyMessage` is set —
+`autocomplete.cjs.js:1000`, `isNotEmpty(props.suggestions) || props.showEmptyMessage ?
+show() : hide()`, with the prop defaulting to `false`. The create option lives in
+`panelFooterTemplate`, so without that flag it is unreachable in precisely the case it exists
+for: a search that matched nothing renders no panel and therefore no footer. `ReferencePicker`
+sets `showEmptyMessage={!!create}` — on for a picker that can create, off everywhere else, so
+the user and group pickers keep closing silently on no results as they always have.
+
 ## 8. Rich text is HTML in a cell, and some things treat it as text
 
 A `text` column in `rich` mode stores HTML. Sanitising is on the **write** path

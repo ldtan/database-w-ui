@@ -234,7 +234,7 @@ Common `config` keys (all optional unless noted):
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?`; `allow_other?` |
-| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns) |
+| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
 | `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
@@ -292,6 +292,21 @@ Notes:
   `target_filter_column_uuid`, set together): the target list's filter column points back at
   the parent's target, and what the parent cell holds constrains which target rows the child
   may add (options filtering is opt-in per request; writes enforce). See planned-features #6.
+- `lookup` **`allow_create`** — the picker may add a missing row to the target list
+  instead of dead-ending, opening the target's own create form prefilled with what was
+  typed. The counterpart of `choice`'s `allow_other`, and it strikes the same bargain
+  from the other side: the offered set stops being the permitted set, but a lookup's
+  off-list answer has to become a real row somewhere rather than loose text.
+  **It is an affordance and confers nothing.** The gate is `create` on the *target*
+  list, resolved per caller when the row is written — by the target's ordinary
+  `POST /items/`, which this changes nothing about. That is also what makes it safe
+  against the disclosure `lookup` exists to prevent: `create` confers `view`
+  (`permissions/enums.py`), so anyone who can be offered the button could already open
+  the target and read its columns. It is deliberately *not* validated against the
+  configurer's own access, since whoever configures a list is routinely not whoever
+  fills its forms. Only the pickers honour it: an unknown label is still an error from
+  import, from the QR fill and from a direct API write, so a typo in a bulk file cannot
+  mint rows. `tests/test_lookup_grants.py` pins both directions.
 - `lookup` **option filters** — `option_filters` is a view's `FilterGroup` asked of the
   *target list's* columns ("only Active schools"), narrowing what the picker offers. Unlike
   the nesting pair it compares against literals, so it does not vary per record; unlike the

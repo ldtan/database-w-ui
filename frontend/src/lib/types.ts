@@ -136,6 +136,12 @@ export interface ColumnConfig {
    *  picker never sends one, because a caller-chosen predicate would make a
    *  lookup-only target's hidden columns readable by elimination. */
   option_filters?: FilterGroup | null;
+  /** Lookup columns only. Lets the picker create a missing target row instead of
+   *  dead-ending. An affordance and nothing more: the button also needs `create`
+   *  on the *target* list, and the target's own route enforces that whatever this
+   *  says. Only the pickers honour it — import and the API still refuse a label
+   *  that matches no row. */
+  allow_create?: boolean;
   multiple?: boolean;
   allowed_schemes?: string[];
   label?: string;

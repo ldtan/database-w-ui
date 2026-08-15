@@ -84,6 +84,24 @@ class ColumnConfig(BaseModel):
     # filter can only ever remove rows from a set the caller was already entitled
     # to, which is why it is safe and a query parameter would not be.
     option_filters: Optional[FilterGroup] = None
+    # Whether the picker may create a missing target row inline, rather than
+    # leaving whoever is filling the form to go and add it themselves. The
+    # lookup counterpart of `allow_other` above: the offered set stops being the
+    # permitted set.
+    #
+    # An affordance, not a permission. The gate is `create` on the *target*
+    # list, resolved per caller at the moment the row is written — by the
+    # target's own `POST /items/` route, which this changes nothing about — and
+    # never by this flag. Turning it on therefore grants nobody anything; it can
+    # only surface a button to people who could already have used the target
+    # list directly. It is deliberately not validated against the configurer's
+    # own access either: whoever configures a list is routinely not whoever
+    # fills its forms, and the target's grants move independently of this one's.
+    #
+    # Only the pickers honour it. A label that matches no row is still an error
+    # on every other write path — import, QR fill, a direct API call — so a typo
+    # in a five-thousand-row file cannot quietly mint five thousand rows.
+    allow_create: Optional[bool] = None
     # calculated — an expression over other columns of this list, by name. The
     # column stores nothing; the value is computed on read. See columns/formula.py.
     formula: Optional[str] = None

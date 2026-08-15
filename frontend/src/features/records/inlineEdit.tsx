@@ -152,6 +152,13 @@ export function InlineCellEditor({
         // cell's value, and in the grid that parent is another cell of this row
         // rather than another field of a draft.
         values={row.data ?? {}}
+        // A lookup's "add a row to the target list" opens a Dialog, and a Dialog
+        // cannot live inside a cell editor: it portals to the body without the
+        // `data-pr-is-overlay` marker DataTable looks for
+        // (datatable.cjs.js:1232-1238), so the first click inside it reads as an
+        // outside click, closes the cell and unmounts the dialog mid-sentence.
+        // The same row is one click away in the Edit dialog, which can host one.
+        allowCreate={false}
       />
     </div>
   );
