@@ -1095,9 +1095,9 @@ class ListItemService:
     async def _columns_by_key(db: AsyncSession, list_id: int) -> dict[str, Column]:
         """The list's fields, as every read and write sees them.
 
-        `in_shape` rather than `deleted_at` alone: a conversion's scratch column is
-        live but not a field of the list, and letting it through here would both leak
-        its half-converted values into every record payload (`shape_values` emits
+        `in_shape` rather than `deleted_at` alone: a hidden column is live but not a
+        field of the list, and letting one through here would both leak
+        its values into every record payload (`shape_values` emits
         whatever is in this dict) and apply its `required`/`default` on writes.
         """
         result = await db.execute(

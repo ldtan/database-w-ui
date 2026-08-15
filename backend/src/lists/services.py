@@ -1123,8 +1123,8 @@ class ListService:
             select(Column.id).where(
                 Column.uuid == column_uuid,
                 Column.list_id == list_id,
-                # A conversion's scratch column is not a field of the list yet, so
-                # it cannot be chosen as the one that labels a row.
+                # A hidden column is not a field of the list, so it cannot be chosen
+                # as the one that labels a row.
                 in_shape(),
             )
         )

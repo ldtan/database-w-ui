@@ -134,8 +134,8 @@ being measured. Sleep a real interval and measure the overshoot instead.
 
 ## Converting a column's type
 
-The other operation that scales with the list rather than the page, and the only one
-that deliberately blocks writers while it runs. A conversion is two calls: `preview`,
+The one operation that deliberately blocks writers while it runs, and the reason it is
+allowed to is that it is the only way to make it correct. A conversion is two calls: `preview`,
 which converts every cell in memory and writes nothing, and `apply`, which does the
 whole job — read, convert, write both the new value and the original, retype the column
 — inside **one transaction**. It used to stage the work in a hidden column between the
@@ -155,7 +155,7 @@ Linear, so the per-record figure extrapolates, and the two numbers to read are t
 two rows.
 
 **Roughly 24 µs of app CPU per record**, about two-thirds of a calculated re-index's
-0.037 ms — unsurprising, since both walk every record once and do a small amount of
+~0.035 ms — unsurprising, since both walk every record once and do a small amount of
 Python per cell, and this one has no formula to evaluate. Divide the CPU column by the
 plan's share to get Render figures: on `starter` (0.5 CPU) the 50,000-record apply is
 ~2.4 s of CPU.
