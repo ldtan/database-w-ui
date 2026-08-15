@@ -35,6 +35,32 @@ export const METRIC_REFRESH_SECONDS = readNonNegativeNumber(
 );
 
 /**
+ * The *floor* on how often the paginator's total is re-asked, in seconds.
+ *
+ * The count sits between a page of records and a metric in what it costs, and it
+ * used to poll on the same clock as the cheapest of the three. A page is one
+ * indexed query stopped by `LIMIT`; the count has no limit to stop it, so it reads
+ * and tests every matching record. Measured on a 100k list: 4 ms for the page,
+ * 12 ms for the count unfiltered — and **268 ms for the count under a search**,
+ * because a search that matches little still has to prove it by looking at
+ * everything. A tab left open on a searched list was spending that every ten
+ * seconds with nobody reading it.
+ *
+ * Shorter than {@link METRIC_REFRESH_SECONDS} on purpose: a total is a number on
+ * screen and beside a paginator, where being visibly behind the rows it describes
+ * is worse than it is for a metric card. Same floor semantics as the metric one —
+ * applied by `useLiveList`, so `LIVE_REFRESH_SECONDS = 0` still disables polling
+ * and a slower records clock still wins.
+ *
+ * Your own edits do not wait for it: the count key is invalidated alongside the
+ * items key, so this interval only ever carries *other people's* changes.
+ */
+export const COUNT_REFRESH_SECONDS = readNonNegativeNumber(
+  import.meta.env.VITE_COUNT_REFRESH_SECONDS,
+  30,
+);
+
+/**
  * How many live records a list may hold before the app suggests archiving, or `0`
  * to never suggest it.
  *
