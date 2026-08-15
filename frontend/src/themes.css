@@ -723,6 +723,27 @@ a {
   border-bottom: var(--border-width) solid var(--border);
 }
 
+/* "Create <what you typed>" in the footer of a reference picker
+   (features/references/ReferencePicker). Full width and separated by a rule,
+   because it is not one more row of the list — picking a suggestion links an
+   existing row, this one writes to another list. */
+.ref-create {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: none;
+  border-top: var(--border-width) solid var(--border);
+  background: var(--surface-2);
+  color: var(--brand);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+.ref-create:hover {
+  background: var(--hover);
+}
+
 /* ============================================================
    Checkbox
    ============================================================ */

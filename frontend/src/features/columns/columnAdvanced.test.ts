@@ -38,6 +38,7 @@ describe("hasAdvancedConfig", () => {
    *  choice would open the section for all of them. */
   it("does not count a setting that is switched off", () => {
     expect(hasAdvancedConfig({ unique: false, multiple: false })).toBe(false);
+    expect(hasAdvancedConfig({ allow_other: false, allow_create: false })).toBe(false);
     expect(hasAdvancedConfig({ label: "" })).toBe(false);
     expect(hasAdvancedConfig({ parent_column_uuid: null })).toBe(false);
     expect(hasAdvancedConfig({ option_filters: null })).toBe(false);

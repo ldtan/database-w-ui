@@ -44,6 +44,8 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   // A lookup's saved option filter. Stored as `undefined` when cleared rather
   // than an empty group, since `isSet` counts any object as a choice made.
   "option_filters",
+  // A lookup that may create its own target rows.
+  "allow_create",
   "default",
   "onupdate",
 ];

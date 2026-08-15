@@ -152,6 +152,7 @@ export function RecordField({
   onChange,
   columns,
   values,
+  allowCreate = true,
 }: {
   listUuid: string;
   column: Column;
@@ -162,6 +163,10 @@ export function RecordField({
    *  on a *sibling* cell — today, a nested lookup filtering by its parent. */
   columns?: Column[];
   values?: Record<string, unknown>;
+  /** Whether an editor may open a dialog of its own — a lookup adding a row to
+   *  its target list. False where this renders inside the grid's cell editor,
+   *  which cannot host one (see `inlineEdit`). */
+  allowCreate?: boolean;
 }) {
   const id = `field-${column.uuid}`;
   switch (column.type) {
@@ -296,6 +301,7 @@ export function RecordField({
           onChange={onChange}
           parentValues={parentValues}
           parentLabel={parent?.display_name}
+          allowCreate={allowCreate}
         />
       );
     }
