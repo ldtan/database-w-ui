@@ -1,46 +1,62 @@
-"""Run a column type conversion: build, backfill, verify, cut over.
+"""Run a column type conversion: preview it, then apply it in one transaction.
 
-Three steps, deliberately separate, because the middle one is where a person
-decides whether to go on:
+Two steps, and the first one **writes nothing**. `preview` converts every record's
+cell in memory and reports what would happen; `apply` does the whole job — read,
+convert, write, retype — inside a single transaction. Between them the list is
+untouched, because there is nothing between them: no scratch column, no in-flight
+state, nothing to abandon.
 
-1. **start** — create the target column *hidden*, and backfill it through
-   `conversion.CellConverter`. Nothing about the list changes: the source column
-   keeps serving every view, filter, form and formula untouched, and the target is
-   invisible to every reader (`Column.in_shape`). Returns a report.
-2. **commit** — swap the two columns' values in every record and retype the source
-   column in place. This is the only moment the list changes, and it is atomic per
-   chunk rather than instant, which is why nothing may reference the target until
-   it is done. A **duplicate** (started with a name) takes the other ending: the new
-   column is simply made visible beside the source, which rewrites nothing at all
-   because its values are already under its own key.
-3. **abandon** — delete the scratch column and its values. Costs nothing, because
-   nothing ever saw them.
+**Why it is shaped this way, and what it replaces.** This used to stage the work:
+`start` built a *hidden* target column, backfilled it, and returned a report for a
+person to read; `commit` then swapped the two columns' values and retyped the
+source. The staging column was invisible to every writer by design — `in_shape()`
+excludes it — which meant a record created or edited while the report sat on screen
+got its value written under the *source* key and nothing under the target's. The
+swap then moved that fresh value into the column being binned and wrote JSON null
+over the live one. A record edited in the window was reverted to whatever the
+backfill had computed before the edit. Neither was reported; the conversion
+announced success.
 
-**Why not convert in place.** Filters and sorts compile to SQL over the raw JSONB
-(`items/filtering.py`), so a column whose declared type and stored bytes disagree
-does not return stale results — a `number` column holding one text cell makes
-`apply_sorts` raise `InvalidTextRepresentationError`, and every sort and range
-filter on it fails until the last row lands. A hidden column has no such window:
-nothing queries it, and it only ever receives values that already validated.
+The gap was human-scale, because a person was reading a report inside it. So the
+gap is gone rather than defended: nothing is written until the moment everything is
+written, and that moment holds a lock and takes a few seconds at the row ceiling.
+Airtable can retype a field with no such window because a base has one in-memory
+writer and the change is one more action in its ordered log; SharePoint can because
+a field is a physical typed column and the remap is one statement, refused outright
+on lists past its threshold. Neither of those is available here — this is stateless
+FastAPI over uuid-keyed JSONB — but the property both of them get is, and this is it.
 
-**The cutover keeps the column's identity, so nothing needs repointing.** Rather
-than swapping uuids between two column rows, the *source row itself* is retyped —
-same uuid, same name, same position. Views, forms, formulas and
-`primary_column_id` all keep pointing exactly where they pointed, because nothing
-they point at moved. Only the record values move, and only between two keys.
+**The preview is deliberately not a commitment.** It is a dry run over live data,
+so its counts can be stale by the time somebody presses the button. That is fine
+and is the point: `apply` re-derives everything from the records as they are, and
+refuses outright if they moved under it (see `_fingerprint`). A report that was
+binding would be a staging column by another name.
 
-**The old values survive in the bin.** The cutover swaps the two keys rather than
-overwriting one, so the scratch column ends up holding the *original* data with
-the *original* type, and is then soft-deleted. Restoring it from the bin within
-the retention window is a real undo.
+**The old values survive in the bin.** A conversion writes the converted value under
+the column's own key and the original under a second, already-binned column named
+`<name>__before_conversion`, carrying the old type and the old config. Restoring it
+within the retention window is a real undo. That is what the key swap used to buy,
+bought here by writing two keys instead of exchanging them — which also means a key
+that was absent stays absent, where the swap turned it into an explicit JSON null.
+
+**The cutover keeps the column's identity.** The converted values go under the
+source column's *own* uuid and the source row is retyped in place — same uuid, same
+name, same position — so views, forms, formulas and `primary_column_id` keep
+pointing exactly where they pointed. Only the values move, and only into a column
+nobody was reading.
+
+**A duplicate is the same code with a different ending.** Given a name, the pass
+writes the converted values under a *new* visible column's key and leaves the source
+completely alone: no backup column, no retype. It gets the same atomicity for free,
+which the staged design did not give it — a duplicate published a copy that was
+missing exactly the edits made while its report was on screen.
 """
 import json
 from datetime import datetime, timezone
-from typing import Optional, Union
-from uuid import UUID
+from typing import Optional
 
 import sqlalchemy as sa
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -61,71 +77,95 @@ from .schemas import ColumnConfig
 from .services import ColumnService
 from .validation import resolve_choice_options
 
-# Records read, converted and written per transaction. Matches the import's batch
-# rather than the reconcile's 5,000: every row here costs Python work and possibly a
-# reference lookup, so the transaction stays short at a smaller size.
+# Records read, converted and written per statement batch. Matches the import's
+# batch rather than the reconcile's 5,000: every row here costs Python work and
+# possibly a reference lookup. Unlike before, these no longer commit individually —
+# the whole apply is one transaction — so this bounds memory and statement size
+# rather than lock duration.
 CHUNK = 500
 
-# Above this many records a conversion is refused in the request and has to be run
-# from the maintenance workflow, which holds no web worker while it runs. Free
-# Postgres is 1GB, so this is well beyond any list that fits — it exists so the
-# ceiling is a deliberate number rather than whatever the request timeout happens
-# to be.
+# Above this many records a conversion is refused. It was always a hard cap rather
+# than a routing decision (nothing ever called the service from a maintenance
+# workflow), and it matters more now: the apply holds row locks on the list until it
+# commits, so this is also the bound on how long writers to this list can be blocked.
+# Free Postgres is 1GB, so it remains well beyond any list that fits.
 ROW_CEILING = 50_000
 
 # Failures named individually in the report. Past this the count still climbs, but
 # a person reading 5,000 identical messages has already learned what they need.
 MAX_REPORTED_ERRORS = 100
 
-# Marks a scratch column as belonging to a conversion, and of what. Not a
-# `ColumnConfig` field: it is bookkeeping this service owns, and a client must not
-# be able to set it. Config merges preserve unknown keys, so it survives a PATCH.
-CONVERSION_OF = "_conversion_of"
-# Marks the scratch column as a **duplicate**: at commit it goes live beside the
-# source rather than replacing it. Same bookkeeping rules as `CONVERSION_OF`, and
-# both are stripped from the config when the column becomes real.
-KEEP_SOURCE = "_keep_source"
+# Namespace for the per-list advisory lock that admits one conversion at a time.
+# Distinct from `_UNIQUE_LOCK_NS` (items) and `RECOMPUTE_LOCK_NS` (backfill) so the
+# three never collide on a shared list id and block each other for unrelated reasons.
+CONVERT_LOCK_NS = 0x434F4E56  # "CONV"
 
-_SUFFIX = "__converting"
+_BACKUP_SUFFIX = "__before_conversion"
+
+# The three writes a row can need, kept as SQL rather than ORM updates for one
+# load-bearing reason: `updated_at` is a Python-side `onupdate`, so a Core/ORM update
+# would stamp every row the conversion touches and make `_fingerprint` below report
+# the conversion's own work as a concurrent write. Raw SQL leaves it alone.
+_SET_BOTH = sa.text(
+    "UPDATE list_items SET data = "
+    "  jsonb_set(jsonb_set(data, ARRAY[:bkey], CAST(:old AS jsonb)), "
+    "            ARRAY[:key], CAST(:new AS jsonb)) "
+    "WHERE id = :row_id"
+)
+# A cell that would not convert: the live key goes away (the report said it would be
+# left empty) and the original is preserved under the backup column.
+_MOVE_ONLY = sa.text(
+    "UPDATE list_items SET data = "
+    "  jsonb_set(data - :key, ARRAY[:bkey], CAST(:old AS jsonb)) "
+    "WHERE id = :row_id"
+)
+# A duplicate: only the new column's key is written, and the source is not touched.
+_SET_ONE = sa.text(
+    "UPDATE list_items SET data = "
+    "  jsonb_set(data, ARRAY[:key], CAST(:new AS jsonb)) "
+    "WHERE id = :row_id"
+)
 
 
 class ConversionService:
-    # -- helpers ---------------------------------------------------------
-
-    @staticmethod
-    def _scratch_name(source: Column) -> str:
-        # Bounded by the column name limit (120) with room for the suffix.
-        return f"{source.name[:100]}{_SUFFIX}"
-
-    @classmethod
-    async def _find_scratch(
-        cls, db: AsyncSession, lst: List, source: Column
-    ) -> Optional[Column]:
-        """The in-flight conversion for this column, if there is one."""
-        result = await db.execute(
-            select(Column).where(
-                Column.list_id == lst.id,
-                Column.deleted_at.is_(None),
-                Column.hidden.is_(True),
-                Column.config[CONVERSION_OF].astext == str(source.uuid),
-            )
-        )
-        return result.scalars().first()
+    # -- shared -----------------------------------------------------------
 
     @staticmethod
     async def _row_count(db: AsyncSession, list_id: int) -> int:
-        # Soft-deleted records included, for the reason `reconcile_shapes` includes
-        # them: a restore must not bring back a value in the old column's type.
+        # Soft-deleted and archived records included, for the reason
+        # `reconcile_shapes` includes them: a restore or an unarchive must not bring
+        # back a value in the old column's type.
         return await db.scalar(
             select(sa.func.count())
             .select_from(ListItem)
             .where(ListItem.list_id == list_id)
         )
 
-    # -- 1. start --------------------------------------------------------
+    @staticmethod
+    async def _fingerprint(db: AsyncSession, list_id: int) -> tuple[int, Optional[datetime]]:
+        """Enough of the list's state to tell whether anyone else wrote to it.
+
+        `(count, max(updated_at))` rather than a timestamp comparison, because it
+        needs no agreement between the app's clock and the database's and it catches
+        both shapes of interference: an insert moves the count, and any update moves
+        the maximum. Deletes and archives move both — they are ordinary updates that
+        stamp `updated_at`.
+
+        Read once before the pass and once after, inside the same transaction. Under
+        READ COMMITTED a later statement sees a newer snapshot, so the second read
+        genuinely observes anything committed while the pass was running.
+        """
+        row = (
+            await db.execute(
+                select(func.count(), func.max(ListItem.updated_at)).where(
+                    ListItem.list_id == list_id
+                )
+            )
+        ).one()
+        return (row[0], row[1])
 
     @classmethod
-    async def start(
+    async def _resolve_target(
         cls,
         db: AsyncSession,
         lst: List,
@@ -134,35 +174,47 @@ class ConversionService:
         config: ColumnConfig,
         user,
         name: Optional[str] = None,
-        display_name: Optional[str] = None,
     ) -> dict:
-        """Create the hidden target column and backfill it. Returns the report.
+        """Check the pair is convertible and return the config to store.
 
-        Naming it makes this a **duplicate** rather than a conversion: the column
-        goes live alongside the source at commit instead of replacing it. The name
-        is taken here rather than at commit so the scratch column holds it against
-        the unique index for the whole run — a backfill that succeeds and then
-        cannot be named would be a maddening way to lose the work.
+        Shared by `preview` and `apply` so the two cannot disagree about what is
+        being built. The minting below is why the report echoes the resolved config
+        back and the apply sends it again: `text` -> `choice` with no options given
+        mints one per distinct value in the *source data*, so re-deriving it at apply
+        time would silently answer a different question if a record changed. Once
+        `options` is populated the mint is skipped, which makes the apply a pure
+        function of what the person actually saw.
         """
-        duplicate = name is not None
-        if await cls._find_scratch(db, lst, source) is not None:
-            raise ConflictError(
-                f"'{source.name}' already has a conversion in progress. Commit or "
-                "abandon it before starting another."
-            )
-
-        # Refuse the pair before creating anything, so a rejected conversion leaves
-        # no scratch column behind to clean up. A same-type duplicate is a straight
-        # copy, which `is_supported` already allows.
         probe = Column(type=target_type, name=source.name, config={})
         check_supported(source, probe)
+
+        if name is not None:
+            # A duplicate's name, checked up front so the preview reports the clash
+            # rather than letting somebody read a report and only then discover the
+            # column cannot be created. This is a courtesy and not the guard: the
+            # unique index is, via the IntegrityError the apply catches, because
+            # nothing here can stop the name being taken in between. Under the old
+            # design the name was *reserved* by the staging column from the moment
+            # the report was built, which is why abandoning had to release it.
+            clash = await db.scalar(
+                select(func.count())
+                .select_from(Column)
+                .where(
+                    Column.list_id == lst.id,
+                    Column.name == name,
+                    Column.deleted_at.is_(None),
+                )
+            )
+            if clash:
+                raise ConflictError(
+                    f"A column named '{name}' already exists on this list"
+                )
 
         rows = await cls._row_count(db, lst.id)
         if rows > ROW_CEILING:
             raise ValidationError(
                 f"This list has {rows:,} records, more than the {ROW_CEILING:,} a "
-                "conversion will run through in a request. Run it from the "
-                "maintenance workflow instead."
+                "conversion will run through in one transaction."
             )
 
         supplied = config.model_dump(mode="json", exclude_unset=True)
@@ -178,70 +230,37 @@ class ConversionService:
             )
             supplied.pop("choices", None)
 
-        stored = await ColumnService._validate_config(
+        return await ColumnService._validate_config(
             db, lst, target_type, ColumnConfig(**supplied), user
         )
-        bookkeeping = {CONVERSION_OF: str(source.uuid)}
-        if duplicate:
-            bookkeeping[KEEP_SOURCE] = True
-        target = Column(
-            list_id=lst.id,
-            name=name if duplicate else cls._scratch_name(source),
-            display_name=(
-                display_name or name
-                if duplicate
-                else f"{source.display_name} (converting)"
-            ),
-            # Inherited, not computed. Columns are ordered by `position, id` and
-            # nothing in the UI ever sets `position`, so in practice every column
-            # is 0 and a duplicate sorts last by id rather than next to its source.
-            # Placing it adjacent would mean renumbering every column after it,
-            # which is a reordering feature and not this one.
-            position=source.position,
-            type=target_type,
-            hidden=True,
-            config={**stored, **bookkeeping},
-        )
-        db.add(target)
-        try:
-            await db.flush()
-        except IntegrityError as exc:
-            await db.rollback()
-            raise ConflictError(
-                f"A column named '{name}' already exists on this list"
-                if duplicate
-                else "A column is already using the name this conversion needs"
-            ) from exc
-        await db.commit()
-        await db.refresh(target)
-
-        report = await cls._backfill(db, lst, source, target, user)
-        report["target_uuid"] = str(target.uuid)
-        report["new_type"] = target.type.value
-        report["duplicate"] = duplicate
-        return report
 
     @classmethod
-    async def _backfill(
+    async def _run(
         cls,
         db: AsyncSession,
         lst: List,
         source: Column,
         target: Column,
         user,
+        keys: Optional[tuple[str, Optional[str]]],
     ) -> dict:
-        """Convert every record's source cell into the target column.
+        """One pass over every record, converting the source cell.
 
-        Chunked and committed per batch, so row locks are held for milliseconds and
-        a killed run leaves a partly-filled *hidden* column rather than a partly-
-        converted visible one. A cell that will not convert is recorded and skipped:
-        the whole point of doing this into a scratch column is that a person gets to
-        read the failures before anything about the list changes.
+        ``keys`` is ``None`` for a dry run — nothing is written and only the counts
+        come back. Otherwise it is ``(live_key, backup_key)``: the key the converted
+        value lands under, and the key the original is preserved under (``None`` for
+        a duplicate, which displaces nothing and so has nothing to preserve).
+
+        Iterated by primary key in chunks so a large list does not become one
+        enormous result set in Python. For the writing pass every chunk is part of
+        the caller's transaction — nothing commits here, deliberately: a partially
+        converted column is the state the whole design exists to make impossible.
         """
         converter = CellConverter(db, lst, source, target, user)
         await converter.prepare()
 
-        skey, tkey = str(source.uuid), str(target.uuid)
+        skey = str(source.uuid)
+        live_key, backup_key = keys if keys else (None, None)
         converted = 0
         failed = 0
         errors: list[dict] = []
@@ -264,12 +283,16 @@ class ConversionService:
             # cell — the same reason the export resolves in batches.
             await converter.load([row.data or {} for row in rows])
 
-            writes = []
+            both: list[dict] = []
+            moved: list[dict] = []
+            one: list[dict] = []
             for row in rows:
                 value = (row.data or {}).get(skey)
                 if value is None:
-                    # Nothing to carry over. The target key stays absent, which every
-                    # reader already treats as empty.
+                    # Nothing to carry over, and nothing to preserve. No key is
+                    # written under either column, which every reader already treats
+                    # as empty — where the old swap turned an absent key into an
+                    # explicit JSON null on both sides.
                     continue
                 try:
                     new_value = await converter.convert(value)
@@ -283,22 +306,48 @@ class ConversionService:
                         errors.append(
                             {"record_uuid": str(row.uuid), "message": str(exc)}
                         )
+                    if keys and backup_key is not None:
+                        # The report promised this cell would be left empty. Clear
+                        # the live key and keep the original in the bin column, so
+                        # "left empty" never means "thrown away".
+                        moved.append(
+                            {
+                                "row_id": row.id,
+                                "key": live_key,
+                                "bkey": backup_key,
+                                "old": json.dumps(value),
+                            }
+                        )
                     continue
-                writes.append(
-                    {"row_id": row.id, "key": tkey, "value": json.dumps(new_value)}
-                )
                 converted += 1
+                if not keys:
+                    continue
+                if backup_key is None:
+                    one.append(
+                        {
+                            "row_id": row.id,
+                            "key": live_key,
+                            "new": json.dumps(new_value),
+                        }
+                    )
+                else:
+                    both.append(
+                        {
+                            "row_id": row.id,
+                            "key": live_key,
+                            "bkey": backup_key,
+                            "new": json.dumps(new_value),
+                            "old": json.dumps(value),
+                        }
+                    )
 
-            if writes:
-                await db.execute(
-                    sa.text(
-                        "UPDATE list_items "
-                        "   SET data = jsonb_set(data, ARRAY[:key], CAST(:value AS jsonb)) "
-                        " WHERE id = :row_id"
-                    ),
-                    writes,
-                )
-            await db.commit()
+            for statement, params in (
+                (_SET_BOTH, both),
+                (_MOVE_ONLY, moved),
+                (_SET_ONE, one),
+            ):
+                if params:
+                    await db.execute(statement, params)
 
         return {
             "converted": converted,
@@ -307,86 +356,198 @@ class ConversionService:
             "errors_truncated": failed > len(errors),
         }
 
-    # -- 2. commit -------------------------------------------------------
+    # -- 1. preview -------------------------------------------------------
 
     @classmethod
-    async def commit(
-        cls, db: AsyncSession, lst: List, source: Column, target_uuid: Union[str, UUID]
+    async def preview(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        source: Column,
+        target_type: ColumnType,
+        config: ColumnConfig,
+        user,
+        name: Optional[str] = None,
+        display_name: Optional[str] = None,
+    ) -> dict:
+        """Convert every cell in memory and report what would happen.
+
+        Writes nothing and creates nothing, so there is no state to clean up if the
+        person closes the dialog, no 409 waiting for their next attempt, and no
+        window in which the list is half-committed to anything.
+
+        The resolved config comes back in the report so `apply` can be handed the
+        same one rather than re-deriving it — see `_resolve_target`.
+        """
+        duplicate = name is not None
+        stored = await cls._resolve_target(
+            db, lst, source, target_type, config, user, name=name
+        )
+
+        # A stand-in for the column that would be built. It is never added to the
+        # session: the converter only reads its `type` and `config` to decide how a
+        # cell converts, and a dry run must not leave a row behind.
+        probe = Column(
+            list_id=lst.id,
+            name=name or source.name,
+            display_name=display_name or name or source.display_name,
+            type=target_type,
+            config=stored,
+        )
+        report = await cls._run(db, lst, source, probe, user, keys=None)
+        report["new_type"] = target_type.value
+        report["duplicate"] = duplicate
+        report["config"] = stored
+        report["name"] = name
+        report["display_name"] = display_name
+        return report
+
+    # -- 2. apply ---------------------------------------------------------
+
+    @classmethod
+    async def apply(
+        cls,
+        db: AsyncSession,
+        lst: List,
+        source: Column,
+        target_type: ColumnType,
+        config: ColumnConfig,
+        user,
+        name: Optional[str] = None,
+        display_name: Optional[str] = None,
     ) -> Column:
-        """Swap the converted values in and retype the column. The point of no return."""
-        target = await ColumnService.get_including_hidden(db, lst.id, target_uuid)
-        if target is None or not target.hidden:
-            raise ValidationError("That conversion is not in progress")
-        if (target.config or {}).get(CONVERSION_OF) != str(source.uuid):
-            raise ValidationError(
-                f"That conversion does not belong to '{source.name}'"
+        """Do the whole conversion in one transaction. The point of no return.
+
+        Everything below happens or none of it does, which is the entire reason this
+        is not two calls. Ordering matters in two places and is commented where it
+        does.
+        """
+        duplicate = name is not None
+
+        # One conversion per list at a time. `try` rather than a blocking wait: the
+        # caller is a web request, and a second person arriving mid-run should be
+        # told so rather than left holding a connection until the first finishes.
+        # Transaction-scoped, so it is released by the commit or the rollback below
+        # with nothing to unstick.
+        if not await db.scalar(
+            select(func.pg_try_advisory_xact_lock(CONVERT_LOCK_NS, lst.id))
+        ):
+            raise ConflictError(
+                f"Another conversion is already running on '{lst.name}'. Wait for "
+                "it to finish and try again."
             )
 
-        await cls._check_gates(db, lst, target)
+        before = await cls._fingerprint(db, lst.id)
+        stored = await cls._resolve_target(
+            db, lst, source, target_type, config, user, name=name
+        )
 
-        if (target.config or {}).get(KEEP_SOURCE):
-            # A duplicate: the values are already under this column's own key, so
-            # there is nothing to move and no record to rewrite. Making it real is
-            # only a matter of letting readers see it.
-            target.hidden = False
-            target.config = {
-                key: value
-                for key, value in (target.config or {}).items()
-                if key not in (CONVERSION_OF, KEEP_SOURCE)
-            }
-            # The backfill wrote these values without sanitising — nothing could read
-            # them, so there was nothing to protect. Making the column visible is the
-            # moment that stops being true, and for a rich one they become markup the
-            # grid renders. Unconditional rather than compared against a previous
-            # config: this column has never had one a reader could see.
-            if target.type == ColumnType.text and is_rich(target.config):
-                await resanitize_column(db, lst.id, target.uuid)
-            await db.commit()
-            await db.refresh(target)
-            return target
+        old_type, old_config = source.type, dict(source.config or {})
+        if duplicate:
+            # Goes live immediately: it displaces nothing, so there is no moment
+            # where showing it would be wrong.
+            target = Column(
+                list_id=lst.id,
+                name=name,
+                display_name=display_name or name,
+                # Inherited, not computed. Columns order by `position, id` and
+                # nothing in the UI ever sets `position`, so in practice every column
+                # is 0 and a duplicate sorts last by id rather than beside its source.
+                position=source.position,
+                type=target_type,
+                config=stored,
+            )
+        else:
+            # The undo. Created already binned, carrying the *old* type and config,
+            # so restoring it from the bin gives back exactly the column that was
+            # there. The unique index on name is partial on `deleted_at IS NULL`, so
+            # this name cannot collide with anything live.
+            target = Column(
+                list_id=lst.id,
+                name=f"{source.name[:100]}{_BACKUP_SUFFIX}",
+                display_name=f"{source.display_name} (before conversion)",
+                position=source.position,
+                type=old_type,
+                config=old_config,
+                deleted_at=datetime.now(timezone.utc),
+            )
+        db.add(target)
+        try:
+            await db.flush()
+        except IntegrityError as exc:
+            await db.rollback()
+            raise ConflictError(
+                f"A column named '{name}' already exists on this list"
+                if duplicate
+                else "A column is already using the name this conversion needs"
+            ) from exc
 
         skey, tkey = str(source.uuid), str(target.uuid)
-        await cls._swap_values(db, lst.id, skey, tkey)
+        # For a conversion the converted value lands under the source's *own* key —
+        # which is what keeps every view, form and formula pointing at it — and the
+        # original moves to the backup column. For a duplicate only the new column's
+        # key is written and the source is untouched.
+        keys = (tkey, None) if duplicate else (skey, tkey)
+        # The converter is told what the values are becoming, which is *not* the row
+        # created above when this is a conversion: that row is the backup and carries
+        # the **old** type, and handing it over would convert text to text and write
+        # the source's values back unchanged. It exists for its uuid. For a duplicate
+        # the created row is the new column, so it is the spec as well.
+        spec = target if duplicate else Column(
+            list_id=lst.id,
+            name=source.name,
+            display_name=source.display_name,
+            type=target_type,
+            config=stored,
+        )
+        report = await cls._run(db, lst, source, spec, user, keys=keys)
 
-        # Retype the *source row*, so the column keeps its uuid, name and position
-        # and nothing that references it has to be repointed. `type` is immutable
-        # everywhere else in the service by design; this is the one operation whose
-        # whole purpose is to change it.
-        old_type, old_config = source.type, dict(source.config or {})
-        new_config = dict(target.config or {})
-        new_config.pop(CONVERSION_OF, None)
-        source.type = target.type
-        source.config = new_config
+        # After the values are written, because they are what the gates are about,
+        # and before the retype, because a failure here has to roll back a column
+        # that never changed type.
+        await cls._check_gates(db, lst, stored, keys[0])
 
-        # The scratch column now holds the original values, so it becomes the undo:
-        # the old type, a name that says what it is, and straight into the bin.
-        target.type = old_type
-        target.config = old_config
-        target.name = f"{source.name[:100]}__before_conversion"
-        target.display_name = f"{source.display_name} (before conversion)"
-        target.hidden = False
-        target.deleted_at = datetime.now(timezone.utc)
+        if not duplicate:
+            # Retype the source row in place, so the column keeps its uuid, name and
+            # position and nothing referring to it needs repointing. `type` is
+            # immutable everywhere else in the service by design; this is the one
+            # operation whose whole purpose is to change it.
+            source.type = target_type
+            source.config = stored
 
         # `text -> text` is a supported pair, so a conversion is one of the ways a
-        # column becomes rich — over values the backfill produced and never sanitised.
-        # After the swap, so it cleans what now sits under the source's own key.
-        if source.type == ColumnType.text and is_rich(new_config):
-            await resanitize_column(db, lst.id, source.uuid)
+        # column becomes rich — over values this pass produced and never sanitised.
+        live = target if duplicate else source
+        if live.type == ColumnType.text and is_rich(stored):
+            await resanitize_column(db, lst.id, live.uuid)
+
+        # The last thing before committing. Anything that wrote to this list while
+        # the pass was running is a record whose value this conversion either did not
+        # see or has just overwritten with a stale one — exactly the failure the
+        # staged design shipped with. Refuse rather than guess; nothing has been
+        # committed, so the rollback is total and the retry is safe.
+        if await cls._fingerprint(db, lst.id) != before:
+            await db.rollback()
+            raise ConflictError(
+                "Records changed while the conversion was running, so it was not "
+                "applied. Nothing was altered — run it again."
+            )
 
         await db.commit()
-        await db.refresh(source)
-        return source
+        await db.refresh(live)
+        return live
 
     @classmethod
-    async def _check_gates(cls, db: AsyncSession, lst: List, target: Column) -> None:
-        """`required` and `unique`, which the backfill deliberately did not enforce.
+    async def _check_gates(
+        cls, db: AsyncSession, lst: List, config: dict, key: str
+    ) -> None:
+        """`required` and `unique`, which the pass deliberately did not enforce.
 
         Per cell they would be the wrong question: a blank source cell is ordinary,
         and a duplicate only matters once the column is real. Here they are exactly
-        right, because this is the moment the column becomes part of the list.
+        right, because this is the moment it becomes part of the list — and because
+        this runs inside the transaction, a failure leaves nothing behind at all.
         """
-        config = target.config or {}
-        key = str(target.uuid)
         params = {"lid": lst.id, "key": key}
 
         if config.get("required"):
@@ -422,82 +583,3 @@ class ConversionService:
                     f"{duplicated:,} value(s) would appear more than once in a "
                     "unique column."
                 )
-
-    @staticmethod
-    async def _swap_values(
-        db: AsyncSession, list_id: int, skey: str, tkey: str
-    ) -> None:
-        """Exchange two keys' values in every record, in committed chunks.
-
-        Iterated by primary key rather than by a predicate that stops matching: a
-        swap is its own inverse, so a statement that re-ran over a row it had
-        already touched would put the data back. Every row is visited exactly once.
-        """
-        swap = sa.text(
-            "data || jsonb_build_object(:skey, data -> :tkey, :tkey, data -> :skey)"
-        ).bindparams(skey=skey, tkey=tkey)
-
-        after = 0
-        while True:
-            ids = (
-                await db.execute(
-                    select(ListItem.id)
-                    .where(ListItem.list_id == list_id, ListItem.id > after)
-                    .order_by(ListItem.id)
-                    .limit(CHUNK)
-                )
-            ).scalars().all()
-            if not ids:
-                return
-            after = ids[-1]
-            await db.execute(
-                sa.update(ListItem).where(ListItem.id.in_(ids)).values(data=swap)
-            )
-            await db.commit()
-
-    # -- 3. abandon ------------------------------------------------------
-
-    @classmethod
-    async def abandon(
-        cls, db: AsyncSession, lst: List, source: Column, target_uuid: Union[str, UUID]
-    ) -> bool:
-        """Throw the scratch column away, values and all.
-
-        Hard delete rather than the bin: nothing ever saw this column, so there is
-        nothing to restore and no reason to make someone empty a bin of work they
-        already decided against.
-        """
-        target = await ColumnService.get_including_hidden(db, lst.id, target_uuid)
-        if target is None or not target.hidden:
-            return False
-        if (target.config or {}).get(CONVERSION_OF) != str(source.uuid):
-            return False
-
-        key = str(target.uuid)
-        after = 0
-        while True:
-            ids = (
-                await db.execute(
-                    select(ListItem.id)
-                    .where(
-                        ListItem.list_id == lst.id,
-                        ListItem.id > after,
-                        ListItem.data.has_key(key),  # noqa: W601 — JSONB `?`
-                    )
-                    .order_by(ListItem.id)
-                    .limit(CHUNK)
-                )
-            ).scalars().all()
-            if not ids:
-                break
-            after = ids[-1]
-            await db.execute(
-                sa.update(ListItem)
-                .where(ListItem.id.in_(ids))
-                .values(data=sa.text("data - :key").bindparams(key=key))
-            )
-            await db.commit()
-
-        await db.delete(target)
-        await db.commit()
-        return True

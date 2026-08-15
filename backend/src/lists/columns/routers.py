@@ -38,7 +38,7 @@ from .schemas import (
     ColumnRead,
     ColumnUpdate,
     ConversionReport,
-    ConversionStart,
+    ConversionRequest,
     LookupOption,
     RecomputeReport,
     RestoredColumnRead,
@@ -233,36 +233,39 @@ async def _column_or_404(db, lst: List, uuid: UUID) -> Column:
 
 
 @router.post("/{uuid}/convert", response_model=ConversionReport)
-async def start_conversion(
+async def preview_conversion(
     uuid: UUID,
-    payload: ConversionStart,
+    payload: ConversionRequest,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Convert this column's values into a new column of another type — or copy them.
+    """Report what converting this column would do. **Writes nothing.**
 
-    Changes **nothing** about the list. The converted values land in a hidden column
-    that no view, filter, form or formula can see, and the report says what did and
-    did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
-    away with `DELETE` — the column keeps working normally either way until then.
+    A dry run: every cell is converted in memory and counted, and the report says
+    what did and did not come through. No column is created, no value is stored and
+    nothing is reserved -- so walking away costs nothing, and there is no in-flight
+    state left to block the next attempt.
+
+    Apply it by POSTing the same body, with the `config` this returns, to
+    `convert/apply`. The two calls deliberately share no server-side handle: that
+    is what stops a record written between them from being reverted or blanked.
 
     Two endings, chosen here by whether a `name` is supplied:
 
-    - **Without a name — a conversion.** Committing retypes *this* column, keeping
+    - **Without a name -- a conversion.** Applying retypes *this* column, keeping
       its uuid, so nothing referring to it needs changing, and the original values
-      go to the bin.
-    - **With a name — a duplicate.** Committing makes the new column live beside
-      this one and leaves this one untouched. Since the values already sit under the
-      new column's own key, that commit rewrites no records at all. The type may be
-      the same as the source's, which is a straight copy.
+      go to the bin as `<name>__before_conversion`.
+    - **With a name -- a duplicate.** Applying adds the new column beside this one
+      and leaves this one untouched. The type may be the same as the source's,
+      which is a straight copy.
     """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     column = await _column_or_404(db, lst, uuid)
     try:
-        return await ConversionService.start(
+        return await ConversionService.preview(
             db,
             lst,
             column,
@@ -278,59 +281,53 @@ async def start_conversion(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
-@router.post("/{uuid}/convert/{target_uuid}", response_model=ColumnRead)
-async def commit_conversion(
+@router.post("/{uuid}/convert/apply", response_model=ColumnRead)
+async def apply_conversion(
     uuid: UUID,
-    target_uuid: UUID,
+    payload: ConversionRequest,
     lst: List = Depends(get_list_or_404),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Make the converted values real. The point of no return.
+    """Do it. The point of no return, and a single transaction.
 
-    For a conversion this swaps them in and retypes the column; the original values
-    are not destroyed but land in a binned column named `<name>__before_conversion`,
-    restorable for the usual retention window. For a **duplicate** it only makes the
-    new column visible — the source is untouched and no record is rewritten.
+    Reads, converts, writes and retypes in one go, so there is never a moment when
+    the column's declared type and its stored values disagree, and no window in
+    which a record somebody else writes can be reverted or blanked. For a
+    conversion the original values land in a binned column named
+    `<name>__before_conversion`, restorable for the usual retention window; for a
+    **duplicate** the source is untouched.
 
-    `required` and `unique` are checked here rather than during the backfill, for
-    both endings — per cell they are the wrong question, since a blank source cell is
-    ordinary and a repeat only matters once the column is real. A failure here leaves
-    the conversion in progress, so it can be fixed and committed again.
+    Send the `config` the preview returned rather than the one you sent it. For
+    `text` -> `choice` the preview mints the options from the source's distinct
+    values, and re-deriving them here would quietly answer a different question
+    than the one that was on screen.
+
+    Two ways this refuses, both leaving the list exactly as it was. `required` and
+    `unique` are checked once the values are in place -- per cell they would be the
+    wrong question, since a blank source cell is ordinary. And if any record on this
+    list was written while the conversion was running, it refuses rather than finish
+    over the top of it; nothing was committed, so running it again is safe.
     """
     await PermissionService.require(
         db, current_user, ResourceType.list, lst.id, Action.configure
     )
     column = await _column_or_404(db, lst, uuid)
     try:
-        return await ConversionService.commit(db, lst, column, target_uuid)
+        return await ConversionService.apply(
+            db,
+            lst,
+            column,
+            payload.type,
+            payload.config,
+            current_user,
+            name=payload.name,
+            display_name=payload.display_name,
+        )
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    except ValidationError as exc:
+    except (ValidationError, UnknownReferenceError) as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-
-@router.delete("/{uuid}/convert/{target_uuid}", status_code=status.HTTP_204_NO_CONTENT)
-async def abandon_conversion(
-    uuid: UUID,
-    target_uuid: UUID,
-    lst: List = Depends(get_list_or_404),
-    db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """Throw an in-progress conversion away, values and all.
-
-    A hard delete rather than the bin: nothing ever saw this column, so there is
-    nothing worth restoring.
-    """
-    await PermissionService.require(
-        db, current_user, ResourceType.list, lst.id, Action.configure
-    )
-    column = await _column_or_404(db, lst, uuid)
-    if not await ConversionService.abandon(db, lst, column, target_uuid):
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="No such conversion"
-        )
 
 
 @router.patch("/{uuid}", response_model=ColumnRead)

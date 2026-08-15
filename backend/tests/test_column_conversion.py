@@ -1,16 +1,23 @@
 """Changing a column's type after it holds records.
 
-The design in one line: convert into a hidden column, let a person read the report,
-then swap. So most of what these tests pin is what *does not* happen — the list is
-unchanged until the commit, and the commit changes nothing except the column's type
-and its values.
+The design in one line: preview it without writing anything, then do the whole thing
+in one transaction. So most of what these tests pin is what *does not* happen — the
+preview leaves no trace at all, and the apply changes nothing except the column's type
+and its values, or nothing whatsoever if it refuses.
+
+This used to be a two-call design that staged the work in a hidden column, and the
+gap between the calls was wide enough for a person to read a report in. A record
+created in that gap was blanked and a record edited in it was reverted, both silently.
+The tests that pinned the machinery of that design — the invisible scratch column, the
+409 on a second start, the cleanup on abandon — are gone with it, replaced by the ones
+under "the preview writes nothing" and "records written during the apply".
 """
 from contextlib import asynccontextmanager
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from main import create_app
 from src.auth.dependencies import get_current_user
@@ -57,7 +64,38 @@ async def _add_rows(client, list_uuid, col, values):
 
 
 async def _convert(client, list_uuid, col, **body):
+    """The dry run. Writes nothing; returns the report."""
     return await client.post(f"/api/lists/{list_uuid}/columns/{col}/convert", json=body)
+
+
+async def _apply(client, list_uuid, col, report, **extra):
+    """Ask for the conversion the report describes.
+
+    The two calls share no server-side handle — that is the whole point of the
+    design — so this one carries everything it needs. It sends the report's
+    *resolved* config rather than whatever was originally typed, because for
+    `text` -> `choice` the preview mints options from the source's distinct values
+    and the apply has to be asking the same question the person read.
+    """
+    body = {
+        "type": report["new_type"],
+        "config": report["config"],
+        "name": report["name"],
+        "display_name": report["display_name"],
+        **extra,
+    }
+    return await client.post(
+        f"/api/lists/{list_uuid}/columns/{col}/convert/apply", json=body
+    )
+
+
+async def _hidden_columns(session_factory):
+    """Nothing may ever be hidden again — the staged design was the only thing that
+    set it, and a stranded hidden column was one of the four bugs this replaced."""
+    async with session_factory() as db:
+        return (
+            await db.execute(select(Column).where(Column.hidden.is_(True)))
+        ).scalars().all()
 
 
 async def _stored(session_factory, key):
@@ -76,9 +114,7 @@ async def test_text_to_number(client, list_uuid, add_column):
     report = (await _convert(client, list_uuid, col, type="number")).json()
     assert (report["converted"], report["failed"]) == (3, 0)
 
-    resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    resp = await _apply(client, list_uuid, col, report)
     assert resp.status_code == 200, resp.text
     assert resp.json()["type"] == "number"
     assert resp.json()["uuid"] == col  # same column, not a replacement
@@ -91,9 +127,7 @@ async def test_number_to_text(client, list_uuid, add_column):
     await _add_rows(client, list_uuid, col, [5, 12])
 
     report = (await _convert(client, list_uuid, col, type="text")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert sorted(r["data"][col] for r in await _rows(client, list_uuid)) == ["12", "5"]
 
 
@@ -111,9 +145,7 @@ async def test_choice_to_text_keeps_every_label(client, list_uuid, add_column):
 
     report = (await _convert(client, list_uuid, col, type="text")).json()
     assert report["failed"] == 0
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert sorted(r["data"][col] for r in await _rows(client, list_uuid)) == [
         "Done",
         "Todo",
@@ -131,9 +163,7 @@ async def test_text_to_choice_mints_an_option_per_distinct_value(
     assert (report["converted"], report["failed"]) == (3, 0)
 
     committed = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report)
     ).json()
     assert committed["type"] == "choice"
     assert committed["config"]["options"] == ["Done", "Todo"]  # distinct, ordered
@@ -176,9 +206,7 @@ async def test_text_to_choice_keeps_stray_values_when_others_are_allowed(
     ).json()
     assert (report["converted"], report["failed"]) == (2, 0)
 
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert sorted(r["data"][col] for r in await _rows(client, list_uuid)) == [
         "Nonsense",
         "Todo",
@@ -191,9 +219,7 @@ async def test_text_to_date(client, list_uuid, add_column):
 
     report = (await _convert(client, list_uuid, col, type="date")).json()
     assert report["failed"] == 0
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert (await _rows(client, list_uuid))[0]["data"][col] == "2026-05-04"
 
 
@@ -204,9 +230,7 @@ async def test_date_widens_to_datetime_without_a_text_round_trip(
     await _add_rows(client, list_uuid, col, ["2026-05-04"])
 
     report = (await _convert(client, list_uuid, col, type="datetime")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert (await _rows(client, list_uuid))[0]["data"][col] == "2026-05-04T00:00:00"
 
 
@@ -215,9 +239,7 @@ async def test_datetime_truncates_to_date(client, list_uuid, add_column):
     await _add_rows(client, list_uuid, col, ["2026-05-04T13:22:00"])
 
     report = (await _convert(client, list_uuid, col, type="date")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert (await _rows(client, list_uuid))[0]["data"][col] == "2026-05-04"
 
 
@@ -240,9 +262,7 @@ async def test_user_column_to_text_writes_usernames(
 
     report = (await _convert(client, list_uuid, col, type="text")).json()
     assert (report["converted"], report["failed"]) == (1, 0)
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     assert (await _rows(client, list_uuid))[0]["data"][col] == "rosa"
 
 
@@ -264,9 +284,7 @@ async def test_text_to_user_resolves_the_username_back_to_a_uuid(
     assert resp.status_code == 200, resp.text
     report = resp.json()
     assert (report["converted"], report["failed"]) == (1, 1)
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     values = [r["data"].get(col) for r in await _rows(client, list_uuid)]
     assert sorted(values, key=lambda v: v or "") == [None, rosa]
 
@@ -307,12 +325,11 @@ async def test_a_lookup_is_refused_when_its_target_cannot_be_read(
     )
     await _add_rows(client, list_uuid, lookup, [row])
 
-    # The owner can read the target, so for them it converts to the label.
+    # The owner can read the target, so for them it converts to the label. Nothing
+    # to throw away afterwards — the preview wrote nothing, so simply not applying
+    # it is the whole of "changed my mind".
     report = (await _convert(client, list_uuid, lookup, type="text")).json()
     assert report["converted"] == 1
-    await client.delete(
-        f"/api/lists/{list_uuid}/columns/{lookup}/convert/{report['target_uuid']}"
-    )
 
     # Somebody who may configure the list but not read the target is refused.
     async with session_factory() as db:
@@ -368,9 +385,7 @@ async def test_a_failed_cell_lands_empty_rather_than_wrong(
     await _add_rows(client, list_uuid, col, ["5", "n/a"])
 
     report = (await _convert(client, list_uuid, col, type="number")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
     values = sorted(
         (r["data"].get(col) is None, r["data"].get(col))
         for r in await _rows(client, list_uuid)
@@ -378,73 +393,109 @@ async def test_a_failed_cell_lands_empty_rather_than_wrong(
     assert values == [(False, 5), (True, None)]
 
 
-# -- the list is untouched until the commit -------------------------------
+# -- the preview writes nothing -------------------------------------------
+#
+# These four replace the tests that used to pin the staged design — that the hidden
+# scratch column was invisible everywhere, that a second conversion was refused while
+# one was in flight, and that abandoning cleaned up after itself. All three described
+# machinery that existed only to make a two-call conversion survivable, and all three
+# are moot now that the preview creates nothing at all. What is pinned instead is the
+# stronger property that made them unnecessary.
 
-async def test_the_scratch_column_is_invisible_everywhere(
+async def test_the_preview_writes_nothing_at_all(
     client, list_uuid, add_column, session_factory
 ):
-    """It exists, it holds converted values, and no reader may see either."""
+    """No column, no value, no state of any kind.
+
+    The old design staged the work in a hidden column, which is what made a record
+    written afterwards get lost. The preview leaves nothing behind for anything to
+    be lost *into*."""
     col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
     await _add_rows(client, list_uuid, col, ["5"])
-    report = (await _convert(client, list_uuid, col, type="number")).json()
-    target = report["target_uuid"]
 
-    columns = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
-    assert col in [c["uuid"] for c in columns]
-    assert target not in [c["uuid"] for c in columns]  # not in the list's shape
-
-    assert (
-        await client.get(f"/api/lists/{list_uuid}/columns/{target}")
-    ).status_code == 404
-
-    assert target not in (await _rows(client, list_uuid))[0]["data"]  # not in records
-
-    csv = (
-        await client.post(f"/api/lists/{list_uuid}/export", json={"format": "csv"})
-    ).text
-    assert "converting" not in csv
-
-    # But it is really there, holding the converted value.
+    before = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
     async with session_factory() as db:
-        scratch = (
-            await db.execute(select(Column).where(Column.hidden.is_(True)))
-        ).scalars().one()
-        assert str(scratch.uuid) == target
-    assert await _stored(session_factory, target) == [5]
+        rows_before = (await db.execute(select(ListItem.data))).scalars().all()
 
-
-async def test_a_second_conversion_is_refused_while_one_is_in_flight(
-    client, list_uuid, add_column
-):
-    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
-    await _add_rows(client, list_uuid, col, ["5"])
-    assert (await _convert(client, list_uuid, col, type="number")).status_code == 200
-    second = await _convert(client, list_uuid, col, type="date")
-    assert second.status_code == 409
-    assert "already has a conversion" in second.json()["detail"]
-
-
-async def test_abandoning_leaves_no_trace(
-    client, list_uuid, add_column, session_factory
-):
-    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
-    await _add_rows(client, list_uuid, col, ["5"])
     report = (await _convert(client, list_uuid, col, type="number")).json()
-    target = report["target_uuid"]
+    assert report["converted"] == 1
 
-    resp = await client.delete(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{target}"
-    )
-    assert resp.status_code == 204
+    after = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    assert [c["uuid"] for c in after] == [c["uuid"] for c in before]
+    assert next(c for c in after if c["uuid"] == col)["type"] == "text"
 
+    # Not one row of the columns table either — a hidden column would not show up
+    # in the listing above, which is exactly how the old scratch column hid.
+    async with session_factory() as db:
+        assert len((await db.execute(select(Column))).scalars().all()) == len(before)
+    assert not await _hidden_columns(session_factory)
+
+    # And every record is byte-for-byte what it was: the value unconverted, and no
+    # second key written beside it.
     async with session_factory() as db:
         assert (
-            await db.execute(select(Column).where(Column.hidden.is_(True)))
-        ).scalars().first() is None
-    assert await _stored(session_factory, target) == [None]  # key gone from the record
+            await db.execute(select(ListItem.data))
+        ).scalars().all() == rows_before
 
-    # And the column is free to be converted again.
+
+async def test_previewing_twice_is_fine(client, list_uuid, add_column):
+    """There is no in-flight state, so there is nothing to conflict with.
+
+    The staged design refused a second `start` with a 409 naming a scratch column
+    the person had never seen — and could not clear it, because abandoning needed a
+    `target_uuid` that only the first response carried. Previewing is now just a
+    question, and asking it twice is allowed, including with a different answer in
+    mind."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
     assert (await _convert(client, list_uuid, col, type="number")).status_code == 200
+    assert (await _convert(client, list_uuid, col, type="number")).status_code == 200
+    # Including changing your mind about the target type, which under the old design
+    # meant first finding and abandoning a conversion you could not name.
+    assert (await _convert(client, list_uuid, col, type="date")).status_code == 200
+    assert (await _convert(client, list_uuid, col, type="number")).status_code == 200
+
+
+async def test_walking_away_from_a_preview_leaves_no_trace(
+    client, list_uuid, add_column, session_factory
+):
+    """The replacement for "abandoning leaves no trace": there is nothing to abandon.
+
+    Not applying a preview is simply not making the second call, so the column stays
+    convertible and no cleanup route has to exist for anyone to find."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    await _convert(client, list_uuid, col, type="number")
+
+    assert not await _hidden_columns(session_factory)
+    assert await _stored(session_factory, col) == ["5"]
+
+    # And it converts normally afterwards.
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    assert (await _apply(client, list_uuid, col, report)).status_code == 200
+
+
+async def test_nothing_is_ever_hidden_any_more(
+    client, list_uuid, add_column, session_factory
+):
+    """`Column.hidden` was set by exactly one thing, and that thing is gone.
+
+    The primitive stays — `drop_conversion_scratch` needs it to find rows the old
+    design stranded — but nothing in the conversion path may set it again. A hidden
+    column is unreachable by construction: no reader sees it and no code path will
+    ever finish it."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    assert not await _hidden_columns(session_factory)
+    await _apply(client, list_uuid, col, report)
+    assert not await _hidden_columns(session_factory)
+
+    dup = (await _convert(client, list_uuid, col, type="text", name="copy")).json()
+    await _apply(client, list_uuid, col, dup, name="copy")
+    assert not await _hidden_columns(session_factory)
 
 
 # -- what the cutover must not disturb ------------------------------------
@@ -473,9 +524,7 @@ async def test_a_view_filtering_on_the_column_survives_the_cutover(
     )
 
     report = (await _convert(client, list_uuid, col, type="number")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
 
     rows = (
         await client.get(f"/api/lists/{list_uuid}/items/?view_uuid={view}")
@@ -499,9 +548,7 @@ async def test_a_calculated_column_referring_to_it_survives_the_cutover(
     await _add_rows(client, list_uuid, col, ["5"])
 
     report = (await _convert(client, list_uuid, col, type="number")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
 
     row = (await _rows(client, list_uuid))[0]
     assert row["data"][col] == 5
@@ -517,9 +564,7 @@ async def test_the_original_values_are_recoverable_from_the_bin(
     await _add_rows(client, list_uuid, col, ["5", "n/a"])
 
     report = (await _convert(client, list_uuid, col, type="number")).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report)
 
     binned = (await client.get(f"/api/lists/{list_uuid}/columns/deleted")).json()
     assert [b["name"] for b in binned] == ["qty__before_conversion"]
@@ -551,9 +596,7 @@ async def test_required_is_checked_at_the_cutover_not_per_cell(
     assert (report["converted"], report["failed"]) == (1, 1)
 
     # ...but the cutover refuses to make a required column with a hole in it.
-    resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    resp = await _apply(client, list_uuid, col, report)
     assert resp.status_code == 409
     assert "required" in resp.json()["detail"]
 
@@ -572,9 +615,7 @@ async def test_unique_is_checked_at_the_cutover(client, list_uuid, add_column):
     ).json()
     assert report["failed"] == 0  # duplicates are not a per-cell problem
 
-    resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    resp = await _apply(client, list_uuid, col, report)
     assert resp.status_code == 409
     assert "more than once" in resp.json()["detail"]
 
@@ -603,9 +644,7 @@ async def test_naming_it_duplicates_instead_of_converting(
     assert (report["converted"], report["failed"]) == (2, 0)
 
     created = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report, name="qty_number")
     ).json()
     assert created["name"] == "qty_number"
     assert created["display_name"] == "Qty (number)"
@@ -647,9 +686,7 @@ async def test_a_same_type_duplicate_is_a_straight_copy(client, list_uuid, add_c
     assert (report["converted"], report["failed"]) == (2, 0)
 
     created = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report, name="stage_copy")
     ).json()
     assert created["config"]["options"] == ["Todo", "Done"]
     rows = await _rows(client, list_uuid)
@@ -703,9 +740,7 @@ async def test_duplicating_a_lookup_carries_its_target(
     assert (report["converted"], report["failed"]) == (1, 0)
 
     created = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report, name="school_copy")
     ).json()
     assert created["config"]["target_list_uuid"] == target
     # Same row uuid under both columns — a lookup copy is a straight JSONB copy.
@@ -727,9 +762,7 @@ async def test_a_duplicate_joins_the_list_in_creation_order(
     report = (
         await _convert(client, list_uuid, col, type="text", name="qty_copy")
     ).json()
-    await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    await _apply(client, list_uuid, col, report, name="qty_copy")
 
     names = [
         c["name"] for c in (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
@@ -740,8 +773,13 @@ async def test_a_duplicate_joins_the_list_in_creation_order(
 async def test_a_duplicate_cannot_take_a_name_already_in_use(
     client, list_uuid, add_column
 ):
-    """Checked before the backfill runs, not after: a conversion that succeeds and
-    then cannot be named would throw the work away for a reason known up front."""
+    """Reported by the preview as well as refused by the apply.
+
+    The preview cannot *reserve* the name — it creates nothing — so this check is a
+    courtesy rather than the guard: it means somebody reads "that name is taken"
+    instead of reading a report and only then being refused. The real guard is the
+    partial unique index, via the IntegrityError the apply catches, since nothing
+    here can stop the name being taken in between."""
     col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
     await add_column(list_uuid, name="taken", display_name="Taken", type="text")
     await _add_rows(client, list_uuid, col, ["5"])
@@ -750,21 +788,39 @@ async def test_a_duplicate_cannot_take_a_name_already_in_use(
     assert resp.status_code == 409
     assert "already exists" in resp.json()["detail"]
 
+    # And again at the apply, which is the one that actually holds the line.
+    report = (
+        await _convert(client, list_uuid, col, type="text", name="free")
+    ).json()
+    await add_column(list_uuid, name="free", display_name="Free", type="text")
+    late = await _apply(client, list_uuid, col, report)
+    assert late.status_code == 409, late.text
 
-async def test_the_reserved_name_is_released_when_a_duplicate_is_abandoned(
+
+async def test_a_previewed_duplicate_does_not_reserve_its_name(
     client, list_uuid, add_column
 ):
+    """Replaces "the reserved name is released when a duplicate is abandoned".
+
+    There is nothing to release, because nothing is taken: the staged design held
+    the name against the unique index from the moment the report was built, which is
+    what made releasing it a thing that had to be got right. Previewing the same
+    duplicate twice is fine, and an ordinary column may still take the name in
+    between — the last of those being the point, since a name held by a report
+    nobody applied was a name nobody could use and nobody could see was held."""
     col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
     await _add_rows(client, list_uuid, col, ["5"])
 
-    report = (
-        await _convert(client, list_uuid, col, type="text", name="qty_copy")
-    ).json()
-    await client.delete(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
+    first = await _convert(client, list_uuid, col, type="text", name="qty_copy")
+    assert first.status_code == 200, first.text
+    second = await _convert(client, list_uuid, col, type="text", name="qty_copy")
+    assert second.status_code == 200, second.text
+
+    ordinary = await client.post(
+        f"/api/lists/{list_uuid}/columns/",
+        json={"name": "qty_copy", "display_name": "Qty copy", "type": "text"},
     )
-    again = await _convert(client, list_uuid, col, type="text", name="qty_copy")
-    assert again.status_code == 200, again.text
+    assert ordinary.status_code == 201, ordinary.text
 
 
 async def test_a_display_name_without_a_name_is_refused(client, list_uuid, add_column):
@@ -791,9 +847,7 @@ async def test_a_duplicate_still_obeys_the_cutover_gates(client, list_uuid, add_
             config={"unique": True},
         )
     ).json()
-    resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-    )
+    resp = await _apply(client, list_uuid, col, report, name="qty_number")
     assert resp.status_code == 409
     assert "more than once" in resp.json()["detail"]
 
@@ -883,9 +937,7 @@ async def test_the_dialogs_blank_choices_string_still_mints(
         await _convert(client, list_uuid, col, type="choice", config={"choices": ""})
     ).json()
     committed = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report)
     ).json()
     assert committed["config"]["options"] == ["Done", "Todo"]
 
@@ -905,9 +957,7 @@ async def test_the_dialogs_choices_shorthand_is_not_overwritten_by_minting(
     ).json()
     assert (report["converted"], report["failed"]) == (1, 1)
     committed = (
-        await client.post(
-            f"/api/lists/{list_uuid}/columns/{col}/convert/{report['target_uuid']}"
-        )
+        await _apply(client, list_uuid, col, report)
     ).json()
     assert committed["config"]["options"] == ["Todo", "Done"]
 
@@ -943,3 +993,245 @@ async def test_converting_to_calculated_is_refused(client, list_uuid, add_column
     )
     assert resp.status_code == 400
     assert "stores no value" in resp.json()["detail"]
+
+
+# -- records written while the conversion runs ----------------------------
+#
+# The bug this design replaced, pinned from every side. Under the staged version a
+# record created between the report and the commit was blanked — the swap wrote JSON
+# null over the live key — and a record edited in that window was reverted to whatever
+# the backfill had computed beforehand. Both were silent, and both were reported as a
+# successful conversion.
+#
+# There is no such window now, so what these pin is the property that replaced it:
+# writing between the two calls is ordinary editing and survives, because the apply
+# reads the records as they are rather than trusting anything the preview saw.
+
+
+async def test_a_record_created_between_the_preview_and_the_apply_keeps_its_value(
+    client, list_uuid, add_column
+):
+    """The exact shape of the old data loss. The record is created after the report,
+    so the staged design had nothing for it under the target key and the swap wrote a
+    null over the value the person had just typed."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    assert report["converted"] == 1  # the report only ever saw the first record
+
+    await _add_rows(client, list_uuid, col, ["7"])
+    resp = await _apply(client, list_uuid, col, report)
+    assert resp.status_code == 200, resp.text
+
+    assert sorted(r["data"][col] for r in await _rows(client, list_uuid)) == [5, 7]
+
+
+async def test_a_record_edited_between_the_preview_and_the_apply_keeps_the_edit(
+    client, list_uuid, add_column
+):
+    """The other half: the staged design held a *stale* value under the target key and
+    installed it, quietly undoing the edit."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "5"}}
+    )
+    item = created.json()["uuid"]
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+
+    await client.patch(
+        f"/api/lists/{list_uuid}/items/{item}", json={"data": {col: "9"}}
+    )
+    assert (await _apply(client, list_uuid, col, report)).status_code == 200
+    assert [r["data"][col] for r in await _rows(client, list_uuid)] == [9]
+
+
+async def test_a_cell_cleared_between_the_preview_and_the_apply_stays_cleared(
+    client, list_uuid, add_column
+):
+    """An emptied cell is a write like any other, and the swap used to resurrect it
+    from the backfill's copy."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    created = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {col: "5"}}
+    )
+    item = created.json()["uuid"]
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    await client.patch(
+        f"/api/lists/{list_uuid}/items/{item}", json={"data": {col: None}}
+    )
+
+    assert (await _apply(client, list_uuid, col, report)).status_code == 200
+    assert (await _rows(client, list_uuid))[0]["data"].get(col) is None
+
+
+async def test_a_duplicate_also_sees_records_added_after_its_report(
+    client, list_uuid, add_column
+):
+    """The duplicate path had the same hole — it published a copy missing exactly the
+    rows and edits made while its report was on screen — and it is closed by the same
+    single transaction rather than by a second mechanism."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+
+    report = (
+        await _convert(client, list_uuid, col, type="number", name="qty_number")
+    ).json()
+    await _add_rows(client, list_uuid, col, ["7"])
+
+    created = (await _apply(client, list_uuid, col, report)).json()
+    copy = created["uuid"]
+    rows = await _rows(client, list_uuid)
+    assert sorted(r["data"][copy] for r in rows) == [5, 7]
+    assert sorted(r["data"][col] for r in rows) == ["5", "7"]  # source untouched
+
+
+async def test_an_empty_cell_gains_no_key_under_either_column(
+    client, list_uuid, add_column, session_factory
+):
+    """The swap built its result with `jsonb_build_object`, and `->` on an absent key
+    yields SQL NULL, which becomes an explicit `{"k": null}` rather than no key at
+    all — so every record with an empty cell came out of a conversion carrying two
+    JSON nulls it did not have before. Writing only the keys there are values for
+    ends that."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    assert (report["converted"], report["failed"]) == (0, 0)
+    assert (await _apply(client, list_uuid, col, report)).status_code == 200
+
+    async with session_factory() as db:
+        data = (await db.execute(select(ListItem.data))).scalars().one()
+    assert col not in data
+    assert all(value is not None for value in data.values())
+
+
+async def test_a_failed_gate_leaves_absolutely_nothing_behind(
+    client, list_uuid, add_column, session_factory
+):
+    """`required` and `unique` are still cutover gates, but failing one is free now.
+
+    The staged design left the conversion in progress — a hidden column full of
+    converted values, and a 409 waiting for the next attempt. Everything is one
+    transaction now, so a refused gate rolls the whole thing back: no backup column,
+    no retype, no hidden anything."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+
+    before = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    report = (
+        await _convert(client, list_uuid, col, type="number", config={"required": True})
+    ).json()
+    resp = await _apply(client, list_uuid, col, report)
+    assert resp.status_code == 409, resp.text
+    assert "required" in resp.json()["detail"]
+
+    after = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    assert [c["uuid"] for c in after] == [c["uuid"] for c in before]
+    assert next(c for c in after if c["uuid"] == col)["type"] == "text"
+    assert not await _hidden_columns(session_factory)
+    async with session_factory() as db:
+        assert (
+            await db.execute(
+                select(Column).where(Column.name.like("%__before_conversion"))
+            )
+        ).scalars().first() is None
+
+
+async def test_the_original_values_are_recoverable_after_a_conversion(
+    client, list_uuid, add_column, session_factory
+):
+    """The undo the key swap used to provide, provided by writing two keys instead:
+    the backup column is binned, carries the *old* type, and holds what was there."""
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    await _apply(client, list_uuid, col, report)
+
+    async with session_factory() as db:
+        backup = (
+            await db.execute(
+                select(Column).where(Column.name == "qty__before_conversion")
+            )
+        ).scalars().one()
+        assert backup.deleted_at is not None  # in the bin
+        assert backup.type.value == "text"  # the old type
+        backup_uuid = str(backup.uuid)
+    assert await _stored(session_factory, backup_uuid) == ["5"]
+
+
+async def test_a_write_landing_during_the_apply_refuses_the_whole_conversion(
+    client, list_uuid, add_column, session_factory, monkeypatch
+):
+    """The last guard, and the only one that cannot be reached through the API.
+
+    Everything above closes the *human-scale* window, which is the one that mattered.
+    What is left is a sub-second one: under READ COMMITTED a write can commit after
+    the pass has read a row and before the transaction ends, and that row would then
+    be converted from a value nobody has any more. `_fingerprint` reads the list's
+    row count and newest `updated_at` before and after; if either moved, the whole
+    thing rolls back.
+
+    Driving that through the ASGI client does not work — httpx serializes the
+    requests — so the concurrent write is injected into the pass itself from a second
+    session, which is the same trick `test_unique_concurrency` uses for the same
+    reason. Note it has to be a *committed* write from another connection: our own
+    writes go through raw SQL precisely so they do not stamp `updated_at` and trip
+    this check on themselves.
+
+    It is an INSERT rather than an UPDATE, for two reasons. It is the dangerous case
+    — a record created mid-apply holds a value the pass never saw and would come out
+    the far side unconverted under a column that has just been retyped. And an UPDATE
+    would simply hang: the pass has already written those rows, so a second connection
+    touching them blocks on locks this transaction will not release until it finishes
+    waiting for that very statement.
+    """
+    from src.lists.columns.conversion_service import ConversionService
+
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+
+    original = ConversionService._run.__func__
+
+    async def _run_then_interfere(cls, db, lst, source, target, user, keys):
+        result = await original(cls, db, lst, source, target, user, keys=keys)
+        if keys is not None:  # the writing pass, not a dry run
+            async with session_factory() as other:
+                await other.execute(
+                    text(
+                        "INSERT INTO list_items "
+                        "  (uuid, list_id, data, created_at, updated_at) "
+                        "VALUES (gen_random_uuid(), :lid, '{}'::jsonb, now(), now())"
+                    ),
+                    {"lid": lst.id},
+                )
+                await other.commit()
+        return result
+
+    monkeypatch.setattr(
+        ConversionService, "_run", classmethod(_run_then_interfere)
+    )
+
+    resp = await _apply(client, list_uuid, col, report)
+    assert resp.status_code == 409, resp.text
+    assert "changed while the conversion was running" in resp.json()["detail"]
+
+    # Nothing the conversion did survived: the column is still text, and the value is
+    # still the *string* rather than the number it was converting to. (The row the
+    # interference inserted is legitimately still there — it was committed by another
+    # connection and is nothing to do with the rollback, which is why this asserts on
+    # the original cell rather than on the whole list.)
+    columns = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    assert next(c for c in columns if c["uuid"] == col)["type"] == "text"
+    assert await _stored(session_factory, col) == ["5", None]
+    assert not await _hidden_columns(session_factory)
+    async with session_factory() as db:
+        assert (
+            await db.execute(
+                select(Column).where(Column.name.like("%__before_conversion"))
+            )
+        ).scalars().first() is None

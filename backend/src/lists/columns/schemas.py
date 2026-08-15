@@ -147,7 +147,7 @@ class LookupOption(BaseModel):
     archived: bool = False
 
 
-class ConversionStart(BaseModel):
+class ConversionRequest(BaseModel):
     """The column to convert *into*: a type, and that type's settings.
 
     The config is validated from scratch against the new type rather than merged
@@ -157,10 +157,15 @@ class ConversionStart(BaseModel):
     distinct value in the source.
 
     **Naming it makes it a duplicate.** With a `name`, the new column goes live
-    *beside* the source when committed rather than replacing it, and the source is
-    left exactly as it was — so this is equally "copy this column" and "copy it,
-    converting on the way". Without a `name` it is a conversion, and the column
-    keeps the source's identity.
+    *beside* the source rather than replacing it, and the source is left exactly as
+    it was — so this is equally "copy this column" and "copy it, converting on the
+    way". Without a `name` it is a conversion, and the column keeps the source's
+    identity.
+
+    The same body serves both the preview and the apply, which is what makes the
+    second call able to stand alone: there is no server-side handle tying them
+    together, so the apply carries everything it needs. Send the preview's resolved
+    `config` back rather than the one originally typed — see `ConversionReport`.
     """
 
     type: ColumnType
@@ -186,20 +191,33 @@ class ConversionFailure(BaseModel):
 
 
 class ConversionReport(BaseModel):
-    """What a backfill did, for a person to read before committing to it.
+    """What a conversion *would* do, for a person to read before asking for it.
 
-    Nothing about the list has changed at this point: the values live in a hidden
-    column that no view, filter, form or formula can see. Committing swaps them in;
-    abandoning throws them away.
+    Nothing has happened at this point and nothing is reserved: the preview writes
+    no values and creates no column, so closing the dialog costs nothing and leaves
+    nothing behind. The counts are a dry run over live data and may be stale by the
+    time anyone acts on them — `apply` re-derives everything and refuses if the
+    records moved, rather than trusting this.
     """
 
-    target_uuid: UUID
-    # What the column becomes if this is committed. Echoed back rather than left
+    # What the column becomes if this is applied. Echoed back rather than left
     # to the caller to remember, so a report is readable on its own.
     new_type: ColumnType
-    # True when committing adds a column beside the source rather than replacing
-    # it — which changes what the commit means, so the report says so.
+    # True when applying adds a column beside the source rather than replacing
+    # it — which changes what applying means, so the report says so.
     duplicate: bool
+    # What the new column will be called, for a duplicate; null for a conversion,
+    # which keeps the source's name. Echoed for the same reason the config is: the
+    # apply carries no server-side handle, so everything it needs to be the same
+    # operation the report described has to come back in the report.
+    name: Optional[str] = None
+    display_name: Optional[str] = None
+    # The validated config the preview resolved, including any choice options minted
+    # from the source's distinct values. Sent back with the apply so that call is a
+    # pure function of what was actually shown: re-deriving it there would re-mint
+    # from whatever the data says at that later moment, quietly answering a
+    # different question than the one on screen.
+    config: dict
     converted: int
     failed: int
     errors: list[ConversionFailure]

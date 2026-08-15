@@ -55,27 +55,6 @@ class ColumnService:
         return result.scalars().first()
 
     @classmethod
-    async def get_including_hidden(
-        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
-    ) -> Optional[Column]:
-        """A column whether or not it is in the list's shape.
-
-        Only the conversion machinery wants this — it has to read and write the
-        scratch column it is filling, which by design no ordinary reader can see.
-        """
-        parsed = coerce_uuid(uuid)
-        if parsed is None:
-            return None
-        result = await db.execute(
-            select(Column).where(
-                Column.deleted_at.is_(None),
-                Column.list_id == list_id,
-                Column.uuid == parsed,
-            )
-        )
-        return result.scalars().first()
-
-    @classmethod
     async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Column]:
         result = await db.execute(
             cls._select(list_id).order_by(Column.position, Column.id)

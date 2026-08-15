@@ -12,9 +12,11 @@ operations then make those same bytes renderable as HTML:
 
 - `ColumnService.update` turning `text_mode` on, which the column dialog offers for an
   existing column; and
-- `ConversionService.commit`, which retypes a column into the conversion's target config
+- `ConversionService.apply`, which retypes a column into the conversion's target config
   (`text -> text` is a supported pair, so the target may simply be the rich version of
-  the same column) over values the backfill wrote without ever sanitising them.
+  the same column) over values the conversion pass wrote without ever sanitising them.
+  It calls this inside its own transaction, so the column never reads as rich while an
+  unsanitised value is still stored.
 
 Neither rewrites a record, so without this the stored value stays as the plain column
 accepted it and the grid then hands it to `dangerouslySetInnerHTML`. Sanitising on
