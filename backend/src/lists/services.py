@@ -729,9 +729,16 @@ class ListService:
         # intact, because they can still be resolved and restored. A deleted list
         # cannot: every value in a lookup column pointing at it is stale at once, and
         # the permission resolver returns *no access* for a deleted resource, so those
-        # labels could not even be authorised. Restoring a list would mean
-        # un-cascading its columns, records, views and forms — a feature that does not
-        # exist. Until it does, this stays a scrub.
+        # labels could not even be authorised.
+        #
+        # The old justification — that restoring a list would mean un-cascading its
+        # children, a feature that did not exist — has expired: `restore` below does
+        # exactly that. What keeps this a scrub is the asymmetry it cannot fix. A
+        # restore brings back the list's own contents and cannot bring back what was
+        # cleared on *other* lists' records, because nothing recorded which cells those
+        # were. Since the values are unrecoverable either way, the referencing column's
+        # config goes with them rather than being left pointing at a list that may
+        # never come back (see `_scrub_references_to_lists`).
         await cls._scrub_references_to_lists(db, [lst.uuid])
         await db.commit()
         return True
@@ -778,14 +785,37 @@ class ListService:
     async def _scrub_references_to_lists(
         cls, db: AsyncSession, list_uuids: Sequence[UUID]
     ) -> None:
-        """Remove dangling lookup references to rows in now-deleted lists.
+        """Remove dangling lookup references to a now-deleted list — values *and* config.
 
         Lookup values are raw uuids stored in another row's JSONB, so deleting a
         target list leaves those pointers unresolvable but present. Since a lookup
         column targets exactly one list, deleting that list makes *every* value in
         the column stale — so drop the column's key from the referencing rows.
         Only columns on surviving lists matter (those on deleted lists are already
-        soft-deleted and thus excluded)."""
+        soft-deleted and thus excluded).
+
+        **The column's own config is cleared with them, and for a long time it was
+        not.** Emptying the cells while leaving `target_list_uuid` naming a list that
+        no longer exists produced a column nothing could use and nothing could fix:
+        `lookup_options` raised, so the picker and every label resolution 404'd, and
+        `_validate_config` refused any PATCH that resent the config — which the column
+        dialog always does — so the only way out was to retarget in the same edit or
+        delete the column. The values were already gone by then, so there was nothing
+        left for the config to be pointing *at*; keeping it only preserved the
+        breakage. Cleared, the column degrades to an unconfigured lookup, which every
+        surface already knows how to render and which can simply be given a new
+        target.
+
+        The pairing and filter fields go too. They name columns *of the dead target*,
+        so they are as meaningless as the target itself — this is the same cascade
+        `ColumnService._clear_dependent_nesting` performs when a parent or filter
+        column is deleted, arriving here from the other direction.
+
+        One asymmetry to know: a list restore no longer silently re-points these
+        columns. It never restored anything usable — the cells were scrubbed at delete
+        time and the restore cannot bring them back (§6, "What is still missing") — so
+        what is lost is a column that pointed at a live list and held nothing.
+        """
         if not list_uuids:
             return
         targets = [str(u) for u in list_uuids]
@@ -812,6 +842,18 @@ class ListService:
                 )
                 .values(data=ListItem.data.op("-")(key))
             )
+            # Reassigned rather than mutated in place, so SQLAlchemy sees the JSONB
+            # change — the same rule `_clear_dependent_nesting` follows.
+            config = dict(column.config or {})
+            for field in (
+                "target_list_uuid",
+                "display_column_uuid",
+                "parent_column_uuid",
+                "target_filter_column_uuid",
+                "option_filters",
+            ):
+                config[field] = None
+            column.config = config
 
     # -- the bin: view, restore, and purge soft-deleted lists ---------------
 

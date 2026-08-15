@@ -1348,6 +1348,29 @@ stamped. What has not changed is the asymmetry that makes the scrub a real gap: 
 brings the list's own contents back and cannot bring back what was cleared on *other* lists'
 records, because nothing recorded which cells those were (gap 6, "What is still missing").
 
+**The scrub clears the referencing column's *config* as well as its values**, and for a long
+time it cleared only the values. A lookup column left naming a list that no longer exists was
+not merely stale, it was stuck: `lookup_options` raised, so the options endpoint 404'd and with
+it the picker, the record dialog and every label resolution; `_validate_config` refused any
+PATCH that resent the config, which `ColumnDialog` always does; and the dialog rendered the dead
+uuid as `…` under the hint about lists shared as lookup targets only — an explanation that was
+actively wrong. Nothing in the UI could repair it except deleting the column.
+
+`target_list_uuid` now goes, and with it `display_column_uuid`, the nesting pair and
+`option_filters`, all of which name columns *of the dead target*. The column degrades to an
+unconfigured lookup: the options endpoint answers with an empty list rather than raising (the
+same tolerance §7 already grants a dangling nesting pairing), the picker opens empty, and
+retargeting is an ordinary PATCH. Note the two absent-target cases stay distinguishable on
+purpose — a config with **no** target returns nothing, while a config naming a list that is not
+there still raises, because that means something got out of step and answering "no options"
+would hide it.
+
+Saving a target-less lookup is still refused. Clearing the config makes the column *fixable*,
+not valid, and the only sensible repairs are retargeting and deleting — both of which work.
+One consequence: a list restore no longer silently re-points these columns. It never restored
+anything usable, since the cells were scrubbed at delete time and cannot come back, so what is
+given up is a column pointing at a live list and holding nothing.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows
