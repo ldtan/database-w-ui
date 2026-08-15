@@ -180,7 +180,7 @@ export function ConversionReportDialog({
             content={
               <span className="text-sm">
                 Values that could not be converted will be <strong>empty</strong>{" "}
-                in the new column. Discard, fix them, and convert again if that is
+                in the new column. Cancel, fix them, and convert again if that is
                 not what you want.
               </span>
             }

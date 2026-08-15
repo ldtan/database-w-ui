@@ -359,8 +359,9 @@ async def test_a_lookup_is_refused_when_its_target_cannot_be_read(
 async def test_a_cell_that_will_not_convert_is_reported_not_fatal(
     client, list_uuid, add_column
 ):
-    """Best-effort, because the whole point of a scratch column is that a person
-    reads the failures while the list is still untouched."""
+    """Best-effort, because the whole point of the preview is that a person reads the
+    failures while the list is still untouched -- and it still is, since the preview
+    has written nothing at this point."""
     col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
     await _add_rows(client, list_uuid, col, ["5", "n/a", "7"])
 
@@ -1235,3 +1236,48 @@ async def test_a_write_landing_during_the_apply_refuses_the_whole_conversion(
                 select(Column).where(Column.name.like("%__before_conversion"))
             )
         ).scalars().first() is None
+
+
+async def test_an_update_during_the_apply_is_caught_by_the_timestamp_half(
+    client, list_uuid, add_column, session_factory, monkeypatch
+):
+    """`_fingerprint` is a pair, and the test above exercises only one half of it.
+
+    An insert moves the row count *and* the newest `updated_at`, so deleting the
+    timestamp from the fingerprint entirely would not fail that one. This moves only
+    the timestamp: it updates a record whose source cell is **empty**, which the pass
+    skips and therefore never locks — so the write lands instead of deadlocking, and
+    the count does not change. Without `max(updated_at)` in the fingerprint this
+    conversion would finish straight over the top of it.
+    """
+    from src.lists.columns.conversion_service import ConversionService
+
+    col = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    await _add_rows(client, list_uuid, col, ["5"])
+    blank = (
+        await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    ).json()["uuid"]
+
+    report = (await _convert(client, list_uuid, col, type="number")).json()
+    original = ConversionService._run.__func__
+
+    async def _run_then_touch(cls, db, lst, source, target, user, keys):
+        result = await original(cls, db, lst, source, target, user, keys=keys)
+        if keys is not None:
+            async with session_factory() as other:
+                await other.execute(
+                    text(
+                        "UPDATE list_items SET updated_at = now() "
+                        " WHERE uuid = CAST(:u AS uuid)"
+                    ),
+                    {"u": blank},
+                )
+                await other.commit()
+        return result
+
+    monkeypatch.setattr(ConversionService, "_run", classmethod(_run_then_touch))
+
+    resp = await _apply(client, list_uuid, col, report)
+    assert resp.status_code == 409, resp.text
+    columns = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    assert next(c for c in columns if c["uuid"] == col)["type"] == "text"

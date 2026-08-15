@@ -760,13 +760,29 @@ buys and what it costs are both worth knowing before extending it.
   all in one transaction), so there is no window and nothing to stage. **Do not reintroduce a
   staging column as an optimisation** — the cost of the second pass is a few seconds at the
   ceiling, and it is what buys the property.
-- **Two things follow from being one transaction.** The apply holds row locks on the whole
-  list until it commits, so writers to that list block for its duration — correct for a
-  point-of-no-return operation, and the reason `ROW_CEILING` is now a bound on lock time as
-  well as on work. And a write that lands *during* the apply is refused rather than run over:
-  `_fingerprint` reads the list's row count and newest `updated_at` before and after, and a
-  change rolls the whole thing back with a 409. The conversion's own writes go through raw
-  SQL precisely so they do not stamp `updated_at` and trip that check on themselves.
+- **Two things follow from being one transaction.** The apply holds row locks until it
+  commits — on the rows it *writes*, which is every record whose source cell had a value; a
+  record with an empty cell is skipped and stays writable throughout. Writers to those rows
+  block for the duration, which is correct for a point-of-no-return operation and is why
+  `ROW_CEILING` is now a bound on lock time as well as on work. And a write that lands while
+  the pass is running is refused rather than run over: `_fingerprint` reads the list's row
+  count and newest `updated_at` before the pass and again after the retype, and a change
+  rolls the whole thing back with a 409. The conversion's own writes go through raw SQL
+  precisely so they do not stamp `updated_at` and trip that check on themselves.
+- **The re-check is not a full serialisation, and three gaps are worth naming.** It closes
+  at the second `_fingerprint` read, not at `COMMIT`, so a row inserted in that last sliver
+  is invisible — the same insert race `resanitize.py` already documents, and the reason it
+  matters here is that such a record holds a value validated against the *old* type under a
+  column that has just been retyped. It sees `list_items` only, so a concurrent
+  `PATCH /columns/{uuid}` on the source is neither detected nor preserved: `apply` overwrites
+  `config` wholesale. And it is blind to the app's other raw-SQL writers of `data`
+  (`backfill`, `resanitize`, `reconcile_shapes`, `_references`, `purge`, the item service's
+  cell patch), none of which stamps `updated_at` either — notably a calculated re-index,
+  whose advisory lock is deliberately in a *different* namespace, so it can run on the same
+  list concurrently. That is currently harmless because both sides merge inside SQL against
+  the current row version under row locks, but it is harmless by accident: a future writer
+  that read a record in Python and wrote the whole blob back would silently lose the
+  conversion's work with no fingerprint change.
 - **Storage roughly doubles for the duration**, and permanently for a conversion. Every
   record holds the converted value under the column's own key and the original under the
   binned `<name>__before_conversion` column, until that column is purged. On a 1GB database

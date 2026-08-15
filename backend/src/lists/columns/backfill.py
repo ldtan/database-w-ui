@@ -71,8 +71,10 @@ _WRITE = sa.text(
 async def list_columns(db: AsyncSession, list_id: int) -> dict[str, Column]:
     """The list's fields as the item service sees them — `in_shape`, keyed by uuid.
 
-    A conversion's hidden scratch column is deliberately not a field of the list, so a
-    formula cannot read it and this must not write into it either.
+    A hidden column is deliberately not a field of the list, so a formula cannot read
+    one and this must not write into one either. Nothing creates hidden columns now
+    (see `Column.hidden`); the ones that exist are strays from the old staged
+    conversion, and they must stay out of a re-index for the same reason.
 
     ``populate_existing`` because this is the one reader that has to see *another*
     session's committed config. Sessions here are built with `expire_on_commit=False`

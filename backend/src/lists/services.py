@@ -44,8 +44,9 @@ CLONE_CHUNK = 1_000
 # objects, so cloning a large list costs the app neither the memory to hold it nor the
 # CPU to decode and re-encode every cell. `COALESCE(map ->> key, key)` is the SQL
 # spelling of `col_map.get(key, key)` — a data key the map does not mention (a leftover
-# from a deleted column, or a conversion's hidden scratch column, which `in_shape` kept
-# out of the clone's schema) is carried across untouched, as it always has been.
+# from a deleted column, or a hidden one left by the old staged conversion, which
+# `in_shape` keeps out of the clone's schema) is carried across untouched, as it always
+# has been.
 #
 # The outer COALESCE is for a record whose `data` is `{}`: `jsonb_object_agg` over no
 # rows answers NULL, and the column is not nullable.

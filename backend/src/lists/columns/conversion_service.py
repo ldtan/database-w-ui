@@ -154,6 +154,24 @@ class ConversionService:
         Read once before the pass and once after, inside the same transaction. Under
         READ COMMITTED a later statement sees a newer snapshot, so the second read
         genuinely observes anything committed while the pass was running.
+
+        Three things it does not see, none of them currently reachable in a way that
+        loses data, all of them worth knowing before relying on this:
+
+        - It closes at the second read, not at `COMMIT`. A row inserted in that last
+          sliver is missed, and would then hold a value validated against the old type
+          under a column that has just been retyped. Same insert race `resanitize.py`
+          documents.
+        - It covers `list_items` only. A concurrent `PATCH` of the source column's own
+          config is neither detected nor preserved — `apply` overwrites it.
+        - It is blind to every other raw-SQL writer of `data`, since none of them
+          stamps `updated_at` either: `backfill`, `resanitize`, `reconcile_shapes`,
+          `_references`, `purge`, and the item service's cell patch. A calculated
+          re-index is the live one — its advisory lock is deliberately a different
+          namespace, so it can run on this list at the same time. That is safe only
+          because both sides merge inside SQL against the current row version under
+          row locks. A future writer that read a record into Python and wrote the
+          whole blob back would lose this conversion's work silently.
         """
         row = (
             await db.execute(
@@ -465,7 +483,15 @@ class ConversionService:
             target = Column(
                 list_id=lst.id,
                 name=f"{source.name[:100]}{_BACKUP_SUFFIX}",
-                display_name=f"{source.display_name} (before conversion)",
+                # Both halves are truncated against their column widths. `name` is
+                # String(120) and the suffix is 18; `display_name` is String(255) and
+                # the suffix is 20. Leaving the second uncapped raised
+                # StringDataRightTruncationError, which is a `DataError` and not an
+                # `IntegrityError` — so the handler below would not catch it and a
+                # conversion of a column with a very long display name answered 500.
+                # `ColumnCreate.display_name` has no `max_length`, so such a column is
+                # creatable today.
+                display_name=f"{source.display_name[:235]} (before conversion)",
                 position=source.position,
                 type=old_type,
                 config=old_config,
@@ -493,6 +519,11 @@ class ConversionService:
         # the **old** type, and handing it over would convert text to text and write
         # the source's values back unchanged. It exists for its uuid. For a duplicate
         # the created row is the new column, so it is the spec as well.
+        #
+        # Never added to the session, so it has no `uuid` — that is a flush-time
+        # default. Safe because the converter reads only `type` and `config`, and the
+        # keys written below come from the flushed `target`; but it is one
+        # `_validate_value` change away from being a `None` where a uuid is expected.
         spec = target if duplicate else Column(
             list_id=lst.id,
             name=source.name,
