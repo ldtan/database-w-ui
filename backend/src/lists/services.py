@@ -21,6 +21,9 @@ from src.workspaces.services import WorkspaceService
 
 from .columns.enums import ColumnType
 from .columns.models import Column, in_shape
+# Also safe at module level, and checked: the column service's own imports reach the
+# list *models* but never this module, so there is no cycle to defer around.
+from .columns.services import ColumnService
 from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
@@ -729,9 +732,16 @@ class ListService:
         # intact, because they can still be resolved and restored. A deleted list
         # cannot: every value in a lookup column pointing at it is stale at once, and
         # the permission resolver returns *no access* for a deleted resource, so those
-        # labels could not even be authorised. Restoring a list would mean
-        # un-cascading its columns, records, views and forms — a feature that does not
-        # exist. Until it does, this stays a scrub.
+        # labels could not even be authorised.
+        #
+        # The old justification — that restoring a list would mean un-cascading its
+        # children, a feature that did not exist — has expired: `restore` below does
+        # exactly that. What keeps this a scrub is the asymmetry it cannot fix. A
+        # restore brings back the list's own contents and cannot bring back what was
+        # cleared on *other* lists' records, because nothing recorded which cells those
+        # were. Since the values are unrecoverable either way, the referencing column's
+        # config goes with them rather than being left pointing at a list that may
+        # never come back (see `_scrub_references_to_lists`).
         await cls._scrub_references_to_lists(db, [lst.uuid])
         await db.commit()
         return True
@@ -778,14 +788,54 @@ class ListService:
     async def _scrub_references_to_lists(
         cls, db: AsyncSession, list_uuids: Sequence[UUID]
     ) -> None:
-        """Remove dangling lookup references to rows in now-deleted lists.
+        """Remove dangling lookup references to a now-deleted list — values *and* config.
 
         Lookup values are raw uuids stored in another row's JSONB, so deleting a
         target list leaves those pointers unresolvable but present. Since a lookup
         column targets exactly one list, deleting that list makes *every* value in
         the column stale — so drop the column's key from the referencing rows.
         Only columns on surviving lists matter (those on deleted lists are already
-        soft-deleted and thus excluded)."""
+        soft-deleted and thus excluded) — which makes the callers' ordering
+        load-bearing now that config goes too. `_cascade_descendants` runs *first*,
+        so a lookup on a list being deleted in the same breath — one pointing at
+        itself, or at a sibling in a workspace going down together — is out of scope
+        here and comes back from the bin still configured. Scrubbing before the
+        cascade would blank it instead, and nothing records what it had pointed at.
+
+        **The column's own config is cleared with them, and for a long time it was
+        not.** Emptying the cells while leaving `target_list_uuid` naming a list that
+        no longer exists produced a column nothing could use and nothing could fix:
+        `lookup_options` raised, so the picker and every label resolution 404'd, and
+        `_validate_config` refused any PATCH that resent the config — which the column
+        dialog always does — so the only way out was to retarget in the same edit or
+        delete the column. The values were already gone by then, so there was nothing
+        left for the config to be pointing *at*; keeping it only preserved the
+        breakage. Cleared, the column degrades to an unconfigured lookup, which every
+        surface already knows how to render and which can simply be given a new
+        target.
+
+        `display_column_uuid`, `target_filter_column_uuid` and `option_filters` go
+        too: each names a column *of the dead target*, so each is as meaningless as
+        the target itself. `parent_column_uuid` names a sibling on this column's
+        **own** list, which is still very much alive — it goes because the pairing is
+        set and unset as a unit and its other half has just been blanked, not because
+        what it points at is gone.
+
+        `required` goes as well; see the comment at the assignment for why a
+        constraint that cannot be satisfied is worse than no constraint.
+
+        Then `ColumnService._clear_dependent_nesting` runs on each column cleared,
+        which is a different direction to the clearing above: it walks *outward*, to
+        the columns that paired against this one and are not themselves in scope here
+        because their own targets survive.
+
+        One asymmetry to know: a list restore no longer silently re-points these
+        columns. It never restored anything usable — the cells were scrubbed at delete
+        time and the restore cannot bring them back (known-gaps gap 6, "What is still
+        missing", which now records this) — so what is lost is a column that pointed
+        at a live list and held nothing, plus a `required` tick and a nesting pairing
+        that have to be set again by hand.
+        """
         if not list_uuids:
             return
         targets = [str(u) for u in list_uuids]
@@ -812,6 +862,52 @@ class ListService:
                 )
                 .values(data=ListItem.data.op("-")(key))
             )
+            # Reassigned rather than mutated in place, so SQLAlchemy sees the JSONB
+            # change — the same rule `_clear_dependent_nesting` follows.
+            config = dict(column.config or {})
+            for field in (
+                "target_list_uuid",
+                "display_column_uuid",
+                "parent_column_uuid",
+                "target_filter_column_uuid",
+                "option_filters",
+            ):
+                config[field] = None
+            # `required` goes too — as `False` rather than `None`, because the schema
+            # types it as a plain bool. A required cell that cannot be filled is not
+            # a constraint, it is a lock: `_validate_data` enforces `required` over
+            # the *merged* record on every create and every edit, and the cell has
+            # just been emptied and cannot be refilled, so one deleted list would
+            # freeze writes across every list that referred to it. Nor could the
+            # setting be turned off on its own — a config PATCH merges onto what is
+            # stored, so `target_list_uuid: None` comes back and `_validate_config`
+            # refuses it. Dropping it follows the rule the `unique` + `multiple`
+            # refusal set: a column must not claim a guarantee it is in no position
+            # to enforce. Re-ticking it is part of retargeting.
+            #
+            # Borrow that rule's *principle* and not its mechanism, which is the
+            # opposite one: `unique` + `multiple` refuses the next save and leaves
+            # existing columns alone precisely because there is no retro-validation.
+            # This rewrites a stored config instead, and it is the only place that
+            # does. What earns the difference is that the refusal there is something
+            # the column's owner sees and can act on, where this freeze is triggered
+            # by somebody else deleting a different list — possibly in a workspace
+            # they own and this owner cannot see — and refuses writes for a reason
+            # nobody on this list can do anything about. Nothing announces the
+            # dropped constraint, which is the cost, and it is smaller than a list
+            # nobody can write to.
+            config["required"] = False
+            column.config = config
+            # Un-nest whatever paired against this column. A nested child names its
+            # parent — a sibling on its *own* list — and a filter column on its own
+            # target list, and either of those can be a column just blanked here
+            # while the child survives untouched, because the child's own target is
+            # still alive. Left alone the child keeps a pairing whose halves resolve
+            # to nothing: the picker offers no rows, `_enforce_nested_lookups`
+            # refuses every selection as not belonging to the parent, and
+            # `_validate_nesting` refuses to save the column at all until someone
+            # clears "Nest under" by hand.
+            await ColumnService._clear_dependent_nesting(db, column)
 
     # -- the bin: view, restore, and purge soft-deleted lists ---------------
 
@@ -905,7 +1001,10 @@ class ListService:
 
         Note: references *into* this list were scrubbed when it was deleted (see
         ``delete``), so cross-list lookups pointing at its rows are not brought back —
-        the list, its columns, and its records are.
+        the list, its columns, and its records are. That scrub also cleared those
+        columns' *config* — target, display column, nesting pairing, option filters
+        and `required` — so what comes back here is a live list that nothing points
+        at any more. Retargeting is an ordinary PATCH, but somebody has to do it.
         """
         lst = await cls.get_deleted_by_uuid(db, uuid)
         if lst is None:

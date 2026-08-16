@@ -44,6 +44,43 @@ async def test_list_bin_lists_and_restores(
     assert binned.headers["X-Total-Count"] == "0"
 
 
+async def test_a_lookup_at_the_deleted_list_itself_is_not_scrubbed(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """A restore must bring the list back configured, not blank.
+
+    The delete scrub clears `target_list_uuid` on every live lookup naming the list
+    being deleted, and a self-referential lookup names it too. What keeps it out of
+    the scrub is ordering: `_cascade_descendants` soft-deletes the list's own columns
+    first, and the scrub only looks at live ones. That ordering used to be invisible —
+    the scrub touched values, and this column's values are on rows that are being
+    deleted anyway — but now that it clears config as well, flipping it would make a
+    restore silently return the column unconfigured, with nothing recording what it
+    had pointed at. Pin it here.
+    """
+    title = await add_column(
+        list_uuid, name="title", display_name="Title", type="text"
+    )
+    parent = await add_column(
+        list_uuid,
+        name="parent",
+        display_name="Parent",
+        type="lookup",
+        config={"target_list_uuid": list_uuid, "display_column_uuid": title},
+    )
+
+    assert (await client.delete(f"/api/lists/{list_uuid}")).status_code == 204
+    assert (await client.post(f"/api/lists/{list_uuid}/restore")).status_code == 200
+
+    cols = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    restored = next(c for c in cols if c["uuid"] == parent)
+    assert restored["config"]["target_list_uuid"] == list_uuid
+    assert restored["config"]["display_column_uuid"] == title
+    # And it still resolves, rather than answering "nothing to offer".
+    options = await client.get(f"/api/lists/{list_uuid}/columns/{parent}/options")
+    assert options.status_code == 200, options.text
+
+
 async def test_restore_missing_list_is_404(client):
     resp = await client.post(
         "/api/lists/00000000-0000-0000-0000-000000000000/restore"

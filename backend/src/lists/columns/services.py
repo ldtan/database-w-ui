@@ -126,10 +126,20 @@ class ColumnService:
                 current_name=payload.name or column.name,
             )
             new_target = (column.config or {}).get("target_list_uuid")
-            if old_target is not None and str(old_target) != str(new_target):
+            if str(old_target) != str(new_target):
                 # Retargeting silently invalidates any nesting pairing that
                 # references this column — the filter column no longer points
                 # where the pairing assumed. Un-nest the dependents.
+                #
+                # There is deliberately no `old_target is not None` guard. It was
+                # redundant while every lookup had a target (for a non-lookup both
+                # sides are None and the comparison is false anyway), and it stopped
+                # being harmless the moment a deleted target list began clearing the
+                # field: `is not None` would then skip exactly the column that most
+                # needs its dependents un-nested — one being repaired after the list
+                # it named was deleted. `ListService._scrub_references_to_lists`
+                # already un-nests at delete time, so this is the second line rather
+                # than the first, and it is cheap enough to keep.
                 await cls._clear_dependent_nesting(db, column)
             data.pop("config")
         if data.get("name") is None:
@@ -218,6 +228,16 @@ class ColumnService:
             raise ValidationError(f"Column '{column.name}' is not a lookup column")
 
         config = column.config or {}
+        if config.get("target_list_uuid") is None:
+            # An unconfigured lookup offers nothing, rather than erroring. Deleting a
+            # target list clears this field on every column that named it
+            # (`ListService._scrub_references_to_lists`), and a column mid-edit can
+            # legitimately be here too. Raising instead used to 404 the options
+            # endpoint, which is what the picker, the record dialog and every label
+            # resolution call — so one deleted list turned its dependants into columns
+            # that could not even be looked at, let alone repaired. This is the same
+            # tolerance a dangling nesting pairing already gets (known-gaps §7).
+            return []
         target = (
             await db.execute(
                 select(List)
@@ -229,6 +249,11 @@ class ColumnService:
             )
         ).scalars().first()
         if target is None:
+            # Still an error, and deliberately still distinct from the case above: a
+            # config naming a list that is not there means something got out of step
+            # — a hand-edited config, or a delete path that did not scrub — and
+            # answering "no options" would hide it. The scrub is what keeps ordinary
+            # deletion out of this branch.
             raise UnknownReferenceError(
                 f"Lookup column '{column.name}' points at a missing target list"
             )
@@ -410,6 +435,15 @@ class ColumnService:
         if type_ == ColumnType.lookup:
             target_list_uuid = data.get("target_list_uuid")
             if target_list_uuid is None:
+                # Still required, including on the columns whose target was cleared
+                # because the list it named was deleted. That is deliberate: a lookup
+                # with nowhere to look is not a configuration worth storing, and the
+                # only repairs are retargeting or deleting the column — both of which
+                # this allows. What was actually broken before was not the strictness
+                # here but that the *old* config survived: the dialog showed a dead
+                # uuid as "…" under a hint about lookup-only sharing, so nobody could
+                # tell what was wrong. With the scrub clearing it, the picker opens
+                # empty and this message names the thing to fix.
                 raise ValidationError("A lookup column requires a target_list_uuid")
             if data.get("default") is not None:
                 raise ValidationError("A lookup column cannot have a default value")

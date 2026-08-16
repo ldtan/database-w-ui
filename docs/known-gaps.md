@@ -394,7 +394,12 @@ What is still missing:
 - **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
   its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
   `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back
-  (see "Deleting a list is the deliberate exception").
+  (see "Deleting a list is the deliberate exception"). Since the scrub also clears the
+  referencing **column's** config — target, display column, nesting pairing, option filters
+  and `required` — the restored list comes back with nothing pointing at it, and each of those
+  columns has to be retargeted by hand. That is the larger half of the loss, and it is a
+  deliberate trade: the values are unrecoverable either way, so the alternative was leaving
+  the column pointing at a list that might never come back and could not be edited meanwhile.
 
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
@@ -469,9 +474,12 @@ Two consequences worth knowing before extending it:
   context. Consistency is guaranteed by `_enforce_nested_lookups` on the write path, which
   import and QR submissions share. Don't "fix" the endpoint to require the param.
 - **A dangling pairing degrades, everywhere.** Deleting or retargeting the parent or the
-  filter column cascade-clears the pairing (`_clear_dependent_nesting`), but if a stale one
-  is ever encountered anyway (a race, a hand-edited config), the picker, the record dialog
-  and the write validation all treat the column as a plain lookup rather than erroring.
+  filter column cascade-clears the pairing (`_clear_dependent_nesting`), and so does deleting
+  the *list* either of them targets — `_scrub_references_to_lists` blanks the column's config
+  and then runs the same cascade outward, because a child whose own target survives is not
+  itself in scope for the scrub. If a stale pairing is ever encountered anyway (a race, a
+  hand-edited config), the picker, the record dialog and the write validation all treat the
+  column as a plain lookup rather than erroring.
 
 ### The option filter is advisory too, and is the caller's business in no sense at all
 
@@ -1347,6 +1355,52 @@ restoring a list would mean un-cascading its children, which nothing did — has
 stamped. What has not changed is the asymmetry that makes the scrub a real gap: the restore
 brings the list's own contents back and cannot bring back what was cleared on *other* lists'
 records, because nothing recorded which cells those were (gap 6, "What is still missing").
+
+**The scrub clears the referencing column's *config* as well as its values**, and for a long
+time it cleared only the values. A lookup column left naming a list that no longer exists was
+not merely stale, it was stuck: `lookup_options` raised, so the options endpoint 404'd and with
+it the picker, the record dialog and every label resolution; `_validate_config` refused any
+PATCH that resent the config, which `ColumnDialog` always does; and the dialog rendered the dead
+uuid as `…` under the hint about lists shared as lookup targets only — an explanation that was
+actively wrong. Nothing in the UI could repair it except deleting the column.
+
+`target_list_uuid` now goes, and with it `display_column_uuid`, `target_filter_column_uuid` and
+`option_filters`, each of which names a column *of the dead target*. `parent_column_uuid` goes
+too, though it names a sibling on the column's own list that is still alive — the pairing is set
+and unset as a unit, and its other half has just been blanked. `required` goes as well, and that
+one is not tidiness: it is enforced over the merged record on every write, and the cell is now
+empty and unfillable, so a ticked `required` would refuse every create and edit on the list that
+holds the column — and could not be un-ticked on its own, since a config PATCH merges onto what
+is stored and the refusal would then be about the missing target instead. Dropping it follows
+the same rule that refuses `unique` + `multiple`: a column must not claim a guarantee it cannot
+enforce. Finally the scrub runs `_clear_dependent_nesting` outward on each column it clears, so
+a nested child whose *own* target survives — and which is therefore not in scope for the scrub —
+does not keep a pairing whose halves resolve to nothing.
+
+The column degrades to an unconfigured lookup: the options endpoint answers with an empty list
+rather than raising (the same tolerance §7 already grants a dangling nesting pairing), the
+picker opens empty, and retargeting is an ordinary PATCH. Note the two absent-target cases stay
+distinguishable on purpose — a config with **no** target returns nothing, while a config naming
+a list that is not there still raises, because that means something got out of step and
+answering "no options" would hide it.
+
+Saving a target-less lookup is still refused. Clearing the config makes the column *fixable*,
+not valid, and the only sensible repairs are retargeting and deleting — both of which work.
+One consequence: a list restore no longer silently re-points these columns. It never restored
+anything usable, since the cells were scrubbed at delete time and cannot come back, so what is
+given up is a column pointing at a live list and holding nothing.
+
+**Columns that lost their target before this shipped are not repaired by the delete-path fix,
+and need the sweep.** The fix changes what a delete does; it does not go back over a database
+that already holds dangling columns, and by the deliberate asymmetry above those are the case
+that *still raises* — so they stay exactly as stuck as the paragraph before last describes.
+`src.maintenance.clear_dangling_lookup_targets` is the one-off that clears them, matching on
+live lookup columns whose `target_list_uuid` names no live list and blanking the same fields
+the scrub does. It is idempotent, and it must be run once against any database that predates
+the fix — the deployed one included. Until it is, this section's past tense is only true of
+lists deleted since. **Run `--dry-run` first and keep the output**: it names each column and
+the target it points at, and clearing is what destroys the only record of that — including
+for targets that are merely soft-deleted and still restorable from the lists bin.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`

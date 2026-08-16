@@ -565,6 +565,53 @@ async def test_retargeting_the_parent_unnests_the_child(
     assert config["target_filter_column_uuid"] is None
 
 
+async def test_deleting_the_parents_target_list_unnests_the_child(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The pairing must not survive the list that gave it meaning.
+
+    Deleting Countries blanks both halves' *other* end — the parent lookup on this
+    list and the filter lookup on Cities — but not the child itself, whose own
+    target (Cities) is alive and untouched. Left nested, the child would keep a
+    pairing that resolves to nothing: the picker offers no rows, the write path
+    refuses every selection as not belonging to the parent, and the column dialog
+    cannot save it until somebody clears "Nest under" by hand. So the scrub un-nests
+    dependents as it goes, the same cascade a deleted or retargeted parent triggers.
+    """
+    s = await _scenario(client, workspace_uuid, list_uuid, add_column)
+    assert (await client.delete(f"/api/lists/{s['countries']}")).status_code == 204
+
+    config = await _city_config(client, list_uuid, s["city_col"])
+    assert config["parent_column_uuid"] is None
+    assert config["target_filter_column_uuid"] is None
+    # And the child is an ordinary lookup again: Cities is still there, so picking
+    # one is a write like any other rather than a rejection with no way to satisfy it.
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/", json={"data": {s["city_col"]: s["tokyo"]}}
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["data"][s["city_col"]] == s["tokyo"]
+
+
+async def test_deleting_the_childs_own_target_list_clears_its_pairing_too(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The other direction, and the one that pins the pairing keys in the scrub itself.
+
+    Delete Cities and the child *is* in scope: its own target is the list that went.
+    Both halves of the pairing are cleared by the scrub's own field list rather than
+    by the outward cascade the previous test covers, so this is what fails if either
+    key is dropped from that list.
+    """
+    s = await _scenario(client, workspace_uuid, list_uuid, add_column)
+    assert (await client.delete(f"/api/lists/{s['cities']}")).status_code == 204
+
+    config = await _city_config(client, list_uuid, s["city_col"])
+    assert config["target_list_uuid"] is None
+    assert config["parent_column_uuid"] is None
+    assert config["target_filter_column_uuid"] is None
+
+
 # ---- cloning ----
 
 

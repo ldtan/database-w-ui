@@ -82,7 +82,21 @@ async def test_delete_list_scrubs_cross_list_lookup_refs(
         name="author",
         display_name="Author",
         type="lookup",
-        config={"target_list_uuid": authors},
+        # Every field the scrub is meant to clear is set to something non-null
+        # here, so that dropping one from the tuple in
+        # `_scrub_references_to_lists` fails this test rather than passing on a
+        # key that was never set in the first place.
+        config={
+            "target_list_uuid": authors,
+            "display_column_uuid": aname,
+            "option_filters": {
+                "conjunction": "and",
+                "conditions": [
+                    {"column_uuid": aname, "operator": "is_not_empty"}
+                ],
+            },
+            "required": True,
+        },
     )
     book = (
         await client.post(
@@ -97,6 +111,219 @@ async def test_delete_list_scrubs_cross_list_lookup_refs(
     items = (await client.get(f"/api/lists/{books}/items/")).json()
     assert len(items) == 1
     assert author_col not in items[0]["data"]  # dangling reference removed
+
+    # And the column's *config* goes with the values it described. Leaving
+    # `target_list_uuid` naming a list that no longer exists left the column
+    # unusable and unrepairable: the options endpoint 404'd, so the picker and
+    # every label resolution failed, and the dialog showed the dead uuid as "…"
+    # under a hint about lookup-only sharing.
+    column = (
+        await client.get(f"/api/lists/{books}/columns/{author_col}")
+    ).json()
+    assert column["config"]["target_list_uuid"] is None
+    assert column["config"]["display_column_uuid"] is None
+    assert column["config"]["option_filters"] is None
+    # `required` too, and this one is not tidiness. It is enforced over the merged
+    # record on every write, and the cell has just been emptied and cannot be
+    # refilled, so leaving it on would freeze creates and edits across this whole
+    # list — see the next test.
+    assert column["config"]["required"] is False
+
+
+async def test_a_required_lookup_stops_freezing_the_list_when_its_target_goes(
+    client, workspace_uuid, add_column
+):
+    """Deleting one list must not stop writes to another.
+
+    `required` is enforced by `_validate_data` over the *merged* record, for every
+    column, on every create and update. Once the target list is gone the cell is
+    empty and unfillable — the picker offers nothing and any uuid is refused — so a
+    required lookup left ticked refuses every write to the list that holds it. Nor
+    could the tick be removed on its own: a config PATCH merges onto what is stored,
+    so `target_list_uuid: None` comes back and the save is refused for that instead.
+    The scrub clears it, on the same rule that refuses `unique` + `multiple` — a
+    column must not claim a guarantee it cannot enforce.
+    """
+    async def make_list(name):
+        resp = await client.post(
+            "/api/lists/",
+            json={"name": name, "display_name": name, "workspace_uuid": workspace_uuid},
+        )
+        return resp.json()["uuid"]
+
+    authors = await make_list("authors")
+    aname = await add_column(authors, name="full_name", display_name="Name", type="text")
+    ursula = (
+        await client.post(
+            f"/api/lists/{authors}/items/", json={"data": {aname: "Ursula"}}
+        )
+    ).json()["uuid"]
+
+    books = await make_list("books")
+    title = await add_column(books, name="title", display_name="Title", type="text")
+    author_col = await add_column(
+        books,
+        name="author",
+        display_name="Author",
+        type="lookup",
+        config={"target_list_uuid": authors, "required": True},
+    )
+    existing = (
+        await client.post(
+            f"/api/lists/{books}/items/",
+            json={"data": {title: "The Dispossessed", author_col: ursula}},
+        )
+    ).json()["uuid"]
+
+    assert (await client.delete(f"/api/lists/{authors}")).status_code == 204
+
+    # A new record, with no author to give it.
+    created = await client.post(
+        f"/api/lists/{books}/items/", json={"data": {title: "The Left Hand"}}
+    )
+    assert created.status_code == 201, created.text
+
+    # And an edit to an unrelated cell of a record whose author was just scrubbed.
+    edited = await client.patch(
+        f"/api/lists/{books}/items/{existing}",
+        json={"data": {title: "The Dispossessed (rev.)"}},
+    )
+    assert edited.status_code == 200, edited.text
+    assert edited.json()["data"][title] == "The Dispossessed (rev.)"
+
+
+async def test_a_lookup_whose_target_was_deleted_still_reads_and_can_be_retargeted(
+    client, workspace_uuid, add_column
+):
+    """The repair path, which is the whole point of clearing the config.
+
+    A column left pointing at a deleted list was not merely wrong, it was stuck: the
+    options endpoint raised, so nothing could render it, and `_validate_config`
+    refused every PATCH that resent the config — which the column dialog always does
+    — so retargeting through the UI was the one thing that could not be done.
+    """
+    async def make_list(name):
+        resp = await client.post(
+            "/api/lists/",
+            json={"name": name, "display_name": name, "workspace_uuid": workspace_uuid},
+        )
+        return resp.json()["uuid"]
+
+    authors = await make_list("authors")
+    await add_column(authors, name="full_name", display_name="Name", type="text")
+    replacement = await make_list("people")
+    await add_column(replacement, name="full_name", display_name="Name", type="text")
+
+    books = await make_list("books")
+    author_col = await add_column(
+        books,
+        name="author",
+        display_name="Author",
+        type="lookup",
+        config={"target_list_uuid": authors},
+    )
+
+    assert (await client.delete(f"/api/lists/{authors}")).status_code == 204
+
+    # The options endpoint answers "nothing to offer" rather than 404ing, so the
+    # picker, the record dialog and every label resolution keep working.
+    options = await client.get(f"/api/lists/{books}/columns/{author_col}/options")
+    assert options.status_code == 200, options.text
+    assert options.json() == []
+
+    # The list itself still reads.
+    assert (await client.get(f"/api/lists/{books}/items/")).status_code == 200
+
+    # Retargeting works, and is the repair.
+    fixed = await client.patch(
+        f"/api/lists/{books}/columns/{author_col}",
+        json={"config": {"target_list_uuid": replacement}},
+    )
+    assert fixed.status_code == 200, fixed.text
+    assert fixed.json()["config"]["target_list_uuid"] == replacement
+
+    reopened = await client.get(f"/api/lists/{books}/columns/{author_col}/options")
+    assert reopened.status_code == 200, reopened.text
+
+
+async def test_a_target_less_lookup_still_refuses_to_be_saved_without_a_target(
+    client, workspace_uuid, add_column
+):
+    """Clearing the config makes the column *fixable*, not valid.
+
+    A lookup with nowhere to look is not a configuration worth storing, so saving one
+    is still refused — the difference is that the picker now opens empty and the
+    message names the thing to fix, where before it showed a dead uuid as "…" and
+    refused for a reason nothing on screen explained."""
+    async def make_list(name):
+        resp = await client.post(
+            "/api/lists/",
+            json={"name": name, "display_name": name, "workspace_uuid": workspace_uuid},
+        )
+        return resp.json()["uuid"]
+
+    authors = await make_list("authors")
+    await add_column(authors, name="full_name", display_name="Name", type="text")
+    books = await make_list("books")
+    author_col = await add_column(
+        books,
+        name="author",
+        display_name="Author",
+        type="lookup",
+        config={"target_list_uuid": authors},
+    )
+    assert (await client.delete(f"/api/lists/{authors}")).status_code == 204
+
+    resp = await client.patch(
+        f"/api/lists/{books}/columns/{author_col}",
+        json={"config": {"help_text": "pick someone"}},
+    )
+    assert resp.status_code == 400
+    assert "target_list_uuid" in resp.json()["detail"]
+
+
+async def test_options_still_raise_for_a_target_that_is_named_but_missing(
+    client, session_factory, workspace_uuid, add_column
+):
+    """The other half of the deliberate asymmetry, which nothing else covers.
+
+    An *absent* target returns `[]`, because a deleted list produces that state
+    ordinarily. A target that is *named* and cannot be found is a different thing:
+    a hand-edited config, or a delete path that failed to scrub. Answering "no
+    options" there would hide it, so it still raises — and without this test the
+    branch that raises could be simplified away with a green suite.
+    """
+    lst = (
+        await client.post(
+            "/api/lists/",
+            json={"name": "books", "display_name": "Books", "workspace_uuid": workspace_uuid},
+        )
+    ).json()["uuid"]
+    other = (
+        await client.post(
+            "/api/lists/",
+            json={"name": "authors", "display_name": "Authors", "workspace_uuid": workspace_uuid},
+        )
+    ).json()["uuid"]
+    author_col = await add_column(
+        lst,
+        name="author",
+        display_name="Author",
+        type="lookup",
+        config={"target_list_uuid": other},
+    )
+
+    # Written behind the service, because nothing the API offers can produce it —
+    # which is the point of keeping it an error.
+    async with session_factory() as db:
+        column = await db.scalar(
+            select(Column).where(Column.uuid == UUID(author_col))
+        )
+        column.config = {**column.config, "target_list_uuid": str(uuid7())}
+        await db.commit()
+
+    resp = await client.get(f"/api/lists/{lst}/columns/{author_col}/options")
+    assert resp.status_code == 404, resp.text
 
 
 async def test_delete_workspace_cascades_to_lists_and_descendants(
