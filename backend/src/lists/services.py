@@ -792,7 +792,12 @@ class ListService:
         column targets exactly one list, deleting that list makes *every* value in
         the column stale — so drop the column's key from the referencing rows.
         Only columns on surviving lists matter (those on deleted lists are already
-        soft-deleted and thus excluded).
+        soft-deleted and thus excluded) — which makes the callers' ordering
+        load-bearing now that config goes too. `_cascade_descendants` runs *first*,
+        so a lookup on a list being deleted in the same breath — one pointing at
+        itself, or at a sibling in a workspace going down together — is out of scope
+        here and comes back from the bin still configured. Scrubbing before the
+        cascade would blank it instead, and nothing records what it had pointed at.
 
         **The column's own config is cleared with them, and for a long time it was
         not.** Emptying the cells while leaving `target_list_uuid` naming a list that
