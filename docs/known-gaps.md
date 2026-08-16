@@ -1390,6 +1390,16 @@ One consequence: a list restore no longer silently re-points these columns. It n
 anything usable, since the cells were scrubbed at delete time and cannot come back, so what is
 given up is a column pointing at a live list and holding nothing.
 
+**Columns that lost their target before this shipped are not repaired by the delete-path fix,
+and need the sweep.** The fix changes what a delete does; it does not go back over a database
+that already holds dangling columns, and by the deliberate asymmetry above those are the case
+that *still raises* — so they stay exactly as stuck as the paragraph before last describes.
+`src.maintenance.clear_dangling_lookup_targets` is the one-off that clears them, matching on
+live lookup columns whose `target_list_uuid` names no live list and blanking the same fields
+the scrub does. It has a `--dry-run`, it is idempotent, and it must be run once against any
+database that predates the fix — the deployed one included. Until it is, this section's past
+tense is only true of lists deleted since.
+
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
 (`http`, `https`, `mailto`, `tel`) — a column cannot opt back into `javascript:`. But rows
