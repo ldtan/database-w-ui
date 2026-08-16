@@ -22,10 +22,11 @@ export function useEffectiveActions(
         `/permissions/effective?resource_type=${resourceType}&resource_uuid=${resourceUuid}`,
       ),
   });
-  // Memoised so the set is referentially stable while the answer is unchanged.
-  // Callers pass it straight into `useEffectiveActionsMap` as the fallback and into
-  // dependency arrays, and a fresh `Set` on every render makes every one of those
-  // recompute for nothing.
+  // Memoised so the set is referentially stable while the answer is unchanged. A
+  // small saving, honestly stated: one `new Set` per render, over a handful of
+  // actions. Every consumer calls `.has(...)` in render and would not notice, and
+  // the one caller that passes it on — as `useEffectiveActionsMap`'s fallback —
+  // depends on its *contents* rather than its identity anyway.
   return useMemo(
     () => (query.data ? new Set(query.data.actions) : NONE),
     [query.data],
@@ -50,7 +51,7 @@ export function useEffectiveActionsMap(
 ): (uuid: string, action: PermissionAction) => boolean {
   // Sorted so a reorder of the same rows reuses the cached response. Memoised on
   // the *contents* rather than the array identity, because callers rebuild the uuid
-  // list on every render and this feeds both the query key and the memo below.
+  // list on every render and an unstable `key` would re-key the query every time.
   const key = useMemo(() => [...uuids].sort(), [uuids.join(",")]);
   const query = useQuery({
     queryKey: ["effective", "batch", resourceType, key],
@@ -73,15 +74,25 @@ export function useEffectiveActionsMap(
     placeholderData: (prev) => prev,
   });
 
-  // **Stable across renders, and that is load-bearing rather than tidy.** The grid
-  // passes this predicate into every cell renderer, and PrimeReact memoises a body
-  // cell against a fixed prop list that cannot see it — so a fresh closure on every
-  // render is what forced `cellMemo` off, which in turn made every `setState` on the
-  // page re-render every cell of every row. Rebuilt only when the answer actually
-  // changes: the response, the set of rows asked about, or the fallback.
+  // Stable across renders, and deliberately not sold as more than it is. The grid
+  // passes this predicate into every cell renderer, but this hook is called *once*
+  // per component — a cell only calls the returned closure, which is a `Map.get`. So
+  // memoising saves one Map of page-size per render of the caller, not one per cell.
   //
-  // `fallbackActions` is a `Set` the caller usually rebuilds too, so it is depended
-  // on by content for the same reason `key` is. Both are small.
+  // It is emphatically **not** the reason `ListDetailPage` runs with `cellMemo` off.
+  // PrimeReact compares a body cell against twelve fixed prop names, and this
+  // predicate is not among them, so its referential stability is invisible to that
+  // memo either way. The note at `cellMemo={false}` has the argument in full; do not
+  // come back here expecting a stable closure to be what lets the memo switch on.
+  //
+  // Rebuilt when the answer changes: the response, or the fallback. `fallbackActions`
+  // is a `Set` the caller usually rebuilds each render, so it is depended on by
+  // content rather than by identity. It is small.
+  //
+  // `key` is deliberately *not* a dependency. The closure never reads it, and
+  // `placeholderData` keeps `query.data` referentially identical while a new key is
+  // in flight — so depending on it would rebuild the Map for a pure row reorder and
+  // arrive at the same answer. `query.data` is what moves when the answer does.
   const fallbackKey = fallbackActions ? [...fallbackActions].sort().join(",") : "";
   return useMemo(() => {
     const byUuid = new Map<string, ActionSet>();
@@ -93,6 +104,9 @@ export function useEffectiveActionsMap(
       if (rowActions) return rowActions.has(action);
       return fallbackActions?.has(action) ?? false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [query.data, key, fallbackKey]);
+    // No `eslint-disable` here, and none above the `key` memo either: this repo has
+    // no ESLint config, no plugin and no lint script, so a directive would be
+    // documentation for a rule that never runs — and would imply these dep arrays are
+    // mechanically checked when nothing checks them. The reasoning above is the guard.
+  }, [query.data, fallbackKey]);
 }

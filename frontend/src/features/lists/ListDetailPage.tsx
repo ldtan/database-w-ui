@@ -1424,10 +1424,14 @@ export function ListDetailPage() {
           // now memoises the predicate, so it only changes identity when the answer
           // does — but the memo above compares *props*, not closures, and none of
           // those twelve moves when permissions resolve. The cell would simply not
-          // re-render, which is the same staleness by a shorter route. The stable
-          // predicate is worth having anyway: with the memo off, every cell renders
-          // on every parent render, and it is what stops each of those rebuilding
-          // the whole uuid→actions Map.
+          // re-render, which is the same staleness by a shorter route.
+          //
+          // The stable predicate is still worth having, but modestly, and the claim
+          // is worth keeping honest: `useEffectiveActionsMap` is called once here,
+          // not per cell. A cell only *calls* the predicate it returns, which is a
+          // `Map.get`. So what memoising saves is one Map of page-size per render of
+          // this component — not one per cell. The real win on this branch is the
+          // lookup label memo, which genuinely was per cell.
           cellMemo={false}
           // PrimeReact calls this before applying its own selection logic, and
           // skips it entirely when the click landed on something clickable — so
