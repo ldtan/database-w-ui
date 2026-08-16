@@ -55,27 +55,6 @@ class ColumnService:
         return result.scalars().first()
 
     @classmethod
-    async def get_including_hidden(
-        cls, db: AsyncSession, list_id: int, uuid: Union[str, UUID]
-    ) -> Optional[Column]:
-        """A column whether or not it is in the list's shape.
-
-        Only the conversion machinery wants this — it has to read and write the
-        scratch column it is filling, which by design no ordinary reader can see.
-        """
-        parsed = coerce_uuid(uuid)
-        if parsed is None:
-            return None
-        result = await db.execute(
-            select(Column).where(
-                Column.deleted_at.is_(None),
-                Column.list_id == list_id,
-                Column.uuid == parsed,
-            )
-        )
-        return result.scalars().first()
-
-    @classmethod
     async def list(cls, db: AsyncSession, list_id: int) -> Sequence[Column]:
         result = await db.execute(
             cls._select(list_id).order_by(Column.position, Column.id)
@@ -490,9 +469,10 @@ class ColumnService:
             from .formula import column_refs, parse
 
             formula = parse(data.get("formula"))
-            # `in_shape`, not `deleted_at` alone: a conversion's scratch column is live
-            # but not a field of the list, so `_columns_by_key` will never hand its
-            # value to a formula. Letting one be referenced here would save a formula
+            # `in_shape`, not `deleted_at` alone: a hidden column is live but not a
+            # field of the list, so `_columns_by_key` will never hand its value to a
+            # formula. Nothing creates hidden columns now (see `Column.hidden`), but the
+            # predicate has to keep agreeing with that reader whatever does. Letting one be referenced here would save a formula
             # whose operand is permanently missing, and — now that the answer is
             # stored — write a blank into something a filter can find.
             siblings = (

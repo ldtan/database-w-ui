@@ -229,13 +229,23 @@ reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a sta
 
 **What is and is not built.** The engine ships in full under §1, and **duplicating a column**
 ships on top of it: `POST /columns/{uuid}/convert` with a `name` makes the new column go live
-*beside* the source at commit rather than replacing it. Same backfill, same report, same
-`required`/`unique` gates — only the ending differs, and that ending **rewrites no records at
-all**, because the values already sit under the new column's own key. The type may equal the
-source's, which `is_supported` already treats as a straight copy, so "copy this column" and
-"copy it, converting on the way" are one operation. The name is taken when the scratch column is
-created rather than at commit, so it is held against the unique index for the whole run — a
-backfill that succeeds and then cannot be named would be a maddening way to lose the work.
+*beside* the source rather than replacing it. Same pass, same report, same `required`/`unique`
+gates — only the ending differs. The type may equal the source's, which `is_supported` already
+treats as a straight copy, so "copy this column" and "copy it, converting on the way" are one
+operation.
+
+**The two-call shape changed in 2026-08, and the reason is worth carrying forward.** It used to
+be `start` (build a hidden column, backfill it, return a report) then `commit` (swap the values
+in, retype the source). The gap between those calls was however long a person spent reading the
+report, and writes landing in it were lost: the hidden column is excluded by `in_shape()`, so
+every write path wrote under the source key only, and the swap then blanked it or replaced it
+with the backfill's stale copy. It is now `preview` — which writes **nothing**, creates no
+column and reserves no name — and `apply`, which does the whole job in one transaction and
+refuses with a 409 if any record on the list moved while it ran. The duplicate ending had the
+same hole (it published a copy missing the window's edits) and is closed by the same change
+rather than by a second mechanism. A consequence to know: the duplicate's name is no longer
+held from the moment the report is built, so the preview reports a clash as a courtesy while
+the unique index remains the actual guard.
 
 The duplicate inherits the source's `position`, which sounds like "next to it" and is not:
 nothing in the UI sets `position`, so every column is 0 and the order falls through to `id`. A
@@ -250,13 +260,14 @@ copy shows up in either is the user's to say. What is still unordered is the lis
 *default* column order — the one `position` alone decides, which the grid falls back to
 and which nothing in the UI writes.
 
-**Still not built: copying into an already existing column.** `start` always creates its target,
+**Still not built: copying into an already existing column.** `apply` always creates its target,
 so that needs a target parameter and the overwrite policy below.
 
 **Needs a decision — but only for the standalone use.** When #1 drives it the answers are pinned:
-a conversion always overwrites (the target column is new and empty) and always copies (the source
-survives until the swap, which is what makes it reversible). What is still open is what a user
-invoking #2 *directly* gets:
+a conversion always overwrites (the target column is new and empty) and always copies (the
+original values are written to the binned `<name>__before_conversion` column in the same pass,
+which is what makes it reversible). What is still open is what a user invoking #2 *directly*
+gets:
 - **Overwrite policy.** Overwrite the target unconditionally, or only fill cells where the target
   is empty? Fill-empty-only is the safer default for merging two columns; overwrite is what a
   pre-drop migration wants.

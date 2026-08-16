@@ -19,20 +19,28 @@ interface Props {
   onDone: () => void;
 }
 
-/** Step two: read what happened, then keep it or throw it away.
+/** Step two: read what would happen, then ask for it or walk away.
  *
- *  The work has already run at this point — into a hidden column that no view,
- *  filter, form or formula can see — so this screen is the whole reason the feature
- *  works the way it does. Until it is applied the list is exactly as it was, and
- *  discarding costs nothing because nothing ever saw the result.
+ *  **No work has run at this point.** The report is a dry run — the server converted
+ *  every cell in memory to count them and wrote nothing, created no column and
+ *  reserved no name. So cancelling is free in the strongest sense: there is no
+ *  request to make, nothing to fail while making it, and nothing left behind to
+ *  block the next attempt. Pressing Apply is what does the whole job, in one
+ *  transaction.
+ *
+ *  That is also why the mutation re-sends the entire request rather than posting to
+ *  some handle the report handed out. The two calls are deliberately unlinked: a
+ *  server-side staging area is exactly what used to let a record written between
+ *  them be reverted or blanked.
  *
  *  Two endings, and the wording has to be honest about which: a **conversion**
  *  replaces the column and puts the old values in the bin, while a **duplicate**
  *  adds a column and displaces nothing. `report.duplicate` says which.
  *
- *  Closing the dialog any other way discards too. Leaving one in progress would
- *  block the next attempt on this column with a 409 that names a scratch column the
- *  person never knew existed. */
+ *  The counts can go stale while this sits open — somebody else may be editing —
+ *  and that is accepted rather than papered over. The apply re-derives everything
+ *  from the records as they are, and refuses with a 409 if they moved underneath it,
+ *  which surfaces here as an ordinary error message. */
 export function ConversionReportDialog({
   listUuid,
   column,
@@ -42,12 +50,26 @@ export function ConversionReportDialog({
 }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
-  const base = `/lists/${listUuid}/columns/${column.uuid}/convert/${report.target_uuid}`;
   const typeLabel = TYPE_LABELS.get(newType) ?? newType;
   const duplicate = report.duplicate;
 
   const apply = useMutation({
-    mutationFn: () => api.post<Column>(base, {}),
+    // The apply carries the whole request again, because there is nothing on the
+    // server tying it to the preview — no staged column, no handle, nothing that
+    // could hold a value written since. The `config` is the one the preview
+    // *resolved*, not the one the dialog sent: for text -> choice the options are
+    // minted from the source's distinct values, and letting the server re-derive
+    // them here would answer a slightly different question than the one on screen.
+    mutationFn: () =>
+      api.post<Column>(
+        `/lists/${listUuid}/columns/${column.uuid}/convert/apply`,
+        {
+          type: report.new_type,
+          config: report.config,
+          name: report.name,
+          display_name: report.display_name,
+        },
+      ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
@@ -65,19 +87,11 @@ export function ConversionReportDialog({
     },
   });
 
-  const discard = useMutation({
-    mutationFn: () => api.del(base),
-    onSuccess: onDone,
-    // A failed discard leaves a hidden column behind, which the person cannot see
-    // or clean up — so say so rather than closing quietly.
-    onError: (err) =>
-      toast.error(
-        "Could not discard the conversion",
-        err instanceof ApiError ? err.message : undefined,
-      ),
-  });
-
-  const busy = apply.isPending || discard.isPending;
+  // Nothing to discard. The preview created no column and wrote no value, so
+  // walking away is closing the dialog — there is no request to make and nothing
+  // that could fail while making it. This used to be a `DELETE` whose failure left
+  // a hidden column the person could neither see nor clean up.
+  const busy = apply.isPending;
 
   // A duplicate displaces nothing, so it does not need the same warning — it adds
   // a column and leaves everything else alone. Only the conversion is destructive.
@@ -113,24 +127,17 @@ export function ConversionReportDialog({
       }
       visible
       onHide={() => {
-        if (!busy) discard.mutate();
+        if (!busy) onDone();
       }}
       style={{ width: 560 }}
       footer={
         <>
-          <Button
-            label="Discard"
-            text
-            onClick={() => discard.mutate()}
-            loading={discard.isPending}
-            disabled={apply.isPending}
-          />
+          <Button label="Cancel" text onClick={onDone} disabled={busy} />
           <Button
             label={duplicate ? "Add column" : "Apply"}
             icon="pi pi-check"
             onClick={confirmApply}
             loading={apply.isPending}
-            disabled={discard.isPending}
           />
         </>
       }
@@ -173,7 +180,7 @@ export function ConversionReportDialog({
             content={
               <span className="text-sm">
                 Values that could not be converted will be <strong>empty</strong>{" "}
-                in the new column. Discard, fix them, and convert again if that is
+                in the new column. Cancel, fix them, and convert again if that is
                 not what you want.
               </span>
             }

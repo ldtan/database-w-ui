@@ -132,6 +132,54 @@ event-loop watchdog built on `await asyncio.sleep(0)` is a busy spin: it re-sche
 immediately, saturates the process, and `process_time()` then charges all of it to the job
 being measured. Sleep a real interval and measure the overshoot instead.
 
+## Converting a column's type
+
+The one operation that deliberately blocks writers while it runs, and the reason it is
+allowed to is that it is the only way to make it correct. A conversion is two calls: `preview`,
+which converts every cell in memory and writes nothing, and `apply`, which does the
+whole job — read, convert, write both the new value and the original, retype the column
+— inside **one transaction**. It used to stage the work in a hidden column between the
+two, and the gap that opened is what lost writes (known-gaps §11).
+
+Measured 2026-08-15, same machine and method, `text` → `number` over a list whose every
+cell converts:
+
+| | 5,000 records | 20,000 records | 50,000 records |
+|---|---|---|---|
+| `preview` app CPU | 78 ms | 297 ms | 859 ms |
+| `apply` app CPU | 125 ms | 438 ms | 1,219 ms |
+| **`apply` wall — the list is locked this long** | **0.3 s** | **1.4 s** | **3.5 s** |
+| CPU per record (apply) | 25 µs | 22 µs | 24 µs |
+
+Linear, so the per-record figure extrapolates, and the two numbers to read are the last
+two rows.
+
+**Roughly 24 µs of app CPU per record**, about two-thirds of a calculated re-index's
+~0.035 ms — unsurprising, since both walk every record once and do a small amount of
+Python per cell, and this one has no formula to evaluate. Divide the CPU column by the
+plan's share to get Render figures: on `starter` (0.5 CPU) the 50,000-record apply is
+~2.4 s of CPU.
+
+**The wall time is the number that matters**, because it is how long every other writer
+to that list waits. The apply holds row locks on every record it has written until it
+commits, which is the price of the whole thing being atomic — and it is the right price
+for a point-of-no-return schema change, but it is a real cost and not a rounding error.
+Wall exceeds CPU by roughly 3× here because most of the gap is Postgres doing the
+`jsonb_set` updates; that side of the box has capacity to spare, so the ratio should
+hold rather than worsen on the deployed plan.
+
+**`ROW_CEILING` stays at 50,000 on the strength of this.** A ~3.5 s lock locally implies
+something in the range of 7–10 s on `starter`, which is tolerable for an operation a
+person deliberately triggered and confirmed, on a list size the deployment has not come
+close to. If a list that big ever becomes plausible, the fix is a job that can hold the
+lock outside a web request — not a return to staging, which is what the window bug was.
+
+Two things this does **not** cost. The preview is free to abandon: it creates no column,
+writes no value and reserves no name, so closing the dialog makes no request at all.
+And a refusal — a failed `required`/`unique` gate, or a record written by somebody else
+mid-apply — rolls back the entire transaction, so a conversion either happens or leaves
+the list exactly as it was.
+
 ## Cloning a list with its records
 
 The other operation that scales with the list rather than the page, and the only one that

@@ -25,11 +25,18 @@ class Column(BaseModel):
     description: Mapped[str] = mapped_column(sa.Text, nullable=True)
     # Type-specific settings (options, precision, target list, required, ...).
     config: Mapped[dict] = mapped_column(JSONB, default=dict)
-    # Live, but not part of the list's shape yet. A type conversion builds its
-    # target column here and backfills into it, so the half-converted data is
-    # invisible to every reader until the cutover swaps it in. Distinct from
-    # `deleted_at`, which also hides a column but marks it for the purge job —
-    # a stalled conversion must not have its work collected.
+    # Live, but not part of the list's shape. **Nothing sets this any more.** It
+    # existed for the staged type conversion, which built its target column here and
+    # backfilled into it so half-converted data stayed invisible until the cutover —
+    # and the gap that opened between building and cutting over is precisely what
+    # lost writes (known-gaps §11). A conversion is one transaction now and stages
+    # nothing.
+    #
+    # The field survives for two reasons: `src/maintenance/drop_conversion_scratch.py`
+    # needs it to find the rows that design stranded, and "invisible to readers but
+    # not marked for the purge" remains a distinct state from `deleted_at` if
+    # anything ever wants it again. Nothing should set it casually — a hidden column
+    # is one no code path will ever read, finish or offer to clean up.
     hidden: Mapped[bool] = mapped_column(
         sa.Boolean, default=False, server_default=sa.false(), nullable=False
     )
@@ -54,13 +61,16 @@ def in_shape():
 
     Live *and* not hidden. Every reader that answers "what fields does a record
     have" — the grid, the record service, export, metrics, forms, the primary
-    column, a lookup's label — must filter on this, or a conversion's half-filled
-    scratch column shows up as a field of the list.
+    column, a lookup's label — must filter on this.
+
+    Nothing sets `hidden` any more (see the field), so in practice this is "not
+    deleted" plus a clause that currently excludes only the rows the old staged
+    conversion stranded. Keep the clause: it is what makes those rows invisible
+    until the one-off cleanup removes them, and it is the guard if anything wants
+    the state back.
 
     Two readers deliberately do **not** use it and take `deleted_at` alone: the
     reference scrub and the shape reconcile. A column being invisible does not
-    exempt the uuids it holds from being cleaned up when their target is purged,
-    and a conversion that runs across a nightly reconcile should come out the far
-    side in the shape it declares.
+    exempt the uuids it holds from being cleaned up when their target is purged.
     """
     return sa.and_(Column.deleted_at.is_(None), Column.hidden.is_(False))

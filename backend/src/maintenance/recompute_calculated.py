@@ -47,8 +47,8 @@ from src.lists.columns.models import Column, in_shape
 async def _lists_with_formulas(db) -> list[int]:
     """Every list holding a live calculated column.
 
-    `in_shape`, matching the job itself: a conversion's hidden scratch column is not a
-    field of the list, so it neither feeds a formula nor gets one.
+    `in_shape`, matching the job itself: a hidden column is not a field of the list,
+    so it neither feeds a formula nor gets one.
     """
     result = await db.execute(
         select(distinct(Column.list_id)).where(

@@ -587,7 +587,8 @@ export function ColumnDialog({
         // Same endpoint for both; sending a name is what makes the server keep the
         // source and put the new column beside it. A conversion sends none, because
         // it keeps the column's identity and so has nothing to rename. Either way
-        // nothing about the list changes here — this fills a hidden column.
+        // this is a dry run: it writes nothing and creates nothing, so the report
+        // it returns costs nothing to walk away from.
         return api.post<ConversionReport>(
           `/lists/${listUuid}/columns/${column.uuid}/convert`,
           duplicating
@@ -734,9 +735,9 @@ export function ColumnDialog({
             className="w-full"
             content={
               <span className="text-sm">
-                Nothing changes yet. The values are copied into a hidden column
-                first, and you get to read what did and did not convert before
-                deciding whether to keep it.
+                Nothing changes yet. This works out what every value would become
+                and shows you what did and did not convert; nothing is written
+                until you decide.
                 {duplicating
                   ? ` “${column.display_name}” is left exactly as it is.`
                   : ""}

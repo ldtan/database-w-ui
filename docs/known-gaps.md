@@ -749,17 +749,58 @@ buys and what it costs are both worth knowing before extending it.
   is what keeps the column's uuid, name and position — so views, forms, formulas and
   `primary_column_id` need no repointing. Anything that caches a column's type across a
   request would break here, and nothing does today.
-- **Storage roughly doubles for the duration.** Every record holds the old value and the new
-  one between the backfill and the cutover. On a 1GB database that is worth checking before
-  converting a large text column.
-- **`required` and `unique` are cutover gates, not backfill rules**, so a report can come
-  back clean and the commit still refuse. That is deliberate — per cell they would fail every
-  ordinary blank — but it does mean the report does not tell you whether the commit will
-  succeed. A dry-run of the gates would.
-- **Above `ROW_CEILING` (50k) a conversion is refused in the request** and the caller is told
-  to use the maintenance workflow. Nothing in that workflow runs it yet: the service function
-  is callable and chunked, but no entry point exists. A list that big is still not plausible on
-  the deployed plans, which is why it was left.
+- **It is one transaction, and it used to be two calls with a person in between.** That
+  earlier design staged the converted values in a *hidden* column and swapped them in when
+  the person pressed Apply — and the gap between those two calls lost writes. Every write
+  path filters columns by `in_shape()`, which excludes hidden ones, so a record created while
+  the report was on screen got a value under the source key and nothing under the target's,
+  and the swap then wrote JSON `null` over it; a record *edited* in that window had the
+  backfill's pre-edit value installed over the edit. Both silent, both reported as success.
+  It is now `preview` (writes nothing at all) and `apply` (reads, converts, writes, retypes,
+  all in one transaction), so there is no window and nothing to stage. **Do not reintroduce a
+  staging column as an optimisation** — the cost of the second pass is a few seconds at the
+  ceiling, and it is what buys the property.
+- **Two things follow from being one transaction.** The apply holds row locks until it
+  commits — on the rows it *writes*, which is every record whose source cell had a value; a
+  record with an empty cell is skipped and stays writable throughout. Writers to those rows
+  block for the duration, which is correct for a point-of-no-return operation and is why
+  `ROW_CEILING` is now a bound on lock time as well as on work. And a write that lands while
+  the pass is running is refused rather than run over: `_fingerprint` reads the list's row
+  count and newest `updated_at` before the pass and again after the retype, and a change
+  rolls the whole thing back with a 409. The conversion's own writes go through raw SQL
+  precisely so they do not stamp `updated_at` and trip that check on themselves.
+- **The re-check is not a full serialisation, and three gaps are worth naming.** It closes
+  at the second `_fingerprint` read, not at `COMMIT`, so a row inserted in that last sliver
+  is invisible — the same insert race `resanitize.py` already documents, and the reason it
+  matters here is that such a record holds a value validated against the *old* type under a
+  column that has just been retyped. It sees `list_items` only, so a concurrent
+  `PATCH /columns/{uuid}` on the source is neither detected nor preserved: `apply` overwrites
+  `config` wholesale. And it is blind to the app's other raw-SQL writers of `data`
+  (`backfill`, `resanitize`, `reconcile_shapes`, `_references`, `purge`, the item service's
+  cell patch), none of which stamps `updated_at` either — notably a calculated re-index,
+  whose advisory lock is deliberately in a *different* namespace, so it can run on the same
+  list concurrently. That is currently harmless because both sides merge inside SQL against
+  the current row version under row locks, but it is harmless by accident: a future writer
+  that read a record in Python and wrote the whole blob back would silently lose the
+  conversion's work with no fingerprint change.
+- **Storage roughly doubles for the duration**, and permanently for a conversion. Every
+  record holds the converted value under the column's own key and the original under the
+  binned `<name>__before_conversion` column, until that column is purged. On a 1GB database
+  that is worth checking before converting a large text column.
+- **`required` and `unique` are cutover gates, not per-cell rules**, so a report can come
+  back clean and the apply still refuse. That is deliberate — per cell they would fail every
+  ordinary blank. What changed is the cost of failing one: the gates run inside the
+  transaction, so a refusal now leaves *nothing* behind, where the staged version left a
+  hidden column full of converted values and a 409 waiting for the next attempt.
+- **A duplicate's name is not reserved by the preview.** It cannot be — the preview creates
+  nothing. The preview reports a clash as a courtesy so nobody reads a report and only then
+  gets refused, but the guard is the partial unique index, via the `IntegrityError` the apply
+  catches. Under the staged design the name was held from the moment the report was built,
+  which is why abandoning had to release it.
+- **Above `ROW_CEILING` (50k) a conversion is refused**, full stop. The message used to point
+  at a maintenance workflow that never existed; it no longer promises one. If a list that big
+  ever becomes plausible, the thing to build is a job that can hold the lock outside a web
+  request — not a return to staging.
 - **A duplicate inherits the source's `position`**, which reads as "next to it" and is not.
   Nothing in the UI ever sets `position`, so every column is 0 and the order falls through to
   `id` — a duplicate appears last, like any other new column. Placing it adjacent means
@@ -768,9 +809,13 @@ buys and what it costs are both worth knowing before extending it.
   form's `fields` are drag-editable and the Columns tab sorts by `display_name`, so all three
   surfaces put the copy somewhere sensible while `position` — the list's default order, which
   the grid falls back to — is still written by nothing.
-- **Copying into an *already existing* column is still not built.** `ConversionService.start`
+- **Copying into an *already existing* column is still not built.** `ConversionService.apply`
   always creates its target, so that needs a target parameter and a decision the planned-features
   doc still lists as open: overwrite the target, or only fill cells where it is empty.
+- **`Column.hidden` is now set by nothing.** It existed for the staging column and survives
+  only so `src/maintenance/drop_conversion_scratch.py` — a one-off, run once after the atomic
+  conversion deployed — can find rows the old design stranded. `in_shape()` still tests it, so
+  the primitive is available if something ever needs it again; nothing should set it casually.
 
 ## 12. A form field's condition is an affordance, not a restriction
 

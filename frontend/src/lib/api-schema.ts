@@ -824,32 +824,35 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Start Conversion
-         * @description Convert this column's values into a new column of another type — or copy them.
+         * Preview Conversion
+         * @description Report what converting this column would do. **Writes nothing.**
          *
-         *     Changes **nothing** about the list. The converted values land in a hidden column
-         *     that no view, filter, form or formula can see, and the report says what did and
-         *     did not convert. Commit it with `POST` to the returned `target_uuid`, or throw it
-         *     away with `DELETE` — the column keeps working normally either way until then.
+         *     A dry run: every cell is converted in memory and counted, and the report says
+         *     what did and did not come through. No column is created, no value is stored and
+         *     nothing is reserved -- so walking away costs nothing, and there is no in-flight
+         *     state left to block the next attempt.
+         *
+         *     Apply it by POSTing the same body, with the `config` this returns, to
+         *     `convert/apply`. The two calls deliberately share no server-side handle: that
+         *     is what stops a record written between them from being reverted or blanked.
          *
          *     Two endings, chosen here by whether a `name` is supplied:
          *
-         *     - **Without a name — a conversion.** Committing retypes *this* column, keeping
+         *     - **Without a name -- a conversion.** Applying retypes *this* column, keeping
          *       its uuid, so nothing referring to it needs changing, and the original values
-         *       go to the bin.
-         *     - **With a name — a duplicate.** Committing makes the new column live beside
-         *       this one and leaves this one untouched. Since the values already sit under the
-         *       new column's own key, that commit rewrites no records at all. The type may be
-         *       the same as the source's, which is a straight copy.
+         *       go to the bin as `<name>__before_conversion`.
+         *     - **With a name -- a duplicate.** Applying adds the new column beside this one
+         *       and leaves this one untouched. The type may be the same as the source's,
+         *       which is a straight copy.
          */
-        post: operations["start_conversion_api_lists__list_uuid__columns__uuid__convert_post"];
+        post: operations["preview_conversion_api_lists__list_uuid__columns__uuid__convert_post"];
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
         trace?: never;
     };
-    "/api/lists/{list_uuid}/columns/{uuid}/convert/{target_uuid}": {
+    "/api/lists/{list_uuid}/columns/{uuid}/convert/apply": {
         parameters: {
             query?: never;
             header?: never;
@@ -859,28 +862,29 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Commit Conversion
-         * @description Make the converted values real. The point of no return.
+         * Apply Conversion
+         * @description Do it. The point of no return, and a single transaction.
          *
-         *     For a conversion this swaps them in and retypes the column; the original values
-         *     are not destroyed but land in a binned column named `<name>__before_conversion`,
-         *     restorable for the usual retention window. For a **duplicate** it only makes the
-         *     new column visible — the source is untouched and no record is rewritten.
+         *     Reads, converts, writes and retypes in one go, so there is never a moment when
+         *     the column's declared type and its stored values disagree, and no window in
+         *     which a record somebody else writes can be reverted or blanked. For a
+         *     conversion the original values land in a binned column named
+         *     `<name>__before_conversion`, restorable for the usual retention window; for a
+         *     **duplicate** the source is untouched.
          *
-         *     `required` and `unique` are checked here rather than during the backfill, for
-         *     both endings — per cell they are the wrong question, since a blank source cell is
-         *     ordinary and a repeat only matters once the column is real. A failure here leaves
-         *     the conversion in progress, so it can be fixed and committed again.
+         *     Send the `config` the preview returned rather than the one you sent it. For
+         *     `text` -> `choice` the preview mints the options from the source's distinct
+         *     values, and re-deriving them here would quietly answer a different question
+         *     than the one that was on screen.
+         *
+         *     Two ways this refuses, both leaving the list exactly as it was. `required` and
+         *     `unique` are checked once the values are in place -- per cell they would be the
+         *     wrong question, since a blank source cell is ordinary. And if any record on this
+         *     list was written while the conversion was running, it refuses rather than finish
+         *     over the top of it; nothing was committed, so running it again is safe.
          */
-        post: operations["commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post"];
-        /**
-         * Abandon Conversion
-         * @description Throw an in-progress conversion away, values and all.
-         *
-         *     A hard delete rather than the bin: nothing ever saw this column, so there is
-         *     nothing worth restoring.
-         */
-        delete: operations["abandon_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__delete"];
+        post: operations["apply_conversion_api_lists__list_uuid__columns__uuid__convert_apply_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -1936,21 +1940,26 @@ export interface components {
         };
         /**
          * ConversionReport
-         * @description What a backfill did, for a person to read before committing to it.
+         * @description What a conversion *would* do, for a person to read before asking for it.
          *
-         *     Nothing about the list has changed at this point: the values live in a hidden
-         *     column that no view, filter, form or formula can see. Committing swaps them in;
-         *     abandoning throws them away.
+         *     Nothing has happened at this point and nothing is reserved: the preview writes
+         *     no values and creates no column, so closing the dialog costs nothing and leaves
+         *     nothing behind. The counts are a dry run over live data and may be stale by the
+         *     time anyone acts on them — `apply` re-derives everything and refuses if the
+         *     records moved, rather than trusting this.
          */
         ConversionReport: {
-            /**
-             * Target Uuid
-             * Format: uuid
-             */
-            target_uuid: string;
             new_type: components["schemas"]["ColumnType"];
             /** Duplicate */
             duplicate: boolean;
+            /** Name */
+            name?: string | null;
+            /** Display Name */
+            display_name?: string | null;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            };
             /** Converted */
             converted: number;
             /** Failed */
@@ -1961,7 +1970,7 @@ export interface components {
             errors_truncated: boolean;
         };
         /**
-         * ConversionStart
+         * ConversionRequest
          * @description The column to convert *into*: a type, and that type's settings.
          *
          *     The config is validated from scratch against the new type rather than merged
@@ -1971,12 +1980,17 @@ export interface components {
          *     distinct value in the source.
          *
          *     **Naming it makes it a duplicate.** With a `name`, the new column goes live
-         *     *beside* the source when committed rather than replacing it, and the source is
-         *     left exactly as it was — so this is equally "copy this column" and "copy it,
-         *     converting on the way". Without a `name` it is a conversion, and the column
-         *     keeps the source's identity.
+         *     *beside* the source rather than replacing it, and the source is left exactly as
+         *     it was — so this is equally "copy this column" and "copy it, converting on the
+         *     way". Without a `name` it is a conversion, and the column keeps the source's
+         *     identity.
+         *
+         *     The same body serves both the preview and the apply, which is what makes the
+         *     second call able to stand alone: there is no server-side handle tying them
+         *     together, so the apply carries everything it needs. Send the preview's resolved
+         *     `config` back rather than the one originally typed — see `ConversionReport`.
          */
-        ConversionStart: {
+        ConversionRequest: {
             type: components["schemas"]["ColumnType"];
             config?: components["schemas"]["ColumnConfig"];
             /** Name */
@@ -4703,7 +4717,7 @@ export interface operations {
             };
         };
     };
-    start_conversion_api_lists__list_uuid__columns__uuid__convert_post: {
+    preview_conversion_api_lists__list_uuid__columns__uuid__convert_post: {
         parameters: {
             query?: never;
             header?: never;
@@ -4715,7 +4729,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConversionStart"];
+                "application/json": components["schemas"]["ConversionRequest"];
             };
         };
         responses: {
@@ -4739,18 +4753,21 @@ export interface operations {
             };
         };
     };
-    commit_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__post: {
+    apply_conversion_api_lists__list_uuid__columns__uuid__convert_apply_post: {
         parameters: {
             query?: never;
             header?: never;
             path: {
                 uuid: string;
-                target_uuid: string;
                 list_uuid: string;
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversionRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {
@@ -4760,37 +4777,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ColumnRead"];
                 };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    abandon_conversion_api_lists__list_uuid__columns__uuid__convert__target_uuid__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                uuid: string;
-                target_uuid: string;
-                list_uuid: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
             /** @description Validation Error */
             422: {
