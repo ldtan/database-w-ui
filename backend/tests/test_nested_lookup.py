@@ -593,6 +593,25 @@ async def test_deleting_the_parents_target_list_unnests_the_child(
     assert resp.json()["data"][s["city_col"]] == s["tokyo"]
 
 
+async def test_deleting_the_childs_own_target_list_clears_its_pairing_too(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The other direction, and the one that pins the pairing keys in the scrub itself.
+
+    Delete Cities and the child *is* in scope: its own target is the list that went.
+    Both halves of the pairing are cleared by the scrub's own field list rather than
+    by the outward cascade the previous test covers, so this is what fails if either
+    key is dropped from that list.
+    """
+    s = await _scenario(client, workspace_uuid, list_uuid, add_column)
+    assert (await client.delete(f"/api/lists/{s['cities']}")).status_code == 204
+
+    config = await _city_config(client, list_uuid, s["city_col"])
+    assert config["target_list_uuid"] is None
+    assert config["parent_column_uuid"] is None
+    assert config["target_filter_column_uuid"] is None
+
+
 # ---- cloning ----
 
 

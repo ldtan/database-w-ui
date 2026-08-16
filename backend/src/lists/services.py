@@ -21,6 +21,9 @@ from src.workspaces.services import WorkspaceService
 
 from .columns.enums import ColumnType
 from .columns.models import Column, in_shape
+# Also safe at module level, and checked: the column service's own imports reach the
+# list *models* but never this module, so there is no cycle to defer around.
+from .columns.services import ColumnService
 from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
@@ -845,10 +848,6 @@ class ListService:
                 )
             )
         ).scalars().all()
-        # Deferred like the PermissionService calls elsewhere in this file: a
-        # module-level import cycles back through the column service's list imports.
-        from .columns.services import ColumnService
-
         for column in lookup_columns:
             key = str(column.uuid)
             await db.execute(
@@ -885,6 +884,18 @@ class ListService:
             # refuses it. Dropping it follows the rule the `unique` + `multiple`
             # refusal set: a column must not claim a guarantee it is in no position
             # to enforce. Re-ticking it is part of retargeting.
+            #
+            # Borrow that rule's *principle* and not its mechanism, which is the
+            # opposite one: `unique` + `multiple` refuses the next save and leaves
+            # existing columns alone precisely because there is no retro-validation.
+            # This rewrites a stored config instead, and it is the only place that
+            # does. What earns the difference is that the refusal there is something
+            # the column's owner sees and can act on, where this freeze is triggered
+            # by somebody else deleting a different list — possibly in a workspace
+            # they own and this owner cannot see — and refuses writes for a reason
+            # nobody on this list can do anything about. Nothing announces the
+            # dropped constraint, which is the cost, and it is smaller than a list
+            # nobody can write to.
             config["required"] = False
             column.config = config
             # Un-nest whatever paired against this column. A nested child names its

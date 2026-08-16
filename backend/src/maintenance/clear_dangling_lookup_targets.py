@@ -19,17 +19,24 @@ every write to the list that holds the column. Nothing in the UI gets out of it.
 
 Idempotent — a second run finds nothing and writes nothing.
 
-**The values are already gone.** They were scrubbed when the list was deleted; that
-half was never broken. This only clears config, so it cannot destroy anything a
-person could still see, and there is nothing here to un-do by halves.
+**It writes config and nothing else**, so it cannot destroy anything a person can see.
+For the population it is aimed at — columns whose list was deleted — the values went
+with the list and that half was never broken. It also catches a column whose target
+was never a live list at all (see the cast note below), and *those* cells were never
+scrubbed; after the sweep they render as row stubs rather than resolving, which is
+what they already did. Either way nothing readable is lost here.
 
-**It clears the same fields the delete path does, deliberately.** Keeping the two
-lists in step is what stops a column repaired by this sweep from behaving differently
-to one scrubbed at delete time — including `required`, whose whole point is that a
-constraint nothing can satisfy freezes writes to an entire list. The one thing it
-does *not* do is un-nest dependents: a child pairing against one of these columns has
-been dangling for as long as the target has, and `_clear_dependent_nesting` is run
-here for the same reason the delete path runs it.
+**It clears the same fields the delete path does, deliberately**, and runs the same
+outward `_clear_dependent_nesting`. Keeping the two in step is what stops a column
+repaired by this sweep from behaving differently to one scrubbed at delete time —
+`required` included, whose whole point is that a constraint nothing can satisfy
+freezes writes to an entire list. A second, divergent copy of the rule is the thing
+most worth avoiding here.
+
+`--dry-run` names every column it would clear, not just a count. This discards the
+only surviving record of what each one pointed at — including targets that are merely
+soft-deleted and still restorable from the bin — so an operator has to be able to
+write that down first.
 """
 import argparse
 import asyncio
@@ -60,18 +67,47 @@ _BLANKED = (
 # The correlation compares `List.uuid` cast to text rather than casting the config
 # value to uuid, so a field holding something that is not a uuid at all — a
 # hand-edited config, an import that guessed — matches nothing and is treated as
-# dangling, which is what it is. Casting the other way would raise instead.
+# dangling, which is what it is. Casting the other way would raise and take the whole
+# sweep down with one bad row.
+#
+# Lowered on both sides, and that matters here in a way it does not at the delete
+# path. Postgres renders a uuid lowercase-hyphenated while `coerce_uuid` accepts
+# uppercase and braces, so a config written in any other form resolves correctly
+# everywhere in the app. A case-sensitive comparison would classify such a column as
+# dangling and blank a *working* one — and this is the query that writes, where the
+# delete path's equivalent can only fail to match. The API cannot produce that form,
+# but hand-edited configs are explicitly in this job's scope; they are the only way
+# its target state arises at all.
+_TARGET = sa.func.lower(Column.config["target_list_uuid"].astext)
 _DUE = sa.select(Column.id).where(
     Column.deleted_at.is_(None),
     Column.type == ColumnType.lookup,
     Column.config["target_list_uuid"].astext.is_not(None),
     ~sa.exists(
         sa.select(sa.literal(1)).where(
-            sa.cast(List.uuid, sa.Text) == Column.config["target_list_uuid"].astext,
+            sa.func.lower(sa.cast(List.uuid, sa.Text)) == _TARGET,
             List.deleted_at.is_(None),
         )
     ),
 )
+
+# What `--dry-run` reports, so the mapping can be written down before it is discarded.
+_DUE_ROWS = sa.select(
+    Column.list_id,
+    Column.uuid,
+    Column.name,
+    Column.config["target_list_uuid"].astext,
+).where(Column.id.in_(_DUE))
+
+
+async def due() -> list[tuple]:
+    """Every column the sweep would clear, as (list_id, uuid, name, dead target).
+
+    Read-only. This is what `--dry-run` prints, and it is the last chance anyone has
+    to record which list each column pointed at — clearing is what destroys that.
+    """
+    async with db_module.SessionLocal() as db:
+        return [tuple(row) for row in await db.execute(_DUE_ROWS)]
 
 
 async def clear_dangling(dry_run: bool = False) -> int:
@@ -105,12 +141,15 @@ async def _main() -> None:
     )
     args = parser.parse_args()
 
-    count = await clear_dangling(dry_run=args.dry_run)
     what = "lookup column(s) pointing at a list that no longer exists"
     if args.dry_run:
-        print(f"Would clear {count:,} {what}.")
+        rows = await due()
+        for list_id, uuid, name, target in rows:
+            print(f"  list {list_id}  column {uuid} ({name})  -> {target}")
+        print(f"Would clear {len(rows):,} {what}.")
+        print("Record the targets above: clearing is what destroys them.")
     else:
-        print(f"Cleared {count:,} {what}.")
+        print(f"Cleared {await clear_dangling():,} {what}.")
 
 
 if __name__ == "__main__":

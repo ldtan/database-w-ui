@@ -17,7 +17,7 @@ from sqlalchemy import select
 from uuid import uuid7
 
 from src.lists.columns.models import Column
-from src.maintenance.clear_dangling_lookup_targets import clear_dangling
+from src.maintenance.clear_dangling_lookup_targets import clear_dangling, due
 
 
 async def _make_list(client, workspace_uuid, name):
@@ -111,6 +111,37 @@ async def test_a_second_run_finds_nothing(session_factory, dangling):
     assert await clear_dangling() == 1
     assert await clear_dangling() == 0
     assert await clear_dangling(dry_run=True) == 0
+
+
+async def test_an_uppercase_target_uuid_is_left_alone(session_factory, dangling):
+    """The sweep writes, so a false positive here destroys a working column.
+
+    Postgres renders a uuid lowercase-hyphenated while `coerce_uuid` accepts uppercase
+    and braces, so a config written in any other form resolves perfectly everywhere in
+    the app. A case-sensitive comparison would call this column dangling and blank it.
+    """
+    async with session_factory() as db:
+        column = await db.scalar(
+            select(Column).where(Column.uuid == dangling["healthy"])
+        )
+        target = column.config["target_list_uuid"].upper()
+        column.config = {**column.config, "target_list_uuid": target}
+        await db.commit()
+
+    assert await clear_dangling() == 1  # the genuinely broken one, and only it
+    healthy = await _config(session_factory, dangling["healthy"])
+    assert healthy["target_list_uuid"] is not None
+    assert healthy["required"] is True
+
+
+async def test_the_dry_run_names_what_it_would_clear(session_factory, dangling):
+    """A count is not enough: this is the last record of what each column pointed at."""
+    rows = await due()
+    assert len(rows) == 1
+    _, uuid, name, target = rows[0]
+    assert str(uuid) == dangling["broken"]
+    assert name == "author"
+    assert target is not None
 
 
 async def test_a_column_whose_target_is_not_even_a_uuid_is_cleared(

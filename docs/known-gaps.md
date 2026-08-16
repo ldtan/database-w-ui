@@ -1396,9 +1396,11 @@ that already holds dangling columns, and by the deliberate asymmetry above those
 that *still raises* — so they stay exactly as stuck as the paragraph before last describes.
 `src.maintenance.clear_dangling_lookup_targets` is the one-off that clears them, matching on
 live lookup columns whose `target_list_uuid` names no live list and blanking the same fields
-the scrub does. It has a `--dry-run`, it is idempotent, and it must be run once against any
-database that predates the fix — the deployed one included. Until it is, this section's past
-tense is only true of lists deleted since.
+the scrub does. It is idempotent, and it must be run once against any database that predates
+the fix — the deployed one included. Until it is, this section's past tense is only true of
+lists deleted since. **Run `--dry-run` first and keep the output**: it names each column and
+the target it points at, and clearing is what destroys the only record of that — including
+for targets that are merely soft-deleted and still restorable from the lists bin.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
