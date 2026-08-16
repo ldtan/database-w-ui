@@ -104,6 +104,33 @@ function labelQuery(listUuid: string, columnUuid: string, uuids: string[]) {
   };
 }
 
+/** Resolve a column's page of uuids to labels, memoised.
+ *
+ *  The memo is the point. `toNames` builds a Map over the whole response — up to
+ *  `RESOLVE_CHUNK` (500) entries — and this is called by *every cell of the column*,
+ *  on every render. The grid runs with `cellMemo` off (see ListDetailPage), so a
+ *  single `setState` anywhere on the page re-renders every cell and each one rebuilt
+ *  that Map from scratch: a hundred rows across three lookup columns is 150,000 Map
+ *  insertions for an answer that has not changed.
+ *
+ *  `usePrincipalLabels` has done exactly this since it was written; the lookup side
+ *  was the copy that never got it. Keeping the two in step matters — they back the
+ *  two halves of the same grid and the same page passes both the same uuid array. */
+function useLookupLabels(
+  listUuid: string,
+  columnUuid: string,
+  pageUuids: string[],
+): LookupLabels {
+  const result = useQuery(labelQuery(listUuid, columnUuid, pageUuids));
+  return useMemo(
+    () => toLabels(pageUuids, result),
+    // `result` itself is a new object every render, so the deps are the three
+    // things `toLabels` actually reads. `pageUuids` is stable per page: the caller
+    // builds it once in a memo and hands the same array to every cell.
+    [pageUuids, result.data, result.isPending, result.isFetching],
+  );
+}
+
 function toLabels(
   uuids: string[],
   result:
@@ -137,8 +164,7 @@ export function LookupCell({
   // column's cells share one query key, so it stays one request per column.
   pageUuids: string[];
 }) {
-  const result = useQuery(labelQuery(listUuid, column.uuid, pageUuids));
-  const resolved = toLabels(pageUuids, result);
+  const resolved = useLookupLabels(listUuid, column.uuid, pageUuids);
   const uuids = Array.isArray(value)
     ? (value as string[])
     : value

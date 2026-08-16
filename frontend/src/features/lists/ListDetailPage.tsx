@@ -1406,18 +1406,28 @@ export function ListDetailPage() {
           // time, which is what a partial PATCH per cell already means.
           editMode={inlineEdit ? "cell" : undefined}
           // PrimeReact memoises every body cell against a fixed prop list
-          // (datatable.cjs.js:493) that does not include the column, so a cell
-          // holds on to the `canItem` closure it first rendered with. When the
-          // effective-actions query resolves after the grid has drawn, cells that
-          // just became editable never gain the affordance and their
-          // `onBeforeCellEditShow` still answers `false` on rows this caller may
-          // in fact write.
+          // (datatable.cjs.js:493 — `rowData`, `field`, `rowIndex`, `editing`, and
+          // eight more) that does not include the column, so a cell holds on to the
+          // `canItem` closure it first rendered with. When the effective-actions
+          // query resolves after the grid has drawn, cells that just became editable
+          // never gain the affordance and their `onBeforeCellEditShow` still answers
+          // `false` on rows this caller may in fact write.
           //
           // The memo cannot be narrowed into correctness: adding `column` to
           // `cellMemoProps` compares a React element rebuilt every render, which
           // never matches, so the memo would be off in all but name. Off honestly
           // is the smaller lie, and it also covers the case gating on the query
           // would miss — a permission changed through the Share dialog mid-session.
+          //
+          // **Making `canItem` referentially stable does not change this**, and it
+          // is worth saying so because it looks like it should. `useEffectiveActionsMap`
+          // now memoises the predicate, so it only changes identity when the answer
+          // does — but the memo above compares *props*, not closures, and none of
+          // those twelve moves when permissions resolve. The cell would simply not
+          // re-render, which is the same staleness by a shorter route. The stable
+          // predicate is worth having anyway: with the memo off, every cell renders
+          // on every parent render, and it is what stops each of those rebuilding
+          // the whole uuid→actions Map.
           cellMemo={false}
           // PrimeReact calls this before applying its own selection logic, and
           // skips it entirely when the click landed on something clickable — so
