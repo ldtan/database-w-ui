@@ -60,6 +60,19 @@ export function renderCell(
       />
     );
   }
+  // A multi-valued cell — a `multiple` choice column today, and whatever else grows
+  // one. Keyed on the value's shape rather than on `column.config.multiple`, because
+  // records outlive the setting that shaped them: a cell can still hold an array on a
+  // column that no longer declares one, and the reverse. That is the same rule `_field`
+  // follows in SQL (`jsonb_typeof`, not the column — known-gaps.md), and asking the
+  // column here would be wrong for exactly the rows that disagree with it.
+  //
+  // Joined with ", " to match `LookupCell` and `formula.py`'s `_MULTI_JOIN`, which
+  // already documents this as the form the grid shows.
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-faint">—</span>;
+    return value.join(", ");
+  }
   if (value === null || value === undefined || value === "") {
     return <span className="text-faint">—</span>;
   }
