@@ -24,6 +24,7 @@ import { InputTextarea } from "primereact/inputtextarea";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
+import { ReferencePicker } from "../references/ReferencePicker";
 import { clearedNested, textMode, type ResolvedField } from "./recordValues";
 
 /**
@@ -77,28 +78,112 @@ const RICH_TOOLBAR = (
  */
 const OTHER = "\u0000other";
 
+interface ChoiceFieldProps {
+  id: string;
+  column: Column;
+  value: unknown;
+  disabled: boolean;
+  onChange: (v: unknown) => void;
+}
+
 /**
- * A choice cell: the options, plus — when the column allows it — an answer of the
- * record's own.
+ * A choice cell — one option, or several when the column says so.
+ *
+ * A dispatcher with no state of its own, so that each shape owns its own hooks:
+ * `multiple` is a column setting that can be toggled, and a single component
+ * branching on it would be calling `useState` conditionally.
+ */
+function ChoiceField(props: ChoiceFieldProps) {
+  return props.column.config.multiple ? (
+    <MultiChoiceField {...props} />
+  ) : (
+    <SingleChoiceField {...props} />
+  );
+}
+
+/**
+ * Several options at once, as removable tokens.
+ *
+ * `ReferencePicker` rather than a `MultiSelect`, and it is a closer fit than its
+ * name suggests: a choice value *is* its own label, so `labelFor` is identity and
+ * the "search" is a local filter over `options`. Three things come with it — the
+ * same control every other multi-valued column uses (a multi choice cell and a
+ * multi lookup cell now look alike), the AutoComplete typing workaround documented
+ * in that file, and `.cell-editor .p-autocomplete-multiple-container` in themes.css,
+ * which already sizes it inside a grid cell.
+ *
+ * Its `create` footer carries the "Other" answer. That is the same affordance a
+ * lookup uses to mint a target row, and it means one control covers both cases
+ * rather than a picker with a text box bolted underneath.
+ */
+function MultiChoiceField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: ChoiceFieldProps) {
+  const options = column.config.options ?? [];
+  const allowOther = !!column.config.allow_other;
+  // Tolerant of a bare value, though the API should never send one: reads run
+  // through `coerce_shape`, which puts every cell in its column's declared shape.
+  const selected = Array.isArray(value)
+    ? (value as string[])
+    : value
+      ? [String(value)]
+      : [];
+
+  return (
+    <ReferencePicker
+      uuids={selected}
+      multiple
+      labelFor={(v) => v}
+      search={async (term) => {
+        const q = term.trim().toLowerCase();
+        return (
+          options
+            // What is already held is not addable, and offering it again is how
+            // a cell ends up holding ["STEM", "STEM"] — which the backend accepts,
+            // since it only checks membership.
+            .filter((o) => !selected.includes(o))
+            .filter((o) => o.toLowerCase().includes(q))
+            .map((o) => ({ label: o, value: o }))
+        );
+      }}
+      onChange={onChange}
+      placeholder="Select…"
+      disabled={disabled}
+      inputId={id}
+      create={
+        allowOther
+          ? {
+              label: (term) => `Use “${term}”…`,
+              onCreate: (term) =>
+                onChange(
+                  selected.includes(term) ? selected : [...selected, term],
+                ),
+            }
+          : undefined
+      }
+    />
+  );
+}
+
+/**
+ * One option, plus — when the column allows it — an answer of the record's own.
  *
  * An "other" answer is stored as the typed string itself, exactly as an option is
  * (D3 in the data-model doc), so nothing on disk marks one. That is what makes it
  * sort, filter, export and search like any other value, and it is why this control
  * recognises one by *not finding it among the options* rather than by a flag.
  */
-function ChoiceField({
+function SingleChoiceField({
   id,
   column,
   value,
   disabled,
   onChange,
-}: {
-  id: string;
-  column: Column;
-  value: unknown;
-  disabled: boolean;
-  onChange: (v: unknown) => void;
-}) {
+}: ChoiceFieldProps) {
   const options = column.config.options ?? [];
   const allowOther = !!column.config.allow_other;
   const offList =

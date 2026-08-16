@@ -250,7 +250,7 @@ const TYPE_HELP: Record<string, string> = {
   text: "Writing — a name, a title, a reference number. Choose how it is filled in: one line, several lines for notes or an address, or rich text, which gives you bold, italic, lists, quotes and links. You can change that later without disturbing what is already stored.",
   number: "A number you can total or compare. You can set a smallest and largest allowed value, or require whole numbers only.",
   checkbox: "A simple yes/no, on/off tick — “Paid?”, “Active?”.",
-  choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording. You can also allow an “Other” answer, which adds a box for anything the options don’t cover.",
+  choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording. Can allow one option or several. You can also allow an “Other” answer, which adds a box for anything the options don’t cover.",
   date: "A calendar day, with no time of day.",
   time: "A time of day, with no date.",
   datetime: "A day and a time together.",
@@ -621,6 +621,24 @@ export function GuidePage() {
           Records that already hold a write-in keep it, and it still shows and exports.
           But the column no longer accepts it, so the next person to edit one of those
           records has to pick from the list. Nothing is rewritten behind your back.
+        </Callout>
+        <h3 className="font-semibold pt-1">Picking more than one</h3>
+        <p>
+          Tick <Ui>Allow selecting multiple options</Ui> and the column takes a list
+          rather than a single answer — programmes a student is enrolled in, tags on
+          a ticket. The cell becomes a picker you add to and remove from, and the grid
+          shows the values separated by commas.
+        </p>
+        <Callout tone="warn" title="Filtering a multi-answer column">
+          <Ui>is</Ui> asks for that <em>exact set</em>, so it rarely matches what you
+          meant. Use <Ui>contains</Ui> to find records holding a particular option —
+          bearing in mind it matches part of a word too, so <em>Arts</em> also finds{" "}
+          <em>Martial Arts</em>.
+        </Callout>
+        <Callout tone="warn" title="Going back to a single answer">
+          Records keep only their first value from then on. The rest are still there
+          for a while — switching back on brings them back — but they go for good the
+          next time that record is edited. The app asks you to confirm before saving.
         </Callout>
         <Callout tone="tip" title="Start simple">
           Text, Number, Checkbox, Choice, and Date cover almost everything. The

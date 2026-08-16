@@ -5,6 +5,7 @@ import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 import { InputNumber } from "primereact/inputnumber";
 import { Dropdown } from "primereact/dropdown";
+import { MultiSelect } from "primereact/multiselect";
 import { Calendar } from "primereact/calendar";
 import { Button } from "primereact/button";
 import { Message } from "primereact/message";
@@ -183,6 +184,10 @@ export function ColumnDialog({
   const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
   const [defaultChecked, setDefaultChecked] = useState(false);
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
+  // The same setting for a `multiple` choice column, which stores a list. Held
+  // apart rather than as one union-typed piece of state, following the rule above:
+  // one per family, and only the one matching the current shape is read.
+  const [defaultChoices, setDefaultChoices] = useState<string[]>([]);
   const [defaultTemporal, setDefaultTemporal] = useState(""); // "" | token | SPECIFIC
   const [defaultDate, setDefaultDate] = useState<Date | null>(null); // when SPECIFIC
   const [defaultUser, setDefaultUser] = useState(""); // "" | "current_user"
@@ -195,6 +200,7 @@ export function ColumnDialog({
     setDefaultNumber(null);
     setDefaultChecked(false);
     setDefaultChoice(null);
+    setDefaultChoices([]);
     setDefaultTemporal("");
     setDefaultDate(null);
     setDefaultUser("");
@@ -322,8 +328,10 @@ export function ColumnDialog({
     if (typeof def === "string") setDefaultText(def);
     if (typeof def === "number") setDefaultNumber(def);
     setDefaultChecked(def === true);
-    // A choice default is stored as the option itself.
+    // A choice default is stored as the option itself — as a list of them on a
+    // `multiple` column, which is the shape the server validates it in.
     if (typeof def === "string") setDefaultChoice(def);
+    if (Array.isArray(def)) setDefaultChoices(def as string[]);
     if (isTemporal(column.type)) {
       const token = dynamicToken(column.type);
       if (def == null) setDefaultTemporal("");
@@ -472,7 +480,11 @@ export function ColumnDialog({
   // stored values — so it would ask whether two records picked the *same set*,
   // which is not what anyone means by a unique column. Hide it, and clear it.
   const multiValued =
-    (type === "user" || type === "group" || type === "lookup") && multiple;
+    (type === "user" ||
+      type === "group" ||
+      type === "lookup" ||
+      type === "choice") &&
+    multiple;
   // A calculated column's only writer is its formula, so `required` has nothing to
   // act on — there is no value for anyone to leave blank. `Unique` does: it asks
   // whether two rows may compute the same answer, which is how a formula expresses
@@ -531,6 +543,7 @@ export function ColumnDialog({
         // keep a stored `true` and leave the column still taking answers the
         // dialog now says it does not.
         config.allow_other = allowOther;
+        config.multiple = multiple;
       }
       if (type === "link") config.label = linkText.trim() || null;
       if (type === "user" || type === "group") config.multiple = multiple;
@@ -567,7 +580,14 @@ export function ColumnDialog({
           defaultValue = defaultText.trim() || null;
         else if (type === "number") defaultValue = defaultNumber;
         else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
-        else if (type === "choice") defaultValue = defaultChoice || null;
+        else if (type === "choice")
+          // A `multiple` column's cells hold a list, and so must its default —
+          // `validate_scalar` refuses a bare string on one.
+          defaultValue = multiple
+            ? defaultChoices.length
+              ? defaultChoices
+              : null
+            : defaultChoice || null;
         else if (isTemporal(type))
           defaultValue =
             defaultTemporal === SPECIFIC
@@ -1076,6 +1096,35 @@ export function ColumnDialog({
 
           {type === "choice" && (
             <CheckboxField
+              inputId="col-multi-choice"
+              checked={multiple}
+              onChange={(next) => {
+                setMultiple(next);
+                // Carry the default across the two shapes rather than dropping
+                // it — the same option means the same thing either way, and the
+                // control it lives in is about to be swapped out from under it.
+                // The rule is `coerce_shape`'s: first element on the way down,
+                // one-element list on the way up.
+                if (next) setDefaultChoices(defaultChoice ? [defaultChoice] : []);
+                else setDefaultChoice(defaultChoices[0] ?? null);
+              }}
+              label="Allow selecting multiple options"
+              hint={
+                // Says what turning it *off* costs, because that is the only
+                // direction that loses anything and the loss is not immediate:
+                // reads keep the first value from that moment, and the rest sit
+                // on the records until one is next edited or the nightly
+                // reconcile converges them. Saving that way asks first (see
+                // `onSave`), so this is the warning before the warning.
+                editing && multiple
+                  ? "Records hold a list of options. Turning this off keeps only the first value of each record — until they are next edited, switching back restores the rest."
+                  : "Records may hold several options at once, stored as a list."
+              }
+            />
+          )}
+
+          {type === "choice" && (
+            <CheckboxField
               inputId="col-allow-other"
               checked={allowOther}
               onChange={setAllowOther}
@@ -1296,24 +1345,43 @@ export function ColumnDialog({
                       useGrouping={false}
                     />
                   )}
-                  {type === "choice" && (
-                    // Typable when the column takes an answer of its own, because
-                    // then a default off the option list is as valid as a cell
-                    // holding one — the server judges it by the same rule.
-                    <Dropdown
-                      inputId="col-default"
-                      value={defaultChoice}
-                      options={choiceLabels.map((l) => ({
-                        label: l,
-                        value: l,
-                      }))}
-                      onChange={(e) => setDefaultChoice(e.value ?? null)}
-                      placeholder="No default"
-                      showClear
-                      editable={allowOther}
-                      className="w-full"
-                    />
-                  )}
+                  {type === "choice" &&
+                    (multiple ? (
+                      // No `editable` counterpart: a MultiSelect takes no free
+                      // text, so a `multiple` column's default is one or more of
+                      // its own options even when `allow_other` is on. The cells
+                      // still take a write-in; only this control does not.
+                      <MultiSelect
+                        inputId="col-default"
+                        value={defaultChoices}
+                        options={choiceLabels.map((l) => ({
+                          label: l,
+                          value: l,
+                        }))}
+                        onChange={(e) => setDefaultChoices(e.value ?? [])}
+                        placeholder="No default"
+                        showClear
+                        display="chip"
+                        className="w-full"
+                      />
+                    ) : (
+                      // Typable when the column takes an answer of its own, because
+                      // then a default off the option list is as valid as a cell
+                      // holding one — the server judges it by the same rule.
+                      <Dropdown
+                        inputId="col-default"
+                        value={defaultChoice}
+                        options={choiceLabels.map((l) => ({
+                          label: l,
+                          value: l,
+                        }))}
+                        onChange={(e) => setDefaultChoice(e.value ?? null)}
+                        placeholder="No default"
+                        showClear
+                        editable={allowOther}
+                        className="w-full"
+                      />
+                    ))}
                   {isTemporal(type) && (
                     <div className="flex flex-col gap-2">
                       <Dropdown
