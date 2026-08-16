@@ -126,10 +126,20 @@ class ColumnService:
                 current_name=payload.name or column.name,
             )
             new_target = (column.config or {}).get("target_list_uuid")
-            if old_target is not None and str(old_target) != str(new_target):
+            if str(old_target) != str(new_target):
                 # Retargeting silently invalidates any nesting pairing that
                 # references this column — the filter column no longer points
                 # where the pairing assumed. Un-nest the dependents.
+                #
+                # There is deliberately no `old_target is not None` guard. It was
+                # redundant while every lookup had a target (for a non-lookup both
+                # sides are None and the comparison is false anyway), and it stopped
+                # being harmless the moment a deleted target list began clearing the
+                # field: `is not None` would then skip exactly the column that most
+                # needs its dependents un-nested — one being repaired after the list
+                # it named was deleted. `ListService._scrub_references_to_lists`
+                # already un-nests at delete time, so this is the second line rather
+                # than the first, and it is cheap enough to keep.
                 await cls._clear_dependent_nesting(db, column)
             data.pop("config")
         if data.get("name") is None:

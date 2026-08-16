@@ -394,7 +394,12 @@ What is still missing:
 - **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
   its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
   `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back
-  (see "Deleting a list is the deliberate exception").
+  (see "Deleting a list is the deliberate exception"). Since the scrub also clears the
+  referencing **column's** config — target, display column, nesting pairing, option filters
+  and `required` — the restored list comes back with nothing pointing at it, and each of those
+  columns has to be retargeted by hand. That is the larger half of the loss, and it is a
+  deliberate trade: the values are unrecoverable either way, so the alternative was leaving
+  the column pointing at a list that might never come back and could not be edited meanwhile.
 
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
@@ -469,9 +474,12 @@ Two consequences worth knowing before extending it:
   context. Consistency is guaranteed by `_enforce_nested_lookups` on the write path, which
   import and QR submissions share. Don't "fix" the endpoint to require the param.
 - **A dangling pairing degrades, everywhere.** Deleting or retargeting the parent or the
-  filter column cascade-clears the pairing (`_clear_dependent_nesting`), but if a stale one
-  is ever encountered anyway (a race, a hand-edited config), the picker, the record dialog
-  and the write validation all treat the column as a plain lookup rather than erroring.
+  filter column cascade-clears the pairing (`_clear_dependent_nesting`), and so does deleting
+  the *list* either of them targets — `_scrub_references_to_lists` blanks the column's config
+  and then runs the same cascade outward, because a child whose own target survives is not
+  itself in scope for the scrub. If a stale pairing is ever encountered anyway (a race, a
+  hand-edited config), the picker, the record dialog and the write validation all treat the
+  column as a plain lookup rather than erroring.
 
 ### The option filter is advisory too, and is the caller's business in no sense at all
 
@@ -1356,14 +1364,25 @@ PATCH that resent the config, which `ColumnDialog` always does; and the dialog r
 uuid as `…` under the hint about lists shared as lookup targets only — an explanation that was
 actively wrong. Nothing in the UI could repair it except deleting the column.
 
-`target_list_uuid` now goes, and with it `display_column_uuid`, the nesting pair and
-`option_filters`, all of which name columns *of the dead target*. The column degrades to an
-unconfigured lookup: the options endpoint answers with an empty list rather than raising (the
-same tolerance §7 already grants a dangling nesting pairing), the picker opens empty, and
-retargeting is an ordinary PATCH. Note the two absent-target cases stay distinguishable on
-purpose — a config with **no** target returns nothing, while a config naming a list that is not
-there still raises, because that means something got out of step and answering "no options"
-would hide it.
+`target_list_uuid` now goes, and with it `display_column_uuid`, `target_filter_column_uuid` and
+`option_filters`, each of which names a column *of the dead target*. `parent_column_uuid` goes
+too, though it names a sibling on the column's own list that is still alive — the pairing is set
+and unset as a unit, and its other half has just been blanked. `required` goes as well, and that
+one is not tidiness: it is enforced over the merged record on every write, and the cell is now
+empty and unfillable, so a ticked `required` would refuse every create and edit on the list that
+holds the column — and could not be un-ticked on its own, since a config PATCH merges onto what
+is stored and the refusal would then be about the missing target instead. Dropping it follows
+the same rule that refuses `unique` + `multiple`: a column must not claim a guarantee it cannot
+enforce. Finally the scrub runs `_clear_dependent_nesting` outward on each column it clears, so
+a nested child whose *own* target survives — and which is therefore not in scope for the scrub —
+does not keep a pairing whose halves resolve to nothing.
+
+The column degrades to an unconfigured lookup: the options endpoint answers with an empty list
+rather than raising (the same tolerance §7 already grants a dangling nesting pairing), the
+picker opens empty, and retargeting is an ordinary PATCH. Note the two absent-target cases stay
+distinguishable on purpose — a config with **no** target returns nothing, while a config naming
+a list that is not there still raises, because that means something got out of step and
+answering "no options" would hide it.
 
 Saving a target-less lookup is still refused. Clearing the config makes the column *fixable*,
 not valid, and the only sensible repairs are retargeting and deleting — both of which work.

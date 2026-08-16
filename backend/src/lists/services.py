@@ -811,15 +811,27 @@ class ListService:
         surface already knows how to render and which can simply be given a new
         target.
 
-        The pairing and filter fields go too. They name columns *of the dead target*,
-        so they are as meaningless as the target itself — this is the same cascade
-        `ColumnService._clear_dependent_nesting` performs when a parent or filter
-        column is deleted, arriving here from the other direction.
+        `display_column_uuid`, `target_filter_column_uuid` and `option_filters` go
+        too: each names a column *of the dead target*, so each is as meaningless as
+        the target itself. `parent_column_uuid` names a sibling on this column's
+        **own** list, which is still very much alive — it goes because the pairing is
+        set and unset as a unit and its other half has just been blanked, not because
+        what it points at is gone.
+
+        `required` goes as well; see the comment at the assignment for why a
+        constraint that cannot be satisfied is worse than no constraint.
+
+        Then `ColumnService._clear_dependent_nesting` runs on each column cleared,
+        which is a different direction to the clearing above: it walks *outward*, to
+        the columns that paired against this one and are not themselves in scope here
+        because their own targets survive.
 
         One asymmetry to know: a list restore no longer silently re-points these
         columns. It never restored anything usable — the cells were scrubbed at delete
-        time and the restore cannot bring them back (§6, "What is still missing") — so
-        what is lost is a column that pointed at a live list and held nothing.
+        time and the restore cannot bring them back (known-gaps gap 6, "What is still
+        missing", which now records this) — so what is lost is a column that pointed
+        at a live list and held nothing, plus a `required` tick and a nesting pairing
+        that have to be set again by hand.
         """
         if not list_uuids:
             return
@@ -833,6 +845,10 @@ class ListService:
                 )
             )
         ).scalars().all()
+        # Deferred like the PermissionService calls elsewhere in this file: a
+        # module-level import cycles back through the column service's list imports.
+        from .columns.services import ColumnService
+
         for column in lookup_columns:
             key = str(column.uuid)
             await db.execute(
@@ -858,7 +874,29 @@ class ListService:
                 "option_filters",
             ):
                 config[field] = None
+            # `required` goes too — as `False` rather than `None`, because the schema
+            # types it as a plain bool. A required cell that cannot be filled is not
+            # a constraint, it is a lock: `_validate_data` enforces `required` over
+            # the *merged* record on every create and every edit, and the cell has
+            # just been emptied and cannot be refilled, so one deleted list would
+            # freeze writes across every list that referred to it. Nor could the
+            # setting be turned off on its own — a config PATCH merges onto what is
+            # stored, so `target_list_uuid: None` comes back and `_validate_config`
+            # refuses it. Dropping it follows the rule the `unique` + `multiple`
+            # refusal set: a column must not claim a guarantee it is in no position
+            # to enforce. Re-ticking it is part of retargeting.
+            config["required"] = False
             column.config = config
+            # Un-nest whatever paired against this column. A nested child names its
+            # parent — a sibling on its *own* list — and a filter column on its own
+            # target list, and either of those can be a column just blanked here
+            # while the child survives untouched, because the child's own target is
+            # still alive. Left alone the child keeps a pairing whose halves resolve
+            # to nothing: the picker offers no rows, `_enforce_nested_lookups`
+            # refuses every selection as not belonging to the parent, and
+            # `_validate_nesting` refuses to save the column at all until someone
+            # clears "Nest under" by hand.
+            await ColumnService._clear_dependent_nesting(db, column)
 
     # -- the bin: view, restore, and purge soft-deleted lists ---------------
 
@@ -952,7 +990,10 @@ class ListService:
 
         Note: references *into* this list were scrubbed when it was deleted (see
         ``delete``), so cross-list lookups pointing at its rows are not brought back —
-        the list, its columns, and its records are.
+        the list, its columns, and its records are. That scrub also cleared those
+        columns' *config* — target, display column, nesting pairing, option filters
+        and `required` — so what comes back here is a live list that nothing points
+        at any more. Retargeting is an ordinary PATCH, but somebody has to do it.
         """
         lst = await cls.get_deleted_by_uuid(db, uuid)
         if lst is None:

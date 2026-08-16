@@ -125,8 +125,10 @@ export interface ColumnConfig {
    *  a cell may hold an answer of its own, stored as the typed string like any
    *  other label, so nothing downstream can tell the two apart. */
   allow_other?: boolean;
-  target_list_uuid?: string;
-  display_column_uuid?: string;
+  /** Nullable, not merely absent: deleting the target list clears these in place
+   *  rather than dropping the keys, so the server really does send `null` here. */
+  target_list_uuid?: string | null;
+  display_column_uuid?: string | null;
   /** Nested lookup: the sibling lookup whose value filters this one's options,
    *  and the target-list lookup column the filter matches on. Set together. */
   parent_column_uuid?: string | null;

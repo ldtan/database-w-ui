@@ -427,13 +427,7 @@ export function ColumnDialog({
     enabled: type === "lookup" && !!targetListUuid,
     retry: false,
   });
-  // Only meaningful once a target is actually chosen. Without the guard an
-  // *unset* target makes the columns query idle rather than errored, but a target
-  // that 403s and a target that is simply absent would otherwise both want to
-  // explain themselves through this one flag — and the hint it drives says the list
-  // is shared as a lookup target only, which is the wrong story for a column whose
-  // target was cleared because the list it named was deleted.
-  const targetSchemaHidden = !!targetListUuid && targetColumns.isError;
+  const targetSchemaHidden = targetColumns.isError;
   // This list's own columns — for a formula, the columns it may reference; for a
   // lookup, the sibling lookups it could nest under.
   const ownColumns = useQuery({
