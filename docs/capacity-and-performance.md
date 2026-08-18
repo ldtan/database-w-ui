@@ -661,10 +661,18 @@ Wall-clock floor per request with no contention at all:
 | Login — after the fixes | **~0.67 s** | ~0.13 s | ~0.07 s |
 | Steady-state active users | ~50 | ~245 | ~490 |
 
-"Active user" means a tab open on a list: one poll per `VITE_LIVE_REFRESH_SECONDS` (60 in
-production), a navigation every couple of minutes, a token refresh every 15 — about
-1.5 ms of CPU per second each, taken at a 60% utilisation target because a single event
-loop queues badly above that.
+"Active user" means a tab open on a list: one poll per `VITE_LIVE_REFRESH_SECONDS`, a
+navigation every couple of minutes, a token refresh every 15 — about 1.5 ms of CPU per
+second each at the 60s interval this row was computed against, taken at a 60% utilisation
+target because a single event loop queues badly above that.
+
+**Production runs 15s as of 2026-08-18, so halve that row.** The two floors absorb most of
+the change — the count stops at 30 and the metric strip stays at 60 — so only the records
+page actually quadruples, taking an active tab to ~2.9 ms of CPU per second and the
+steady-state column to roughly ~25 / ~125 / ~250. Arithmetic from the per-endpoint costs
+above; nothing was re-measured. Note this row was never the binding limit anyway (see the
+login burst below), and it counts tabs someone is *using* — `useLiveList` still stops
+polling on a hidden tab and after 5 idle minutes on a visible one.
 
 That steady-state row was never the real limit, though. **The limit was a login burst.**
 Thirty people arriving at once cost 30 × 717 ms = 21.5 s of CPU, which on the free tier

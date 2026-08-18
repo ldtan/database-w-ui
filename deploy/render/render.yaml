@@ -98,8 +98,8 @@ services:
       # Optional — the app defaults to 10s if unset. `0` disables polling. Lower is
       # snappier but more requests. It used to have a second job on the free plan —
       # a focused open tab kept the instance from spinning down — which `starter`
-      # makes moot, so this is now purely a freshness-vs-load dial and could come
-      # down from 60 if that is wanted. See docs/planned-features.md #8.
+      # makes moot, so this is now purely a freshness-vs-load dial. It was 60 from
+      # day one and came down to 15 on 2026-08-18. See docs/planned-features.md #8.
       #
       # Two things on the page do not follow this down, each taking the greater of
       # this and its own floor: the metric strip (VITE_METRIC_REFRESH_SECONDS,
@@ -110,12 +110,22 @@ services:
       # a search, on a 100k list). Lowering the value below therefore speeds up the
       # records alone, which is the intent.
       #
-      # At the 60 set here neither floor is doing anything — the metric one is
-      # exactly equal to it and the count one is below, so both maxes come back 60.
-      # They start to bite the moment this comes down, which is exactly when it
-      # matters that they exist.
+      # At the 15 set here both floors are doing real work, which is the whole
+      # reason they exist: the records page follows to 15s, the count stops at 30
+      # and the metric strip does not move off 60 at all. So this is a 4x on the
+      # cheapest of the three queries, 2x on the middle one, and 1x on the dearest
+      # — not the 4x across the board it looks like. Per actively-used tab that is
+      # ~1.5 ms of CPU per second instead of ~0.6; a hundred such tabs is ~19% of
+      # the 0.5-CPU instance, against ~8% at 60. Both guardrails still apply
+      # (hidden tab, and 5 min idle on a visible one), so an abandoned tab costs
+      # nothing at any interval — this is a bill for tabs someone is using.
+      #
+      # The ceiling is set by the worst tab open, not the average one: a search on
+      # a large list costs ~500 ms a page rather than ~23, so one such viewer is
+      # ~33 ms/sec on its own. If that shape ever becomes routine, raise this back
+      # up or set VITE_COUNT_REFRESH_SECONDS explicitly rather than absorbing it.
       - key: VITE_LIVE_REFRESH_SECONDS
-        value: "60"
+        value: "15"
       # How many live records a list may hold before the app suggests archiving,
       # or `0` to never suggest it. Optional — the app defaults to 25000, which was
       # measured as where search and non-compiled metrics start to be felt on 0.1
