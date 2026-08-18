@@ -1263,15 +1263,24 @@ already set. Blur restores the selected label instead; only an emptied box clear
 twelve columns across a phone is twelve slivers. It is a second *layout*, not a second
 implementation, and the seam is where the bugs live:
 
-- Values go through the shared `renderCell`; ordering through the shared `sortRows`. Both
-  were duplicated once and the copies drifted — the grid sorted with PrimeReact's comparator
-  (blanks float to the top on a descending sort, `"item10"` before `"item9"`) and the cards
-  with ours, so the same list came out in a different order depending on the width of the
-  screen. The grid now sorts through each column's `sortFunction`, which is the only way to
-  make `DataTable` use someone else's comparator without going `lazy` (which would take its
-  paging away too).
-- Reference cells sort by the **uuid** they hold, not the label they show — both layouts
-  alike. Sorting those meaningfully means sorting server-side by the resolved label.
+- Values go through the shared `renderCell`. Ordering was duplicated once and the copies
+  drifted — the grid sorted with PrimeReact's comparator (blanks float to the top on a
+  descending sort, `"item10"` before `"item9"`) and the cards with ours, so the same list
+  came out in a different order depending on the width of the screen. Neither sorts now:
+  the grid is `lazy`, both layouts render the page the server already ordered, and there
+  is one comparator because there is none. `sortRows` survives only as `compareValues`,
+  which `ColumnsPanel` uses to order a column *list*, not records.
+- Reference cells used to sort by the **uuid** they hold rather than the label they show —
+  uuid7 is time-ordered, so a lookup sorted by creation order scrambled by hex. They now
+  sort server-side by the resolved label: a `lookup` by its target row's display column, a
+  `user` by username, a `group` by display name (`items/references.py`). A multi-valued
+  cell sorts by its *first* link, the only single sortable reading of one. The reach into
+  the other table can fail — no `lookup` on the target, a target that is named and
+  missing, a target with no column to read a label from — and every one of those falls
+  back to the old uuid ordering rather than failing the listing, which is also the order
+  on screen for a caller who only ever sees row stubs. A target row the caller may not
+  `lookup` sorts as empty rather than by its real label; ordering by it would hand back
+  the one thing a row-level grant withholds.
 - Anything new the grid grows (a column header affordance, a row action) has no home in a
   card unless you give it one. Sorting is the example: it lived in the column headers, so on
   a phone it did not exist at all until a "Sort by" dropdown was added to the toolbar.

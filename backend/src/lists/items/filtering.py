@@ -9,6 +9,11 @@ This is the one reader that cannot lean on ``coerce_shape`` — the comparison h
 in Postgres, not in Python — so ``_field`` reproduces its rule in SQL. Get that wrong
 and a filter disagrees with the grid it filters.
 
+One kind of ordering cannot be expressed against ``data`` at all: a reference column
+stores a uuid and shows a label from another table. Resolving that needs the database and
+the caller's grants, so it happens in `references.py` and arrives here as a prepared
+``sources`` argument — this module stays synchronous and knows nothing about permissions.
+
 A condition's value is normally the literal it was saved with. The exception is a
 temporal column, where ``"today"`` and ``"now"`` are resolved *here*, against the
 clock, every time the statement is built — so a saved view means what it says the
@@ -24,6 +29,24 @@ from ..columns.validation import resolve_filter_token
 from .models import ListItem
 
 _COMPARATORS = {">", ">=", "<", "<=", "gt", "gte", "lt", "lte"}
+
+
+def first_value(column: Column):
+    """The cell's single reading: its first element when it holds an array, else itself.
+
+    `coerce_shape`'s rule in SQL, split out from `_field` because two callers want it for
+    different reasons. `_field` uses it to absorb records that outlived a `multiple`
+    toggle. Reference sorting uses it *unconditionally* — including on a column that
+    declares `multiple` — because ordering by the first linked row's label is the only
+    reading of a multi-valued cell that is a single sortable value, and it beats the
+    alternative the generic path gives: the serialized array text, `["<uuid>", …]`,
+    ranked by its leading bracket.
+    """
+    cell = ListItem.data[str(column.uuid)]
+    return case(
+        (func.jsonb_typeof(cell) == "array", cell[0].astext),
+        else_=cell.astext,
+    )
 
 
 def _field(column: Column):
@@ -44,13 +67,9 @@ def _field(column: Column):
     the filter language currently has. Giving multi-valued columns real per-element
     operators is a separate piece of work.
     """
-    cell = ListItem.data[str(column.uuid)]
     if (column.config or {}).get("multiple"):
-        return cell.astext
-    return case(
-        (func.jsonb_typeof(cell) == "array", cell[0].astext),
-        else_=cell.astext,
-    )
+        return ListItem.data[str(column.uuid)].astext
+    return first_value(column)
 
 
 def _as_text(value: object) -> Optional[str]:
@@ -154,8 +173,16 @@ def apply_filters(stmt, filters: Optional[dict], columns: dict[str, Column], use
     return stmt.where(combined)
 
 
-def _order_terms(key: str, direction: str, columns: dict[str, Column]) -> list:
+def _order_terms(
+    key: str, direction: str, columns: dict[str, Column], sources: dict
+) -> list:
     """How to order by one column — zero, one or two ORDER BY terms.
+
+    A reference column (`lookup`, `user`, `group`) orders by the **label it renders**,
+    not the uuid it stores, whenever `sources` carries one for it — see `references.py`
+    for how that is resolved and why it can be absent. Absent, the column falls through
+    to the generic text term below, which is uuid order: what a caller who cannot read
+    the target sees in the cells anyway.
 
     Two for a `calculated` column, because it is the one column type whose values are
     not all the same kind: the formula decides per column, and a list can hold
@@ -177,6 +204,9 @@ def _order_terms(key: str, direction: str, columns: dict[str, Column]) -> list:
     def directed(term):
         return term.desc() if descending else term.asc()
 
+    source = sources.get(key)
+    if source is not None:
+        return [directed(source.label)]
     if column.type in COMPUTED_TYPES:
         return [directed(_numeric(column)), directed(_field(column))]
     field = _field(column)
@@ -185,15 +215,57 @@ def _order_terms(key: str, direction: str, columns: dict[str, Column]) -> list:
     return [directed(field)]
 
 
-def apply_sorts(stmt, sorts, columns: dict[str, Column], group_by: Optional[dict] = None):
+def ordered_keys(sorts, group_by: Optional[dict] = None) -> list[str]:
+    """The column uuids a request orders by, in ORDER BY order, deduped.
+
+    Grouping leads, because a group's rows have to stay adjacent to be rendered under
+    one heading. Shared with `references.label_sources`: it resolves a label for every
+    key here, and `apply_sorts` joins one onto every key here. Two copies of this walk
+    could disagree, and the way they would show it is a column quietly ordering by uuid
+    again — the exact bug the labels exist to fix.
+    """
+    keys = [str(group_by.get("column_uuid"))] if group_by else []
+    keys += [str(spec.get("column_uuid")) for spec in sorts or []]
+    return list(dict.fromkeys(keys))
+
+
+def apply_sorts(
+    stmt,
+    sorts,
+    columns: dict[str, Column],
+    group_by: Optional[dict] = None,
+    sources: Optional[dict] = None,
+):
+    """Order ``stmt``, joining in whatever labels the ordering needs.
+
+    ``sources`` comes from `references.label_sources`, which is async — the resolution
+    needs the database and the caller's permissions, and this function has neither. It
+    defaults to none, which is both what the pure-config callers want and the behaviour
+    every sort had before reference columns learned to order by their label.
+
+    The joins are LEFT and keyed on a unique column, so they add columns to the row and
+    never rows to the result. A key is joined once however many times it is ordered by,
+    which is what stops a column that both groups and sorts from being added to the FROM
+    clause twice.
+    """
+    sources = sources or {}
+    for key in ordered_keys(sorts, group_by):
+        source = sources.get(key)
+        if source is not None:
+            stmt = stmt.join(source.table, source.onclause, isouter=True)
+
     order = []
     # Grouping requires all rows of a group to be adjacent, so order by the
     # group column first; the view's own sorts break ties within each group.
     if group_by:
-        order.extend(_order_terms(str(group_by.get("column_uuid")), "asc", columns))
+        order.extend(
+            _order_terms(str(group_by.get("column_uuid")), "asc", columns, sources)
+        )
     for spec in sorts or []:
         order.extend(
-            _order_terms(str(spec.get("column_uuid")), spec.get("direction"), columns)
+            _order_terms(
+                str(spec.get("column_uuid")), spec.get("direction"), columns, sources
+            )
         )
     order.append(ListItem.id)  # stable tiebreaker, and the default ordering
     return stmt.order_by(*order)
