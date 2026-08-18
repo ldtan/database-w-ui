@@ -26,8 +26,11 @@ interface Props {
 /** What a metric may aggregate — the backend refuses the rest, so offering them
  *  here would only be a way to get a 400. `calculated` is included on purpose: a
  *  metric is a leaf, so totalling a per-record formula has no cycle to worry
- *  about the way a calculated column referencing another would. */
-const AGGREGATABLE = ["number", "text", "calculated"];
+ *  about the way a calculated column referencing another would. `rating` and
+ *  `duration` are here because a cell in either is a plain number that aggregates
+ *  exactly as `number` does — "total hours" and "average score" are the two things
+ *  people open this dialog to ask. Mirrors `REFERENCEABLE_TYPES` on the server. */
+const AGGREGATABLE = ["number", "rating", "duration", "text", "calculated"];
 
 export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
   const queryClient = useQueryClient();

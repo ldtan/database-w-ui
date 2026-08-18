@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Calendar } from "primereact/calendar";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
@@ -5,6 +7,14 @@ import { InputNumber } from "primereact/inputnumber";
 import { SelectButton } from "primereact/selectbutton";
 import { Button } from "primereact/button";
 
+import {
+  durationFormat,
+  durationPlaceholder,
+  formatDuration,
+  parseDuration,
+} from "../../lib/duration";
+import { normalizePhoneQuery, phonePlaceholder } from "../../lib/phone";
+import { ratingScale } from "../../lib/rating";
 import {
   filterTokenLabel,
   filterTokens,
@@ -94,12 +104,32 @@ export function FilterConditionsEditor({
               style={{ width: 120 }}
             />
             {needsValue &&
-              (col?.type === "number" ? (
+              (col?.type === "number" || col?.type === "rating" ? (
+                // A rating is filtered as the number it is — "at least 4 stars"
+                // is the question, and the widget would only get in the way of
+                // asking it.
                 <InputNumber
                   value={(cond.value as number) ?? null}
                   onValueChange={(e) => update(i, { value: e.value ?? null })}
                   useGrouping={false}
+                  min={col.type === "rating" ? 1 : undefined}
+                  max={col.type === "rating" ? ratingScale(col) : undefined}
                   style={{ width: 120 }}
+                />
+              ) : col?.type === "duration" ? (
+                // A box, not a number input: the condition is stored in seconds,
+                // but nobody asking for "longer than an hour and a half" wants to
+                // work out 5400. Typed the way the column is written, parsed here.
+                <DurationFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
+                />
+              ) : col?.type === "phone" ? (
+                <PhoneFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
                 />
               ) : col?.type === "choice" ? (
                 // Typable when the column takes answers of its own: those are
@@ -192,6 +222,89 @@ export function FilterConditionsEditor({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The value side of a condition on a `phone` column.
+ *
+ * Cells hold E.164, so a condition typed the way somebody says a number out loud
+ * ("0917 123 4567") matches nothing — the trap a plain text box would leave open,
+ * silently, on the one type where the stored form and the spoken form always differ.
+ *
+ * So a *whole* number is normalised to E.164, and anything else is left exactly as
+ * typed, which is what keeps `contains 917` working. On blur rather than per
+ * keystroke: mid-word the text is not a number yet, and rewriting the box the moment
+ * the last digit lands would move the cursor out from under whoever is still typing.
+ */
+function PhoneFilterValue({
+  column,
+  value,
+  onChange,
+}: {
+  column: Column;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (typeof value === "string" ? value : "");
+  return (
+    <InputText
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={() => {
+        setDraft(null);
+        const stored = normalizePhoneQuery(column, shown);
+        if (stored !== shown) onChange(stored);
+      }}
+      placeholder={phonePlaceholder(column)}
+      style={{ width: 120 }}
+    />
+  );
+}
+
+/**
+ * The value side of a condition on a `duration` column.
+ *
+ * The condition is stored in **seconds**, because that is what the cells hold and
+ * what `filtering._numeric` compares against. Nobody asking for "longer than an
+ * hour and a half" wants to work 5400 out, though, so the box takes the same
+ * written forms the cell editor does and converts as it goes.
+ *
+ * It holds its own draft while it is being typed, for the same reason the cell
+ * editor does: a duration passes through strings that are not durations yet ("1:"
+ * on the way to "1:30"), and rendering straight from the parsed number would empty
+ * the box mid-word. An unreadable draft still writes `null` to the condition, so a
+ * half-finished one is dropped by `cleanConditions` rather than saved as a stale
+ * number the box has stopped showing.
+ */
+function DurationFilterValue({
+  column,
+  value,
+  onChange,
+}: {
+  column: Column;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const format = durationFormat(column);
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown =
+    draft ?? (typeof value === "number" ? formatDuration(format, value) : "");
+  return (
+    <InputText
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(parseDuration(format, e.target.value));
+      }}
+      onBlur={() => setDraft(null)} // fall back to the canonical rendering
+      placeholder={durationPlaceholder(format)}
+      style={{ width: 120 }}
+    />
   );
 }
 

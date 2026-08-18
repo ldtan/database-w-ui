@@ -22,6 +22,71 @@ _TEMPORAL = {
     ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
 }
 _NUMBER_FORMATS = {"plain", "currency", "percent"}
+_RATING_ICONS = {"star", "heart", "number"}
+_DURATION_FORMATS = {"h:mm", "h:mm:ss", "m:ss", "decimal_hours"}
+# A scale nobody can read is not a scale. Ten glyphs is already past the point
+# where somebody counts rather than sees, and the cap is what keeps a rating a
+# rating rather than a `number` column drawn very badly.
+RATING_MAX = 10
+_DEFAULT_RATING_MAX = 5
+
+
+def rating_scale(config: dict) -> int:
+    """The top of a rating column's scale, defaulting to five stars."""
+    top = config.get("max")
+    if isinstance(top, bool) or not isinstance(top, int):
+        return _DEFAULT_RATING_MAX
+    return top
+
+
+_SECONDS_RE = re.compile(r"\d+(?:\.\d+)?\Z")
+_UNIT_SECONDS = {"h": 3600, "m": 60, "s": 1}
+_UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])")
+_UNIT_FORM_RE = re.compile(r"(?:\d+(?:\.\d+)?\s*[hms]\s*)+\Z")
+
+
+def parse_duration(config: dict, text: str) -> Optional[float]:
+    """Read a written duration as seconds, or None if it is not one.
+
+    A cell stores seconds, and the export writes those seconds plainly — so a bare
+    number here **always** means seconds, whatever the column is formatted as. That
+    is what makes an exported file import back unchanged, and it is the one rule in
+    this grammar that is not negotiable.
+
+    On top of that, two written forms people actually type:
+
+    - **Colon form.** `1:30:00` is always h:mm:ss. `1:30` is h:mm — an hour and a
+      half — *unless* the column is formatted `m:ss`, where it reads as a minute and
+      a half, because that is what the column has been showing them. The parts after
+      the first must be under 60, so `1:75` is a typo rather than a silent 2:15.
+    - **Unit form.** `90m`, `1.5h`, `1h30m`, `45s`. Unambiguous whatever the format,
+      and the only way to write a duration that is right in any column.
+    """
+    raw = text.strip().lower()
+    if not raw:
+        return None
+    if _SECONDS_RE.fullmatch(raw):
+        return float(raw)
+    if ":" in raw:
+        parts = raw.split(":")
+        if len(parts) > 3 or not all(_SECONDS_RE.fullmatch(p) for p in parts):
+            return None
+        values = [float(p) for p in parts]
+        if any(v >= 60 for v in values[1:]):
+            return None
+        if len(parts) == 3:
+            hours, minutes, seconds = values
+        elif config.get("duration_format") == "m:ss":
+            hours, (minutes, seconds) = 0.0, values
+        else:
+            (hours, minutes), seconds = values, 0.0
+        return hours * 3600 + minutes * 60 + seconds
+    if _UNIT_FORM_RE.fullmatch(raw):
+        return sum(
+            float(amount) * _UNIT_SECONDS[unit]
+            for amount, unit in _UNIT_RE.findall(raw)
+        )
+    return None
 # How a text column is edited. Unset means "single"; see ColumnConfig.text_mode.
 # "rich" stores HTML rather than plain text — see columns/richtext.py.
 TEXT_MODES = ("single", "multiline", "rich")
@@ -65,6 +130,67 @@ def normalize_email(value: str) -> str:
     one misses the other, and grouping shows the same person twice.
     """
     return value.strip().lower()
+
+
+_PHONE_FORMATS = {"e164", "national", "international"}
+
+
+def phone_regions(config: dict) -> tuple[Optional[str], list[str]]:
+    """A phone column's default region and its allowed set, both normalised upper."""
+    default = config.get("default_region")
+    default = default.strip().upper() if isinstance(default, str) and default else None
+    allowed = config.get("allowed_regions") or []
+    allowed = [r.strip().upper() for r in allowed if isinstance(r, str) and r.strip()]
+    return default, allowed
+
+
+def normalize_phone(config: dict, name: str, value: str) -> str:
+    """A phone number in the form the column stores: E.164.
+
+    **The normalisation is the type.** A regex could tell `+639171234567` from
+    `banana`, but it could not tell that `0917 123 4567`, `+63 917 123 4567` and
+    `09171234567` are one number — so `unique` would miss the duplicate it exists to
+    catch, a filter for one spelling would miss the others, and grouping would show
+    one person twice. Every one of those becomes `+639171234567` here, on the write
+    path every caller shares.
+
+    Raises `ValidationError` with the column's name, in the house style, so a bad
+    number reads like every other refused cell rather than like a library error.
+    """
+    import phonenumbers
+
+    default_region, allowed = phone_regions(config)
+    raw = value.strip()
+    try:
+        parsed = phonenumbers.parse(raw, default_region)
+    except phonenumbers.NumberParseException:
+        # The commonest cause by far, and worth saying outright: a national number
+        # on a column that was never told which country it is national to.
+        if default_region is None and not raw.startswith("+"):
+            raise ValidationError(
+                f"Column '{name}' needs the country code (e.g. +639171234567), "
+                f"or a default region set on the column"
+            )
+        raise ValidationError(f"Column '{name}': '{value}' is not a phone number")
+
+    if not phonenumbers.is_valid_number(parsed):
+        # Distinct from a parse failure: this is well-formed and still not a number
+        # anyone could dial — the right length for no operator in that country.
+        raise ValidationError(
+            f"Column '{name}': '{value}' is not a valid phone number"
+        )
+
+    if allowed:
+        region = phonenumbers.region_code_for_number(parsed)
+        if region not in allowed:
+            raise ValidationError(
+                f"Column '{name}' only accepts numbers from "
+                f"{', '.join(allowed)}, not {region or 'that country'}"
+            )
+
+    return phonenumbers.format_number(
+        parsed, phonenumbers.PhoneNumberFormat.E164
+    )
 
 
 def normalize_color(value: str) -> str:
@@ -288,6 +414,53 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
         ):
             raise ValidationError("'max_length' must be a positive integer")
 
+    elif column_type == ColumnType.rating:
+        # `max` is the top of the scale, and it is the one config key on this type
+        # a person actually sets. Rejected outright rather than clamped, because a
+        # column silently drawn with five stars after somebody asked for twenty is
+        # a setting that did not take and said nothing.
+        top = config.get("max")
+        if top is not None and (
+            isinstance(top, bool)
+            or not isinstance(top, int)
+            or not 1 <= top <= RATING_MAX
+        ):
+            raise ValidationError(
+                f"A rating column's 'max' must be a whole number from 1 to "
+                f"{RATING_MAX}"
+            )
+        if config.get("min") is not None:
+            # The bottom of the scale is 1, always: a rating of zero is what an
+            # *empty* cell means, so a configurable floor would give the column two
+            # ways to say "unrated" and no way to tell them apart.
+            raise ValidationError(
+                "A rating column has no 'min' — its scale starts at 1, and an "
+                "unrated record is an empty cell"
+            )
+        icon = config.get("rating_icon")
+        if icon is not None and icon not in _RATING_ICONS:
+            raise ValidationError(
+                f"'rating_icon' must be one of {', '.join(sorted(_RATING_ICONS))}"
+            )
+
+    elif column_type == ColumnType.duration:
+        for key in ("min", "max"):
+            v = config.get(key)
+            if v is not None and (
+                isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0
+            ):
+                raise ValidationError(
+                    f"duration '{key}' must be a non-negative number of seconds"
+                )
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and hi is not None and lo > hi:
+            raise ValidationError("'min' cannot exceed 'max'")
+        fmt = config.get("duration_format")
+        if fmt is not None and fmt not in _DURATION_FORMATS:
+            raise ValidationError(
+                f"'duration_format' must be one of {', '.join(sorted(_DURATION_FORMATS))}"
+            )
+
     elif column_type == ColumnType.email:
         max_length = config.get("max_length")
         if max_length is not None and (
@@ -296,6 +469,30 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
             or max_length < 1
         ):
             raise ValidationError("'max_length' must be a positive integer")
+
+    elif column_type == ColumnType.phone:
+        import phonenumbers
+
+        default_region, allowed = phone_regions(config)
+        for region in ([default_region] if default_region else []) + allowed:
+            if region not in phonenumbers.SUPPORTED_REGIONS:
+                raise ValidationError(
+                    f"'{region}' is not a country code this build knows; "
+                    f"expected an ISO-3166 alpha-2 code like 'PH'"
+                )
+        # A default region outside the allowed set is a column nobody can fill by
+        # typing a national number: the region that makes one parseable is the one
+        # the check then rejects it for.
+        if default_region and allowed and default_region not in allowed:
+            raise ValidationError(
+                f"'default_region' ({default_region}) must be one of "
+                f"'allowed_regions' ({', '.join(allowed)})"
+            )
+        fmt = config.get("display_format")
+        if fmt is not None and fmt not in _PHONE_FORMATS:
+            raise ValidationError(
+                f"'display_format' must be one of {', '.join(sorted(_PHONE_FORMATS))}"
+            )
 
     elif column_type == ColumnType.color:
         swatches = config.get("swatches")
@@ -366,6 +563,31 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
             raise ValidationError(f"Column '{name}' must be >= {lo}")
         if hi is not None and value > hi:
             raise ValidationError(f"Column '{name}' must be <= {hi}")
+
+    elif column_type == ColumnType.rating:
+        top = rating_scale(config)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _expect(name, f"a rating from 1 to {top}")
+        if isinstance(value, float) and not value.is_integer():
+            _expect(name, f"a whole rating from 1 to {top}")
+        if not 1 <= value <= top:
+            raise ValidationError(
+                f"Column '{name}' must be a rating from 1 to {top}; leave it empty "
+                f"for unrated"
+            )
+
+    elif column_type == ColumnType.duration:
+        # Seconds. Not required to be whole — half a second is a length of time —
+        # but never negative, which no reading of a duration produces.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _expect(name, "a duration in seconds")
+        if value < 0:
+            raise ValidationError(f"Column '{name}' cannot be a negative duration")
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and value < lo:
+            raise ValidationError(f"Column '{name}' must be at least {lo} second(s)")
+        if hi is not None and value > hi:
+            raise ValidationError(f"Column '{name}' must be at most {hi} second(s)")
 
     elif column_type == ColumnType.checkbox:
         if not isinstance(value, bool):
@@ -438,6 +660,15 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         hi = config.get("max_length")
         if hi is not None and len(address) > hi:
             raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
+
+    elif column_type == ColumnType.phone:
+        if not isinstance(value, str):
+            _expect(name, "a phone number")
+        # `normalize_phone` *is* the check — it raises for everything this would
+        # otherwise have to re-test, and the write path has already run it, so this
+        # is what makes a value arriving any other way (a column default, a
+        # conversion) meet the same bar.
+        normalize_phone(config, name, value)
 
     elif column_type == ColumnType.color:
         if not isinstance(value, str):

@@ -149,9 +149,27 @@ export interface ColumnConfig {
   label?: string;
   /** Text, link and email columns. */
   max_length?: number;
+  /** Phone columns only. `default_region` is what lets a *national* number be
+   *  typed at all: without one the server takes only a number carrying its own
+   *  country code, because a geography guess would read one country's number as
+   *  another's. `display_format` is a UI hint like `number_format`. */
+  default_region?: string;
+  allowed_regions?: string[];
+  display_format?: "e164" | "national" | "international";
   /** Colour columns only. A palette the picker offers first — it constrains
    *  nothing, because the point of a colour field is picking one. */
   swatches?: string[];
+  /** Number, rating, duration and the temporal types — read per type. On a
+   *  rating `max` is the top of the scale, which is a bound like any other; on a
+   *  duration both are counts of seconds. */
+  min?: number | string;
+  max?: number | string;
+  /** Rating columns only. Which glyph the scale is drawn with. */
+  rating_icon?: "star" | "heart" | "number";
+  /** Duration columns only. A cell holds seconds; this is how they are shown and
+   *  typed. A display setting in the same sense `number_format` is — the server
+   *  never formats anything, so a CSV carries the raw seconds. */
+  duration_format?: "h:mm" | "h:mm:ss" | "m:ss" | "decimal_hours";
   formula?: string;
   [key: string]: unknown;
 }

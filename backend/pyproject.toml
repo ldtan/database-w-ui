@@ -19,6 +19,14 @@ dependencies = [
     # rejects the writes and silently sends `today` defaults back to UTC. 350KB to
     # not have that depend on the base image.
     "tzdata>=2025.2",
+    # A `phone` column stores E.164, and normalising to it is the whole point of the
+    # type — without one canonical form, `unique` misses the same number typed two
+    # ways and a filter for it finds only one of them. Doing that by regex means
+    # either rejecting real numbers or accepting impossible ones, so this carries
+    # Google's libphonenumber metadata instead. Its counterpart on the frontend is
+    # `libphonenumber-js`, which *formats* what this normalises; the two version
+    # independently but describe the same numbering plans, so update them together.
+    "phonenumbers>=9.0.37",
 ]
 
 [dependency-groups]

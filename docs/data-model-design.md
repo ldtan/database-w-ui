@@ -237,7 +237,10 @@ Common `config` keys (all optional unless noted):
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `email`       | address `string`, trimmed and lowercased   | `max_length?` |
+| `phone`       | E.164 `string` (`+639171234567`)           | `default_region?` (ISO-3166 alpha-2), `allowed_regions?`, `display_format?` (`e164`/`national`/`international`) |
 | `color`       | `#rrggbb` `string`, lowercased             | `swatches?` (a palette the picker offers) |
+| `rating`      | whole `number`, `1..max`                   | `max?` (scale, default 5, ≤ 10), `rating_icon?` (`star`/`heart`/`number`) |
+| `duration`    | `number` of **seconds**                    | `min?`, `max?` (seconds), `duration_format?` (`h:mm`/`h:mm:ss`/`m:ss`/`decimal_hours`) |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
 | `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
@@ -339,6 +342,48 @@ Notes:
   `swatches` are **offered, never enforced**: the point of a colour field is picking one,
   so a colour outside the palette is a valid answer, which is the opposite bargain to
   `choice`'s `options`.
+- `phone` — **the normalisation is the type.** A cell stores E.164 whatever was typed,
+  so `0917 123 4567`, `+63 917 123 4567` and `09171234567` are one value: `unique`
+  catches the duplicate it exists to catch, a filter for one spelling finds the others,
+  and grouping shows one person once. A regex cannot do that, so the backend carries
+  `phonenumbers` (Google's libphonenumber) and the frontend its counterpart
+  `libphonenumber-js` — the two describe the same numbering plans, so what is *shown*
+  agrees with what was *accepted*. Update them together.
+  - **There is no implicit country.** Without a `default_region` the column takes only a
+    number carrying its own country code; a server-side geography guess would read one
+    country's number as another's, silently and per record. `default_region` is what
+    lets a national number be typed, `allowed_regions` narrows what the column accepts
+    once parsed, and a `default_region` outside that set is refused at config time — it
+    would be a column nobody could fill by typing. `display_format` is a UI hint like
+    `number_format`, and `national` falls back to the international form for a number
+    from elsewhere, since a local rendering of a foreign number is one nobody can dial.
+  - `text` → `phone` is the motivating conversion: it is how an existing free-text
+    column gets cleaned up, with the rows that cannot be read named in the report rather
+    than dropped.
+- `rating` / `duration` — **both are `number` in a costume, and `NUMERIC_TYPES` is what
+  keeps the costume from changing the behaviour.** A cell in either holds a plain JSON
+  number, so `items/filtering.py` casts it (`_numeric`, `_numeric_comparable`,
+  `_order_terms`), a metric aggregates it (`metrics/services.py::REFERENCEABLE_TYPES`,
+  compiled to SQL by `pushdown._PUSHABLE_TYPES`) and a formula reads it. Those three
+  readers test the **set** rather than `== ColumnType.number`, and that is load-bearing:
+  SQL comparison defaults to text, so a type left out of it sorts 10 before 9 and answers
+  `> 3` by string order.
+  - A **rating** starts at 1 and has no `min`, because a rating of zero is what an *empty
+    cell* means — a configurable floor would give the column two ways to say "unrated"
+    and no way to tell them apart. Its scale is the shared `max` key rather than one of
+    its own, since the top of a rating is a bound like any other, and it is capped at 10
+    (past which people count rather than see).
+  - A **duration** stores **seconds and exports seconds**. `duration_format` is a display
+    setting in exactly the sense `number_format` and `precision` are — the backend stores
+    them and never reads them — so a CSV round-trips exactly and the format can be changed
+    on a populated column. The import is more generous than the export: a bare number is
+    always seconds (which is what makes the round trip work), and on top of that
+    `parse_duration` reads `1:30`, `1:30:00` and `90m`/`1.5h` for whoever is typing a file
+    by hand. `1:30` is h:mm unless the column is formatted `m:ss`; `1:75` is refused as
+    the typo it is rather than read as 2:15. The one format that does **not** round-trip
+    through that parser is `decimal_hours`, whose written form is itself a bare number —
+    so its editor is a number box in hours that converts explicitly, and nothing types a
+    decimal-hours value into a parser that would mean seconds by it.
 - **Config updates merge:** a `PATCH` to a column's `config` merges onto the stored
   config — settings you don't resend are preserved (rather than the whole config being
   replaced). To change a choice column's option set, resend `choices` or `options`.
@@ -389,7 +434,7 @@ Notes:
   so it sees this write's answer — and compares it against the other rows' *index*, which is
   the one place staleness costs more than a misordered row. Full details and the costs in
   [known gaps §5](known-gaps.md).
-- The set is extensible: adding e.g. `attachment`, `rating` is just a new enum
+- The set is extensible: adding e.g. `attachment` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
   **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind
   to enum labels; see `migrations/versions/b1f7c4a90e12_add_link_column_type.py` for the
@@ -689,8 +734,12 @@ Notes:
   now (§5), and the two are protected differently: a column chain is topologically sorted
   and its cycles refused at save time, while a metric needs neither because it is a
   **leaf** — nothing derives from one, so there is no cycle to detect.
-- **Referenceable types are `number`, `text` and `calculated`**, enforced at config time.
-  The rest store uuids or ISO strings whose text form would surprise, exactly as for §5.
+- **Referenceable types are `NUMERIC_TYPES` (`number`, `rating`, `duration`), `text` and
+  `calculated`**, enforced at config time. The rest store uuids or ISO strings whose text
+  form would surprise, exactly as for §5. A `duration` is here because "total hours" is
+  the motivating metric and a cell in one is a plain number; what the total *means* is a
+  display question, answered by the card's `suffix`/`precision` rather than by this module,
+  which has never formatted anything.
 - **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in
   **one pass**, so the cards always agree with each other. That pass is built on
   `ListItemService.visible_stmt` — the same statement the grid reads — so it honours the
@@ -733,8 +782,9 @@ Notes:
   (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
   with nowhere to put a per-group number. Doing it properly means an aggregate row inside
   the table.
-- **Further column types:** `attachment`, `rating`, `duration`, `phone`, `location`.
-  (`link`, `user`, `group`, `email` and `color` are built — see §5.)
+- **Further column types:** `attachment`, `location`.
+  (`link`, `user`, `group`, `email`, `phone`, `color`, `rating` and `duration` are
+  built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /

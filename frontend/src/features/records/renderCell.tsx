@@ -1,7 +1,10 @@
 import { isColor, normalizeColor } from "../../lib/color";
 import { stripHtml } from "../../lib/display";
+import { durationFormat, formatDuration } from "../../lib/duration";
 import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
+import { formatPhone, telHref } from "../../lib/phone";
+import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
 import { LookupCell } from "../lookups/LookupControls";
@@ -118,6 +121,48 @@ export function renderCell(
       >
         {String(value)}
       </a>
+    );
+  }
+  if (column.type === "phone") {
+    const href = telHref(value);
+    const shown = formatPhone(column, value);
+    // Same two escapes as `link` and `email`: a number the parser rejects is plain
+    // text, and nothing is an anchor while the cell is an editor.
+    if (!href || editing) return shown || String(value);
+    return (
+      <a
+        href={href}
+        className="hover:underline whitespace-nowrap"
+        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+      >
+        {shown}
+      </a>
+    );
+  }
+  if (column.type === "duration") {
+    return formatDuration(durationFormat(column), value);
+  }
+  if (column.type === "rating") {
+    // The glyphs, not a number, because that is the whole reason to pick this
+    // type over `number`. Filled up to the value and hollow to the top of the
+    // scale, so a 3 reads as "3 of 5" without a caption — except on a `number`
+    // icon, where somebody has asked for the digits back.
+    const top = ratingScale(column);
+    const filled = ratingValue(column, value) ?? 0;
+    if (column.config.rating_icon === "number") return `${filled}/${top}`;
+    const glyph = column.config.rating_icon === "heart" ? "heart" : "star";
+    return (
+      <span className="whitespace-nowrap" title={`${filled} of ${top}`}>
+        {Array.from({ length: top }, (_, i) => (
+          <i
+            key={i}
+            className={`pi pi-${glyph}${i < filled ? "-fill" : ""} text-xs`}
+            style={i < filled ? { color: "var(--brand)" } : undefined}
+            aria-hidden
+          />
+        ))}
+      </span>
     );
   }
   if (column.type === "color") {

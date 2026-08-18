@@ -39,6 +39,15 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   "label",
   // A colour column's offered palette.
   "swatches",
+  // A phone column's country settings. `default_region` changes what the column
+  // *accepts*, not only how it looks, which is why it is worth folding open for.
+  "default_region",
+  "allowed_regions",
+  "display_format",
+  // A rating's glyph and a duration's written form. Both are display settings, so
+  // they sit here for the same reason `number_format` would.
+  "rating_icon",
+  "duration_format",
   "multiple",
   // A nested lookup, which is set as a pair.
   "parent_column_uuid",

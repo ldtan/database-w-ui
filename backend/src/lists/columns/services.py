@@ -31,6 +31,7 @@ from .validation import (
     is_dynamic_default,
     normalize_color,
     normalize_email,
+    normalize_phone,
     resolve_choice_options,
     validate_config_constraints,
     validate_scalar,
@@ -617,6 +618,10 @@ class ColumnService:
             data["default"] = normalize_email(data["default"])
         if type_ == ColumnType.color and isinstance(data.get("default"), str):
             data["default"] = normalize_color(data["default"])
+        if type_ == ColumnType.phone and isinstance(data.get("default"), str):
+            # Normalised against the config being saved, not the stored one, so a
+            # default and a `default_region` set in the same request agree.
+            data["default"] = normalize_phone(data, "default", data["default"])
         if type_ == ColumnType.color and isinstance(data.get("swatches"), list):
             data["swatches"] = [
                 normalize_color(s) if isinstance(s, str) else s

@@ -23,7 +23,7 @@ from typing import Optional
 
 from sqlalchemy import Numeric, and_, case, cast, func, or_
 
-from ..columns.enums import COMPUTED_TYPES, ColumnType
+from ..columns.enums import COMPUTED_TYPES, NUMERIC_TYPES, ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_filter_token
 from .models import ListItem
@@ -79,8 +79,9 @@ def _as_text(value: object) -> Optional[str]:
 def _numeric(column: Column):
     """The cell as a number, or NULL where it does not hold one.
 
-    A `number` column can be cast outright — every value in it is one. A `calculated`
-    column cannot: the language has no fixed output type, so one formula yields numbers
+    A NUMERIC_TYPES column can be cast outright — every value in one is a number,
+    whether it is counting seconds, stars or anything else. A `calculated` column
+    cannot: the language has no fixed output type, so one formula yields numbers
     and the next yields text, and `CAST('Ada' AS numeric)` does not fail the row, it
     fails the whole statement. The `jsonb_typeof` guard is what makes a range filter or
     a numeric sort safe on a column whose type is decided per formula rather than per
@@ -88,7 +89,7 @@ def _numeric(column: Column):
     treats a cell it cannot answer for.
     """
     cell = ListItem.data[str(column.uuid)]
-    if column.type == ColumnType.number:
+    if column.type in NUMERIC_TYPES:
         return cast(_field(column), Numeric)
     return case((func.jsonb_typeof(cell) == "number", cell.astext), else_=None).cast(
         Numeric
@@ -98,13 +99,13 @@ def _numeric(column: Column):
 def _numeric_comparable(column: Column, value: object) -> bool:
     """Should a `>`/`<` on this column compare numbers rather than text?
 
-    Always for a `number` column. For a `calculated` one it depends on the question:
+    Always for a NUMERIC_TYPES column. For a `calculated` one it depends on the question:
     the same column can hold `30` on one row and `"Ada Lovelace"` on the next, so the
     value being compared against is the only signal for which comparison was meant —
     and text ordering on numbers ("9" > "10") is exactly the sort of wrong answer a
     stored, filterable column now makes easy to hit.
     """
-    if column.type == ColumnType.number:
+    if column.type in NUMERIC_TYPES:
         return True
     return column.type in COMPUTED_TYPES and isinstance(value, (int, float)) and not (
         isinstance(value, bool)
@@ -210,7 +211,7 @@ def _order_terms(
     if column.type in COMPUTED_TYPES:
         return [directed(_numeric(column)), directed(_field(column))]
     field = _field(column)
-    if column.type == ColumnType.number:
+    if column.type in NUMERIC_TYPES:
         field = cast(field, Numeric)
     return [directed(field)]
 

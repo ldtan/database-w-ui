@@ -31,6 +31,7 @@
  * away on this side of the wire.
  */
 import { api } from "../../lib/api";
+import { durationFormat, parseDuration } from "../../lib/duration";
 import type { ApiUser, ApiUserGroup, Column } from "../../lib/types";
 import { deserialize, isEmptyValue, type ResolvedField } from "./recordValues";
 
@@ -158,7 +159,16 @@ async function shape(
 ): Promise<unknown> {
   switch (column.type) {
     case "number":
+    case "rating":
       return toNumber(raw);
+    case "duration":
+      // A code may carry either the seconds a cell holds or a written duration
+      // ("1:30"), and the same parser the grid's editor uses reads both. An
+      // unreadable one falls through as text for the server to refuse, which is
+      // what every other type here does with a value it cannot shape.
+      return typeof raw === "string"
+        ? (parseDuration(durationFormat(column), raw) ?? raw)
+        : toNumber(raw);
     case "checkbox":
       return toBoolean(raw);
     case "date":

@@ -19,6 +19,7 @@
     "@hookform/resolvers": "^3.9.1",
     "@tanstack/react-query": "^5.62.7",
     "html5-qrcode": "^2.3.8",
+    "libphonenumber-js": "^1.13.11",
     "primeicons": "^7.0.0",
     "primereact": "^10.9.2",
     "quill": "^2.0.3",

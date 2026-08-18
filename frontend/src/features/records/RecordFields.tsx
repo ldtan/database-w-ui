@@ -21,8 +21,17 @@ import { Editor } from "primereact/editor";
 import { InputNumber } from "primereact/inputnumber";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
+import { Rating } from "primereact/rating";
 
 import { colorSwatches, isColor, normalizeColor } from "../../lib/color";
+import {
+  durationFormat,
+  durationPlaceholder,
+  formatDuration,
+  parseDuration,
+} from "../../lib/duration";
+import { formatAsTyped, phonePlaceholder } from "../../lib/phone";
+import { ratingScale, ratingValue } from "../../lib/rating";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
@@ -294,6 +303,97 @@ function ColorField({
   );
 }
 
+/**
+ * A phone cell, spaced as it is typed.
+ *
+ * The formatting only ever *reformats* — `AsYouType` adds no digit and drops none —
+ * so what is submitted is what was typed and the server still has the last word.
+ * That is what makes it safe to do on every keystroke: unlike a duration, there is
+ * no reading of a half-typed number that could be stored and be wrong.
+ *
+ * It does not normalise. `+63 917 123 4567` is sent as typed and the server writes
+ * `+639171234567` (`normalize_phone`), because rewriting the box to E.164 mid-word
+ * would fight whoever is typing and hide the spacing that makes a number checkable
+ * by eye. The canonical form comes back on the next read.
+ */
+function PhoneField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: ChoiceFieldProps) {
+  return (
+    <InputText
+      id={id}
+      type="tel"
+      value={typeof value === "string" ? value : ""}
+      onChange={(e) => onChange(formatAsTyped(column, e.target.value))}
+      placeholder={phonePlaceholder(column)}
+      disabled={disabled}
+    />
+  );
+}
+
+/**
+ * A duration cell, typed the way the column is written.
+ *
+ * Two editors behind one case, split on the format for the reason `parseDuration`
+ * documents: three of the four formats are colon forms that parser reads
+ * unambiguously, and `decimal_hours` is a bare number it would read as *seconds*.
+ * So decimal-hours columns get a number box in hours that multiplies out here,
+ * and the value never passes through a parser that would mean something else by it.
+ *
+ * The text box holds its own draft while it is focused. A duration is typed a
+ * character at a time and passes through strings that are not durations yet
+ * ("1:" on the way to "1:30"), so committing on every keystroke would blank the
+ * cell mid-word — the same problem `SingleChoiceField`'s sticky "other" mode has.
+ */
+function DurationField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: ChoiceFieldProps) {
+  const format = durationFormat(column);
+  const stored = typeof value === "number" ? value : null;
+  const [draft, setDraft] = useState<string | null>(null);
+
+  if (format === "decimal_hours") {
+    return (
+      <InputNumber
+        inputId={id}
+        value={stored === null ? null : stored / 3600}
+        onValueChange={(e) => onChange(e.value == null ? null : e.value * 3600)}
+        minFractionDigits={0}
+        maxFractionDigits={2}
+        min={0}
+        suffix=" h"
+        disabled={disabled}
+      />
+    );
+  }
+
+  const shown = draft ?? formatDuration(format, value);
+  return (
+    <InputText
+      id={id}
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        // Committed as it goes so a dialog saved without blurring still saves the
+        // value; an unreadable draft commits null rather than a stale number, so
+        // what is stored is never something the box has stopped showing.
+        onChange(parseDuration(format, e.target.value));
+      }}
+      onBlur={() => setDraft(null)} // fall back to the canonical rendering
+      placeholder={durationPlaceholder(format)}
+      disabled={disabled}
+    />
+  );
+}
+
 export function RecordField({
   listUuid,
   column,
@@ -439,9 +539,56 @@ export function RecordField({
           disabled={disabled}
         />
       );
+    case "phone":
+      return (
+        <PhoneField
+          id={id}
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
     case "color":
       return (
         <ColorField
+          id={id}
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
+        />
+      );
+    case "rating":
+      if (column.config.rating_icon === "number") {
+        return (
+          <InputNumber
+            inputId={id}
+            value={ratingValue(column, value)}
+            onValueChange={(e) => onChange(e.value ?? null)}
+            min={1}
+            max={ratingScale(column)}
+            useGrouping={false}
+            disabled={disabled}
+          />
+        );
+      }
+      return (
+        <Rating
+          // `cancel` is how a cell gets emptied again, and it matters more here
+          // than on an ordinary rating widget: there is no zero to fall back to,
+          // so without it a mis-click is permanent.
+          value={ratingValue(column, value) ?? undefined}
+          onChange={(e) => onChange(e.value ?? null)}
+          stars={ratingScale(column)}
+          onIcon={column.config.rating_icon === "heart" ? "pi pi-heart-fill" : undefined}
+          offIcon={column.config.rating_icon === "heart" ? "pi pi-heart" : undefined}
+          disabled={disabled}
+        />
+      );
+    case "duration":
+      return (
+        <DurationField
           id={id}
           column={column}
           value={value}
