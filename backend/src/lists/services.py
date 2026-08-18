@@ -24,6 +24,7 @@ from .columns.models import Column, in_shape
 # Also safe at module level, and checked: the column service's own imports reach the
 # list *models* but never this module, so there is no cycle to defer around.
 from .columns.services import ColumnService
+from .events.broker import broker
 from .forms.enums import FormType
 from .forms.models import Form
 from .items.models import ListItem
@@ -742,8 +743,16 @@ class ListService:
         # were. Since the values are unrecoverable either way, the referencing column's
         # config goes with them rather than being left pointing at a list that may
         # never come back (see `_scrub_references_to_lists`).
-        await cls._scrub_references_to_lists(db, [lst.uuid])
+        scrubbed = await cls._scrub_references_to_lists(db, [lst.uuid])
         await db.commit()
+        # These are the lists whose *cells* the scrub emptied — other people's, which
+        # are still live and may well be on a screen. Somebody with the deleted list
+        # itself open is not signalled and does not need to be: their stream ends at
+        # its own deadline and the reconnect 404s, which is the list going away rather
+        # than its rows changing. (A self-referencing lookup puts that list in this set
+        # anyway; notifying a list nobody can still watch is a no-op.)
+        for list_id in scrubbed:
+            broker.notify(list_id)
         return True
 
     @classmethod
@@ -765,9 +774,11 @@ class ListService:
     @classmethod
     async def soft_delete_for_workspace(
         cls, db: AsyncSession, workspace_id: int, when: datetime
-    ) -> None:
+    ) -> set[int]:
         """Soft-delete all lists in a workspace and their descendants, in bulk.
-        Does not commit — the caller (workspace delete) owns the transaction."""
+        Does not commit — the caller (workspace delete) owns the transaction, and
+        owns telling `_scrub_references_to_lists`' returned lists to look again once
+        it has."""
         result = await db.execute(
             select(List.id, List.uuid).where(
                 List.workspace_id == workspace_id, List.deleted_at.is_(None)
@@ -775,20 +786,26 @@ class ListService:
         )
         rows = result.all()
         if not rows:
-            return
+            return set()
         list_ids = [row.id for row in rows]
         list_uuids = [row.uuid for row in rows]
         await cls._cascade_descendants(db, list_ids, when)
         await db.execute(
             update(List).where(List.id.in_(list_ids)).values(deleted_at=when)
         )
-        await cls._scrub_references_to_lists(db, list_uuids)
+        return await cls._scrub_references_to_lists(db, list_uuids)
 
     @classmethod
     async def _scrub_references_to_lists(
         cls, db: AsyncSession, list_uuids: Sequence[UUID]
-    ) -> None:
+    ) -> set[int]:
         """Remove dangling lookup references to a now-deleted list — values *and* config.
+
+        Returns the ids of the lists whose **records** this touched, which is never the
+        list being deleted and is often somebody else's. They are handed back rather
+        than signalled from here because this does not own the transaction — both
+        callers commit after it, and a live event sent before a commit tells watchers to
+        re-read rows that have not changed yet.
 
         Lookup values are raw uuids stored in another row's JSONB, so deleting a
         target list leaves those pointers unresolvable but present. Since a lookup
@@ -837,7 +854,7 @@ class ListService:
         that have to be set again by hand.
         """
         if not list_uuids:
-            return
+            return set()
         targets = [str(u) for u in list_uuids]
         lookup_columns = (
             await db.execute(
@@ -908,6 +925,7 @@ class ListService:
             # `_validate_nesting` refuses to save the column at all until someone
             # clears "Nest under" by hand.
             await ColumnService._clear_dependent_nesting(db, column)
+        return {column.list_id for column in lookup_columns}
 
     # -- the bin: view, restore, and purge soft-deleted lists ---------------
 

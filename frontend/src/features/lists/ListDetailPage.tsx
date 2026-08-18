@@ -46,7 +46,7 @@ import {
 } from "../records/cellEdit";
 import { InlineCellEditor } from "../records/inlineEdit";
 import { isNewRow, landedOnPage, newRowItem } from "../records/newRow";
-import { recordCountKey, recordPagesKey } from "../records/recordKeys";
+import { recordCountKey, recordCountsKey, recordPagesKey } from "../records/recordKeys";
 import { buildRecordData, deserialize, resolveFields } from "../records/recordValues";
 import { renderCell } from "../records/renderCell";
 import { ImportExportDialog } from "../transfer/ImportExportDialog";
@@ -232,13 +232,19 @@ export function ListDetailPage() {
     queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
   });
   // Live records: keep this list current as other people add/edit/remove rows.
-  // Spread first so the query's own keys/fn win; today it supplies a polling
-  // `refetchInterval`, later an SSE subscription (see useLiveList).
-  const live = useLiveList(listUuid);
+  // Spread first so the query's own keys/fn win. It subscribes to the list's event
+  // stream and invalidates the key it is given, returning a polling
+  // `refetchInterval` only if that stream cannot be held open (see useLiveList).
+  const live = useLiveList(listUuid, { queryKey: recordPagesKey(listUuid) });
   // The same seam on a slower clock for the total, which is a dearer question than
   // the page it describes — see COUNT_REFRESH_SECONDS. A floor, so it can only ever
-  // slow the count down relative to the records, never speed it up.
-  const liveCount = useLiveList(listUuid, COUNT_REFRESH_SECONDS);
+  // slow the count down relative to the records, never speed it up. Keyed on the
+  // count *prefix*, not this page's key: an event names the list and nothing else,
+  // and every scope's total went stale at the same moment.
+  const liveCount = useLiveList(listUuid, {
+    queryKey: recordCountsKey(listUuid),
+    minSeconds: COUNT_REFRESH_SECONDS,
+  });
   // Everything that decides *which* records come back is part of the key, because
   // every one of them is applied server-side: the page, the order, the view and
   // the search each produce a different set of rows, not a rearrangement of one

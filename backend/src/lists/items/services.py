@@ -33,6 +33,7 @@ from ..columns.validation import (
     resolve_dynamic_default,
     validate_scalar,
 )
+from ..events.broker import broker
 from ..models import List
 from .filtering import apply_filters, apply_sorts, location_address
 from .models import ListItem
@@ -684,6 +685,7 @@ class ListItemService:
         await db.flush()
         new_uuid = item.uuid
         await db.commit()
+        broker.notify(lst.id)
         # get_for_read, not get_by_uuid: the response renders the record, so it
         # carries coerced values and any calculated column's computed value.
         return await cls.get_for_read(db, lst.id, new_uuid)
@@ -719,6 +721,7 @@ class ListItemService:
         if payload.permissions_inherit is not None:
             item.permissions_inherit = payload.permissions_inherit
         await db.commit()
+        broker.notify(lst.id)
         # get_for_read: see the note in create() — the response is a rendered record.
         return await cls.get_for_read(db, lst.id, uuid)
 
@@ -740,6 +743,7 @@ class ListItemService:
         # when the record is *purged*, at which point it is unrecoverable anyway.
         item.deleted_at = datetime.now(timezone.utc)
         await db.commit()
+        broker.notify(lst.id)
         return True
 
     @classmethod
@@ -784,6 +788,10 @@ class ListItemService:
         deleted = result.rowcount
         if deleted:
             await db.commit()
+            # Only when something moved. A bulk delete naming nothing this list
+            # still holds commits nothing, and a live event for it would send every
+            # watcher to refetch an unchanged page.
+            broker.notify(lst.id)
         return deleted
 
     # -- the bin: view and restore soft-deleted records ---------------------
@@ -867,6 +875,7 @@ class ListItemService:
 
         item.deleted_at = None
         await db.commit()
+        broker.notify(lst.id)
         return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
@@ -950,6 +959,7 @@ class ListItemService:
         # give back what archiving took.
         item.archived_at = datetime.now(timezone.utc)
         await db.commit()
+        broker.notify(lst.id)
         return True
 
     @classmethod
@@ -984,6 +994,7 @@ class ListItemService:
         archived = result.rowcount
         if archived:
             await db.commit()
+            broker.notify(lst.id)  # only when something moved — see `bulk_delete`
         return archived
 
     @classmethod
@@ -1042,6 +1053,7 @@ class ListItemService:
 
         item.archived_at = None
         await db.commit()
+        broker.notify(lst.id)
         return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod

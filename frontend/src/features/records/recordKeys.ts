@@ -43,3 +43,14 @@ export const recordCountKey = (
   q: string,
   filters: FilterGroup,
 ) => ["items", listUuid, "count", viewUuid, q, filters] as const;
+
+/** Every count of this list, whatever scope it was asked in.
+ *
+ * The prefix `recordCountKey` sits under, for a caller that wants to refresh the
+ * total without knowing which view, search or filter produced the one on screen —
+ * `useLiveList`, which is handed a live event naming the list and nothing more.
+ * Spelled here rather than inline at that call site so the segment after the uuid is
+ * decided in exactly one place, which is the rule the docblock above states.
+ */
+export const recordCountsKey = (listUuid: string) =>
+  ["items", listUuid, "count"] as const;

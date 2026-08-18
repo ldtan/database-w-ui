@@ -28,3 +28,9 @@ export const metricValuesKey = (
   q: string,
   filters: FilterGroup,
 ) => ["items", listUuid, "metrics", viewUuid, q, filters] as const;
+
+/** Every metric-values query for this list, whatever scope it was asked in — the
+ * prefix `metricValuesKey` sits under. See `recordCountsKey` for why this is spelled
+ * beside its key rather than at the one call site that needs it (`useLiveList`). */
+export const metricValuesPrefix = (listUuid: string) =>
+  ["items", listUuid, "metrics"] as const;

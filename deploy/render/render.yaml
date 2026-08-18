@@ -92,14 +92,23 @@ services:
     envVars:
       - key: NODE_VERSION
         value: "22"
-      # "Live records" polling interval in seconds: an open list refetches this
-      # often to pick up other people's row changes (paused while the tab is
-      # hidden). Baked in at build time (Vite), so a change needs a redeploy.
-      # Optional — the app defaults to 10s if unset. `0` disables polling. Lower is
-      # snappier but more requests. It used to have a second job on the free plan —
-      # a focused open tab kept the instance from spinning down — which `starter`
-      # makes moot, so this is now purely a freshness-vs-load dial. It was 60 from
-      # day one and came down to 15 on 2026-08-18. See docs/planned-features.md #8.
+      # "Live records" **fallback** polling interval in seconds.
+      #
+      # An open list normally holds an SSE stream (GET /lists/{uuid}/events) and
+      # refetches when the server says its records moved, so this interval is not
+      # used at all on a healthy deployment. It is what the app falls back to when
+      # the stream cannot be held open — a proxy that buffers text/event-stream,
+      # SSE_ENABLED=False below, or a network that forbids them — and the numbers
+      # underneath it still describe exactly that case.
+      #
+      # Baked in at build time (Vite), so a change needs a redeploy. Optional — the
+      # app defaults to 10s if unset. `0` disables the fallback entirely, which
+      # means a deployment whose stream is blocked would not refresh at all; leave
+      # it set. Lower is snappier but more requests. It used to have a second job on
+      # the free plan — a focused open tab kept the instance from spinning down —
+      # which `starter` makes moot. It was 60 from day one, came down to 15 on
+      # 2026-08-18, and became a fallback when push shipped.
+      # See docs/planned-features.md #8.
       #
       # Two things on the page do not follow this down, each taking the greater of
       # this and its own floor: the metric strip (VITE_METRIC_REFRESH_SECONDS,
@@ -110,7 +119,10 @@ services:
       # a search, on a 100k list). Lowering the value below therefore speeds up the
       # records alone, which is the intent.
       #
-      # At the 15 set here both floors are doing real work, which is the whole
+      # Those two floors are not fallback-only: under push they throttle how often
+      # an event may invalidate the count and the metric strip, so the same cost
+      # ceiling holds on both transports. At the 15 set here both are doing real
+      # work on the fallback path, which is the whole
       # reason they exist: the records page follows to 15s, the count stops at 30
       # and the metric strip does not move off 60 at all. So this is a 4x on the
       # cheapest of the three queries, 2x on the middle one, and 1x on the dearest
@@ -232,6 +244,43 @@ envVarGroups:
       - key: LOGIN_MAX_FAILURES_PER_IP
         value: "50"
       - key: LOGIN_THROTTLE_WINDOW_MINUTES
+        value: "15"
+
+      # "Live records" server push. An open list holds GET /lists/{uuid}/events and
+      # refetches when told its records moved; the SPA falls back to polling on its
+      # own if the stream will not stay open, so none of these three is required and
+      # the defaults (True / 300 / 15) are the intended settings.
+      #
+      # SSE_ENABLED=False is the kill switch: the route answers 503 and every client
+      # reverts to VITE_LIVE_REFRESH_SECONDS above. It lives here rather than in the
+      # static site's build config precisely so it can be flipped without rebuilding
+      # and redeploying the SPA — which is what you want at the moment you discover
+      # you need it.
+      #
+      # **Reach for it if event frames only arrive when a connection closes.** The
+      # SPA reaches the API through the /api/* rewrite on dbui-web, and whether that
+      # proxy buffers text/event-stream is not documented. The response already sets
+      # Cache-Control: no-transform and X-Accel-Buffering: no. If it is buffering
+      # anyway, the alternative to switching this off is to have the SPA call the
+      # API's own origin for this one route, which means setting ALLOWED_ORIGINS.
+      # Check with:
+      #   curl -N -H "Authorization: Bearer <token>" \
+      #        https://<web-host>/api/lists/<uuid>/events
+      # A ": ping" should appear at once, and more of them every 15 seconds.
+      - key: SSE_ENABLED
+        value: "True"
+      # How long one stream lives before the server closes it and the client
+      # reconnects. Finite on purpose, and it is doing four jobs — see the comment on
+      # the setting in src/core/config.py. The one to weigh before changing it: this
+      # is the **revocation window**, since a stream is authorized at connect and
+      # never again. Lower closes that window and costs one request per stream per
+      # interval; higher is cheaper and widens it by exactly as much.
+      - key: SSE_MAX_STREAM_SECONDS
+        value: "300"
+      # How often an idle stream emits a comment frame, so a proxy does not reap a
+      # connection that has said nothing and the server learns when a peer has gone.
+      # Raise it only if something upstream is known to tolerate longer silences.
+      - key: SSE_HEARTBEAT_SECONDS
         value: "15"
 
       # The bootstrap account, seeded on first boot while the users table is empty. On a public

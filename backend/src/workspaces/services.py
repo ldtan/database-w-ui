@@ -359,14 +359,20 @@ class WorkspaceService:
         cls._guard_system_workspace(workspace)
 
         # Deferred import avoids a module cycle (lists.services imports this one).
+        from src.lists.events.broker import broker
         from src.lists.services import ListService
 
         now = datetime.now(timezone.utc)
         # Cascade the soft delete to the workspace's lists and their descendants,
         # all in this one transaction.
-        await ListService.soft_delete_for_workspace(db, workspace.id, now)
+        scrubbed = await ListService.soft_delete_for_workspace(db, workspace.id, now)
         workspace.deleted_at = now
         await db.commit()
+        # Lists whose lookup cells the cascade emptied — typically outside this
+        # workspace, since those are the ones still readable. See ListService.delete
+        # for why the signal waits for the commit.
+        for list_id in scrubbed:
+            broker.notify(list_id)
         return True
 
     # -- the bin: view, restore, and purge soft-deleted workspaces ----------
