@@ -27,7 +27,7 @@ from ..columns.enums import (
     ColumnType,
 )
 from ..columns.models import Column, in_shape
-from ..columns.validation import parse_duration
+from ..columns.validation import format_location, parse_duration, parse_location
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
 from ..items.references import label_sources
@@ -67,9 +67,19 @@ async def _ordered_columns(
     return cols
 
 
-def _csv_cell(value: object) -> str:
+def _csv_cell(value: object, column: Optional[Column] = None) -> str:
+    """One cell as the file writes it.
+
+    ``column`` is optional because `_error_values` calls this on a *raw uploaded
+    row*, where there is no column to attribute a cell to — every header is kept,
+    including ones this list has no column for. With one, a type whose value is not
+    a scalar gets its own rendering: today only `location`, whose cell is an object
+    and whose `str()` would be a Python dict repr in a spreadsheet.
+    """
     if value is None:
         return ""
+    if column is not None and column.type == ColumnType.location:
+        return format_location(value) or ""
     if isinstance(value, list):
         return ";".join(str(v) for v in value)
     if isinstance(value, bool):
@@ -398,7 +408,8 @@ async def export_rows(
                     writer.writerow(
                         [
                             _csv_cell(
-                                labels.cell(c, coerce_shape(c, row.get(str(c.uuid))))
+                                labels.cell(c, coerce_shape(c, row.get(str(c.uuid)))),
+                                c,
                             )
                             for c in columns
                         ]
@@ -423,6 +434,14 @@ def _parse_cell(column: Column, raw: object):
         return _SKIP
 
     multiple = bool((column.config or {}).get("multiple"))
+    if column.type == ColumnType.location:
+        # The canonical one-line form the export writes, read straight back — which
+        # is what makes a location column round-trip through a file. A JSON upload
+        # may also hand over the object itself, and does not need parsing.
+        if isinstance(raw, dict):
+            return raw
+        parsed = parse_location(str(raw))
+        return parsed if parsed is not None else _SKIP
     if column.type == ColumnType.duration:
         # Read before the generic numeric branch below, and a superset of it: a bare
         # number is seconds (which is what the export writes, so a file round-trips),

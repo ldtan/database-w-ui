@@ -49,6 +49,22 @@ def first_value(column: Column):
     )
 
 
+def location_address(column: Column):
+    """A location cell's address, as text.
+
+    `location` is the one type whose cell is a JSON **object**, so `->>` on it yields
+    the serialized blob — `{"address": "12 Rizal St", "lat": …}` — and every filter,
+    sort and search would be asking questions of that string instead of the place.
+    The address is the readable half, so it is what those three operate on; the
+    coordinates are not something anyone filters by hand.
+
+    Three readers share this: `_field` below, `ListItemService._apply_search`, and
+    nothing else — a location is not aggregatable and not formula-referenceable, so
+    the numeric and metric paths never see one.
+    """
+    return ListItem.data[str(column.uuid)]["address"].astext
+
+
 def _field(column: Column):
     """The cell as a filter should see it — the value `coerce_shape` would return.
 
@@ -67,6 +83,8 @@ def _field(column: Column):
     the filter language currently has. Giving multi-valued columns real per-element
     operators is a separate piece of work.
     """
+    if column.type == ColumnType.location:
+        return location_address(column)
     if (column.config or {}).get("multiple"):
         return ListItem.data[str(column.uuid)].astext
     return first_value(column)

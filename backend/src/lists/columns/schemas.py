@@ -66,6 +66,14 @@ class ColumnConfig(BaseModel):
     default_region: Optional[str] = None  # ISO-3166 alpha-2, e.g. "PH"
     allowed_regions: Optional[list[str]] = None
     display_format: Optional[str] = None  # e164 | national | international
+    # location — a cell is an OBJECT: {address, lat, lng}, the only non-scalar cell
+    # shape in the system. `require_coordinates` refuses an address with no pin;
+    # `default_center`/`default_zoom` say where the picker opens; `map_link` picks
+    # which map site the cell's external link opens. The last three are UI hints.
+    require_coordinates: Optional[bool] = None
+    default_center: Optional[dict] = None  # {"lat": ..., "lng": ...}
+    default_zoom: Optional[int] = None
+    map_link: Optional[str] = None  # osm | google | apple
     # color — a #rrggbb string. `swatches` is a palette the picker offers first;
     # it constrains nothing, because the point of a colour field is picking one.
     swatches: Optional[list[str]] = None

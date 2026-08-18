@@ -133,6 +133,80 @@ def normalize_email(value: str) -> str:
 
 
 _PHONE_FORMATS = {"e164", "national", "international"}
+_MAP_LINKS = {"osm", "google", "apple"}
+# The only keys a location cell may hold. Fixed rather than open so a cell cannot
+# quietly become a place to stash arbitrary JSON — `data` is schemaless, and this
+# type is the first one whose *value* is an object.
+LOCATION_KEYS = ("address", "lat", "lng")
+_ADDRESS_MAX = 500
+# The coordinate suffix of the one-line text form. Anchored to the end and required
+# to *look like* a pair of coordinates, which is what lets an address keep its own
+# "@": "Unit 3 @ The Mall" has no numeric suffix, so all of it is the address, while
+# "Unit 3 @ The Mall @10.0,123.0" splits at the last one. A leading space is written
+# but not required to read, so a hand-typed "@10.3,123.8" works too.
+_COORD_SUFFIX_RE = re.compile(
+    r"\s*@(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\Z"
+)
+
+
+def format_location(value) -> Optional[str]:
+    """A location as one line of text — the form the export writes.
+
+    `12 Rizal St, Cebu City @10.31570,123.88540`, either half optional. This is the
+    canonical text form in both directions: what a CSV carries, and what a
+    conversion to `text` produces, so `parse_location` reads it straight back.
+
+    Five decimal places is about a metre, which is finer than any address is, and
+    keeps the file readable — a float repr of `10.315700000000001` in a spreadsheet
+    cell helps nobody.
+    """
+    if not isinstance(value, dict):
+        return None
+    address = value.get("address") or ""
+    lat, lng = value.get("lat"), value.get("lng")
+    if lat is None or lng is None:
+        return address or None
+    coords = f"@{float(lat):.5f},{float(lng):.5f}"
+    return f"{address} {coords}" if address else coords
+
+
+def parse_location(text: str) -> Optional[dict]:
+    """Read the one-line text form back into a cell, or None if it is empty.
+
+    Anything that is not the coordinate suffix is the address, so a line a person
+    typed by hand — just an address, no coordinates — is read as one rather than
+    refused. Only a *well-formed* suffix is taken as coordinates; a trailing "@"
+    that is part of the address stays part of it.
+    """
+    raw = text.strip()
+    if not raw:
+        return None
+
+    address, lat, lng = raw, None, None
+    suffix = _COORD_SUFFIX_RE.search(raw)
+    if suffix:
+        lat, lng = float(suffix.group(1)), float(suffix.group(2))
+        address = raw[: suffix.start()].strip()
+
+    return {"address": address or None, "lat": lat, "lng": lng}
+
+
+def _coordinate(config: dict, name: str, value) -> None:
+    """Check one {lat, lng} pair, wherever it appears (a cell, a default centre)."""
+    lat, lng = value.get("lat"), value.get("lng")
+    if (lat is None) != (lng is None):
+        raise ValidationError(
+            f"Column '{name}' needs both a latitude and a longitude, or neither"
+        )
+    if lat is None:
+        return
+    for label, coord, limit in (("latitude", lat, 90), ("longitude", lng, 180)):
+        if isinstance(coord, bool) or not isinstance(coord, (int, float)):
+            raise ValidationError(f"Column '{name}': {label} must be a number")
+        if not -limit <= coord <= limit:
+            raise ValidationError(
+                f"Column '{name}': {label} must be between -{limit} and {limit}"
+            )
 
 
 def phone_regions(config: dict) -> tuple[Optional[str], list[str]]:
@@ -494,6 +568,29 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
                 f"'display_format' must be one of {', '.join(sorted(_PHONE_FORMATS))}"
             )
 
+    elif column_type == ColumnType.location:
+        centre = config.get("default_center")
+        if centre is not None:
+            if not isinstance(centre, dict) or set(centre) - {"lat", "lng"}:
+                raise ValidationError(
+                    "'default_center' must be a {lat, lng} object"
+                )
+            if centre.get("lat") is None or centre.get("lng") is None:
+                raise ValidationError(
+                    "'default_center' needs both a latitude and a longitude"
+                )
+            _coordinate(config, "default_center", centre)
+        zoom = config.get("default_zoom")
+        if zoom is not None and (
+            isinstance(zoom, bool) or not isinstance(zoom, int) or not 0 <= zoom <= 20
+        ):
+            raise ValidationError("'default_zoom' must be a whole number from 0 to 20")
+        link = config.get("map_link")
+        if link is not None and link not in _MAP_LINKS:
+            raise ValidationError(
+                f"'map_link' must be one of {', '.join(sorted(_MAP_LINKS))}"
+            )
+
     elif column_type == ColumnType.color:
         swatches = config.get("swatches")
         if swatches is not None:
@@ -669,6 +766,39 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         # is what makes a value arriving any other way (a column default, a
         # conversion) meet the same bar.
         normalize_phone(config, name, value)
+
+    elif column_type == ColumnType.location:
+        # The one cell shape in the system that is an object rather than a scalar or
+        # a list of them, which is why the key set is closed: `data` is schemaless,
+        # so nothing but this check stops a location cell becoming a place to stash
+        # arbitrary JSON that every reader downstream would then have to survive.
+        if not isinstance(value, dict):
+            _expect(name, "a location ({address, lat, lng})")
+        unknown = sorted(set(value) - set(LOCATION_KEYS))
+        if unknown:
+            raise ValidationError(
+                f"Column '{name}' has no place for {', '.join(unknown)}; a location "
+                f"holds {', '.join(LOCATION_KEYS)}"
+            )
+        address = value.get("address")
+        if address is not None and not isinstance(address, str):
+            raise ValidationError(f"Column '{name}': address must be text")
+        if isinstance(address, str) and len(address) > _ADDRESS_MAX:
+            raise ValidationError(
+                f"Column '{name}': address must be at most {_ADDRESS_MAX} characters"
+            )
+        _coordinate(config, name, value)
+        has_address = isinstance(address, str) and address.strip() != ""
+        if not has_address and value.get("lat") is None:
+            # Neither half filled in is an empty cell spelled awkwardly. Refused
+            # rather than silently nulled, so `required` cannot be satisfied by one.
+            raise ValidationError(
+                f"Column '{name}' needs an address or a pair of coordinates"
+            )
+        if config.get("require_coordinates") and value.get("lat") is None:
+            raise ValidationError(
+                f"Column '{name}' needs coordinates, not only an address"
+            )
 
     elif column_type == ColumnType.color:
         if not isinstance(value, str):

@@ -14,6 +14,7 @@ class ColumnType(str, enum.Enum):
     link = "link"
     email = "email"
     phone = "phone"
+    location = "location"
     color = "color"
     rating = "rating"
     duration = "duration"

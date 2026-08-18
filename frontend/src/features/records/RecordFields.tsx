@@ -33,6 +33,7 @@ import {
 import { formatAsTyped, phonePlaceholder } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import type { Column } from "../../lib/types";
+import { LocationField } from "../locations/LocationField";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
 import { ReferencePicker } from "../references/ReferencePicker";
@@ -537,6 +538,16 @@ export function RecordField({
           onChange={(e) => onChange(e.target.value)}
           placeholder="name@example.com"
           disabled={disabled}
+        />
+      );
+    case "location":
+      return (
+        <LocationField
+          id={id}
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
         />
       );
     case "phone":

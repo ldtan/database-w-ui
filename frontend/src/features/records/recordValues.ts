@@ -218,5 +218,9 @@ export function textMode(column: Column): TextMode {
  * Shrinking either into a row would be a worse editor than the one that exists.
  */
 export function needsFullEditor(column: Column): boolean {
+  // A location is edited with a map, which does not fit in a table row and
+  // cannot be hosted by the grid's cell editor anyway (`inlineEdit` has no
+  // dialog to put one in).
+  if (column.type === "location") return true;
   return textMode(column) !== "single";
 }

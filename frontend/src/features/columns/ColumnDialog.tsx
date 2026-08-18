@@ -85,6 +85,14 @@ const PHONE_FORMAT_OPTIONS = [
   { label: "+639171234567 (E.164)", value: "e164" },
 ];
 
+// Which map site a location cell's external link opens. Kept in step with
+// `_MAP_LINKS` on the server and `mapHref` in lib/location.ts.
+const MAP_LINK_OPTIONS = [
+  { label: "OpenStreetMap", value: "osm" },
+  { label: "Google Maps", value: "google" },
+  { label: "Apple Maps", value: "apple" },
+];
+
 // Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
 const SPECIFIC = "__specific__";
 // Sentinel for the lookup "Workspace" dropdown: lists shared with the user from
@@ -195,6 +203,13 @@ export function ColumnDialog({
   const [phoneRegion, setPhoneRegion] = useState<string | null>(null);
   const [phoneAllowed, setPhoneAllowed] = useState<string[]>([]);
   const [phoneDisplay, setPhoneDisplay] = useState("international");
+  // Location: whether an address alone will do, where the picker opens, and which
+  // map site a cell links out to. Only the first changes what the column accepts.
+  const [requireCoords, setRequireCoords] = useState(false);
+  const [centreLat, setCentreLat] = useState<number | null>(null);
+  const [centreLng, setCentreLng] = useState<number | null>(null);
+  const [mapZoom, setMapZoom] = useState<number | null>(null);
+  const [mapLink, setMapLink] = useState("osm");
   // 245 entries through `Intl.DisplayNames`, computed once per module and memoised
   // here so re-rendering the dialog does not walk the list again.
   const countries = useMemo(() => countryOptions(), []);
@@ -290,6 +305,11 @@ export function ColumnDialog({
       setPhoneRegion(null);
       setPhoneAllowed([]);
       setPhoneDisplay("international");
+      setRequireCoords(false);
+      setCentreLat(null);
+      setCentreLng(null);
+      setMapZoom(null);
+      setMapLink("osm");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -326,6 +346,11 @@ export function ColumnDialog({
       setPhoneRegion(null);
       setPhoneAllowed([]);
       setPhoneDisplay("international");
+      setRequireCoords(false);
+      setCentreLat(null);
+      setCentreLng(null);
+      setMapZoom(null);
+      setMapLink("osm");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -362,6 +387,11 @@ export function ColumnDialog({
     setAllowOther(!!config.allow_other);
     setLinkText((config.label as string) ?? "");
     setSwatchText(((config.swatches as string[]) ?? []).join(";"));
+    setRequireCoords(!!config.require_coordinates);
+    setCentreLat((config.default_center?.lat as number) ?? null);
+    setCentreLng((config.default_center?.lng as number) ?? null);
+    setMapZoom((config.default_zoom as number) ?? null);
+    setMapLink((config.map_link as string) ?? "osm");
     setPhoneRegion((config.default_region as string) ?? null);
     setPhoneAllowed((config.allowed_regions as string[]) ?? []);
     setPhoneDisplay((config.display_format as string) ?? "international");
@@ -565,6 +595,10 @@ export function ColumnDialog({
     !isCalculated &&
     type !== "lookup" &&
     type !== "group" &&
+    // A location is picked on a map, and a default one is a place every new
+    // record starts at — which is what `default_center` already expresses,
+    // without writing a value into cells nobody chose.
+    type !== "location" &&
     !(supportsOnUpdate && onUpdate !== "");
   // Options for the choice "default option" dropdown, from the shorthand as typed.
   const choiceLabels = choices
@@ -613,6 +647,19 @@ export function ColumnDialog({
       }
       if (type === "link") config.label = linkText.trim() || null;
       if (type === "email") config.max_length = maxLength;
+      if (type === "location") {
+        // All four always sent, like `unique`: a config PATCH merges, so clearing a
+        // centre means an explicit null rather than an omitted key. The centre is
+        // both coordinates or neither — the server refuses half of one, which is
+        // right, and this is what stops the dialog ever sending half.
+        config.require_coordinates = requireCoords;
+        config.default_center =
+          centreLat !== null && centreLng !== null
+            ? { lat: centreLat, lng: centreLng }
+            : null;
+        config.default_zoom = mapZoom;
+        config.map_link = mapLink === "osm" ? null : mapLink;
+      }
       if (type === "phone") {
         // All three always sent, like `unique`: a config PATCH merges, so clearing
         // a region means an explicit null rather than an omitted key — and this is
@@ -677,7 +724,12 @@ export function ColumnDialog({
       // Default value — sent for every type that supports one (not lookup, group,
       // or calculated). Always sent, even when empty, so clearing it on edit takes
       // effect: a config PATCH merges, so an omitted key would keep the old default.
-      if (!isCalculated && type !== "lookup" && type !== "group") {
+      if (
+        !isCalculated &&
+        type !== "lookup" &&
+        type !== "group" &&
+        type !== "location"
+      ) {
         let defaultValue: unknown = null;
         if (
           type === "text" ||
@@ -1327,6 +1379,67 @@ export function ColumnDialog({
                 />
               </Field>
             )}
+
+          {type === "location" && (
+            <>
+              <CheckboxField
+                inputId="col-require-coords"
+                checked={requireCoords}
+                onChange={setRequireCoords}
+                label="Require a pin, not just an address"
+                hint="A record cannot be saved with an address that was never placed on the map."
+              />
+              <FieldRow>
+                <Field label="Map opens at (latitude)" htmlFor="col-centre-lat" optional>
+                  <InputNumber
+                    inputId="col-centre-lat"
+                    value={centreLat}
+                    onValueChange={(e) => setCentreLat(e.value ?? null)}
+                    minFractionDigits={0}
+                    maxFractionDigits={5}
+                    min={-90}
+                    max={90}
+                    useGrouping={false}
+                  />
+                </Field>
+                <Field label="Longitude" htmlFor="col-centre-lng" optional>
+                  <InputNumber
+                    inputId="col-centre-lng"
+                    value={centreLng}
+                    onValueChange={(e) => setCentreLng(e.value ?? null)}
+                    minFractionDigits={0}
+                    maxFractionDigits={5}
+                    min={-180}
+                    max={180}
+                    useGrouping={false}
+                  />
+                </Field>
+              </FieldRow>
+              <Field
+                label="Zoom"
+                htmlFor="col-map-zoom"
+                optional
+                hint="0 is the whole world, 19 is a building. Left empty, the picker opens on the world until a centre is set."
+              >
+                <InputNumber
+                  inputId="col-map-zoom"
+                  value={mapZoom}
+                  onValueChange={(e) => setMapZoom(e.value ?? null)}
+                  min={0}
+                  max={20}
+                  useGrouping={false}
+                />
+              </Field>
+              <Field label="Open in" htmlFor="col-map-link">
+                <Dropdown
+                  inputId="col-map-link"
+                  value={mapLink}
+                  options={MAP_LINK_OPTIONS}
+                  onChange={(e) => setMapLink(e.value)}
+                />
+              </Field>
+            </>
+          )}
 
           {type === "phone" && (
             <>

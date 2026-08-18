@@ -91,11 +91,13 @@ def create_app() -> FastAPI:
     from src.lists.routers import router as lists_router
     from src.permissions.routers import router as permissions_router
     from src.people.routers import router as people_router
+    from src.geocode.routers import router as geocode_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
     app.include_router(lists_router, prefix=settings.API_PREFIX)
     app.include_router(permissions_router, prefix=settings.API_PREFIX)
     app.include_router(people_router, prefix=settings.API_PREFIX)
+    app.include_router(geocode_router, prefix=settings.API_PREFIX)
 
     return app
 
