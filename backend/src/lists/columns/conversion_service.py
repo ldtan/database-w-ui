@@ -66,6 +66,7 @@ from src.core.exceptions import (
     ValidationError,
 )
 
+from ..events.broker import broker
 from ..items.models import ListItem
 from ..models import List
 from .conversion import CellConverter, check_supported, mint_choice_options
@@ -565,6 +566,10 @@ class ConversionService:
             )
 
         await db.commit()
+        # A conversion rewrites the cell of every record that had a value, so every
+        # open grid is showing something out of date. After the commit, and after the
+        # fingerprint re-check above, so a refused conversion signals nothing.
+        broker.notify(lst.id)
         await db.refresh(live)
         return live
 

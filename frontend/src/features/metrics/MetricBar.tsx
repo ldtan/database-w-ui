@@ -6,7 +6,7 @@ import { METRIC_REFRESH_SECONDS } from "../../lib/config";
 import { useLiveList } from "../../lib/useLiveList";
 import type { FilterGroup, Metric, MetricValue, MetricValues } from "../../lib/types";
 import { recordScopeParams } from "../views/recordQuery";
-import { metricsKey, metricValuesKey } from "./metricKeys";
+import { metricsKey, metricValuesKey, metricValuesPrefix } from "./metricKeys";
 
 interface Props {
   listUuid: string;
@@ -57,7 +57,12 @@ export function MetricBar({
   filters,
   visible,
 }: Props) {
-  const live = useLiveList(listUuid, METRIC_REFRESH_SECONDS);
+  // Keyed on the metric-values *prefix* rather than this card strip's exact key: a
+  // live event names the list alone, and every scope's totals went stale together.
+  const live = useLiveList(listUuid, {
+    queryKey: metricValuesPrefix(listUuid),
+    minSeconds: METRIC_REFRESH_SECONDS,
+  });
   const values = useQuery({
     // Cards follow the records — same guardrails, same invalidation — but on a
     // slower clock. A metric is an aggregate over the whole list where a page of

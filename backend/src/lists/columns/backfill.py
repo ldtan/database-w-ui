@@ -48,6 +48,7 @@ import sqlalchemy as sa
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..events.broker import broker
 from ..items.models import ListItem
 from .chain import build_chain
 from .models import Column, in_shape
@@ -211,9 +212,18 @@ async def recompute_locked(db: AsyncSession, list_id: int) -> Optional[int]:
     if not await try_lock(db, list_id):
         return None
     try:
-        return await recompute_records(db, list_id)
+        changed = await recompute_records(db, list_id)
     finally:
         await unlock(db, list_id)
+    # A re-index rewrites values people are looking at, so it is a record change like
+    # any other. Here rather than in `recompute_records` because this is the seam both
+    # entry points share — the inline route and `run_deferred` — while that function is
+    # also what the nightly out-of-process sweep calls, where a notify reaches nobody.
+    # Only when something actually moved: a pass over an already-current list writes
+    # nothing, and the nightly sweep is mostly those.
+    if changed:
+        broker.notify(list_id)
+    return changed
 
 
 class Deferrer(Protocol):

@@ -518,20 +518,29 @@ refused-when-unviewable).
 
 ---
 
-## 8. Live records (an open list reflects other people's changes) — **polling shipped, push planned**
+## 8. Live records (an open list reflects other people's changes) — **shipped: push, falling back to polling**
 
-**Shipped (polling).** An open list now refetches its records on an interval, so a row
-someone else creates, edits or deletes shows up without a manual reload. It is one hook,
-`useLiveList(listUuid)` (`frontend/src/lib/useLiveList.ts`), spread into the list's items
-`useQuery` in `ListDetailPage`. Today its body hands react-query a `refetchInterval` of
-`LIVE_REFRESH_SECONDS` (`lib/config.ts`, from `VITE_LIVE_REFRESH_SECONDS`, default **10s**,
-`0` disables; the Render deploy sets 15, down from 60 on 2026-08-18). A caller whose query is dearer than a page of
-rows raises its own interval through the hook's `minSeconds` argument — the metric strip
-passes `METRIC_REFRESH_SECONDS` (60) — which can only ever slow a query down and cannot
-revive polling that `0` turned off. Two guardrails hold the idle cost at zero: polling is
-**paused while the tab is hidden** (`refetchIntervalInBackground: false`), *and* **paused
-after `IDLE_AFTER_MS` (5 min) with no user activity on a still-visible tab** — a list left open on screen stops
-refetching until the next interaction.
+**Shipped.** An open list holds a Server-Sent Events stream and refetches when the
+server says that list's records moved, so a row someone else creates, edits or deletes
+shows up in well under a second. It is still one hook,
+`useLiveList(listUuid, { queryKey, minSeconds })` (`frontend/src/lib/useLiveList.ts`),
+spread into the list's items `useQuery` in `ListDetailPage`. While the stream is open
+the hook returns `{}` and react-query is left alone.
+
+**Polling is still here, as the fallback.** If the stream will not stay open — a proxy
+that buffers event streams, a deployment with `SSE_ENABLED=False`, a network that
+forbids them — the hook returns the `refetchInterval` it used to return
+unconditionally: `LIVE_REFRESH_SECONDS` (`lib/config.ts`, from
+`VITE_LIVE_REFRESH_SECONDS`, default **10s**, `0` disables; the Render deploy sets 15,
+down from 60 on 2026-08-18), with the same `minSeconds` floor a dearer caller raises
+(`METRIC_REFRESH_SECONDS`, 60; `COUNT_REFRESH_SECONDS`, 30). That path is not new code
+kept alive out of caution — it is the shipped polling implementation, unchanged, for
+the case where push cannot be had. The **two guardrails moved rather than went away**:
+`liveStream.ts` closes the stream while the tab is hidden **and** after `IDLE_AFTER_MS`
+(5 min) with no activity on a visible one, reporting `paused`, which stops the fallback
+timer too. Reopening fires one catch-up refetch, since whatever happened during the gap
+was missed. Governing the stream and the timer from one answer is the reason that logic
+left this hook.
 
 **The load-bearing principle: a live update carries no record data.** Each refresh is a
 normal, permissioned `GET /items/`, which re-applies `item_view_filter` — so a poll can
@@ -541,11 +550,20 @@ enough that the safe move is to never ship record data down a fan-out channel at
 signal "something changed," and each client re-reads through the endpoint that already knows
 what it may see.
 
-**Why polling first (the deliberate v1 trade).** The API is a **single uvicorn process**
+**Why polling shipped first, and what it now costs.** The numbers below described the
+steady state when polling was the only path. They now describe the **fallback**, and
+they are the reason push was worth building: on push an idle or quiet list costs one
+held connection and nothing else, and the per-tab CPU below goes to roughly zero.
+Keep them — they are what a deployment pays if the stream cannot be held open, which
+is exactly the case the fallback exists for and the one worth being able to price.
+
+The API is a **single uvicorn process**
 (deploy/render/render.yaml), and react-query, the 401→refresh flow, and `keepPreviousData` are
-all already in place — so polling is ~an hour of work, is multi-worker correct *for free*
+all already in place — so polling was ~an hour of work, is multi-worker correct *for free*
 (every poll is an independent permissioned request; there is no fan-out to get wrong), and
-sidesteps the auth friction below. The costs accepted: up to one interval of latency, and a
+sidesteps the auth friction above. That "multi-worker correct for free" is still true and
+is still the fallback's quiet advantage: scaling past one instance breaks the in-process
+broker and does not break polling. The costs accepted: up to one interval of latency, and a
 wasted query per *focused, active* tab. A caveat that has since expired: on the free plan an
 actively-used tab polling kept the instance awake and spent free hours, which the idle
 guardrail above capped. `starter` is always-on, so that side effect is gone and polling is
@@ -556,39 +574,62 @@ only to 30s and the metric strip does not move off 60 at all. The number to watc
 that average but the dearest tab — a page under search costs ~500 ms rather than ~23, so a
 single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
 
-**Planned (server push, near-instant).** When "live" needs to feel instant, or many viewers
-watch one list (where polling's idle queries add up), replace the hook's body with a
-Server-Sent Events subscription — **no call site changes**, which is the whole point of the
-seam. The shape:
+**How push is built.**
 
 - **Transport is SSE consumed via `fetch`, not the native `EventSource`.** Auth is a Bearer
-  token in `localStorage` (`api.ts`), and `EventSource` cannot set an `Authorization` header;
-  a streamed `fetch` response can. This also lets a token expiring mid-stream reconnect
-  through the existing refresh path rather than dropping silently.
-- **A content-free endpoint**, `GET /lists/{uuid}/events`, **gated on list `view`** at
-  connect, emitting only "list changed." It must **hold no pooled DB connection while
-  streaming** — it waits on an in-memory queue, or the stream would pin a session for its
-  whole life and exhaust the pool (see known-gaps on the two-connection rule). The client
-  calls `queryClient.invalidateQueries(["items", listUuid])` per event, debounced so a
-  200-row import fires one refetch, not 200.
-- **Fan-out behind a two-method broker** (`subscribe(list_id)` / `notify(list_id)`), emitted
-  from the one choke point every record write already passes through
-  (`ListItemService.create`/`update`/`delete`/`bulk_delete`/`restore` + import). An
-  **in-process asyncio broker is correct on today's single instance**; a paid/multi-worker
-  deploy — or record-mutating crons running in a *separate* process (`reconcile_shapes`,
-  purge) — needs **Postgres `LISTEN/NOTIFY`** instead: writers `NOTIFY` inside the write
-  transaction (delivered on commit, so a rolled-back write signals nothing), and each worker
-  holds **one dedicated listener connection created at startup, outside the request pool**.
-  Building the broker interface now makes that a localized swap, the same way the deploy
-  already defers the Alembic pre-deploy hook until it is paid for.
+  token in `localStorage` (`api.ts`), and `EventSource` cannot set an `Authorization` header
+  — and there is no cookie in this app to fall back on. `api.stream()` shares the
+  bearer-attach and, critically, the `inFlightRefresh` collapse, so a token expiring
+  mid-stream reconnects through the existing refresh path instead of racing every ordinary
+  request for the single-use refresh token.
+- **A content-free endpoint**, `GET /lists/{uuid}/events` (`src/lists/events/routers.py`),
+  **gated on list `view`** at connect, emitting `event: records` and `: ping` and nothing
+  else. It **holds no pooled DB connection while streaming**: auth and the permission check
+  run inside a session opened and closed before the first byte, and the stream then waits on
+  an in-memory event. **This is why the route is not on the lists router** — that router
+  applies `Depends(get_current_user)`, which takes `Depends(get_db)`, and a `yield`
+  dependency is released only when the response completes, which for a stream is when the
+  tab closes. It is mounted straight onto the app in `main.py` instead, and
+  `test_an_open_stream_does_not_hold_a_pooled_connection` is the regression test, because
+  nothing else would notice this breaking until production.
+- **Fan-out behind a two-method broker** (`subscribe(list_id)` / `notify(list_id)`,
+  `src/lists/events/broker.py`), called after commit from every record write:
+  `ListItemService.create`/`update`/`delete`/`bulk_delete`/`restore`/`archive`/
+  `bulk_archive`/`unarchive`, the CSV/JSON import (once per import), a calculated re-index,
+  a column conversion, and the lookup scrub a list or workspace delete runs across *other*
+  lists. The in-process asyncio broker is correct on today's single instance
+  (`numInstances` unset); **Postgres `LISTEN/NOTIFY`** is the swap behind the same interface
+  for a multi-worker deploy, or to make the out-of-process maintenance crons
+  (`reconcile_shapes`, purge) signal — writers `NOTIFY` inside the write transaction, and
+  each worker holds one dedicated listener connection created at startup, outside the
+  request pool.
+- **A subscriber's mailbox is an `asyncio.Event`, not a queue**, and that is the design.
+  The events carry no content, so "three records changed" and "a record changed" are the
+  same message: one bit of state coalesces a burst by construction, with no queue size to
+  pick, no drop policy to get wrong and no way for a slow reader to grow memory. A 200-row
+  import is one wake-up (`test_an_import_wakes_watchers_once_not_once_per_row`).
+- **Streams are deliberately finite.** `SSE_MAX_STREAM_SECONDS` (300) closes them and the
+  client reconnects. That bounds the 15-minute access token, gives graceful shutdown a
+  ceiling, makes proxy connection-age caps ordinary — and **is the revocation window**,
+  since authorization is checked at connect and there is no session to re-check with.
 
-**Needs a decision (only when push is built):**
-- **What else is "live."** Scoped to records here. The same channel extends to column, view
-  and form changes; decide whether a schema change should also nudge open viewers or stay
-  manual.
-- **Debounce/coalesce window** for bursty writes (imports), and whether the originating
-  client suppresses its own echo (it already invalidates locally on its mutation) via a
-  client id, or just tolerates one redundant refetch.
+**The decisions the design left open, now settled:**
+- **What is "live": records only.** Column, view and form changes stay manual, as they were
+  under polling. The channel extends to them by adding an event name beside `records`; the
+  reason not to yet is that a schema invalidation remounts grid cells and would discard an
+  in-progress inline edit.
+- **Coalescing: 300 ms on the client** (`liveStream.ts`), on top of the server-side
+  coalescing the Event mailbox gives for free. **The originating client's own echo is
+  tolerated, not suppressed** — it already invalidates locally, so it pays one redundant
+  refetch, and the alternative was plumbing a client id through every write path to save it.
+- **The dear queries keep their floors, as throttles.** The grid invalidates on the event;
+  the paginator's count and the metric strip invalidate on the same event but at most once
+  per their floor. Without that, every write would trigger a full-list metric scan per
+  viewer (~2 s of app CPU on a 100k list), which is worse than the polling it replaces.
+  This is what cost the seam its "no call site changes" promise: an invalidation has to be
+  aimed, so each caller now names the key it wants refreshed
+  (`recordPagesKey` / `recordCountsKey` / `metricValuesPrefix`). Three call sites, and the
+  namespace rule in `recordKeys` is unchanged.
 
 ---
 

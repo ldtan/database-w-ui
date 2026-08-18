@@ -27,8 +27,18 @@ async def lifespan(app: FastAPI):
         await seed_initial_data(db)
         await ensure_system_groups(db)
 
+    # Streams opened before this point must not survive it. Clear the flag on the
+    # way in so an app built a second time in one process (the test suite does this
+    # per fixture) does not inherit the previous one's shutdown — or its event loop.
+    from src.lists.events.broker import begin_shutdown, reset_shutdown
+    reset_shutdown()
+
     yield
-    # Shutdown logic (if any) would go here
+
+    # End every open event stream. A stream is an in-flight request that has simply
+    # not finished answering, so without this uvicorn's graceful shutdown waits out
+    # each subscriber's full SSE_MAX_STREAM_SECONDS on every redeploy.
+    begin_shutdown()
 
 def create_app() -> FastAPI:
     # Swagger UI, ReDoc, and the schema document they both read, are development
@@ -92,9 +102,15 @@ def create_app() -> FastAPI:
     from src.permissions.routers import router as permissions_router
     from src.people.routers import router as people_router
     from src.geocode.routers import router as geocode_router
+    # Live records. Deliberately *not* included into lists_router: that router
+    # applies Depends(get_current_user), which takes Depends(get_db), and a yield
+    # dependency is released only once the response completes — which for a stream
+    # is when the browser closes it. See src/lists/events/routers.py.
+    from src.lists.events.routers import router as list_events_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
     app.include_router(lists_router, prefix=settings.API_PREFIX)
+    app.include_router(list_events_router, prefix=settings.API_PREFIX)
     app.include_router(permissions_router, prefix=settings.API_PREFIX)
     app.include_router(people_router, prefix=settings.API_PREFIX)
     app.include_router(geocode_router, prefix=settings.API_PREFIX)

@@ -28,6 +28,7 @@ from ..columns.enums import (
 )
 from ..columns.models import Column, in_shape
 from ..columns.validation import format_location, parse_duration, parse_location
+from ..events.broker import broker
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
 from ..items.references import label_sources
@@ -600,4 +601,10 @@ async def import_records(
             )
 
     await db.commit()
+    # Once for the import, not once per row. The rows are committed in batches, so
+    # a per-row notify would also be honest — but the granularity a watcher cares
+    # about is "this import happened", and the broker's mailbox would coalesce a
+    # thousand of them into this same single wake-up anyway.
+    if created:
+        broker.notify(lst.id)
     return {"created": created, "errors": errors}

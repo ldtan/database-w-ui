@@ -643,23 +643,30 @@ bound.
   `106250024.4` against the scan's `106250024.40004165`. The compiled answer is the more
   accurate one, and the gap is far below the 1e-6 the frontend already rounds to. Worth
   knowing before someone reports it as a bug.
-- **Nothing is cached, and the frontend re-asks on a timer.** The values query rides
-  `useLiveList`, so a large list is where this will first hurt. Three things keep it in
-  hand, and they are worth keeping attached to each other:
+- **Nothing is cached, and the frontend re-asks whenever the records move.** The values
+  query rides `useLiveList`, so a large list is where this will first hurt — and server
+  push made that *more* true, not less: a busy list can produce events far faster than
+  the old timer ticked. Three things keep it in hand, and they are worth keeping attached
+  to each other:
   - **The strip is hidden until the toolbar's Metrics button reveals it**, and `visible`
     gates the query rather than just the markup — a list nobody is totalling costs
     nothing, and the timer only runs for someone actually looking at a total. Making the
     strip default to shown, or rendering it hidden with the query still enabled, quietly
     turns every open list into a repeating full scan.
-  - **The cards poll on their own, slower clock**: `METRIC_REFRESH_SECONDS` (default 60)
-    is a *floor* the hook raises `LIVE_REFRESH_SECONDS` to for this caller, so a deploy
-    that makes records snappier cannot drag a whole-list scan along with it, and one that
-    slows records down still wins because the floor only ever raises. `0` still disables
-    polling outright. The rows under a total are what has to be live; a total a minute old
-    is a total.
+  - **The cards refresh on their own, slower clock**: `METRIC_REFRESH_SECONDS` (default
+    60) is a *floor* this caller passes `useLiveList`. Under server push it **throttles
+    the invalidation** — the grid refreshes on the event, the strip at most once a minute
+    however many events arrive — and on the polling fallback it raises the interval, as
+    it always did: same promise about cost, two mechanisms. Keeping it through the swap
+    was not optional. Invalidating the whole `["items", listUuid]` namespace per event
+    would have been simpler and would put a whole-list scan on every write, per viewer,
+    which is dearer than the polling push replaced; that is the reason each caller of the
+    hook now names the key it wants refreshed. `LIVE_REFRESH_SECONDS = 0` still disables
+    the fallback outright. The rows under a total are what has to be live; a total a
+    minute old is a total.
   - **Your own edits do not wait for that clock.** The values key is nested under the
     items key (below), so the invalidation the grid already fires refreshes the cards
-    immediately. The interval carries only *other people's* changes, which is why
+    immediately. The throttle above carries only *other people's* changes, which is why
     lengthening it costs so little.
 
   The three still matter after pushdown, because pushdown does not help the formulas that
@@ -1158,25 +1165,61 @@ The count is now a separate question — `total=false` suppresses `X-Total-Count
 that already holds it, `GET items/count` asks it alone, and the page is fetched *before* the
 total so a rejected `after` pays for no count at all.
 
-**"Live records" is polling, and its refresh must stay a permissioned re-read — never a
-data push.** An open list refetches its records every `VITE_LIVE_REFRESH_SECONDS` (default
-10, `0` disables; the Render deploy sets 15, down from 60 on 2026-08-18) through the
-`useLiveList` hook
-(`frontend/src/lib/useLiveList.ts`) — which a dearer caller may only ever *slow*, via the
-`minSeconds` floor the metric strip passes (§9) — paused
-while the tab is hidden **and** after 5 minutes with no user activity on a still-visible tab
-(so a list left open on screen stops polling until touched). It works precisely *because*
-each refresh is an ordinary
-`GET /items/`, so it inherits the `item_view_filter` above and can never surface a row the
-viewer can't see — the client is told nothing except "look again." Two things follow that
-are easy to get wrong when this grows into server push (planned-features #8): a live event
-must carry **only** "list changed," never record data (a fan-out of rows would bypass the
-per-record filter every subscriber is entitled to differently); and the future SSE stream
-must hold **no pooled DB connection** while open (see the two-connection rule below), or a
-long-lived subscriber pins a session for its whole life. One operational note that used to
-apply and no longer does: on Render's free tier a focused, open tab polling kept the single
-instance awake and spent free hours doing it. The API is on `starter` now, which is
-always-on, so the polling interval is a freshness-vs-load choice and nothing else.
+**"Live records" is server push, and its refresh must stay a permissioned re-read — never
+a data push.** An open list holds an SSE stream (`GET /lists/{uuid}/events`) and refetches
+when told that list changed; if the stream cannot be held open it falls back to the
+polling this replaced, every `VITE_LIVE_REFRESH_SECONDS` (default 10, `0` disables; the
+Render deploy sets 15). Both paths go through the `useLiveList` hook
+(`frontend/src/lib/useLiveList.ts`), and a dearer caller may only ever *slow* its own
+refresh, via the `minSeconds` floor the metric strip passes (§9) — under polling that
+raised the interval, under push it throttles the invalidation. Nothing refreshes at all
+while the tab is hidden or after 5 minutes with no user activity on a visible one; that
+guard now lives in `liveStream.ts`, where it can close the stream and stop the fallback
+timer with one answer instead of two.
+
+The whole thing works precisely *because* every refresh is an ordinary `GET /items/`, so
+it inherits the `item_view_filter` above and can never surface a row the viewer can't see
+— the client is told nothing except "look again." **Five things about the push path are
+load-bearing, and each one is quiet when broken:**
+
+- **An event carries only "list changed," never record data.** A fan-out of rows would
+  bypass the per-record filter every subscriber is entitled to differently. The frames are
+  `event: records` and `: ping`; there is nothing else on the channel and nothing else may
+  be put there.
+- **The stream holds no pooled DB connection** (see the two-connection rule below), or a
+  long-lived subscriber pins a session for its whole life and ~15 of them empty the pool.
+  This is why the route is **not** on the lists router: that router applies
+  `Depends(get_current_user)` → `Depends(get_db)`, and a `yield` dependency is released
+  only when the response completes — which for a stream is when the tab closes. It is
+  mounted directly in `main.py`, and does its auth and `view` check by hand inside a
+  session it closes before streaming. `test_an_open_stream_does_not_hold_a_pooled_connection`
+  is what catches a regression; nothing else would, until production hung.
+- **Push opens a timing side channel that polling did not.** A viewer with list `view` but
+  restricted per record learns the instant *any* record in that list is written, including
+  ones they cannot see — their refetch then shows no change. Closing it would mean
+  filtering per subscriber, which needs record data on the channel, which is the first
+  rule. It reveals timing, never content, and that is the accepted trade.
+- **Authorization is checked at connect and never again**, because there is no session to
+  re-check with. `SSE_MAX_STREAM_SECONDS` (300) is therefore the **revocation window**:
+  losing `view` on a list stops the signals reaching that subscriber at their next
+  reconnect. Nothing leaks meanwhile — the events carry nothing and every refetch is
+  separately permissioned — but the tap closes late, and that setting is how late.
+- **`notify` goes after the commit, never before.** A watcher woken early re-reads the old
+  rows and then believes it is current, which is worse than not being told. The scrub a
+  list or workspace delete runs across *other* lists is the awkward case: it does not own
+  its transaction, so it returns the affected list ids and its callers signal after they
+  commit.
+
+Two operational notes. On Render's free tier a focused, open tab polling kept the single
+instance awake and spent free hours doing it; the API is on `starter` now, which is
+always-on, so that is gone. And **whether Render's static-site rewrite buffers
+`text/event-stream` is unverified** — the SPA reaches `/api/*` through it
+(`render.yaml`). The response sets `Cache-Control: no-cache, no-transform` and
+`X-Accel-Buffering: no`, but if frames still arrive only when the connection closes, the
+answers are to point the events request at the API origin directly (which means populating
+`ALLOWED_ORIGINS`, since CORS otherwise never enters the picture) or to set
+`SSE_ENABLED=False` and stay on polling. That last one is the kill switch, and it is an
+API environment change rather than a frontend rebuild on purpose.
 
 **A `user` cell must never resolve to a person's real name.** `/auth/users` is readable by
 any authenticated user (the Share dialog needs to list principals), but person records are

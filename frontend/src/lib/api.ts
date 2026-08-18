@@ -151,6 +151,37 @@ async function requestRaw(
   return res;
 }
 
+// A response whose body is read as it arrives rather than parsed whole — today,
+// only the live-records event stream (`liveStream.ts`).
+//
+// It exists here, beside `requestRaw`, rather than in the caller for one reason: the
+// token. A long-lived stream is the request most likely to be holding an access token
+// that expires mid-flight, and `refreshTokens` above collapses concurrent refreshes so
+// the single-use refresh token is spent once. A stream that did its own refresh would
+// race every ordinary request for it and log the user out.
+//
+// It deliberately does **not** go through `requestRaw`: that retries by re-invoking
+// itself, which for a stream would mean two open connections, and it throws ApiError on
+// any non-2xx, which loses the status a caller needs to tell "not authorized" from
+// "this deployment has live updates switched off" (503, the kill switch). So the raw
+// Response comes back and the caller decides.
+async function stream(path: string, signal: AbortSignal): Promise<Response> {
+  const send = async () => {
+    const headers = new Headers({ Accept: "text/event-stream" });
+    const token = getAccessToken();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`/api${path}`, { headers, signal });
+  };
+
+  const res = await send();
+  // One retry, matching `requestRaw`: the stream the server closed on us may simply
+  // have outlived its token, and reconnecting through the existing refresh path is
+  // the whole reason this is a `fetch` and not an `EventSource` (which cannot carry
+  // an Authorization header at all).
+  if (res.status === 401 && (await refreshTokens())) return send();
+  return res;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers);
   if (options.body && !headers.has("Content-Type")) {
@@ -198,6 +229,8 @@ export const api = {
   // Upload: POST multipart form data (browser sets the Content-Type boundary).
   postForm: <T>(path: string, form: FormData) =>
     requestRaw(path, { method: "POST", body: form }).then((r) => r.json() as Promise<T>),
+  // Open a streaming GET, returning the raw Response — see `stream` above.
+  stream,
 };
 
 // `remember` picks where the token pair is stored: true (default) keeps you signed

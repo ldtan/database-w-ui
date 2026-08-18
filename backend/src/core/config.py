@@ -98,6 +98,45 @@ class Settings(BaseSettings):
     # first if it ever needs to go down.
     BULK_DELETE_MAX: int = 500
 
+    # "Live records": an open list subscribes to GET /lists/{uuid}/events and
+    # refetches when it is told something changed, instead of polling on a timer.
+    # See src/lists/events/ and docs/planned-features.md #8.
+    #
+    # False makes the route answer 503, which the client reads as "fall back to
+    # polling" — so this is the kill switch, and it is deliberately here rather
+    # than in the SPA's build-time config: a Vite variable needs a rebuild and a
+    # redeploy of the static site, where this is an environment change on the API.
+    SSE_ENABLED: bool = True
+
+    # How long one stream may live before the server closes it and the client
+    # reconnects. A stream is deliberately finite, and the number is doing four
+    # jobs at once:
+    #
+    #   - An access token lasts ACCESS_TOKEN_EXPIRE_MINUTES. Authorization is
+    #     checked at connect and never again, so a stream that outlived its token
+    #     would be a session with no expiry.
+    #   - **It is the revocation window.** Losing `view` on the list, or a grant
+    #     expiring, stops the signals reaching a subscriber at their next connect
+    #     and not before. Nothing leaks meanwhile — the events carry no data and
+    #     every refetch they trigger is separately permissioned — but the tap
+    #     closes late, and this is how late.
+    #   - Graceful shutdown: uvicorn waits for in-flight requests, and a stream is
+    #     one. The shutdown event in src/lists/events/broker.py ends a stream
+    #     immediately; this bounds the case where that is not reached.
+    #   - Proxies cap connection age on their own schedules. Reconnecting on ours
+    #     makes that ordinary rather than a symptom.
+    #
+    # Lower is safer and costs one request per stream per interval; higher is
+    # cheaper and widens the revocation window by exactly the same amount.
+    SSE_MAX_STREAM_SECONDS: int = 300
+
+    # How often an idle stream emits a comment frame. Two jobs: proxies reap a
+    # connection that has said nothing (Render's static-site rewrite sits in front
+    # of the API, and its timeout is not ours to set), and a write to a peer that
+    # has gone away is how the server learns to drop the subscriber — without
+    # traffic, an abandoned connection is indistinguishable from a quiet one.
+    SSE_HEARTBEAT_SECONDS: int = 15
+
     @model_validator(mode="after")
     def _auth_may_only_be_disabled_in_debug(self) -> "Settings":
         """DISABLE_AUTH is a development shortcut and a production disaster.
