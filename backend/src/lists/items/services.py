@@ -26,6 +26,7 @@ from ..columns.chain import ChainStep, apply_formulas, build_chain
 from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import (
+    LOCATION_KEYS,
     normalize_color,
     normalize_email,
     normalize_phone,
@@ -33,7 +34,7 @@ from ..columns.validation import (
     validate_scalar,
 )
 from ..models import List
-from .filtering import apply_filters, apply_sorts
+from .filtering import apply_filters, apply_sorts, location_address
 from .models import ListItem
 from .references import label_sources
 from .schemas import ListItemCreate, ListItemUpdate
@@ -425,6 +426,15 @@ class ListItemService:
                             sa.literal(uuids, postgresql.ARRAY(sa.Text))
                         )
                     )
+                continue
+            if column.type == ColumnType.location:
+                # A location cell is an object, so `->>` on it is the serialized
+                # blob — searching that would match a record for the word "address"
+                # and for any digit of its latitude. The address is the half a
+                # person can read, and it is what `_field` filters and sorts on too.
+                conditions.append(
+                    location_address(column).ilike(pattern, escape=LIKE_ESCAPE)
+                )
                 continue
             conditions.append(
                 ListItem.data[key].astext.ilike(pattern, escape=LIKE_ESCAPE)
@@ -1470,6 +1480,26 @@ class ListItemService:
             value = normalize_email(value)
         if column.type == ColumnType.color and isinstance(value, str):
             value = normalize_color(value)
+        if (
+            column.type == ColumnType.location
+            and isinstance(value, dict)
+            # Only a cell that is *already* the right shape is rebuilt. Rebuilding
+            # one with a surplus key would drop it silently, and dropping it is
+            # exactly what must not happen: `data` is schemaless, so the refusal in
+            # `validate_scalar` is the only thing between a location cell and a
+            # place to stash arbitrary JSON. Leave it be and let that check speak.
+            and not set(value) - set(LOCATION_KEYS)
+        ):
+            # Stored with all three keys present and the address trimmed, so every
+            # cell has the same shape whether it came from the picker, an import or
+            # a conversion — the SQL readers index `data -> key ->> 'address'`, and a
+            # missing key would read as NULL for reasons nothing explains.
+            address = value.get("address")
+            value = {
+                "address": address.strip() or None if isinstance(address, str) else address,
+                "lat": value.get("lat"),
+                "lng": value.get("lng"),
+            }
         if column.type == ColumnType.phone and isinstance(value, str):
             # E.164, whatever was typed. This is the type's whole reason to exist
             # over a `text` column: one number is one value, so `unique` catches a

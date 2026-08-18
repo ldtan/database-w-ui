@@ -54,6 +54,23 @@ class Settings(BaseSettings):
     # 0.1-CPU instance.
     FORMULA_INLINE_MAX_RECORDS: int = 5_000
 
+    # Address search for `location` columns, proxied through the API so the
+    # deployment has one identity, one rate limit and one cache — none of which a
+    # browser can provide. See src/geocode/services.py.
+    #
+    # Empty disables it, and that is a supported way to run: a location column
+    # works by typing an address and dropping a pin, so the search box simply says
+    # it is unavailable rather than the field breaking.
+    GEOCODE_URL: str = "https://nominatim.openstreetmap.org/search"
+    # Nominatim's policy asks to be able to contact whoever is calling. A
+    # deployment that leaves this at the default is anonymous to them, which is
+    # exactly the thing that gets a User-Agent blocked — set it.
+    GEOCODE_USER_AGENT: str = "database-w-ui (set GEOCODE_USER_AGENT)"
+    # One call a second is the published limit. Enforced deployment-wide by a
+    # semaphore, on the same single-instance assumption as the login throttle.
+    GEOCODE_MIN_INTERVAL_SECONDS: float = 1.0
+    GEOCODE_TIMEOUT_SECONDS: float = 5.0
+
     # How many rows one import may carry — the list importer and the user batch
     # importer both read this. A policy decision rather than a tuning knob: every row
     # is validated and inserted through the ordinary service, several round trips

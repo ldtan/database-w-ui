@@ -238,6 +238,7 @@ Common `config` keys (all optional unless noted):
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `email`       | address `string`, trimmed and lowercased   | `max_length?` |
 | `phone`       | E.164 `string` (`+639171234567`)           | `default_region?` (ISO-3166 alpha-2), `allowed_regions?`, `display_format?` (`e164`/`national`/`international`) |
+| `location`    | **object** `{address, lat, lng}`           | `require_coordinates?`, `default_center?` (`{lat, lng}`), `default_zoom?`, `map_link?` (`osm`/`google`/`apple`) |
 | `color`       | `#rrggbb` `string`, lowercased             | `swatches?` (a palette the picker offers) |
 | `rating`      | whole `number`, `1..max`                   | `max?` (scale, default 5, ≤ 10), `rating_icon?` (`star`/`heart`/`number`) |
 | `duration`    | `number` of **seconds**                    | `min?`, `max?` (seconds), `duration_format?` (`h:mm`/`h:mm:ss`/`m:ss`/`decimal_hours`) |
@@ -342,6 +343,38 @@ Notes:
   `swatches` are **offered, never enforced**: the point of a colour field is picking one,
   so a colour outside the palette is a valid answer, which is the opposite bargain to
   `choice`'s `options`.
+- `location` — **the only cell whose value is an object**, and the one place that
+  costs something. Everything else stores a scalar or a list of them, so `data ->> key`
+  is the value; on a location it is the *serialized blob*, and a filter, a sort, a
+  search, an export and a conversion would all have been asking questions of
+  `{"address": …, "lat": …}` rather than of the place. Four readers therefore know
+  about this type by name, and a fifth that ever needs to must be added deliberately:
+  `items/filtering.py::_field` and `ListItemService._apply_search` (both via
+  `location_address`, which reaches for `data -> key ->> 'address'`),
+  `transfer/services.py::_csv_cell` and `columns/conversion.py::_render_scalar` (both
+  via `format_location`). See known-gaps §13.
+  - **The address is what the three text operations use.** Coordinates are not
+    something anyone filters or sorts by hand, and the address is the half a person
+    can read. `unique` needed nothing — JSONB `@>` compares objects natively, so two
+    records at the same address with different pins are correctly two places.
+  - **The key set is closed** (`address`, `lat`, `lng`), and the write path leaves a
+    cell with a surplus key *alone* so `validate_scalar` can refuse it. `data` is
+    schemaless, so that refusal is the only thing between a location cell and a place
+    to stash arbitrary JSON. `lat`/`lng` are set together or not at all, and a cell
+    with neither half is refused rather than nulled, so `required` cannot be satisfied
+    by an empty one.
+  - **The canonical text form is `12 Rizal St, Cebu City @10.31570,123.88540`**, which
+    is what an export writes, what an import reads and what a conversion to `text`
+    produces. The coordinate suffix is anchored to the end and has to *look like*
+    coordinates, which is what lets an address keep its own "@" — "Unit 3 @ The Mall"
+    is all address. Five decimals is about a metre, finer than any address is.
+  - **Geocoding is a convenience, not part of the model.** Address search goes through
+    the app's own `GET /geocode` (`src/geocode/`) rather than the browser, because
+    Nominatim's policy wants an identifiable User-Agent and a bounded rate, and a
+    browser can provide neither. It never fails: an unconfigured or unreachable
+    geocoder answers `available: false` with a sentence, and the picker still takes a
+    typed address and a dropped pin. Tiles are fetched by the browser directly, with
+    attribution.
 - `phone` — **the normalisation is the type.** A cell stores E.164 whatever was typed,
   so `0917 123 4567`, `+63 917 123 4567` and `09171234567` are one value: `unique`
   catches the duplicate it exists to catch, a filter for one spelling finds the others,
@@ -782,9 +815,9 @@ Notes:
   (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
   with nowhere to put a per-group number. Doing it properly means an aggregate row inside
   the table.
-- **Further column types:** `attachment`, `location`.
-  (`link`, `user`, `group`, `email`, `phone`, `color`, `rating` and `duration` are
-  built — see §5.)
+- **Further column types:** `attachment`.
+  (`link`, `user`, `group`, `email`, `phone`, `location`, `color`, `rating` and
+  `duration` are built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /

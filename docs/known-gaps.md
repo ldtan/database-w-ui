@@ -857,6 +857,73 @@ So the following all hold, and none of them is a bug:
   computed on write, so a new record has none yet; on edit it is present and compares
   normally. Nothing prevents such a condition, since the edit case is legitimate.
 
+## 13. A `location` cell is an object, and five readers have to know it
+
+Every other column type stores a scalar or a list of scalars, and a great deal of this
+codebase quietly rests on that. `data ->> '<column uuid>'` is *the value* for every one
+of them. On a `location` it is the serialized blob — `{"address": "12 Rizal St", "lat":
+10.3157, "lng": 123.8854}` — so a reader that was not told about this type does not
+fail, it answers a different question, silently and plausibly.
+
+**The four that were taught, and what each would have done otherwise:**
+
+| Reader | Without the branch |
+| --- | --- |
+| `items/filtering.py::_field` | `contains "address"` matches every record; sorting orders by a leading `{` |
+| `ListItemService._apply_search` | a search for `10` matches every latitude and longitude |
+| `transfer/services.py::_csv_cell` | a spreadsheet column full of `{'address': …}` |
+| `columns/conversion.py::_render_scalar` | the same dict repr, written into every record **permanently** — a conversion is the point of no return |
+
+The first two go through `filtering.location_address` and the last two through
+`validation.format_location`, so there are two shared implementations rather than four
+copies. **The fifth reader is whoever adds the next one.** If something new stringifies
+a cell, it needs a case here, and nothing will tell you: the existing tests pass, the
+grid looks right, and only the new surface is wrong.
+
+`location` is deliberately absent from `NUMERIC_TYPES`, `REFERENCE_TYPES`,
+`FORMULA_REFERENCEABLE_TYPES` and the metric sets, which is what keeps the numeric,
+label-resolving, formula and aggregate paths from ever seeing one. Keep it that way
+unless you are prepared to answer what `SUM(office)` means.
+
+Two smaller things worth knowing:
+
+- **`unique` needed nothing.** JSONB `@>` compares objects natively, so two records at
+  the same address with different pins are correctly two places — and the same place
+  twice is correctly a 409.
+- **The key set is closed, and the write path is careful about *when* it normalises.**
+  A cell with a surplus key is left alone rather than rebuilt, so `validate_scalar` can
+  refuse it. Rebuilding first would drop the key silently, and since `data` is
+  schemaless that refusal is the only thing standing between a location cell and a
+  place to stash arbitrary JSON. The ordering is load-bearing and looks like a
+  redundancy; `test_location_column.py` pins it.
+
+**Geocoding is a third-party dependency that is allowed to be down.** `GET /geocode`
+proxies Nominatim so the deployment has one identity, one rate limit and one cache —
+none of which a browser can provide — and it answers `available: false` with a sentence
+for an outage, a timeout, a missing configuration or a rate-limit rejection. It must
+stay that way: a location column works by typing an address and dropping a pin, and
+turning an unreachable volunteer-run service into a 5xx would make somebody's address
+field appear broken for a reason that has nothing to do with them. The rate limit is a
+per-process semaphore, which carries the same single-instance assumption the login
+throttle already documents — two web workers are two callers to Nominatim.
+
+**On some Windows dev machines the geocode call kills the worker, and no amount of
+`try` will catch it.** This is the app's first outbound HTTPS request, so it is the
+first thing to hit a Python/OpenSSL mismatch that was always there:
+
+```
+OPENSSL_Uplink(00007FF…,08): no OPENSSL_Applink
+```
+
+It is a **process abort**, not an exception — `ssl.create_default_context()` alone
+triggers it, before any socket is opened, so it is nothing to do with this module and
+nothing this module can defend against. Linux (and therefore the deployment) is
+unaffected. If you meet it, either set `GEOCODE_URL=` in your `.env` to turn address
+search off locally — the picker still takes a typed address and a dropped pin, which
+is exactly the fallback it is designed around — or fix the interpreter's OpenSSL. Do
+not "fix" it by wrapping the call in a broader `except`; there is no exception to
+catch, and the next person will waste an afternoon proving that again.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers

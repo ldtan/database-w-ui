@@ -74,11 +74,24 @@ describe("textMode", () => {
 });
 
 describe("needsFullEditor", () => {
-  it("is true only for rich and multiline text", () => {
+  it("is true for rich and multiline text", () => {
     expect(needsFullEditor(column({ config: { text_mode: "rich" } }))).toBe(true);
     expect(needsFullEditor(column({ config: { text_mode: "multiline" } }))).toBe(true);
     expect(needsFullEditor(column())).toBe(false);
     expect(needsFullEditor(column({ type: "link" }))).toBe(false);
+  });
+
+  it("is true for a location, which is edited on a map", () => {
+    // A map does not fit in a table row, and the grid's cell editor has no dialog
+    // to host one in — so a location cell opens the record instead of editing in
+    // place. The one type whose editor is excluded by *type* rather than by config.
+    expect(needsFullEditor(column({ type: "location" }))).toBe(true);
+  });
+
+  it("is false for the other new scalar types, which do fit in a row", () => {
+    for (const type of ["email", "phone", "color", "rating", "duration"] as const) {
+      expect(needsFullEditor(column({ type }))).toBe(false);
+    }
   });
 });
 

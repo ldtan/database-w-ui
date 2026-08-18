@@ -3,6 +3,7 @@ import { stripHtml } from "../../lib/display";
 import { durationFormat, formatDuration } from "../../lib/duration";
 import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
+import { locationLabel, mapHref } from "../../lib/location";
 import { formatPhone, telHref } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
@@ -121,6 +122,31 @@ export function renderCell(
       >
         {String(value)}
       </a>
+    );
+  }
+  // The one cell that is an *object*, so it must never reach the `String(value)`
+  // at the bottom of this function — that renders `[object Object]`. It sits after
+  // the empty check above because an empty location arrives as `null` like any
+  // other empty cell; what it cannot do is fall through.
+  if (column.type === "location") {
+    const label = locationLabel(value);
+    if (!label) return <span className="text-faint">—</span>;
+    const href = mapHref(column, value);
+    if (!href || editing) return label;
+    return (
+      <span className="inline-flex items-center gap-1">
+        <span>{label}</span>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="pi pi-external-link text-xs"
+          style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+          title="Open in maps"
+          aria-label={`Open ${label} in maps`}
+          onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+        />
+      </span>
     );
   }
   if (column.type === "phone") {

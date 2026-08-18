@@ -32,6 +32,7 @@
  */
 import { api } from "../../lib/api";
 import { durationFormat, parseDuration } from "../../lib/duration";
+import { parseLocation } from "../../lib/location";
 import type { ApiUser, ApiUserGroup, Column } from "../../lib/types";
 import { deserialize, isEmptyValue, type ResolvedField } from "./recordValues";
 
@@ -169,6 +170,12 @@ async function shape(
       return typeof raw === "string"
         ? (parseDuration(durationFormat(column), raw) ?? raw)
         : toNumber(raw);
+    case "location":
+      // A code carries the one-line form the export writes, so a printed label
+      // and a CSV say the same thing. Parsed here rather than left as text
+      // because the picker holds an object — handed a string it would show an
+      // empty map over a value that is in fact about to save correctly.
+      return typeof raw === "string" ? (parseLocation(raw) ?? raw) : raw;
     case "checkbox":
       return toBoolean(raw);
     case "date":

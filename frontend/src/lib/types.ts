@@ -156,6 +156,13 @@ export interface ColumnConfig {
   default_region?: string;
   allowed_regions?: string[];
   display_format?: "e164" | "national" | "international";
+  /** Location columns only. A cell is an OBJECT — `{address, lat, lng}` — which
+   *  is why `lib/location.ts` exists: `String(value)` on one is `[object Object]`,
+   *  so every surface that shows a location goes through that module. */
+  require_coordinates?: boolean;
+  default_center?: { lat: number; lng: number } | null;
+  default_zoom?: number;
+  map_link?: "osm" | "google" | "apple";
   /** Colour columns only. A palette the picker offers first — it constrains
    *  nothing, because the point of a colour field is picking one. */
   swatches?: string[];

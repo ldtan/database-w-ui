@@ -1626,6 +1626,30 @@ export interface paths {
         patch: operations["update_person_api_people__uuid__patch"];
         trace?: never;
     };
+    "/api/geocode/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Geocode
+         * @description Candidates for a typed address.
+         *
+         *     Never fails: an unconfigured or unreachable geocoder answers `available: false`
+         *     with a sentence to show, because a location column is usable without one and a
+         *     502 here would make somebody's address field break for an outage elsewhere.
+         */
+        get: operations["geocode_api_geocode__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1861,6 +1885,16 @@ export interface components {
             allowed_regions?: string[] | null;
             /** Display Format */
             display_format?: string | null;
+            /** Require Coordinates */
+            require_coordinates?: boolean | null;
+            /** Default Center */
+            default_center?: {
+                [key: string]: unknown;
+            } | null;
+            /** Default Zoom */
+            default_zoom?: number | null;
+            /** Map Link */
+            map_link?: string | null;
             /** Swatches */
             swatches?: string[] | null;
             /** Rating Icon */
@@ -1930,7 +1964,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "phone" | "color" | "rating" | "duration" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
+        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "phone" | "location" | "color" | "rating" | "duration" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */
@@ -2287,6 +2321,36 @@ export interface components {
             config?: components["schemas"]["FormConfig"] | null;
             /** Permissions Inherit */
             permissions_inherit?: boolean | null;
+        };
+        /** GeocodeResponse */
+        GeocodeResponse: {
+            /** Results */
+            results: components["schemas"]["GeocodeResult"][];
+            /**
+             * Available
+             * @default true
+             */
+            available: boolean;
+            /** Detail */
+            detail?: string | null;
+        };
+        /**
+         * GeocodeResult
+         * @description One candidate for a typed address.
+         *
+         *     Deliberately three fields and no more. Nominatim's response carries a great deal
+         *     besides — bounding boxes, OSM ids, an address broken into components, licensing
+         *     — and none of it is what a `location` cell holds, so none of it is passed on.
+         *     Narrowing here rather than in the browser is what keeps the upstream's response
+         *     shape from becoming part of this app's API.
+         */
+        GeocodeResult: {
+            /** Label */
+            label: string;
+            /** Lat */
+            lat: number;
+            /** Lng */
+            lng: number;
         };
         /**
          * GrantCreate
@@ -6562,6 +6626,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PersonRead"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    geocode_api_geocode__get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GeocodeResponse"];
                 };
             };
             /** @description Validation Error */

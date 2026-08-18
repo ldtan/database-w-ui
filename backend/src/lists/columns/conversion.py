@@ -40,7 +40,7 @@ from ..models import List
 from ..transfer.services import _LabelResolver, _parse_cell, _SKIP
 from .enums import COMPUTED_TYPES, REFERENCE_TYPES, ColumnType
 from .models import Column
-from .validation import parse_temporal
+from .validation import format_location, parse_temporal
 
 # The most distinct values `text` -> `choice` will mint options from. A column with
 # more distinct values than this is free text, not a set of choices, and turning it
@@ -81,15 +81,23 @@ def check_supported(source: Column, target: Column) -> None:
     )
 
 
-def _render_scalar(value) -> Optional[str]:
+def _render_scalar(value, column: Optional[Column] = None) -> Optional[str]:
     """One already-resolved value as text.
 
     Matches the export's `_csv_cell` except for `None`, which stays `None` here: an
     empty cell must convert to an empty cell, not to the empty string, or every
     blank row in the source arrives in the target as a value.
+
+    ``column`` is what tells a non-scalar cell from a scalar one. Only `location`
+    has one today, and without this its conversion to text would write a Python dict
+    repr into every record — permanently, since a conversion is the point of no
+    return. `format_location` is the same rendering the export writes, so
+    `text -> location` reads it back.
     """
     if value is None:
         return None
+    if column is not None and column.type == ColumnType.location:
+        return format_location(value)
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
@@ -197,10 +205,10 @@ class CellConverter:
         if self._resolver is not None:
             value = self._resolver.cell(self._source, value)
         if isinstance(value, list):
-            rendered = [_render_scalar(v) for v in value]
+            rendered = [_render_scalar(v, self._source) for v in value]
             joined = _JOIN.join(v for v in rendered if v is not None)
             return joined or None
-        return _render_scalar(value)
+        return _render_scalar(value, self._source)
 
     def _temporal(self, value):
         try:

@@ -44,6 +44,13 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   "default_region",
   "allowed_regions",
   "display_format",
+  // A location column's picker settings. `require_coordinates` changes what the
+  // column *accepts*; the rest say where the map opens and which site the cell
+  // links to.
+  "require_coordinates",
+  "default_center",
+  "default_zoom",
+  "map_link",
   // A rating's glyph and a duration's written form. Both are display settings, so
   // they sit here for the same reason `number_format` would.
   "rating_icon",

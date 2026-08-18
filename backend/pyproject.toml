@@ -27,6 +27,12 @@ dependencies = [
     # `libphonenumber-js`, which *formats* what this normalises; the two version
     # independently but describe the same numbering plans, so update them together.
     "phonenumbers>=9.0.37",
+    # Promoted out of the dev group: the geocode proxy (src/geocode) makes an
+    # outbound call from a request handler, so it is needed at runtime now, not
+    # only by the test client. `fastapi[standard]` happens to pull it in today,
+    # which is exactly the kind of transitive dependency that disappears in a minor
+    # release and takes a route with it.
+    "httpx>=0.28.1",
 ]
 
 [dependency-groups]
