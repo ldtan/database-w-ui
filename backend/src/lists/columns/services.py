@@ -29,6 +29,8 @@ from .validation import (
     ONUPDATE_TYPES,
     dynamic_tokens,
     is_dynamic_default,
+    normalize_color,
+    normalize_email,
     resolve_choice_options,
     validate_config_constraints,
     validate_scalar,
@@ -606,6 +608,20 @@ class ColumnService:
             # Stored stripped, like a link value, so the default that is written into
             # records is byte-for-byte the one that was validated.
             data["default"] = data["default"].strip()
+
+        # Same rule for the types that normalize on write: a default is written into
+        # records verbatim, so it has to be stored in the form a typed value would
+        # end up in, or a defaulted cell and a typed one hold two spellings of the
+        # same thing and `unique` misses the collision between them.
+        if type_ == ColumnType.email and isinstance(data.get("default"), str):
+            data["default"] = normalize_email(data["default"])
+        if type_ == ColumnType.color and isinstance(data.get("default"), str):
+            data["default"] = normalize_color(data["default"])
+        if type_ == ColumnType.color and isinstance(data.get("swatches"), list):
+            data["swatches"] = [
+                normalize_color(s) if isinstance(s, str) else s
+                for s in data["swatches"]
+            ]
 
         # Numeric/temporal/text settings must be well-formed (min <= max, ...).
         validate_config_constraints(type_, data)

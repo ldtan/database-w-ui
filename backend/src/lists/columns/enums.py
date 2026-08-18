@@ -12,6 +12,8 @@ class ColumnType(str, enum.Enum):
     choice = "choice"
     lookup = "lookup"
     link = "link"
+    email = "email"
+    color = "color"
     user = "user"
     group = "group"
     date = "date"
@@ -35,11 +37,15 @@ PRINCIPAL_TYPES = frozenset({ColumnType.user, ColumnType.group})
 # *label* (a cell is the label itself — see `resolve_choice_options`), an ISO-8601
 # temporal string, or another formula's answer. The rest are excluded for a reason
 # rather than an omission: `checkbox` has no text form worth having, `link` is a URL
-# nobody computes over, and the REFERENCE_TYPES store ids that need a database round
-# trip to become the label a person would expect to see.
+# nobody computes over, `color` is a rendering instruction rather than a value, and
+# the REFERENCE_TYPES store ids that need a database round trip to become the label a
+# person would expect to see. `email` is in because it is plain text with a checked
+# grammar — "the address, or a fallback" and "the part after the @" are ordinary
+# things to ask, and nothing about the check makes the string less readable.
 FORMULA_REFERENCEABLE_TYPES = frozenset({
     ColumnType.number,
     ColumnType.text,
+    ColumnType.email,
     ColumnType.calculated,
     ColumnType.choice,
     ColumnType.date,

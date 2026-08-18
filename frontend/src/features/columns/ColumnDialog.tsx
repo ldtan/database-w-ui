@@ -71,9 +71,12 @@ const SHARED = "__shared__";
 // is evaluated in dependency order on every write. `choice` is here because a cell
 // stores its label, and the temporal two because a cell is an ISO string that AGE and
 // DT_FORMAT can read.
+// `email` is here because a cell is plain text with a checked grammar; `color` and
+// `link` are not, because a hex code and a URL are things nobody computes over.
 const FORMULA_REFERENCEABLE: ColumnType[] = [
   "number",
   "text",
+  "email",
   "calculated",
   "choice",
   "date",
@@ -155,6 +158,10 @@ export function ColumnDialog({
   // adding a value to it.
   const [allowOther, setAllowOther] = useState(false);
   const [linkText, setLinkText] = useState("");
+  // Colour: the palette the picker offers first, typed as a ";"-separated list of
+  // hex values — the same shorthand a choice column's options use. Offered and
+  // never enforced, so an empty palette is a colour column that works normally.
+  const [swatchText, setSwatchText] = useState("");
   // Which workspace's lists the target dropdown is drawn from. A lookup can point
   // at any list the user can view — their own across workspaces, or one shared
   // with them (the SHARED bucket). Defaults to the current list's workspace.
@@ -180,7 +187,7 @@ export function ColumnDialog({
   const [textMode, setTextMode] = useState<TextMode>("single");
   // Default value — one piece of state per family of column type; only the one
   // matching `type` is read when the config is built.
-  const [defaultText, setDefaultText] = useState(""); // text / link
+  const [defaultText, setDefaultText] = useState(""); // text / link / email / color
   const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
   const [defaultChecked, setDefaultChecked] = useState(false);
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
@@ -236,6 +243,7 @@ export function ColumnDialog({
       setChoices("");
       setAllowOther(false);
       setLinkText("");
+      setSwatchText("");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -266,6 +274,7 @@ export function ColumnDialog({
       setChoices("");
       setAllowOther(false);
       setLinkText("");
+      setSwatchText("");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -301,6 +310,7 @@ export function ColumnDialog({
     setChoices(((config.options as string[]) ?? []).join(";"));
     setAllowOther(!!config.allow_other);
     setLinkText((config.label as string) ?? "");
+    setSwatchText(((config.swatches as string[]) ?? []).join(";"));
     // Left null so the seeding effect can resolve which workspace the stored
     // target lives in (the config only records the list, not its workspace).
     setTargetWorkspace(null);
@@ -546,6 +556,16 @@ export function ColumnDialog({
         config.multiple = multiple;
       }
       if (type === "link") config.label = linkText.trim() || null;
+      if (type === "email") config.max_length = maxLength;
+      if (type === "color") {
+        // Always sent, like `unique`: a config PATCH merges, so emptying the
+        // palette means writing an explicit null rather than omitting the key.
+        const swatches = swatchText
+          .split(";")
+          .map((s) => s.trim())
+          .filter(Boolean);
+        config.swatches = swatches.length ? swatches : null;
+      }
       if (type === "user" || type === "group") config.multiple = multiple;
       if (type === "lookup") {
         config.target_list_uuid = targetListUuid;
@@ -576,7 +596,15 @@ export function ColumnDialog({
       // effect: a config PATCH merges, so an omitted key would keep the old default.
       if (!isCalculated && type !== "lookup" && type !== "group") {
         let defaultValue: unknown = null;
-        if (type === "text" || type === "link")
+        if (
+          type === "text" ||
+          type === "link" ||
+          type === "email" ||
+          type === "color"
+        )
+          // Sent as typed. The server normalises an email and a colour to their
+          // stored form (`_validate_config`), so a default and a typed cell end
+          // up as one value rather than two spellings of one.
           defaultValue = defaultText.trim() || null;
         else if (type === "number") defaultValue = defaultNumber;
         else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
@@ -1014,7 +1042,7 @@ export function ColumnDialog({
           open={advancedOpen}
           onOpenChange={setAdvancedOpen}
         >
-          {type === "text" && (
+          {(type === "text" || type === "email") && (
             <Field label="Max length" htmlFor="col-maxlen" optional>
               <InputNumber
                 inputId="col-maxlen"
@@ -1148,6 +1176,23 @@ export function ColumnDialog({
                 value={linkText}
                 onChange={(e) => setLinkText(e.target.value)}
                 placeholder="Shown instead of the URL"
+              />
+            </Field>
+          )}
+
+          {type === "color" && (
+            <Field
+              label="Palette"
+              htmlFor="col-swatches"
+              optional
+              hint="Colours the picker offers first, separated by “;”. It is a shortcut and not a restriction — any colour is still a valid answer."
+            >
+              <InputText
+                id="col-swatches"
+                className="font-mono"
+                value={swatchText}
+                onChange={(e) => setSwatchText(e.target.value)}
+                placeholder="#1d4ed8;#dc2626;#16a34a"
               />
             </Field>
           )}
@@ -1324,15 +1369,23 @@ export function ColumnDialog({
                       placeholder="Used when left blank"
                     />
                   ) : (
-                    (type === "text" || type === "link") && (
+                    (type === "text" ||
+                      type === "link" ||
+                      type === "email" ||
+                      type === "color") && (
                       <InputText
                         id="col-default"
+                        className={type === "color" ? "font-mono" : undefined}
                         value={defaultText}
                         onChange={(e) => setDefaultText(e.target.value)}
                         placeholder={
                           type === "link"
                             ? "https://example.com"
-                            : "Used when left blank"
+                            : type === "email"
+                              ? "name@example.com"
+                              : type === "color"
+                                ? "#1d4ed8"
+                                : "Used when left blank"
                         }
                       />
                     )

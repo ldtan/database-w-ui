@@ -41,6 +41,41 @@ def link_schemes(config: dict) -> list[str]:
     schemes = config.get("allowed_schemes")
     return list(schemes) if schemes else list(_DEFAULT_LINK_SCHEMES)
 
+
+# Deliberately not RFC 5322. That grammar admits quoted local parts, comments and
+# bare-host domains that no mail provider on earth accepts, so implementing it
+# faithfully rejects nothing anybody would type wrong while passing plenty nobody
+# can send to. This is the check a signup form makes: one `@`, something either
+# side of it, a dot in the host, and no whitespace anywhere.
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+\Z")
+# `#rrggbb`. Three-digit shorthand is expanded before this is applied rather than
+# accepted alongside it, so `#abc` and `#aabbcc` cannot be two values for one
+# colour — which is what `unique`, filtering and grouping would otherwise see.
+_COLOR_RE = re.compile(r"#[0-9a-f]{6}\Z")
+_COLOR_SHORTHAND_RE = re.compile(r"#(?P<r>[0-9a-f])(?P<g>[0-9a-f])(?P<b>[0-9a-f])\Z")
+
+
+def normalize_email(value: str) -> str:
+    """An email address as it is stored: trimmed and lowercased.
+
+    Lowercased in full, host *and* local part. The local part is technically
+    case-sensitive per RFC 5321, and treating it that way is the wrong trade here:
+    no provider in practice distinguishes `Ada@` from `ada@`, while storing both
+    means `unique` does not catch the duplicate it exists to catch, a filter for
+    one misses the other, and grouping shows the same person twice.
+    """
+    return value.strip().lower()
+
+
+def normalize_color(value: str) -> str:
+    """A colour as it is stored: `#rrggbb`, lowercased, shorthand expanded."""
+    text = value.strip().lower()
+    short = _COLOR_SHORTHAND_RE.fullmatch(text)
+    if short:
+        r, g, b = short.group("r"), short.group("g"), short.group("b")
+        return f"#{r}{r}{g}{g}{b}{b}"
+    return text
+
 # Dynamic tokens for a column's `default`/`onupdate`: values not fixed at config
 # time but resolved per record when it is written. Temporal columns stamp the
 # current date/time; a user column stamps whoever is making the write.
@@ -253,6 +288,28 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
         ):
             raise ValidationError("'max_length' must be a positive integer")
 
+    elif column_type == ColumnType.email:
+        max_length = config.get("max_length")
+        if max_length is not None and (
+            isinstance(max_length, bool)
+            or not isinstance(max_length, int)
+            or max_length < 1
+        ):
+            raise ValidationError("'max_length' must be a positive integer")
+
+    elif column_type == ColumnType.color:
+        swatches = config.get("swatches")
+        if swatches is not None:
+            if not isinstance(swatches, list):
+                raise ValidationError("'swatches' must be a list of colours")
+            for swatch in swatches:
+                if not isinstance(swatch, str) or not _COLOR_RE.fullmatch(
+                    normalize_color(swatch)
+                ):
+                    raise ValidationError(
+                        f"'{swatch}' is not a colour; expected #rrggbb"
+                    )
+
     elif column_type in _TEMPORAL:
         expected = _TEMPORAL[column_type][1]
         for key in ("min", "max"):
@@ -366,6 +423,29 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         hi = config.get("max_length")
         if hi is not None and len(value) > hi:
             raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
+
+    elif column_type == ColumnType.email:
+        if not isinstance(value, str):
+            _expect(name, "an email address")
+        # Checked against the stored form, because that is what everything
+        # downstream sees: `_validate_value` normalizes before this runs on the
+        # record path, and `_validate_config` does the same to a default.
+        address = normalize_email(value)
+        if not _EMAIL_RE.fullmatch(address):
+            raise ValidationError(
+                f"Column '{name}' expects an email address (e.g. name@example.com)"
+            )
+        hi = config.get("max_length")
+        if hi is not None and len(address) > hi:
+            raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
+
+    elif column_type == ColumnType.color:
+        if not isinstance(value, str):
+            _expect(name, "a colour (#rrggbb)")
+        if not _COLOR_RE.fullmatch(normalize_color(value)):
+            raise ValidationError(
+                f"Column '{name}' expects a colour like #1d4ed8, not {value!r}"
+            )
 
     elif column_type in _TEMPORAL:
         if not isinstance(value, str):

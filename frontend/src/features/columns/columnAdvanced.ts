@@ -37,6 +37,8 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   "allow_other",
   // A link column's display text.
   "label",
+  // A colour column's offered palette.
+  "swatches",
   "multiple",
   // A nested lookup, which is set as a pair.
   "parent_column_uuid",

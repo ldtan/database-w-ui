@@ -880,8 +880,11 @@ export interface paths {
          *     Two ways this refuses, both leaving the list exactly as it was. `required` and
          *     `unique` are checked once the values are in place -- per cell they would be the
          *     wrong question, since a blank source cell is ordinary. And if any record on this
-         *     list was written while the conversion was running, it refuses rather than finish
-         *     over the top of it; nothing was committed, so running it again is safe.
+         *     list was written while the pass was running, it refuses rather than finish over
+         *     the top of it; nothing was committed, so running it again is safe. That check
+         *     closes when the pass ends rather than at the commit, so a record inserted in the
+         *     last sliver before it is not caught -- see known-gaps §11 for that residual and
+         *     the two others beside it.
          */
         post: operations["apply_conversion_api_lists__list_uuid__columns__uuid__convert_apply_post"];
         delete?: never;
@@ -1852,6 +1855,8 @@ export interface components {
             allowed_schemes?: string[] | null;
             /** Label */
             label?: string | null;
+            /** Swatches */
+            swatches?: string[] | null;
             /** Choices */
             choices?: string | null;
             /** Options */
@@ -1915,7 +1920,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
+        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "color" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */

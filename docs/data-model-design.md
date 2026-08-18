@@ -236,6 +236,8 @@ Common `config` keys (all optional unless noted):
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?`; `allow_other?` |
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
+| `email`       | address `string`, trimmed and lowercased   | `max_length?` |
+| `color`       | `#rrggbb` `string`, lowercased             | `swatches?` (a palette the picker offers) |
 | `user`        | `users.uuid` (or `[uuid, …]` if multi)     | `multiple?` |
 | `group`       | `user_groups.uuid` (or `[uuid, …]`)        | `multiple?` |
 | `date`        | ISO-8601 date `string` (`YYYY-MM-DD`)      | `min?`, `max?` (ISO date); `default: "today"` |
@@ -323,6 +325,20 @@ Notes:
   Enforced in `validate_scalar`, so import and the column's own `default` go through it too;
   the frontend re-checks before it builds an `href` (`lib/links.ts`). `label` is optional
   fixed anchor text shown instead of the raw URL.
+- `email` / `color` — **both store a canonical form, and that is the whole of what makes
+  them more than `text` with a regex.** An address is trimmed and lowercased; a colour is
+  trimmed, lowercased and expanded from `#abc` to `#aabbcc`. Normalising is done in
+  `_validate_value` (and on the column's own `default`, in `_validate_config`), so every
+  write path shares it — a record, an import, a QR fill, a conversion from `text`. Without
+  it `unique` would miss `Ada@example.com` against `ada@example.com`, a filter for one
+  would not find the other, and grouping would show one mailbox twice. The email check is
+  deliberately **not** RFC 5322: that grammar admits quoted local parts and bare-host
+  domains no provider accepts, so implementing it faithfully rejects nothing anybody
+  mistypes while passing plenty nobody can send to. What is checked is what a signup form
+  checks — one `@`, something either side, a dot in the host, no whitespace. A colour's
+  `swatches` are **offered, never enforced**: the point of a colour field is picking one,
+  so a colour outside the palette is a valid answer, which is the opposite bargain to
+  `choice`'s `options`.
 - **Config updates merge:** a `PATCH` to a column's `config` merges onto the stored
   config — settings you don't resend are preserved (rather than the whole config being
   replaced). To change a choice column's option set, resend `choices` or `options`.
@@ -373,7 +389,7 @@ Notes:
   so it sees this write's answer — and compares it against the other rows' *index*, which is
   the one place staleness costs more than a misordered row. Full details and the costs in
   [known gaps §5](known-gaps.md).
-- The set is extensible: adding e.g. `email`, `attachment`, `rating` is just a new enum
+- The set is extensible: adding e.g. `attachment`, `rating` is just a new enum
   member + `config` convention — no migration of the *records*, since `data` is JSONB.
   **The `ColumnType` enum itself does need a hand-written migration** — autogenerate is blind
   to enum labels; see `migrations/versions/b1f7c4a90e12_add_link_column_type.py` for the
@@ -383,7 +399,11 @@ Notes:
 A new type must be added to **every** frontend touchpoint or it half-works:
 `lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `features/records/renderCell.tsx` (how a value
 *displays*), `RecordField` in `features/records/RecordFields.tsx` (how it is *edited*),
-`FilterConditionsEditor.tsx`, and the export/import cell handling in
+`FilterConditionsEditor.tsx`, `features/columns/ColumnDialog.tsx` (how it is *configured* —
+state, seeding, `resetDefaults`, and the config emit, where a key must always be sent
+because a `PATCH` merges), `features/columns/columnAdvanced.ts` (`ADVANCED_KEYS`, or a
+column that uses the new setting opens with it folded away invisibly),
+`features/records/qrFill.ts` (`shape()`), and the export/import cell handling in
 `src/lists/transfer/services.py`. Both record components were extracted out of
 `ListDetailPage.tsx`/`RecordFormDialog.tsx` precisely so that there is one of each: the grid,
 the phone cards, the bin and the view-form dialog all display through `renderCell`, and the
@@ -713,8 +733,8 @@ Notes:
   (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
   with nowhere to put a per-group number. Doing it properly means an aggregate row inside
   the table.
-- **Further column types:** `email`, `attachment`, `rating`. (`link`, `user` and `group` are
-  built — see §5.)
+- **Further column types:** `attachment`, `rating`, `duration`, `phone`, `location`.
+  (`link`, `user`, `group`, `email` and `color` are built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /

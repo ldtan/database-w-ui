@@ -25,7 +25,12 @@ from ..columns.enums import (
 from ..columns.chain import ChainStep, apply_formulas, build_chain
 from ..columns.models import Column, in_shape
 from ..columns.richtext import is_rich, sanitize
-from ..columns.validation import resolve_dynamic_default, validate_scalar
+from ..columns.validation import (
+    normalize_color,
+    normalize_email,
+    resolve_dynamic_default,
+    validate_scalar,
+)
 from ..models import List
 from .filtering import apply_filters, apply_sorts
 from .models import ListItem
@@ -1457,6 +1462,13 @@ class ListItemService:
             # trimming here keeps the stored string and the checked string the
             # same one — otherwise `unique` and `max_length` see the padding.
             value = value.strip()
+        if column.type == ColumnType.email and isinstance(value, str):
+            # Same rule as a link, one step further: an address is stored in its
+            # canonical form, so the same mailbox typed two ways is one value.
+            # `unique` depends on it, and so does a filter finding both.
+            value = normalize_email(value)
+        if column.type == ColumnType.color and isinstance(value, str):
+            value = normalize_color(value)
         if column.type == ColumnType.choice and (column.config or {}).get("allow_other"):
             # An "other" answer is typed, so it arrives with whatever spacing was
             # typed around it, and it is stored as the value itself. Trimmed for
