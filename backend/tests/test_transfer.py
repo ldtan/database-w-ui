@@ -142,6 +142,42 @@ async def _seed_lookup(client, add_column, workspace_uuid, list_uuid, row_names)
     return lookup, rows
 
 
+async def test_export_orders_a_lookup_sort_by_label(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """An export is a snapshot of a view, so it has to be ordered like the view.
+
+    The file writes the *label* already; ordering it by the uuid behind that label
+    would produce rows in an order nothing on screen explains, in an artifact nobody
+    can correct afterwards. Seeded so uuid order is the reverse of label order.
+    """
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    lookup, rows = await _seed_lookup(
+        client,
+        add_column,
+        workspace_uuid,
+        list_uuid,
+        ["Zulu High", "Mike High", "Alpha High"],
+    )
+    for person, school in (("Ann", "Zulu High"), ("Bo", "Mike High"), ("Cy", "Alpha High")):
+        await client.post(
+            f"/api/lists/{list_uuid}/items/",
+            json={"data": {name: person, lookup: rows[school]}},
+        )
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/export",
+        json={
+            "format": "json",
+            "columns": ["name"],
+            "sorts": [{"column_uuid": lookup, "direction": "asc"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    # Alpha, Mike, Zulu — not the insertion/uuid order the uuids would have given.
+    assert resp.json() == [{"name": "Cy"}, {"name": "Bo"}, {"name": "Ann"}]
+
+
 async def test_export_writes_lookup_labels_and_import_reads_them_back(
     client, workspace_uuid, list_uuid, add_column
 ):

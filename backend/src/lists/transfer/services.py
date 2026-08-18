@@ -24,6 +24,7 @@ from ..columns.enums import COMPUTED_TYPES, PRINCIPAL_TYPES, ColumnType
 from ..columns.models import Column, in_shape
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
+from ..items.references import label_sources
 from ..items.services import (
     ListItemService,
     coerce_shape,
@@ -313,7 +314,15 @@ async def export_rows(
         if not include_archived:
             stmt = stmt.where(ListItem.archived_at.is_(None))
         stmt = apply_filters(stmt, filters, all_columns, user)
-        stmt = apply_sorts(stmt, sorts, all_columns)
+        # The same label ordering the grid gets. An export is a snapshot of a view, and
+        # a file whose rows came out in a different order from the screen it was taken
+        # from is the sort of discrepancy nobody can debug after the fact.
+        stmt = apply_sorts(
+            stmt,
+            sorts,
+            all_columns,
+            sources=await label_sources(db, user, all_columns, sorts),
+        )
         if limit is not None:
             stmt = stmt.limit(limit)
 

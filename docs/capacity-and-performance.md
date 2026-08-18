@@ -427,6 +427,15 @@ after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor r
   whole matching set on *every* page — 105 ms at page 1, rising only to 268 ms at page 990. That
   path is slow everywhere, not slow deep, and what it needs is an expression index (still
   entangled with the `multiple` toggle; see `known-gaps.md`).
+
+  Ordering by a **reference** column costs one more thing on top of that: it LEFT JOINs a
+  derived table of the target's labels (`items/references.py`), so the target list is
+  scanned once per query. Only a request that actually sorts or groups by such a column
+  pays it — the count and an unordered listing build no sources at all — and because the
+  join is on the unique `uuid` it adds columns to a row and never rows to the result, so
+  the page size and `X-Total-Count` cannot drift apart. The derived table is a simple one,
+  so Postgres flattens it and still gets to choose between an index nested loop and a hash
+  join on the real relative sizes of the two lists.
 - **`X-Total-Count`.** A flat 12–13 ms against this list, paid on every page load whichever way
   the page was fetched. Once the page itself is ~4 ms, the count is three-quarters of the
   request — it was the largest single thing this endpoint did, and is dealt with in the next

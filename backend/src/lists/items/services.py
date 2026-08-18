@@ -29,6 +29,7 @@ from ..columns.validation import resolve_dynamic_default, validate_scalar
 from ..models import List
 from .filtering import apply_filters, apply_sorts
 from .models import ListItem
+from .references import label_sources
 from .schemas import ListItemCreate, ListItemUpdate
 
 # Namespace for the per-list advisory lock that serializes unique-value writes.
@@ -614,7 +615,15 @@ class ListItemService:
                 ListItem.id > await cls._after_id(db, lst, after, sorts, group_by, skip)
             )
             skip = 0
-        stmt = apply_sorts(stmt, sorts, columns, group_by).offset(skip).limit(limit)
+        # Only an ordered request pays for this: with nothing to sort or group by there
+        # is no reference column to resolve, and `label_sources` returns an empty map
+        # without touching the database.
+        sources = await label_sources(db, user, columns, sorts, group_by)
+        stmt = (
+            apply_sorts(stmt, sorts, columns, group_by, sources)
+            .offset(skip)
+            .limit(limit)
+        )
         items = (await db.execute(stmt)).scalars().all()
         cls._shape_for_read(columns, items)
         return items
