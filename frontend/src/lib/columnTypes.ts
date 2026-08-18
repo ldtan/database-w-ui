@@ -14,6 +14,8 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Link (URL)", value: "link" },
   { label: "Email", value: "email" },
   { label: "Colour", value: "color" },
+  { label: "Rating", value: "rating" },
+  { label: "Duration", value: "duration" },
   { label: "User", value: "user" },
   { label: "Group", value: "group" },
   { label: "Lookup (link to another list)", value: "lookup" },

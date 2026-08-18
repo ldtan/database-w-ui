@@ -26,6 +26,7 @@ import {
   conversionTargets,
   duplicateTargets,
 } from "../../lib/columnTypes";
+import { RATING_MAX } from "../../lib/rating";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
 import type {
@@ -60,6 +61,21 @@ function dynamicToken(type: ColumnType): string | null {
 function dynamicLabel(type: ColumnType): string {
   return type === "date" ? "Today" : type === "user" ? "Current user" : "Now";
 }
+const RATING_ICON_OPTIONS = [
+  { label: "Stars", value: "star" },
+  { label: "Hearts", value: "heart" },
+  { label: "A number", value: "number" },
+];
+
+// A cell always holds seconds; this is only how they are written. Kept in step
+// with `_DURATION_FORMATS` on the server and `DurationFormat` in lib/duration.ts.
+const DURATION_FORMAT_OPTIONS = [
+  { label: "1:30 (hours:minutes)", value: "h:mm" },
+  { label: "1:30:00 (hours:minutes:seconds)", value: "h:mm:ss" },
+  { label: "1:30 (minutes:seconds)", value: "m:ss" },
+  { label: "1.50 (decimal hours)", value: "decimal_hours" },
+];
+
 // Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
 const SPECIFIC = "__specific__";
 // Sentinel for the lookup "Workspace" dropdown: lists shared with the user from
@@ -75,6 +91,8 @@ const SHARED = "__shared__";
 // `link` are not, because a hex code and a URL are things nobody computes over.
 const FORMULA_REFERENCEABLE: ColumnType[] = [
   "number",
+  "rating",
+  "duration",
   "text",
   "email",
   "calculated",
@@ -162,6 +180,11 @@ export function ColumnDialog({
   // hex values — the same shorthand a choice column's options use. Offered and
   // never enforced, so an empty palette is a colour column that works normally.
   const [swatchText, setSwatchText] = useState("");
+  // Rating: which glyph the scale is drawn with. Its *size* is the shared `max`
+  // key held above — the top of a rating is a bound like any other.
+  const [ratingIcon, setRatingIcon] = useState("star");
+  // Duration: how seconds are written. A display setting, like `number_format`.
+  const [durationFmt, setDurationFmt] = useState("h:mm");
   // Which workspace's lists the target dropdown is drawn from. A lookup can point
   // at any list the user can view — their own across workspaces, or one shared
   // with them (the SHARED bucket). Defaults to the current list's workspace.
@@ -244,6 +267,8 @@ export function ColumnDialog({
       setAllowOther(false);
       setLinkText("");
       setSwatchText("");
+      setRatingIcon("star");
+      setDurationFmt("h:mm");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -275,6 +300,8 @@ export function ColumnDialog({
       setAllowOther(false);
       setLinkText("");
       setSwatchText("");
+      setRatingIcon("star");
+      setDurationFmt("h:mm");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -311,6 +338,8 @@ export function ColumnDialog({
     setAllowOther(!!config.allow_other);
     setLinkText((config.label as string) ?? "");
     setSwatchText(((config.swatches as string[]) ?? []).join(";"));
+    setRatingIcon((config.rating_icon as string) ?? "star");
+    setDurationFmt((config.duration_format as string) ?? "h:mm");
     // Left null so the seeding effect can resolve which workspace the stored
     // target lives in (the config only records the list, not its workspace).
     setTargetWorkspace(null);
@@ -557,6 +586,23 @@ export function ColumnDialog({
       }
       if (type === "link") config.label = linkText.trim() || null;
       if (type === "email") config.max_length = maxLength;
+      if (type === "rating") {
+        // The scale rides on the shared `max` key, so it goes out with the other
+        // bounds rather than under a name of its own. Always sent, like `unique`:
+        // a config PATCH merges, so a scale reset to the default has to be an
+        // explicit value rather than an omitted key.
+        config.max = max;
+        // `null` at the default, the way a link's empty `label` is sent as null:
+        // these are folded-away settings, and `hasAdvancedConfig` counts anything
+        // stored as a choice somebody made — so writing "star" onto every rating
+        // column would open the Advanced section on all of them, over nothing.
+        config.rating_icon = ratingIcon === "star" ? null : ratingIcon;
+      }
+      if (type === "duration") {
+        config.min = min;
+        config.max = max;
+        config.duration_format = durationFmt === "h:mm" ? null : durationFmt;
+      }
       if (type === "color") {
         // Always sent, like `unique`: a config PATCH merges, so emptying the
         // palette means writing an explicit null rather than omitting the key.
@@ -606,7 +652,14 @@ export function ColumnDialog({
           // stored form (`_validate_config`), so a default and a typed cell end
           // up as one value rather than two spellings of one.
           defaultValue = defaultText.trim() || null;
-        else if (type === "number") defaultValue = defaultNumber;
+        else if (
+          type === "number" ||
+          type === "rating" ||
+          type === "duration"
+        )
+          // A duration default is counted in seconds like the cells, and a
+          // rating default is a point on the scale.
+          defaultValue = defaultNumber;
         else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
         else if (type === "choice")
           // A `multiple` column's cells hold a list, and so must its default —
@@ -1013,6 +1066,7 @@ export function ColumnDialog({
                 />
               </Field>
             )}
+
           </FormSection>
         )}
 
@@ -1054,10 +1108,16 @@ export function ColumnDialog({
             </Field>
           )}
 
-          {type === "number" && (
+          {(type === "number" || type === "duration") && (
             <>
               <FieldRow>
-                <Field label="Min" htmlFor="col-min" optional>
+                {/* A duration's bounds are the same two config keys, counted in
+                    seconds — the unit the cells hold. */}
+                <Field
+                  label={type === "duration" ? "Min (seconds)" : "Min"}
+                  htmlFor="col-min"
+                  optional
+                >
                   <InputNumber
                     inputId="col-min"
                     value={min}
@@ -1065,7 +1125,11 @@ export function ColumnDialog({
                     useGrouping={false}
                   />
                 </Field>
-                <Field label="Max" htmlFor="col-max" optional>
+                <Field
+                  label={type === "duration" ? "Max (seconds)" : "Max"}
+                  htmlFor="col-max"
+                  optional
+                >
                   <InputNumber
                     inputId="col-max"
                     value={max}
@@ -1074,12 +1138,14 @@ export function ColumnDialog({
                   />
                 </Field>
               </FieldRow>
-              <CheckboxField
-                inputId="col-int"
-                checked={integerOnly}
-                onChange={setIntegerOnly}
-                label="Integers only"
-              />
+              {type === "number" && (
+                <CheckboxField
+                  inputId="col-int"
+                  checked={integerOnly}
+                  onChange={setIntegerOnly}
+                  label="Integers only"
+                />
+              )}
             </>
           )}
 
@@ -1179,6 +1245,50 @@ export function ColumnDialog({
               />
             </Field>
           )}
+
+            {type === "rating" && (
+              <FieldRow>
+                <Field
+                  label="Scale"
+                  htmlFor="col-rating-max"
+                  optional
+                  hint="How many to offer. Ratings start at 1; an unrated record is an empty cell."
+                >
+                  <InputNumber
+                    inputId="col-rating-max"
+                    value={max}
+                    onValueChange={(e) => setMax(e.value ?? null)}
+                    min={1}
+                    max={RATING_MAX}
+                    placeholder="5"
+                    useGrouping={false}
+                  />
+                </Field>
+                <Field label="Shown as" htmlFor="col-rating-icon">
+                  <Dropdown
+                    inputId="col-rating-icon"
+                    value={ratingIcon}
+                    options={RATING_ICON_OPTIONS}
+                    onChange={(e) => setRatingIcon(e.value)}
+                  />
+                </Field>
+              </FieldRow>
+            )}
+
+            {type === "duration" && (
+              <Field
+                label="Written as"
+                htmlFor="col-duration-format"
+                hint="How durations are shown and typed. A cell always stores seconds, so this can be changed later and an export is unaffected."
+              >
+                <Dropdown
+                  inputId="col-duration-format"
+                  value={durationFmt}
+                  options={DURATION_FORMAT_OPTIONS}
+                  onChange={(e) => setDurationFmt(e.value)}
+                />
+              </Field>
+            )}
 
           {type === "color" && (
             <Field
@@ -1390,11 +1500,18 @@ export function ColumnDialog({
                       />
                     )
                   )}
-                  {type === "number" && (
+                  {(type === "number" ||
+                    type === "rating" ||
+                    type === "duration") && (
                     <InputNumber
                       inputId="col-default"
                       value={defaultNumber}
                       onValueChange={(e) => setDefaultNumber(e.value ?? null)}
+                      min={
+                        type === "rating" ? 1 : type === "duration" ? 0 : undefined
+                      }
+                      max={type === "rating" ? (max ?? 5) : undefined}
+                      suffix={type === "duration" ? " s" : undefined}
                       useGrouping={false}
                     />
                   )}

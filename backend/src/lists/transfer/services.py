@@ -20,8 +20,14 @@ from src.core.exceptions import ConflictError, UnknownReferenceError, Validation
 from src.core.utils import coerce_uuid
 from src.infrastructure import database as db_module
 
-from ..columns.enums import COMPUTED_TYPES, PRINCIPAL_TYPES, ColumnType
+from ..columns.enums import (
+    COMPUTED_TYPES,
+    NUMERIC_TYPES,
+    PRINCIPAL_TYPES,
+    ColumnType,
+)
 from ..columns.models import Column, in_shape
+from ..columns.validation import parse_duration
 from ..items.filtering import apply_filters, apply_sorts
 from ..items.models import ListItem
 from ..items.references import label_sources
@@ -417,7 +423,22 @@ def _parse_cell(column: Column, raw: object):
         return _SKIP
 
     multiple = bool((column.config or {}).get("multiple"))
-    if column.type == ColumnType.number:
+    if column.type == ColumnType.duration:
+        # Read before the generic numeric branch below, and a superset of it: a bare
+        # number is seconds (which is what the export writes, so a file round-trips),
+        # and "1:30" or "90m" are the forms somebody hand-writing a file will use.
+        if isinstance(raw, bool):
+            raise ValidationError(f"column '{column.name}': '{raw}' is not a duration")
+        if isinstance(raw, (int, float)):
+            return raw
+        seconds = parse_duration(column.config or {}, str(raw))
+        if seconds is None:
+            raise ValidationError(
+                f"column '{column.name}': '{raw}' is not a duration "
+                f"(try 5400, 1:30, or 90m)"
+            )
+        return seconds
+    if column.type in NUMERIC_TYPES:
         if isinstance(raw, bool):
             raise ValidationError(f"column '{column.name}': '{raw}' is not a number")
         if isinstance(raw, (int, float)):

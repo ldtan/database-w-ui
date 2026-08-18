@@ -39,6 +39,10 @@ const ADVANCED_KEYS: Array<keyof ColumnConfig | string> = [
   "label",
   // A colour column's offered palette.
   "swatches",
+  // A rating's glyph and a duration's written form. Both are display settings, so
+  // they sit here for the same reason `number_format` would.
+  "rating_icon",
+  "duration_format",
   "multiple",
   // A nested lookup, which is set as a pair.
   "parent_column_uuid",

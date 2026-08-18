@@ -1857,6 +1857,10 @@ export interface components {
             label?: string | null;
             /** Swatches */
             swatches?: string[] | null;
+            /** Rating Icon */
+            rating_icon?: string | null;
+            /** Duration Format */
+            duration_format?: string | null;
             /** Choices */
             choices?: string | null;
             /** Options */
@@ -1920,7 +1924,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "color" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
+        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "color" | "rating" | "duration" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */

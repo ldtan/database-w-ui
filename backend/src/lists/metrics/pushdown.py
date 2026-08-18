@@ -79,7 +79,7 @@ from sqlalchemy import Numeric, case, cast, func, literal
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from ..columns.enums import ColumnType
+from ..columns.enums import NUMERIC_TYPES, ColumnType
 from ..columns.models import Column
 from ..items.models import ListItem
 from . import aggregate
@@ -90,7 +90,7 @@ PUSHABLE = frozenset({"SUM", "AVG", "MIN", "MAX", "COUNT", "COUNT_ROWS", "EMPTY"
 
 # Column types whose cells this module will read. `calculated` is excluded even
 # though a metric may reference one; the module docstring says why.
-_PUSHABLE_TYPES = frozenset({ColumnType.number, ColumnType.text})
+_PUSHABLE_TYPES = frozenset(NUMERIC_TYPES | {ColumnType.text})
 
 # The JSONB types the row grammar reads as a value. `ast.Name` evaluation in
 # `columns.formula` keeps `int`, `float` and `str` and answers `None` for

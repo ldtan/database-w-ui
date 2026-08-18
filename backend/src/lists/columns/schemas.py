@@ -39,8 +39,11 @@ class ColumnConfig(BaseModel):
     min_length: Optional[int] = None
     max_length: Optional[int] = None
     pattern: Optional[str] = None  # regex; value must fully match
-    # number, date, time, datetime — min/max are interpreted per type
-    # (a number for number columns; an ISO-8601 string for temporal columns)
+    # number, rating, duration, date, time, datetime — min/max are interpreted per
+    # type (a number for the numeric ones, seconds for a duration, an ISO-8601
+    # string for the temporal ones). On a `rating` column `max` is the top of the
+    # scale — the number of stars — which is a bound like any other and so needs no
+    # key of its own.
     min: Optional[Any] = None
     max: Optional[Any] = None
     # number
@@ -57,6 +60,13 @@ class ColumnConfig(BaseModel):
     # color — a #rrggbb string. `swatches` is a palette the picker offers first;
     # it constrains nothing, because the point of a colour field is picking one.
     swatches: Optional[list[str]] = None
+    # rating — which glyph the scale is drawn with. Purely a UI hint, like
+    # `number_format`: the cell holds an integer either way.
+    rating_icon: Optional[str] = None  # star | heart | number
+    # duration — a cell holds **seconds**, and this is how they are shown and
+    # typed. A UI hint in exactly the sense `number_format` is: the server never
+    # formats anything, so a CSV carries the seconds and round-trips exactly.
+    duration_format: Optional[str] = None  # h:mm | h:mm:ss | m:ss | decimal_hours
     # choice — options are plain labels; a cell stores the label itself
     choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
     options: Optional[list[str]] = None  # canonical form, e.g. ["Todo", "Doing"]

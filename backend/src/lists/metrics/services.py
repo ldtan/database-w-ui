@@ -10,7 +10,7 @@ from src.core.exceptions import ConflictError, ValidationError
 
 from src.core.utils import coerce_uuid
 
-from ..columns.enums import ColumnType
+from ..columns.enums import NUMERIC_TYPES, ColumnType
 from ..columns.models import Column, in_shape
 from ..items.models import ListItem
 from ..items.services import ListItemService, computed_columns, shape_values
@@ -27,8 +27,15 @@ from .schemas import MetricConfig, MetricCreate, MetricUpdate, MetricValue, Metr
 # (`SUM(line_total)`) is one of the things people most want. A choice or a date is
 # reachable from here anyway, through a calculated column that reads one — which keeps
 # the pushdown question (`pushdown._PUSHABLE_TYPES`) to one place rather than two.
+#
+# The whole of NUMERIC_TYPES is here rather than `number` alone: `SUM(hours)` over a
+# `duration` column and `AVG(score)` over a `rating` one are the two things people
+# open the metrics strip to ask, and a cell in either holds a plain JSON number that
+# aggregates exactly as a `number` cell does. What their totals *mean* is a display
+# question — 5400 seconds shows as 1:30 through the metric's `suffix`/`precision` and
+# the same formatter the column uses — and this module has never formatted anything.
 REFERENCEABLE_TYPES = frozenset(
-    {ColumnType.number, ColumnType.text, ColumnType.calculated}
+    NUMERIC_TYPES | {ColumnType.text, ColumnType.calculated}
 )
 
 # How many records one *scan* will read before it stops and says so. A metric is
@@ -164,9 +171,10 @@ class MetricService:
             if target is None:
                 raise ValidationError(f"Formula references unknown column '{name}'")
             if target.type not in REFERENCEABLE_TYPES:
+                allowed = ", ".join(sorted(t.value for t in REFERENCEABLE_TYPES))
                 raise ValidationError(
-                    f"A metric can only aggregate number, text or calculated "
-                    f"columns; '{name}' is {target.type.value}"
+                    f"A metric can only aggregate {allowed} columns; "
+                    f"'{name}' is {target.type.value}"
                 )
 
     @classmethod

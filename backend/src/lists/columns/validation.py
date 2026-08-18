@@ -22,6 +22,71 @@ _TEMPORAL = {
     ColumnType.datetime: (datetime.fromisoformat, "a date-time (ISO-8601)"),
 }
 _NUMBER_FORMATS = {"plain", "currency", "percent"}
+_RATING_ICONS = {"star", "heart", "number"}
+_DURATION_FORMATS = {"h:mm", "h:mm:ss", "m:ss", "decimal_hours"}
+# A scale nobody can read is not a scale. Ten glyphs is already past the point
+# where somebody counts rather than sees, and the cap is what keeps a rating a
+# rating rather than a `number` column drawn very badly.
+RATING_MAX = 10
+_DEFAULT_RATING_MAX = 5
+
+
+def rating_scale(config: dict) -> int:
+    """The top of a rating column's scale, defaulting to five stars."""
+    top = config.get("max")
+    if isinstance(top, bool) or not isinstance(top, int):
+        return _DEFAULT_RATING_MAX
+    return top
+
+
+_SECONDS_RE = re.compile(r"\d+(?:\.\d+)?\Z")
+_UNIT_SECONDS = {"h": 3600, "m": 60, "s": 1}
+_UNIT_RE = re.compile(r"(\d+(?:\.\d+)?)\s*([hms])")
+_UNIT_FORM_RE = re.compile(r"(?:\d+(?:\.\d+)?\s*[hms]\s*)+\Z")
+
+
+def parse_duration(config: dict, text: str) -> Optional[float]:
+    """Read a written duration as seconds, or None if it is not one.
+
+    A cell stores seconds, and the export writes those seconds plainly — so a bare
+    number here **always** means seconds, whatever the column is formatted as. That
+    is what makes an exported file import back unchanged, and it is the one rule in
+    this grammar that is not negotiable.
+
+    On top of that, two written forms people actually type:
+
+    - **Colon form.** `1:30:00` is always h:mm:ss. `1:30` is h:mm — an hour and a
+      half — *unless* the column is formatted `m:ss`, where it reads as a minute and
+      a half, because that is what the column has been showing them. The parts after
+      the first must be under 60, so `1:75` is a typo rather than a silent 2:15.
+    - **Unit form.** `90m`, `1.5h`, `1h30m`, `45s`. Unambiguous whatever the format,
+      and the only way to write a duration that is right in any column.
+    """
+    raw = text.strip().lower()
+    if not raw:
+        return None
+    if _SECONDS_RE.fullmatch(raw):
+        return float(raw)
+    if ":" in raw:
+        parts = raw.split(":")
+        if len(parts) > 3 or not all(_SECONDS_RE.fullmatch(p) for p in parts):
+            return None
+        values = [float(p) for p in parts]
+        if any(v >= 60 for v in values[1:]):
+            return None
+        if len(parts) == 3:
+            hours, minutes, seconds = values
+        elif config.get("duration_format") == "m:ss":
+            hours, (minutes, seconds) = 0.0, values
+        else:
+            (hours, minutes), seconds = values, 0.0
+        return hours * 3600 + minutes * 60 + seconds
+    if _UNIT_FORM_RE.fullmatch(raw):
+        return sum(
+            float(amount) * _UNIT_SECONDS[unit]
+            for amount, unit in _UNIT_RE.findall(raw)
+        )
+    return None
 # How a text column is edited. Unset means "single"; see ColumnConfig.text_mode.
 # "rich" stores HTML rather than plain text — see columns/richtext.py.
 TEXT_MODES = ("single", "multiline", "rich")
@@ -288,6 +353,53 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
         ):
             raise ValidationError("'max_length' must be a positive integer")
 
+    elif column_type == ColumnType.rating:
+        # `max` is the top of the scale, and it is the one config key on this type
+        # a person actually sets. Rejected outright rather than clamped, because a
+        # column silently drawn with five stars after somebody asked for twenty is
+        # a setting that did not take and said nothing.
+        top = config.get("max")
+        if top is not None and (
+            isinstance(top, bool)
+            or not isinstance(top, int)
+            or not 1 <= top <= RATING_MAX
+        ):
+            raise ValidationError(
+                f"A rating column's 'max' must be a whole number from 1 to "
+                f"{RATING_MAX}"
+            )
+        if config.get("min") is not None:
+            # The bottom of the scale is 1, always: a rating of zero is what an
+            # *empty* cell means, so a configurable floor would give the column two
+            # ways to say "unrated" and no way to tell them apart.
+            raise ValidationError(
+                "A rating column has no 'min' — its scale starts at 1, and an "
+                "unrated record is an empty cell"
+            )
+        icon = config.get("rating_icon")
+        if icon is not None and icon not in _RATING_ICONS:
+            raise ValidationError(
+                f"'rating_icon' must be one of {', '.join(sorted(_RATING_ICONS))}"
+            )
+
+    elif column_type == ColumnType.duration:
+        for key in ("min", "max"):
+            v = config.get(key)
+            if v is not None and (
+                isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0
+            ):
+                raise ValidationError(
+                    f"duration '{key}' must be a non-negative number of seconds"
+                )
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and hi is not None and lo > hi:
+            raise ValidationError("'min' cannot exceed 'max'")
+        fmt = config.get("duration_format")
+        if fmt is not None and fmt not in _DURATION_FORMATS:
+            raise ValidationError(
+                f"'duration_format' must be one of {', '.join(sorted(_DURATION_FORMATS))}"
+            )
+
     elif column_type == ColumnType.email:
         max_length = config.get("max_length")
         if max_length is not None and (
@@ -366,6 +478,31 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
             raise ValidationError(f"Column '{name}' must be >= {lo}")
         if hi is not None and value > hi:
             raise ValidationError(f"Column '{name}' must be <= {hi}")
+
+    elif column_type == ColumnType.rating:
+        top = rating_scale(config)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _expect(name, f"a rating from 1 to {top}")
+        if isinstance(value, float) and not value.is_integer():
+            _expect(name, f"a whole rating from 1 to {top}")
+        if not 1 <= value <= top:
+            raise ValidationError(
+                f"Column '{name}' must be a rating from 1 to {top}; leave it empty "
+                f"for unrated"
+            )
+
+    elif column_type == ColumnType.duration:
+        # Seconds. Not required to be whole — half a second is a length of time —
+        # but never negative, which no reading of a duration produces.
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            _expect(name, "a duration in seconds")
+        if value < 0:
+            raise ValidationError(f"Column '{name}' cannot be a negative duration")
+        lo, hi = config.get("min"), config.get("max")
+        if lo is not None and value < lo:
+            raise ValidationError(f"Column '{name}' must be at least {lo} second(s)")
+        if hi is not None and value > hi:
+            raise ValidationError(f"Column '{name}' must be at most {hi} second(s)")
 
     elif column_type == ColumnType.checkbox:
         if not isinstance(value, bool):

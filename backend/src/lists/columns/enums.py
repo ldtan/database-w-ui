@@ -14,6 +14,8 @@ class ColumnType(str, enum.Enum):
     link = "link"
     email = "email"
     color = "color"
+    rating = "rating"
+    duration = "duration"
     user = "user"
     group = "group"
     date = "date"
@@ -32,6 +34,21 @@ REFERENCE_TYPES = frozenset({ColumnType.lookup, ColumnType.user, ColumnType.grou
 COMPUTED_TYPES = frozenset({ColumnType.calculated})
 # `user`/`group` are lookup with a fixed target — an account or a group, not a row.
 PRINCIPAL_TYPES = frozenset({ColumnType.user, ColumnType.group})
+# Types whose cell holds a JSON *number*, whatever it is a number of. A `rating` is
+# a point on a scale and a `duration` is a count of seconds, but both are stored,
+# compared, ordered and totalled exactly as `number` is — the difference between
+# them is how they are typed in and drawn, which is the frontend's business.
+#
+# Every reader that has to know a cell is numeric tests this set rather than
+# `== ColumnType.number`, and that is not tidiness: SQL comparison defaults to
+# *text*, so a rating left out of it would put 10 before 9 in a sort and answer
+# `> 3` by string order. `_numeric`, `_numeric_comparable` and `_order_terms` in
+# `items/filtering.py` are the three that matter.
+NUMERIC_TYPES = frozenset({
+    ColumnType.number,
+    ColumnType.rating,
+    ColumnType.duration,
+})
 # What a formula in a `calculated` column may name. Every one of these stores a
 # self-contained scalar a row expression can already read: a number, text, a choice
 # *label* (a cell is the label itself — see `resolve_choice_options`), an ISO-8601
@@ -44,6 +61,8 @@ PRINCIPAL_TYPES = frozenset({ColumnType.user, ColumnType.group})
 # things to ask, and nothing about the check makes the string less readable.
 FORMULA_REFERENCEABLE_TYPES = frozenset({
     ColumnType.number,
+    ColumnType.rating,
+    ColumnType.duration,
     ColumnType.text,
     ColumnType.email,
     ColumnType.calculated,

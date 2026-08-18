@@ -152,6 +152,17 @@ export interface ColumnConfig {
   /** Colour columns only. A palette the picker offers first — it constrains
    *  nothing, because the point of a colour field is picking one. */
   swatches?: string[];
+  /** Number, rating, duration and the temporal types — read per type. On a
+   *  rating `max` is the top of the scale, which is a bound like any other; on a
+   *  duration both are counts of seconds. */
+  min?: number | string;
+  max?: number | string;
+  /** Rating columns only. Which glyph the scale is drawn with. */
+  rating_icon?: "star" | "heart" | "number";
+  /** Duration columns only. A cell holds seconds; this is how they are shown and
+   *  typed. A display setting in the same sense `number_format` is — the server
+   *  never formats anything, so a CSV carries the raw seconds. */
+  duration_format?: "h:mm" | "h:mm:ss" | "m:ss" | "decimal_hours";
   formula?: string;
   [key: string]: unknown;
 }

@@ -1,7 +1,9 @@
 import { isColor, normalizeColor } from "../../lib/color";
 import { stripHtml } from "../../lib/display";
+import { durationFormat, formatDuration } from "../../lib/duration";
 import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
+import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
 import { LookupCell } from "../lookups/LookupControls";
@@ -118,6 +120,31 @@ export function renderCell(
       >
         {String(value)}
       </a>
+    );
+  }
+  if (column.type === "duration") {
+    return formatDuration(durationFormat(column), value);
+  }
+  if (column.type === "rating") {
+    // The glyphs, not a number, because that is the whole reason to pick this
+    // type over `number`. Filled up to the value and hollow to the top of the
+    // scale, so a 3 reads as "3 of 5" without a caption — except on a `number`
+    // icon, where somebody has asked for the digits back.
+    const top = ratingScale(column);
+    const filled = ratingValue(column, value) ?? 0;
+    if (column.config.rating_icon === "number") return `${filled}/${top}`;
+    const glyph = column.config.rating_icon === "heart" ? "heart" : "star";
+    return (
+      <span className="whitespace-nowrap" title={`${filled} of ${top}`}>
+        {Array.from({ length: top }, (_, i) => (
+          <i
+            key={i}
+            className={`pi pi-${glyph}${i < filled ? "-fill" : ""} text-xs`}
+            style={i < filled ? { color: "var(--brand)" } : undefined}
+            aria-hidden
+          />
+        ))}
+      </span>
     );
   }
   if (column.type === "color") {
