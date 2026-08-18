@@ -132,6 +132,67 @@ def normalize_email(value: str) -> str:
     return value.strip().lower()
 
 
+_PHONE_FORMATS = {"e164", "national", "international"}
+
+
+def phone_regions(config: dict) -> tuple[Optional[str], list[str]]:
+    """A phone column's default region and its allowed set, both normalised upper."""
+    default = config.get("default_region")
+    default = default.strip().upper() if isinstance(default, str) and default else None
+    allowed = config.get("allowed_regions") or []
+    allowed = [r.strip().upper() for r in allowed if isinstance(r, str) and r.strip()]
+    return default, allowed
+
+
+def normalize_phone(config: dict, name: str, value: str) -> str:
+    """A phone number in the form the column stores: E.164.
+
+    **The normalisation is the type.** A regex could tell `+639171234567` from
+    `banana`, but it could not tell that `0917 123 4567`, `+63 917 123 4567` and
+    `09171234567` are one number — so `unique` would miss the duplicate it exists to
+    catch, a filter for one spelling would miss the others, and grouping would show
+    one person twice. Every one of those becomes `+639171234567` here, on the write
+    path every caller shares.
+
+    Raises `ValidationError` with the column's name, in the house style, so a bad
+    number reads like every other refused cell rather than like a library error.
+    """
+    import phonenumbers
+
+    default_region, allowed = phone_regions(config)
+    raw = value.strip()
+    try:
+        parsed = phonenumbers.parse(raw, default_region)
+    except phonenumbers.NumberParseException:
+        # The commonest cause by far, and worth saying outright: a national number
+        # on a column that was never told which country it is national to.
+        if default_region is None and not raw.startswith("+"):
+            raise ValidationError(
+                f"Column '{name}' needs the country code (e.g. +639171234567), "
+                f"or a default region set on the column"
+            )
+        raise ValidationError(f"Column '{name}': '{value}' is not a phone number")
+
+    if not phonenumbers.is_valid_number(parsed):
+        # Distinct from a parse failure: this is well-formed and still not a number
+        # anyone could dial — the right length for no operator in that country.
+        raise ValidationError(
+            f"Column '{name}': '{value}' is not a valid phone number"
+        )
+
+    if allowed:
+        region = phonenumbers.region_code_for_number(parsed)
+        if region not in allowed:
+            raise ValidationError(
+                f"Column '{name}' only accepts numbers from "
+                f"{', '.join(allowed)}, not {region or 'that country'}"
+            )
+
+    return phonenumbers.format_number(
+        parsed, phonenumbers.PhoneNumberFormat.E164
+    )
+
+
 def normalize_color(value: str) -> str:
     """A colour as it is stored: `#rrggbb`, lowercased, shorthand expanded."""
     text = value.strip().lower()
@@ -409,6 +470,30 @@ def validate_config_constraints(column_type: ColumnType, config: dict) -> None:
         ):
             raise ValidationError("'max_length' must be a positive integer")
 
+    elif column_type == ColumnType.phone:
+        import phonenumbers
+
+        default_region, allowed = phone_regions(config)
+        for region in ([default_region] if default_region else []) + allowed:
+            if region not in phonenumbers.SUPPORTED_REGIONS:
+                raise ValidationError(
+                    f"'{region}' is not a country code this build knows; "
+                    f"expected an ISO-3166 alpha-2 code like 'PH'"
+                )
+        # A default region outside the allowed set is a column nobody can fill by
+        # typing a national number: the region that makes one parseable is the one
+        # the check then rejects it for.
+        if default_region and allowed and default_region not in allowed:
+            raise ValidationError(
+                f"'default_region' ({default_region}) must be one of "
+                f"'allowed_regions' ({', '.join(allowed)})"
+            )
+        fmt = config.get("display_format")
+        if fmt is not None and fmt not in _PHONE_FORMATS:
+            raise ValidationError(
+                f"'display_format' must be one of {', '.join(sorted(_PHONE_FORMATS))}"
+            )
+
     elif column_type == ColumnType.color:
         swatches = config.get("swatches")
         if swatches is not None:
@@ -575,6 +660,15 @@ def validate_scalar(column_type: ColumnType, config: dict, name: str, value) -> 
         hi = config.get("max_length")
         if hi is not None and len(address) > hi:
             raise ValidationError(f"Column '{name}' must be at most {hi} character(s)")
+
+    elif column_type == ColumnType.phone:
+        if not isinstance(value, str):
+            _expect(name, "a phone number")
+        # `normalize_phone` *is* the check — it raises for everything this would
+        # otherwise have to re-test, and the write path has already run it, so this
+        # is what makes a value arriving any other way (a column default, a
+        # conversion) meet the same bar.
+        normalize_phone(config, name, value)
 
     elif column_type == ColumnType.color:
         if not isinstance(value, str):

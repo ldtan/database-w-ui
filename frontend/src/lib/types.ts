@@ -149,6 +149,13 @@ export interface ColumnConfig {
   label?: string;
   /** Text, link and email columns. */
   max_length?: number;
+  /** Phone columns only. `default_region` is what lets a *national* number be
+   *  typed at all: without one the server takes only a number carrying its own
+   *  country code, because a geography guess would read one country's number as
+   *  another's. `display_format` is a UI hint like `number_format`. */
+  default_region?: string;
+  allowed_regions?: string[];
+  display_format?: "e164" | "national" | "international";
   /** Colour columns only. A palette the picker offers first — it constrains
    *  nothing, because the point of a colour field is picking one. */
   swatches?: string[];

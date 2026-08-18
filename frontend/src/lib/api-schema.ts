@@ -1855,6 +1855,12 @@ export interface components {
             allowed_schemes?: string[] | null;
             /** Label */
             label?: string | null;
+            /** Default Region */
+            default_region?: string | null;
+            /** Allowed Regions */
+            allowed_regions?: string[] | null;
+            /** Display Format */
+            display_format?: string | null;
             /** Swatches */
             swatches?: string[] | null;
             /** Rating Icon */
@@ -1924,7 +1930,7 @@ export interface components {
          * ColumnType
          * @enum {string}
          */
-        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "color" | "rating" | "duration" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
+        ColumnType: "text" | "number" | "checkbox" | "choice" | "lookup" | "link" | "email" | "phone" | "color" | "rating" | "duration" | "user" | "group" | "date" | "time" | "datetime" | "calculated";
         /** ColumnUpdate */
         ColumnUpdate: {
             /** Name */

@@ -28,6 +28,7 @@ from ..columns.richtext import is_rich, sanitize
 from ..columns.validation import (
     normalize_color,
     normalize_email,
+    normalize_phone,
     resolve_dynamic_default,
     validate_scalar,
 )
@@ -1469,6 +1470,14 @@ class ListItemService:
             value = normalize_email(value)
         if column.type == ColumnType.color and isinstance(value, str):
             value = normalize_color(value)
+        if column.type == ColumnType.phone and isinstance(value, str):
+            # E.164, whatever was typed. This is the type's whole reason to exist
+            # over a `text` column: one number is one value, so `unique` catches a
+            # duplicate spelled differently and a filter finds every spelling of it.
+            # It raises for a number it cannot make canonical, so the
+            # `validate_scalar` below re-runs it only for the sake of a value that
+            # reached the column some other way.
+            value = normalize_phone(column.config or {}, column.name, value)
         if column.type == ColumnType.choice and (column.config or {}).get("allow_other"):
             # An "other" answer is typed, so it arrives with whatever spacing was
             # typed around it, and it is stored as the value itself. Trimmed for

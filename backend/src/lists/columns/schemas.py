@@ -57,6 +57,15 @@ class ColumnConfig(BaseModel):
     # domain allowlist: which addresses a company will accept is a policy that
     # changes without the column changing, and a `text` column with a `pattern`
     # already expresses it for the one shop that wants it enforced here.
+    # phone — a cell stores E.164 ("+639171234567"), whatever was typed.
+    # `default_region` is what lets a *national* number ("0917 123 4567") be typed at
+    # all: without one, only a number carrying its own country code is accepted, and
+    # that is the deliberate default — a server-side geography guess would silently
+    # read one country's number as another's. `allowed_regions` narrows what the
+    # column accepts once parsed; `display_format` is a UI hint like `number_format`.
+    default_region: Optional[str] = None  # ISO-3166 alpha-2, e.g. "PH"
+    allowed_regions: Optional[list[str]] = None
+    display_format: Optional[str] = None  # e164 | national | international
     # color — a #rrggbb string. `swatches` is a palette the picker offers first;
     # it constrains nothing, because the point of a colour field is picking one.
     swatches: Optional[list[str]] = None

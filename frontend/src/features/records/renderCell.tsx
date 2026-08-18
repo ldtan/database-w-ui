@@ -3,6 +3,7 @@ import { stripHtml } from "../../lib/display";
 import { durationFormat, formatDuration } from "../../lib/duration";
 import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
+import { formatPhone, telHref } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
@@ -119,6 +120,23 @@ export function renderCell(
         onClick={(e) => e.stopPropagation()} // don't also toggle row selection
       >
         {String(value)}
+      </a>
+    );
+  }
+  if (column.type === "phone") {
+    const href = telHref(value);
+    const shown = formatPhone(column, value);
+    // Same two escapes as `link` and `email`: a number the parser rejects is plain
+    // text, and nothing is an anchor while the cell is an editor.
+    if (!href || editing) return shown || String(value);
+    return (
+      <a
+        href={href}
+        className="hover:underline whitespace-nowrap"
+        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+      >
+        {shown}
       </a>
     );
   }

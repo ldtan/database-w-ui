@@ -26,6 +26,7 @@ import {
   conversionTargets,
   duplicateTargets,
 } from "../../lib/columnTypes";
+import { countryOptions } from "../../lib/phone";
 import { RATING_MAX } from "../../lib/rating";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
@@ -74,6 +75,14 @@ const DURATION_FORMAT_OPTIONS = [
   { label: "1:30:00 (hours:minutes:seconds)", value: "h:mm:ss" },
   { label: "1:30 (minutes:seconds)", value: "m:ss" },
   { label: "1.50 (decimal hours)", value: "decimal_hours" },
+];
+
+// A cell always holds E.164; this is only how it is drawn. Kept in step with
+// `_PHONE_FORMATS` on the server and `PhoneFormat` in lib/phone.ts.
+const PHONE_FORMAT_OPTIONS = [
+  { label: "+63 917 123 4567 (international)", value: "international" },
+  { label: "0917 123 4567 (local)", value: "national" },
+  { label: "+639171234567 (E.164)", value: "e164" },
 ];
 
 // Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
@@ -180,6 +189,15 @@ export function ColumnDialog({
   // hex values — the same shorthand a choice column's options use. Offered and
   // never enforced, so an empty palette is a colour column that works normally.
   const [swatchText, setSwatchText] = useState("");
+  // Phone: which country a *national* number is read against, and which countries
+  // the column accepts at all. The first changes what the column takes, not just
+  // how it looks — with none set the server accepts only "+" numbers.
+  const [phoneRegion, setPhoneRegion] = useState<string | null>(null);
+  const [phoneAllowed, setPhoneAllowed] = useState<string[]>([]);
+  const [phoneDisplay, setPhoneDisplay] = useState("international");
+  // 245 entries through `Intl.DisplayNames`, computed once per module and memoised
+  // here so re-rendering the dialog does not walk the list again.
+  const countries = useMemo(() => countryOptions(), []);
   // Rating: which glyph the scale is drawn with. Its *size* is the shared `max`
   // key held above — the top of a rating is a bound like any other.
   const [ratingIcon, setRatingIcon] = useState("star");
@@ -269,6 +287,9 @@ export function ColumnDialog({
       setSwatchText("");
       setRatingIcon("star");
       setDurationFmt("h:mm");
+      setPhoneRegion(null);
+      setPhoneAllowed([]);
+      setPhoneDisplay("international");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -302,6 +323,9 @@ export function ColumnDialog({
       setSwatchText("");
       setRatingIcon("star");
       setDurationFmt("h:mm");
+      setPhoneRegion(null);
+      setPhoneAllowed([]);
+      setPhoneDisplay("international");
       setTargetWorkspace(workspaceUuid);
       setTargetListUuid(null);
       setDisplayColumnUuid(null);
@@ -338,6 +362,9 @@ export function ColumnDialog({
     setAllowOther(!!config.allow_other);
     setLinkText((config.label as string) ?? "");
     setSwatchText(((config.swatches as string[]) ?? []).join(";"));
+    setPhoneRegion((config.default_region as string) ?? null);
+    setPhoneAllowed((config.allowed_regions as string[]) ?? []);
+    setPhoneDisplay((config.display_format as string) ?? "international");
     setRatingIcon((config.rating_icon as string) ?? "star");
     setDurationFmt((config.duration_format as string) ?? "h:mm");
     // Left null so the seeding effect can resolve which workspace the stored
@@ -586,6 +613,16 @@ export function ColumnDialog({
       }
       if (type === "link") config.label = linkText.trim() || null;
       if (type === "email") config.max_length = maxLength;
+      if (type === "phone") {
+        // All three always sent, like `unique`: a config PATCH merges, so clearing
+        // a region means an explicit null rather than an omitted key — and this is
+        // the one folded-away setting where leaving a stale value in place changes
+        // which numbers the column *accepts*, not merely how they are drawn.
+        config.default_region = phoneRegion;
+        config.allowed_regions = phoneAllowed.length ? phoneAllowed : null;
+        config.display_format =
+          phoneDisplay === "international" ? null : phoneDisplay;
+      }
       if (type === "rating") {
         // The scale rides on the shared `max` key, so it goes out with the other
         // bounds rather than under a name of its own. Always sent, like `unique`:
@@ -646,6 +683,7 @@ export function ColumnDialog({
           type === "text" ||
           type === "link" ||
           type === "email" ||
+          type === "phone" ||
           type === "color"
         )
           // Sent as typed. The server normalises an email and a colour to their
@@ -1290,6 +1328,51 @@ export function ColumnDialog({
               </Field>
             )}
 
+          {type === "phone" && (
+            <>
+              <Field
+                label="Default country"
+                htmlFor="col-phone-region"
+                optional
+                hint="Which country a local number like 0917 123 4567 belongs to. Leave it unset and the column takes only numbers written with their country code."
+              >
+                <Dropdown
+                  inputId="col-phone-region"
+                  value={phoneRegion}
+                  options={countries}
+                  onChange={(e) => setPhoneRegion(e.value ?? null)}
+                  filter
+                  showClear
+                  placeholder="None — country code required"
+                />
+              </Field>
+              <Field
+                label="Only accept numbers from"
+                htmlFor="col-phone-allowed"
+                optional
+                hint="Leave empty to accept any country."
+              >
+                <MultiSelect
+                  inputId="col-phone-allowed"
+                  value={phoneAllowed}
+                  options={countries}
+                  onChange={(e) => setPhoneAllowed(e.value ?? [])}
+                  filter
+                  display="chip"
+                  placeholder="Any country"
+                />
+              </Field>
+              <Field label="Shown as" htmlFor="col-phone-display">
+                <Dropdown
+                  inputId="col-phone-display"
+                  value={phoneDisplay}
+                  options={PHONE_FORMAT_OPTIONS}
+                  onChange={(e) => setPhoneDisplay(e.value)}
+                />
+              </Field>
+            </>
+          )}
+
           {type === "color" && (
             <Field
               label="Palette"
@@ -1482,6 +1565,7 @@ export function ColumnDialog({
                     (type === "text" ||
                       type === "link" ||
                       type === "email" ||
+                      type === "phone" ||
                       type === "color") && (
                       <InputText
                         id="col-default"

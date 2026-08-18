@@ -13,6 +13,7 @@ class ColumnType(str, enum.Enum):
     lookup = "lookup"
     link = "link"
     email = "email"
+    phone = "phone"
     color = "color"
     rating = "rating"
     duration = "duration"

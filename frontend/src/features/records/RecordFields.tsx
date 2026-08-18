@@ -30,6 +30,7 @@ import {
   formatDuration,
   parseDuration,
 } from "../../lib/duration";
+import { formatAsTyped, phonePlaceholder } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
@@ -303,6 +304,38 @@ function ColorField({
 }
 
 /**
+ * A phone cell, spaced as it is typed.
+ *
+ * The formatting only ever *reformats* — `AsYouType` adds no digit and drops none —
+ * so what is submitted is what was typed and the server still has the last word.
+ * That is what makes it safe to do on every keystroke: unlike a duration, there is
+ * no reading of a half-typed number that could be stored and be wrong.
+ *
+ * It does not normalise. `+63 917 123 4567` is sent as typed and the server writes
+ * `+639171234567` (`normalize_phone`), because rewriting the box to E.164 mid-word
+ * would fight whoever is typing and hide the spacing that makes a number checkable
+ * by eye. The canonical form comes back on the next read.
+ */
+function PhoneField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: ChoiceFieldProps) {
+  return (
+    <InputText
+      id={id}
+      type="tel"
+      value={typeof value === "string" ? value : ""}
+      onChange={(e) => onChange(formatAsTyped(column, e.target.value))}
+      placeholder={phonePlaceholder(column)}
+      disabled={disabled}
+    />
+  );
+}
+
+/**
  * A duration cell, typed the way the column is written.
  *
  * Two editors behind one case, split on the format for the reason `parseDuration`
@@ -504,6 +537,16 @@ export function RecordField({
           onChange={(e) => onChange(e.target.value)}
           placeholder="name@example.com"
           disabled={disabled}
+        />
+      );
+    case "phone":
+      return (
+        <PhoneField
+          id={id}
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
         />
       );
     case "color":

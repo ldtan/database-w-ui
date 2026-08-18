@@ -237,6 +237,7 @@ Common `config` keys (all optional unless noted):
 | `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `email`       | address `string`, trimmed and lowercased   | `max_length?` |
+| `phone`       | E.164 `string` (`+639171234567`)           | `default_region?` (ISO-3166 alpha-2), `allowed_regions?`, `display_format?` (`e164`/`national`/`international`) |
 | `color`       | `#rrggbb` `string`, lowercased             | `swatches?` (a palette the picker offers) |
 | `rating`      | whole `number`, `1..max`                   | `max?` (scale, default 5, ≤ 10), `rating_icon?` (`star`/`heart`/`number`) |
 | `duration`    | `number` of **seconds**                    | `min?`, `max?` (seconds), `duration_format?` (`h:mm`/`h:mm:ss`/`m:ss`/`decimal_hours`) |
@@ -341,6 +342,24 @@ Notes:
   `swatches` are **offered, never enforced**: the point of a colour field is picking one,
   so a colour outside the palette is a valid answer, which is the opposite bargain to
   `choice`'s `options`.
+- `phone` — **the normalisation is the type.** A cell stores E.164 whatever was typed,
+  so `0917 123 4567`, `+63 917 123 4567` and `09171234567` are one value: `unique`
+  catches the duplicate it exists to catch, a filter for one spelling finds the others,
+  and grouping shows one person once. A regex cannot do that, so the backend carries
+  `phonenumbers` (Google's libphonenumber) and the frontend its counterpart
+  `libphonenumber-js` — the two describe the same numbering plans, so what is *shown*
+  agrees with what was *accepted*. Update them together.
+  - **There is no implicit country.** Without a `default_region` the column takes only a
+    number carrying its own country code; a server-side geography guess would read one
+    country's number as another's, silently and per record. `default_region` is what
+    lets a national number be typed, `allowed_regions` narrows what the column accepts
+    once parsed, and a `default_region` outside that set is refused at config time — it
+    would be a column nobody could fill by typing. `display_format` is a UI hint like
+    `number_format`, and `national` falls back to the international form for a number
+    from elsewhere, since a local rendering of a foreign number is one nobody can dial.
+  - `text` → `phone` is the motivating conversion: it is how an existing free-text
+    column gets cleaned up, with the rows that cannot be read named in the report rather
+    than dropped.
 - `rating` / `duration` — **both are `number` in a costume, and `NUMERIC_TYPES` is what
   keeps the costume from changing the behaviour.** A cell in either holds a plain JSON
   number, so `items/filtering.py` casts it (`_numeric`, `_numeric_comparable`,
@@ -763,8 +782,9 @@ Notes:
   (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
   with nowhere to put a per-group number. Doing it properly means an aggregate row inside
   the table.
-- **Further column types:** `attachment`, `phone`, `location`.
-  (`link`, `user`, `group`, `email`, `color`, `rating` and `duration` are built — see §5.)
+- **Further column types:** `attachment`, `location`.
+  (`link`, `user`, `group`, `email`, `phone`, `color`, `rating` and `duration` are
+  built — see §5.)
 - **Client-streamed export downloads:** export streams server-side (§ items), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /

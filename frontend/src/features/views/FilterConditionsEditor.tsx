@@ -13,6 +13,7 @@ import {
   formatDuration,
   parseDuration,
 } from "../../lib/duration";
+import { normalizePhoneQuery, phonePlaceholder } from "../../lib/phone";
 import { ratingScale } from "../../lib/rating";
 import {
   filterTokenLabel,
@@ -124,6 +125,12 @@ export function FilterConditionsEditor({
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
                 />
+              ) : col?.type === "phone" ? (
+                <PhoneFilterValue
+                  column={col}
+                  value={cond.value}
+                  onChange={(v) => update(i, { value: v })}
+                />
               ) : col?.type === "choice" ? (
                 // Typable when the column takes answers of its own: those are
                 // stored as whatever was typed, so the options are no longer the
@@ -215,6 +222,47 @@ export function FilterConditionsEditor({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * The value side of a condition on a `phone` column.
+ *
+ * Cells hold E.164, so a condition typed the way somebody says a number out loud
+ * ("0917 123 4567") matches nothing — the trap a plain text box would leave open,
+ * silently, on the one type where the stored form and the spoken form always differ.
+ *
+ * So a *whole* number is normalised to E.164, and anything else is left exactly as
+ * typed, which is what keeps `contains 917` working. On blur rather than per
+ * keystroke: mid-word the text is not a number yet, and rewriting the box the moment
+ * the last digit lands would move the cursor out from under whoever is still typing.
+ */
+function PhoneFilterValue({
+  column,
+  value,
+  onChange,
+}: {
+  column: Column;
+  value: unknown;
+  onChange: (value: unknown) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const shown = draft ?? (typeof value === "string" ? value : "");
+  return (
+    <InputText
+      value={shown}
+      onChange={(e) => {
+        setDraft(e.target.value);
+        onChange(e.target.value);
+      }}
+      onBlur={() => {
+        setDraft(null);
+        const stored = normalizePhoneQuery(column, shown);
+        if (stored !== shown) onChange(stored);
+      }}
+      placeholder={phonePlaceholder(column)}
+      style={{ width: 120 }}
+    />
   );
 }
 
