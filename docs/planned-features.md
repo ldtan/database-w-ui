@@ -525,7 +525,7 @@ someone else creates, edits or deletes shows up without a manual reload. It is o
 `useLiveList(listUuid)` (`frontend/src/lib/useLiveList.ts`), spread into the list's items
 `useQuery` in `ListDetailPage`. Today its body hands react-query a `refetchInterval` of
 `LIVE_REFRESH_SECONDS` (`lib/config.ts`, from `VITE_LIVE_REFRESH_SECONDS`, default **10s**,
-`0` disables; the Render deploy sets 60). A caller whose query is dearer than a page of
+`0` disables; the Render deploy sets 15, down from 60 on 2026-08-18). A caller whose query is dearer than a page of
 rows raises its own interval through the hook's `minSeconds` argument — the metric strip
 passes `METRIC_REFRESH_SECONDS` (60) — which can only ever slow a query down and cannot
 revive polling that `0` turned off. Two guardrails hold the idle cost at zero: polling is
@@ -549,8 +549,12 @@ sidesteps the auth friction below. The costs accepted: up to one interval of lat
 wasted query per *focused, active* tab. A caveat that has since expired: on the free plan an
 actively-used tab polling kept the instance awake and spent free hours, which the idle
 guardrail above capped. `starter` is always-on, so that side effect is gone and polling is
-now only a load question — at 60s and ~23 ms of CPU a poll, a hundred actively-used tabs is
-~38 ms of CPU per second, under 8% of the 0.5-CPU instance.
+now only a load question — at the 15s the deploy sets and ~23 ms of CPU a poll, a hundred
+actively-used tabs is ~193 ms of CPU per second, ~19% of the 0.5-CPU instance (it was ~38 ms
+and under 8% at 60s). The two floors are why that is not a straight 4×: the count follows
+only to 30s and the metric strip does not move off 60 at all. The number to watch is not
+that average but the dearest tab — a page under search costs ~500 ms rather than ~23, so a
+single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
 
 **Planned (server push, near-instant).** When "live" needs to feel instant, or many viewers
 watch one list (where polling's idle queries add up), replace the hook's body with a

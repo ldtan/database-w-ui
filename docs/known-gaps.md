@@ -1093,7 +1093,8 @@ total so a rejected `after` pays for no count at all.
 
 **"Live records" is polling, and its refresh must stay a permissioned re-read — never a
 data push.** An open list refetches its records every `VITE_LIVE_REFRESH_SECONDS` (default
-10, `0` disables; the Render deploy sets 60) through the `useLiveList` hook
+10, `0` disables; the Render deploy sets 15, down from 60 on 2026-08-18) through the
+`useLiveList` hook
 (`frontend/src/lib/useLiveList.ts`) — which a dearer caller may only ever *slow*, via the
 `minSeconds` floor the metric strip passes (§9) — paused
 while the tab is hidden **and** after 5 minutes with no user activity on a still-visible tab
