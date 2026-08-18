@@ -50,6 +50,13 @@ class ColumnConfig(BaseModel):
     # link
     allowed_schemes: Optional[list[str]] = None  # defaults to ["http", "https"]
     label: Optional[str] = None  # fixed anchor text; falls back to the URL itself
+    # email — shares `max_length` with text/link above. There is deliberately no
+    # domain allowlist: which addresses a company will accept is a policy that
+    # changes without the column changing, and a `text` column with a `pattern`
+    # already expresses it for the one shop that wants it enforced here.
+    # color — a #rrggbb string. `swatches` is a palette the picker offers first;
+    # it constrains nothing, because the point of a colour field is picking one.
+    swatches: Optional[list[str]] = None
     # choice — options are plain labels; a cell stores the label itself
     choices: Optional[str] = None  # shorthand input, e.g. "Todo;Doing;Done"
     options: Optional[list[str]] = None  # canonical form, e.g. ["Todo", "Doing"]

@@ -15,12 +15,14 @@ import { useState } from "react";
 
 import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
+import { ColorPicker } from "primereact/colorpicker";
 import { Dropdown } from "primereact/dropdown";
 import { Editor } from "primereact/editor";
 import { InputNumber } from "primereact/inputnumber";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
 
+import { colorSwatches, isColor, normalizeColor } from "../../lib/color";
 import type { Column } from "../../lib/types";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
@@ -229,6 +231,69 @@ function SingleChoiceField({
   );
 }
 
+/**
+ * A colour cell: a picker, the hex, and the column's palette if it has one.
+ *
+ * The text box is not a convenience — it is the only way to paste a brand colour
+ * somebody was given as a string, and the only way to *see* what is stored. It
+ * takes what is typed verbatim and lets the server normalise, for the same reason
+ * the email field does: rewriting `#ab` to `#aabbcc` mid-word would fight whoever
+ * is typing `#abcdef`.
+ *
+ * `swatches` are offered and never enforced (`colorSwatches`), so the picker and
+ * the box stay live whatever the palette says.
+ */
+function ColorField({
+  id,
+  column,
+  value,
+  disabled,
+  onChange,
+}: ChoiceFieldProps) {
+  const swatches = colorSwatches(column);
+  const text = typeof value === "string" ? value : "";
+  // PrimeReact's ColorPicker wants a bare hex with no `#`, and gives one back.
+  const picked = isColor(text) ? normalizeColor(text).slice(1) : "";
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-2">
+        <ColorPicker
+          inputId={id}
+          format="hex"
+          value={picked}
+          onChange={(e) => onChange(e.value ? `#${String(e.value)}` : null)}
+          disabled={disabled}
+        />
+        <InputText
+          aria-label={`${column.display_name}: hex value`}
+          className="font-mono"
+          value={text}
+          onChange={(e) => onChange(e.target.value || null)}
+          placeholder="#1d4ed8"
+          disabled={disabled}
+        />
+      </div>
+      {swatches.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1">
+          {swatches.map((swatch) => (
+            <button
+              key={swatch}
+              type="button"
+              className="h-6 w-6 rounded border"
+              style={{ background: swatch, borderColor: "var(--surface-border)" }}
+              title={swatch}
+              aria-label={swatch}
+              onClick={() => onChange(swatch)}
+              disabled={disabled}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function RecordField({
   listUuid,
   column,
@@ -358,6 +423,30 @@ export function RecordField({
           onChange={(e) => onChange(e.target.value)}
           placeholder="https://example.com"
           disabled={disabled}
+        />
+      );
+    case "email":
+      return (
+        <InputText
+          id={id}
+          type="email"
+          value={(value as string) ?? ""}
+          // Sent as typed. The server lowercases and trims it (`normalize_email`),
+          // and normalising as somebody types would fight their cursor and their
+          // capital letters for no gain.
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="name@example.com"
+          disabled={disabled}
+        />
+      );
+    case "color":
+      return (
+        <ColorField
+          id={id}
+          column={column}
+          value={value}
+          disabled={disabled}
+          onChange={onChange}
         />
       );
     case "lookup": {

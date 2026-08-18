@@ -1,4 +1,6 @@
+import { isColor, normalizeColor } from "../../lib/color";
 import { stripHtml } from "../../lib/display";
+import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
@@ -100,6 +102,39 @@ export function renderCell(
       >
         {linkLabel(column, href)}
       </a>
+    );
+  }
+  if (column.type === "email") {
+    const href = mailtoHref(value);
+    // Same two escapes as `link` above: an address the check rejects is plain
+    // text, and nothing is an anchor while the cell is an editor.
+    if (!href || editing) return String(value);
+    return (
+      <a
+        href={href}
+        className="hover:underline"
+        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+      >
+        {String(value)}
+      </a>
+    );
+  }
+  if (column.type === "color") {
+    const hex = isColor(value) ? normalizeColor(value) : null;
+    // A colour with no swatch is a six-character string nobody can read as a
+    // colour, so an unrenderable value falls back to the text rather than
+    // drawing a chip in some arbitrary fill.
+    if (!hex) return String(value);
+    return (
+      <span className="inline-flex items-center gap-2">
+        <span
+          className="inline-block h-4 w-4 shrink-0 rounded border"
+          style={{ background: hex, borderColor: "var(--surface-border)" }}
+          aria-hidden
+        />
+        <span className="font-mono text-xs">{hex}</span>
+      </span>
     );
   }
   // Otherwise a datetime renders as its raw stored string, seconds and all.

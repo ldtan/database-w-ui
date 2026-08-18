@@ -147,6 +147,11 @@ export interface ColumnConfig {
   multiple?: boolean;
   allowed_schemes?: string[];
   label?: string;
+  /** Text, link and email columns. */
+  max_length?: number;
+  /** Colour columns only. A palette the picker offers first — it constrains
+   *  nothing, because the point of a colour field is picking one. */
+  swatches?: string[];
   formula?: string;
   [key: string]: unknown;
 }
