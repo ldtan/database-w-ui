@@ -26,7 +26,12 @@ import {
   conversionTargets,
   duplicateTargets,
 } from "../../lib/columnTypes";
-import { countryOptions } from "../../lib/phone";
+import {
+  countryChoices,
+  phoneExample,
+  type PhoneFormat,
+} from "../../lib/phone";
+import type { CountryCode } from "libphonenumber-js/max";
 import { RATING_MAX } from "../../lib/rating";
 import { isTemporal, parseTemporal, serializeTemporal } from "../../lib/temporal";
 import { useToast } from "../../lib/toast";
@@ -79,11 +84,29 @@ const DURATION_FORMAT_OPTIONS = [
 
 // A cell always holds E.164; this is only how it is drawn. Kept in step with
 // `_PHONE_FORMATS` on the server and `PhoneFormat` in lib/phone.ts.
-const PHONE_FORMAT_OPTIONS = [
-  { label: "+63 917 123 4567 (international)", value: "international" },
-  { label: "0917 123 4567 (local)", value: "national" },
-  { label: "+639171234567 (E.164)", value: "e164" },
+//
+// Where the column names a country the examples are drawn from *it*, because a
+// fixed `+63 917 123 4567` describes the choice correctly on a Philippine column
+// and misdescribes it on every other — and this dropdown is the one place somebody
+// compares the three forms side by side.
+//
+// Where it names none there is no country to speak for, so the options describe
+// the *shape* instead. Falling back to an example from some default country would
+// be the same guess `initialRegion` refuses to make, and worse here: `local` has
+// no example without a country at all, so two of the three options would render
+// identically and one of them would be a lie.
+const PHONE_FORMATS: { label: string; shape: string; value: PhoneFormat }[] = [
+  { label: "international", shape: "International — country code and spaces", value: "international" },
+  { label: "local", shape: "Local — no country code", value: "national" },
+  { label: "E.164", shape: "E.164 — country code, no spaces", value: "e164" },
 ];
+
+function phoneFormatOptions(region: CountryCode | undefined) {
+  return PHONE_FORMATS.map(({ label, shape, value }) => ({
+    label: region ? `${phoneExample(region, value)} (${label})` : shape,
+    value,
+  }));
+}
 
 // Which map site a location cell's external link opens. Kept in step with
 // `_MAP_LINKS` on the server and `mapHref` in lib/location.ts.
@@ -211,8 +234,30 @@ export function ColumnDialog({
   const [mapZoom, setMapZoom] = useState<number | null>(null);
   const [mapLink, setMapLink] = useState("osm");
   // 245 entries through `Intl.DisplayNames`, computed once per module and memoised
-  // here so re-rendering the dialog does not walk the list again.
-  const countries = useMemo(() => countryOptions(), []);
+  // here so re-rendering the dialog does not walk the list again. Labelled with
+  // dial codes by the same function the record editors use, so a country reads the
+  // same where a column is set up and where its cells are filled in.
+  const countries = useMemo(() => countryChoices(), []);
+  // The default country may only be one the column accepts. The server already
+  // refuses the other combination (`validate_config_constraints`: "default_region
+  // must be within allowed_regions"), so offering it here would be offering a
+  // config that cannot be saved — and the refusal arrives as a toast on Save,
+  // three fields away from the dropdown that caused it.
+  const defaultCountries = useMemo(
+    () => countryChoices(phoneAllowed as CountryCode[]),
+    [phoneAllowed],
+  );
+  // Every example the dialog shows comes from the country actually chosen: the
+  // default first, then the only country the column allows, then nothing — the
+  // same order `phonePlaceholder` walks, for the same reason.
+  const phoneExampleRegion = (phoneRegion ??
+    (phoneAllowed.length === 1 ? phoneAllowed[0] : undefined)) as
+    | CountryCode
+    | undefined;
+  const phoneFormats = useMemo(
+    () => phoneFormatOptions(phoneExampleRegion),
+    [phoneExampleRegion],
+  );
   // Rating: which glyph the scale is drawn with. Its *size* is the shared `max`
   // key held above — the top of a rating is a bound like any other.
   const [ratingIcon, setRatingIcon] = useState("star");
@@ -1447,16 +1492,20 @@ export function ColumnDialog({
                 label="Default country"
                 htmlFor="col-phone-region"
                 optional
-                hint="Which country a local number like 0917 123 4567 belongs to. Leave it unset and the column takes only numbers written with their country code."
+                hint={
+                  phoneAllowed.length
+                    ? "Which country a local number belongs to. Only the countries this column accepts are offered."
+                    : "Which country a local number like 0917 123 4567 belongs to. Leave it unset and whoever fills the column picks a country per number, or writes the country code."
+                }
               >
                 <Dropdown
                   inputId="col-phone-region"
                   value={phoneRegion}
-                  options={countries}
+                  options={defaultCountries}
                   onChange={(e) => setPhoneRegion(e.value ?? null)}
                   filter
                   showClear
-                  placeholder="None — country code required"
+                  placeholder="None — chosen per number"
                 />
               </Field>
               <Field
@@ -1469,17 +1518,37 @@ export function ColumnDialog({
                   inputId="col-phone-allowed"
                   value={phoneAllowed}
                   options={countries}
-                  onChange={(e) => setPhoneAllowed(e.value ?? [])}
+                  onChange={(e) => {
+                    const next: string[] = e.value ?? [];
+                    setPhoneAllowed(next);
+                    // Narrowing the column out from under its own default would
+                    // save a config the server refuses. Cleared here, where the
+                    // cause is on screen, rather than reported on Save.
+                    if (next.length && phoneRegion && !next.includes(phoneRegion)) {
+                      setPhoneRegion(null);
+                    }
+                  }}
                   filter
                   display="chip"
                   placeholder="Any country"
                 />
               </Field>
-              <Field label="Shown as" htmlFor="col-phone-display">
+              <Field
+                label="Shown as"
+                htmlFor="col-phone-display"
+                hint={
+                  phoneExampleRegion
+                    ? `Numbers will look like ${phoneExample(
+                        phoneExampleRegion,
+                        phoneDisplay as PhoneFormat,
+                      )} in the grid. It changes nothing about what is stored — a cell always holds E.164.`
+                    : "How a number is drawn in the grid. It changes nothing about what is stored — a cell always holds E.164. Set a default country above to see an example."
+                }
+              >
                 <Dropdown
                   inputId="col-phone-display"
                   value={phoneDisplay}
-                  options={PHONE_FORMAT_OPTIONS}
+                  options={phoneFormats}
                   onChange={(e) => setPhoneDisplay(e.value)}
                 />
               </Field>

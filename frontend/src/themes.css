@@ -1073,6 +1073,113 @@ a {
 .cell-editor .p-autocomplete-multiple-container {
   width: 100%;
 }
+
+/* A phone editor is two controls on one line — a country and a number — so the
+   rule above has to be undone for the country and re-aimed at the number. The
+   dropdown escapes it already by not being a *direct* child of `.cell-editor`;
+   this says so on purpose rather than leaving it to that accident, and stops the
+   dropdown from growing to the width of its longest country name.
+
+   `min-width: 0` on the box is what lets the pair shrink inside a narrow column:
+   without it a flex item refuses to go below its content's width and the country
+   is pushed out of the cell. */
+.phone-field {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  width: 100%;
+  flex-wrap: wrap;
+}
+.phone-field > .p-dropdown {
+  flex: 0 0 auto;
+  width: auto;
+}
+/* Sized to the `PH +63` the value template renders, not to the country names in
+   the panel — which are what a `width: auto` dropdown would otherwise measure. */
+.phone-field > .p-dropdown .p-dropdown-label {
+  width: 5.5rem;
+  padding-right: 0;
+  white-space: nowrap;
+}
+.phone-country-value {
+  white-space: nowrap;
+}
+
+/* Inside a grid cell the pair must fit on one line whatever the column's width,
+   because an editor that wraps grows the row it opened in — the very thing
+   `compact` exists to prevent. So: no wrapping, the code alone in the dropdown
+   (`+63`, not `PH +63`), and no clear button. Clearing a country is a rare thing
+   to want and the record dialog still offers it; a cell's width is not.
+
+   Where a country picker *is* shown — only on a column that names none, where a
+   number cannot be entered without one — the pair needs more room than a grid
+   column has, so it floats over the cells beside it rather than squeezing the
+   number into forty pixels. Overlaying is the one way to be both full-width and
+   the height of a row; it is what a spreadsheet does with a long cell, and it
+   lasts only as long as the editor is open. */
+.phone-field-compact {
+  flex-wrap: nowrap;
+}
+.phone-field-compact > .p-dropdown .p-dropdown-label {
+  width: 2.6rem;
+}
+.phone-field-compact > .p-dropdown .p-dropdown-clear-icon {
+  display: none;
+}
+.phone-field-compact > .p-inputtext {
+  flex: 1 1 4rem;
+}
+.cell-editor:has(> .phone-field-compact > .p-dropdown) {
+  position: relative;
+}
+.phone-field-compact:has(> .p-dropdown) {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  transform: translateY(-50%);
+  width: max(100%, 15rem);
+  z-index: 3;
+  background: var(--surface);
+  border-radius: var(--radius);
+}
+.phone-field > .p-inputtext {
+  flex: 1 1 8rem;
+  min-width: 0;
+}
+/* The status line spans the pair rather than sitting beside them. */
+.phone-field > .phone-status {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+/* A phone cell's actions: present, but not competing with the number for
+   attention until somebody reaches for them. Revealed on hover of the row's cell
+   and on keyboard focus, so they are reachable by tab as well as by pointer —
+   `opacity` rather than `display` for exactly that reason, since a hidden button
+   is not focusable and the reveal would never fire. */
+.phone-actions {
+  opacity: 0;
+  transition: opacity 0.12s ease-in-out;
+}
+.phone-actions > * {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  line-height: 1;
+}
+td:hover > .phone-cell .phone-actions,
+.phone-cell:hover .phone-actions,
+.phone-actions:focus-within {
+  opacity: 1;
+}
+/* Touch has no hover, and a control that only appears on one is a control that
+   does not exist on a phone — which is the device most likely to want to dial. */
+@media (hover: none) {
+  .phone-actions {
+    opacity: 1;
+  }
+}
 .p-datatable .p-datatable-tbody > tr {
   background: var(--surface);
   color: var(--text);

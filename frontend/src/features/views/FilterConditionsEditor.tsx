@@ -13,7 +13,6 @@ import {
   formatDuration,
   parseDuration,
 } from "../../lib/duration";
-import { normalizePhoneQuery, phonePlaceholder } from "../../lib/phone";
 import { ratingScale } from "../../lib/rating";
 import {
   filterTokenLabel,
@@ -25,6 +24,7 @@ import {
 import type { Column, FilterCondition } from "../../lib/types";
 import { LookupFilterValue } from "../lookups/LookupControls";
 import { PrincipalFilterValue } from "../principals/PrincipalControls";
+import { PhoneInput } from "../records/PhoneInput";
 import { NO_VALUE_OPS, OPERATORS } from "./operators";
 
 interface Props {
@@ -236,6 +236,12 @@ export function FilterConditionsEditor({
  * typed, which is what keeps `contains 917` working. On blur rather than per
  * keystroke: mid-word the text is not a number yet, and rewriting the box the moment
  * the last digit lands would move the cursor out from under whoever is still typing.
+ *
+ * All of which now lives in `PhoneInput`'s `query` mode, alongside the record editor
+ * it has to agree with. What the shared control adds here is the country dropdown —
+ * the thing that decides which numbering plan `0917 123 4567` is read against, and
+ * without which a filter on a column with no `default_region` cannot be typed in
+ * national form at all.
  */
 function PhoneFilterValue({
   column,
@@ -246,22 +252,12 @@ function PhoneFilterValue({
   value: unknown;
   onChange: (value: unknown) => void;
 }) {
-  const [draft, setDraft] = useState<string | null>(null);
-  const shown = draft ?? (typeof value === "string" ? value : "");
   return (
-    <InputText
-      value={shown}
-      onChange={(e) => {
-        setDraft(e.target.value);
-        onChange(e.target.value);
-      }}
-      onBlur={() => {
-        setDraft(null);
-        const stored = normalizePhoneQuery(column, shown);
-        if (stored !== shown) onChange(stored);
-      }}
-      placeholder={phonePlaceholder(column)}
-      style={{ width: 120 }}
+    <PhoneInput
+      column={column}
+      value={value}
+      onChange={onChange}
+      mode="query"
     />
   );
 }

@@ -1,10 +1,12 @@
+import { useState } from "react";
+
 import { isColor, normalizeColor } from "../../lib/color";
 import { stripHtml } from "../../lib/display";
 import { durationFormat, formatDuration } from "../../lib/duration";
 import { mailtoHref } from "../../lib/email";
 import { linkLabel, safeHref } from "../../lib/links";
 import { locationLabel, mapHref } from "../../lib/location";
-import { formatPhone, telHref } from "../../lib/phone";
+import { formatPhone, splitPhone, telHref } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
 import type { Column, ListItem } from "../../lib/types";
@@ -155,16 +157,7 @@ export function renderCell(
     // Same two escapes as `link` and `email`: a number the parser rejects is plain
     // text, and nothing is an anchor while the cell is an editor.
     if (!href || editing) return shown || String(value);
-    return (
-      <a
-        href={href}
-        className="hover:underline whitespace-nowrap"
-        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
-        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
-      >
-        {shown}
-      </a>
-    );
+    return <PhoneCell column={column} value={value} href={href} shown={shown} />;
   }
   if (column.type === "duration") {
     return formatDuration(durationFormat(column), value);
@@ -237,4 +230,82 @@ export function renderCell(
     return <span style={{ whiteSpace: "pre-wrap" }}>{String(value)}</span>;
   }
   return String(value);
+}
+
+/**
+ * A phone cell, and the two things anyone reads one in order to do.
+ *
+ * The number itself stays the `tel:` link it already was. What is added is a copy
+ * button and an SMS link, revealed on hover the way a row's actions are: a phone
+ * number in a table is almost never being *read* — it is being dialled, texted, or
+ * pasted into whatever does the dialling — and on a desktop, where `tel:` often
+ * lands nowhere, copying was three clicks through the record dialog.
+ *
+ * Every action carries the **E.164** form, never the displayed one. What the column
+ * shows is a local convention; what another system will accept is the canonical
+ * number, and `parsed.number` is the only form that is both.
+ *
+ * `sms:` is not in the backend's `SAFE_LINK_SCHEMES`, and that is not an
+ * inconsistency: that list governs schemes a *`link` cell's value* may carry, where
+ * the scheme is chosen by whoever typed the value. Here the scheme is ours and the
+ * number is parsed before it is used — the same argument `telHref` already makes.
+ */
+function PhoneCell({
+  column,
+  value,
+  href,
+  shown,
+}: {
+  column: Column;
+  value: unknown;
+  href: string;
+  shown: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  const e164 = href.slice("tel:".length);
+  const country = splitPhone(value).region;
+
+  return (
+    <span className="phone-cell inline-flex items-center gap-1">
+      <a
+        href={href}
+        className="hover:underline whitespace-nowrap"
+        style={{ color: "var(--brand)" }} // themed per palette; no Tailwind token for it
+        title={`Call ${formatPhone(column, value)}${country ? ` (${country})` : ""}`}
+        onClick={(e) => e.stopPropagation()} // don't also toggle row selection
+      >
+        {shown}
+      </a>
+      <span className="phone-actions inline-flex items-center gap-1">
+        <button
+          type="button"
+          className={`pi ${copied ? "pi-check" : "pi-copy"} text-xs`}
+          style={{ color: "var(--brand)" }}
+          title={copied ? "Copied" : `Copy ${e164}`}
+          aria-label={`Copy ${e164}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            // The tick is the whole acknowledgement. A toast per cell would be
+            // noise in a grid, and this renderer is shared with the card list and
+            // the bin, neither of which has anywhere sensible to put one.
+            void navigator.clipboard?.writeText(e164).then(
+              () => {
+                setCopied(true);
+                setTimeout(() => setCopied(false), 1200);
+              },
+              () => undefined, // a browser that refuses the clipboard says so itself
+            );
+          }}
+        />
+        <a
+          href={`sms:${e164}`}
+          className="pi pi-comment text-xs"
+          style={{ color: "var(--brand)" }}
+          title={`Text ${e164}`}
+          aria-label={`Text ${e164}`}
+          onClick={(e) => e.stopPropagation()}
+        />
+      </span>
+    </span>
+  );
 }
