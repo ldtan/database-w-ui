@@ -159,6 +159,11 @@ export function InlineCellEditor({
         // outside click, closes the cell and unmounts the dialog mid-sentence.
         // The same row is one click away in the Edit dialog, which can host one.
         allowCreate={false}
+        // The other half of "a cell is not a dialog": an editor here may not grow
+        // the row it opened in, so the ones that would add a line of their own —
+        // phone's validity message — put it in a tooltip instead. Every row in the
+        // grid would jump as the cell was typed in otherwise.
+        compact
       />
     </div>
   );

@@ -30,13 +30,13 @@ import {
   formatDuration,
   parseDuration,
 } from "../../lib/duration";
-import { formatAsTyped, phonePlaceholder } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import type { Column } from "../../lib/types";
 import { LocationField } from "../locations/LocationField";
 import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
 import { ReferencePicker } from "../references/ReferencePicker";
+import { PhoneInput } from "./PhoneInput";
 import { clearedNested, textMode, type ResolvedField } from "./recordValues";
 
 /**
@@ -305,38 +305,6 @@ function ColorField({
 }
 
 /**
- * A phone cell, spaced as it is typed.
- *
- * The formatting only ever *reformats* — `AsYouType` adds no digit and drops none —
- * so what is submitted is what was typed and the server still has the last word.
- * That is what makes it safe to do on every keystroke: unlike a duration, there is
- * no reading of a half-typed number that could be stored and be wrong.
- *
- * It does not normalise. `+63 917 123 4567` is sent as typed and the server writes
- * `+639171234567` (`normalize_phone`), because rewriting the box to E.164 mid-word
- * would fight whoever is typing and hide the spacing that makes a number checkable
- * by eye. The canonical form comes back on the next read.
- */
-function PhoneField({
-  id,
-  column,
-  value,
-  disabled,
-  onChange,
-}: ChoiceFieldProps) {
-  return (
-    <InputText
-      id={id}
-      type="tel"
-      value={typeof value === "string" ? value : ""}
-      onChange={(e) => onChange(formatAsTyped(column, e.target.value))}
-      placeholder={phonePlaceholder(column)}
-      disabled={disabled}
-    />
-  );
-}
-
-/**
  * A duration cell, typed the way the column is written.
  *
  * Two editors behind one case, split on the format for the reason `parseDuration`
@@ -404,6 +372,7 @@ export function RecordField({
   columns,
   values,
   allowCreate = true,
+  compact = false,
 }: {
   listUuid: string;
   column: Column;
@@ -418,6 +387,11 @@ export function RecordField({
    *  its target list. False where this renders inside the grid's cell editor,
    *  which cannot host one (see `inlineEdit`). */
   allowCreate?: boolean;
+  /** This editor sits in a grid cell rather than in a dialog, so it may not grow
+   *  the row it is in. Editors that would otherwise show a line of their own
+   *  beneath the control drop it here — today only `phone`, whose validity line
+   *  moves to the input's tooltip. */
+  compact?: boolean;
 }) {
   const id = `field-${column.uuid}`;
   switch (column.type) {
@@ -552,12 +526,13 @@ export function RecordField({
       );
     case "phone":
       return (
-        <PhoneField
+        <PhoneInput
           id={id}
           column={column}
           value={value}
           disabled={disabled}
           onChange={onChange}
+          compact={compact}
         />
       );
     case "color":
