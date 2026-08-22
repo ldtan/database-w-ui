@@ -645,15 +645,21 @@ a {
 
 /* The calendar's trigger. As a solid brand block beside its own input it was the
    loudest thing in the Share dialog — a button to *open a picker* outranking the
-   button that grants the access. It is an addon on the field, not an action. */
-.p-calendar .p-datepicker-trigger.p-button {
+   button that grants the access. It is an addon on the field, not an action.
+
+   `.temporal-trigger` is the same button on a field this app assembles itself
+   (`TemporalInput`), and it is named here rather than restyled next to that
+   component so the two cannot drift into looking like different controls. */
+.p-calendar .p-datepicker-trigger.p-button,
+.temporal-field > .temporal-trigger.p-button {
   background: var(--surface-2);
   border: var(--border-width) solid var(--border);
   border-left: none;
   color: var(--text-muted);
   border-radius: 0 var(--radius) var(--radius) 0;
 }
-.p-calendar .p-datepicker-trigger.p-button:enabled:hover {
+.p-calendar .p-datepicker-trigger.p-button:enabled:hover,
+.temporal-field > .temporal-trigger.p-button:enabled:hover {
   background: var(--hover);
   color: var(--brand);
 }
@@ -1180,6 +1186,58 @@ td:hover > .phone-cell .phone-actions,
     opacity: 1;
   }
 }
+
+/* A temporal editor is a box you type in with the picker on the end of it — the
+   same two-part shape the calendar has everywhere else in the app, which is why
+   the trigger borrows that component's theming above rather than restating it.
+
+   `min-width: 0` on the box is what lets the pair shrink inside a narrow column:
+   a flex item otherwise refuses to go below its content's width, and the button
+   is pushed out of the cell. */
+.temporal-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  flex-wrap: wrap;
+}
+.temporal-field > .p-inputtext {
+  flex: 1 1 8rem;
+  min-width: 0;
+  border-radius: var(--radius) 0 0 var(--radius);
+}
+/* The status line spans the pair rather than sitting beside them. */
+.temporal-field > .temporal-status {
+  flex: 1 0 100%;
+  margin: 0;
+}
+/* The panel *is* the calendar: the strip of padding around it is chrome nobody
+   asked for, and it is the part not covered by the inline calendar's own
+   `data-pr-is-overlay` marker — so removing it removes a place to misclick. */
+.temporal-picker .p-overlaypanel-content {
+  padding: 0;
+}
+/* A filter's controls sit in a row that wraps, so this one asks for about the width
+   the calendar it replaced had and then takes whatever else is going on the line it
+   lands on. Growing is what keeps its message on one line: a date and the sentence
+   under it need more room than the box alone does. */
+.temporal-field-query {
+  width: auto;
+  flex: 1 1 11rem;
+  max-width: 20rem;
+}
+/* Inside a grid cell the pair must stay on one line whatever the column's width,
+   because an editor that wraps grows the row it opened in — the very thing
+   `compact` exists to prevent. */
+.temporal-field-compact {
+  flex-wrap: nowrap;
+}
+/* `.cell-editor .p-inputtext` sets `width: 100%` on every input inside a cell
+   editor, which here fights the flex basis and pushes the trigger out. The flex
+   row already fills the cell; the box only has to fill what is left of it. */
+.cell-editor .temporal-field > .p-inputtext {
+  width: auto;
+}
+
 .p-datatable .p-datatable-tbody > tr {
   background: var(--surface);
   color: var(--text);
@@ -1387,6 +1445,20 @@ td:hover > .phone-cell .phone-actions,
 }
 .p-datepicker .p-datepicker-buttonbar {
   border-top: var(--border-width) solid var(--border);
+}
+/* Today and Clear. PrimeReact asks for `p-button-text` and the base theme paints
+   them solid anyway, which put two filled blocks at the foot of every picker — the
+   same complaint the trigger above answers, and louder, because these sit under the
+   dates rather than beside a field. Shortcuts, in the colour a link is. */
+.p-datepicker .p-datepicker-buttonbar .p-button {
+  background: transparent;
+  border-color: transparent;
+  color: var(--brand);
+  padding: 0.35rem 0.6rem;
+}
+.p-datepicker .p-datepicker-buttonbar .p-button:enabled:hover {
+  background: var(--hover);
+  color: var(--brand);
 }
 
 /* ============================================================
