@@ -605,6 +605,31 @@ async def test_temporal_range_enforced(client, list_uuid, add_column):
         assert bad.status_code == 400, bad.text
 
 
+async def test_temporal_refusal_names_the_shape_it_wanted(client, list_uuid, add_column):
+    """A malformed value is refused in words, and those words are quoted elsewhere.
+
+    The browser's box says the same sentence under a date it cannot read
+    (`temporalStatus` in frontend/src/lib/temporal.ts), so that somebody who types
+    a bad date is told once rather than told one thing and then another by the
+    server. Nothing else pins this wording, and an edit to `_TEMPORAL` that only
+    reads better would silently split the two apart.
+    """
+    cases = [
+        ("date", "12/07/2026", "a date (YYYY-MM-DD)"),
+        ("time", "25:00:00", "a time (HH:MM[:SS])"),
+        ("datetime", "2026-02-30T14:30:00", "a date-time (ISO-8601)"),
+    ]
+    for type_, value, shape in cases:
+        col = await add_column(
+            list_uuid, name=f"bad_{type_}", display_name=type_, type=type_
+        )
+        res = await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        )
+        assert res.status_code == 400, res.text
+        assert shape in res.json()["detail"], res.text
+
+
 async def test_temporal_range_must_be_well_formed(client, list_uuid):
     """The column itself is refused, rather than one that can never be filled in."""
     async def add(config):

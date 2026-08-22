@@ -161,8 +161,8 @@ export function InlineCellEditor({
         allowCreate={false}
         // The other half of "a cell is not a dialog": an editor here may not grow
         // the row it opened in, so the ones that would add a line of their own —
-        // phone's validity message — put it in a tooltip instead. Every row in the
-        // grid would jump as the cell was typed in otherwise.
+        // phone's validity message, and a date's — put it in a tooltip instead.
+        // Every row in the grid would jump as the cell was typed in otherwise.
         compact
       />
     </div>

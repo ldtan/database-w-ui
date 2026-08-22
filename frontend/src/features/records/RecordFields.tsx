@@ -13,7 +13,6 @@
  */
 import { useState } from "react";
 
-import { Calendar } from "primereact/calendar";
 import { Checkbox } from "primereact/checkbox";
 import { ColorPicker } from "primereact/colorpicker";
 import { Dropdown } from "primereact/dropdown";
@@ -37,6 +36,7 @@ import { LookupField } from "../lookups/LookupControls";
 import { PrincipalField } from "../principals/PrincipalControls";
 import { ReferencePicker } from "../references/ReferencePicker";
 import { PhoneInput } from "./PhoneInput";
+import { TemporalInput } from "./TemporalInput";
 import { clearedNested, textMode, type ResolvedField } from "./recordValues";
 
 /**
@@ -389,8 +389,8 @@ export function RecordField({
   allowCreate?: boolean;
   /** This editor sits in a grid cell rather than in a dialog, so it may not grow
    *  the row it is in. Editors that would otherwise show a line of their own
-   *  beneath the control drop it here — today only `phone`, whose validity line
-   *  moves to the input's tooltip. */
+   *  beneath the control drop it here — `phone`, and the three temporal types,
+   *  whose validity lines move to the input's tooltip. */
   compact?: boolean;
 }) {
   const id = `field-${column.uuid}`;
@@ -457,36 +457,19 @@ export function RecordField({
           onChange={onChange}
         />
       );
+    // One editor for the three of them: what differs between a date and a date-time
+    // is what `TemporalInput` reads off the column, not which component is asked for.
     case "date":
-      return (
-        <Calendar
-          inputId={id}
-          value={(value as Date) ?? null}
-          onChange={(e) => onChange(e.value ?? null)}
-          dateFormat="yy-mm-dd"
-          showButtonBar
-          disabled={disabled}
-        />
-      );
     case "time":
-      return (
-        <Calendar
-          inputId={id}
-          value={(value as Date) ?? null}
-          onChange={(e) => onChange(e.value ?? null)}
-          timeOnly
-          disabled={disabled}
-        />
-      );
     case "datetime":
       return (
-        <Calendar
-          inputId={id}
-          value={(value as Date) ?? null}
-          onChange={(e) => onChange(e.value ?? null)}
-          showTime
-          dateFormat="yy-mm-dd"
+        <TemporalInput
+          id={id}
+          column={column}
+          value={value}
           disabled={disabled}
+          onChange={onChange}
+          compact={compact}
         />
       );
     case "link":

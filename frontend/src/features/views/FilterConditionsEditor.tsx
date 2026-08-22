@@ -1,6 +1,5 @@
 import { useState } from "react";
 
-import { Calendar } from "primereact/calendar";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
 import { InputNumber } from "primereact/inputnumber";
@@ -14,17 +13,12 @@ import {
   parseDuration,
 } from "../../lib/duration";
 import { ratingScale } from "../../lib/rating";
-import {
-  filterTokenLabel,
-  filterTokens,
-  isTemporal,
-  parseTemporal,
-  serializeTemporal,
-} from "../../lib/temporal";
+import { filterTokenLabel, filterTokens, isTemporal } from "../../lib/temporal";
 import type { Column, FilterCondition } from "../../lib/types";
 import { LookupFilterValue } from "../lookups/LookupControls";
 import { PrincipalFilterValue } from "../principals/PrincipalControls";
 import { PhoneInput } from "../records/PhoneInput";
+import { TemporalInput } from "../records/TemporalInput";
 import { NO_VALUE_OPS, OPERATORS } from "./operators";
 
 interface Props {
@@ -46,7 +40,8 @@ interface Props {
  * The value input follows the column's type, and for reference columns that is not
  * a nicety: a lookup, user or group cell stores a *uuid*, so a text box could only
  * ever be filled by pasting one. Those get a picker, and a near-miss in a text box
- * silently matching nothing is why temporal columns get a calendar.
+ * silently matching nothing is why a temporal column's box says what it makes of
+ * what has been typed into it.
  */
 export function FilterConditionsEditor({
   listUuid,
@@ -311,10 +306,13 @@ const SPECIFIC = "__specific__";
 /**
  * The value side of a condition on a `date`, `time` or `datetime` column.
  *
- * A calendar, because otherwise this is a bare text box: you would have to hand-type
- * the exact stored format and a near-miss silently matches nothing. And, in front of
- * it, the words this column understands instead of a fixed value — **Today** on a
- * date, **Now** on a time, either on a date & time.
+ * A box you can type in *and* a calendar, which is `TemporalInput` — the same control
+ * a record's cells use. A bare text box was never an option here: a near-miss on the
+ * stored format silently matches nothing, and a filter that quietly finds no rows is
+ * indistinguishable from a filter that is right. What that box now has is the line
+ * underneath saying so before Apply is pressed, which is the half a calendar alone
+ * could not give. And, in front of it, the words this column understands instead of a
+ * fixed value — **Today** on a date, **Now** on a time, either on a date & time.
  *
  * Storing the word rather than the date it stands for is the entire feature. A
  * condition holds a literal, so "due today or earlier" saved into a view means
@@ -350,18 +348,11 @@ function TemporalFilterValue({
         style={{ width: 118 }}
       />
       {token === null && (
-        <Calendar
-          value={parseTemporal(column.type, value)}
-          onChange={(e) =>
-            onChange(
-              e.value ? serializeTemporal(column.type, e.value as Date) : null,
-            )
-          }
-          dateFormat="yy-mm-dd"
-          timeOnly={column.type === "time"}
-          showTime={column.type === "datetime"}
-          showButtonBar
-          style={{ width: 170 }}
+        <TemporalInput
+          column={column}
+          value={value}
+          onChange={onChange}
+          mode="query"
         />
       )}
     </>
