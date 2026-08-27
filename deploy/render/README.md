@@ -80,9 +80,26 @@ in `backend/src/auth/tokens/throttle.py` are per process, so they are exact only
 holds. Scaling is now possible where it was not before; that counter is the first thing to fix
 if it happens, and the migration is already in the right place for it.
 
-**Always-on changes what the polling interval is for.** `VITE_LIVE_REFRESH_SECONDS` used to do
-double duty on the free plan — a focused tab polling kept the instance from spinning down. On
-`starter` there is no spin-down, so it is now purely a freshness-vs-load dial.
+**`VITE_LIVE_REFRESH_SECONDS` is now only a fallback.** It has been demoted twice. On the free
+plan it did double duty — a focused tab polling kept the instance from spinning down — and
+`starter` ended that. Then live records became a **server push**: an open list holds
+`GET /lists/{uuid}/events` and refetches when told to, so on a healthy deployment this interval
+is not used at all. It is what the app falls back to when the stream cannot be held open, which
+is worth keeping set rather than zeroed for exactly that case.
+
+**`SSE_ENABLED` is the kill switch, and it lives on the API on purpose.** Setting it `False`
+makes the events route answer `503`, which every client reads as "fall back to polling". It is
+an environment change plus an API restart; putting it in the SPA's build-time config would have
+made turning push off a rebuild and a redeploy of the static site. `SSE_MAX_STREAM_SECONDS`
+(300) is also **the revocation window** — authorization is checked at connect and never again,
+so losing `view` on a list stops the signals at the subscriber's next reconnect and not before.
+
+**`GEOCODE_USER_AGENT` is not set here, and address search is anonymous to Nominatim as a
+result.** Their policy asks to be able to contact the caller, and the default value literally
+says "set GEOCODE_USER_AGENT" — being anonymous is what gets a User-Agent blocked. The failure
+is graceful when it comes (`available: false` and a sentence; a `location` column still takes a
+typed address and a dropped pin), but it should be set. `GEOCODE_URL` empty disables the search
+outright, which is a supported way to run.
 
 **The SPA and the API share an origin by rewrite.** `frontend/src/lib/api.ts` calls a relative
 `/api/...` and has no configurable base URL, so the static site rewrites `/api/*` to the API
@@ -99,7 +116,8 @@ request the app makes, `curl` makes identically. What protects it is the bearer 
 route requires (`401` without one), plus the failure limits on login, which is the only route
 that has to answer an unproven caller. `ALLOWED_ORIGINS` is not part of that: CORS governs
 what other browser pages may read, and scripts ignore it. The unauthenticated surface is
-`/health` and the three `…/auth/tokens` routes — worth re-checking with an unauthenticated
+`/health` and the four `…/auth/tokens` routes (`login`, `refresh`, `revoke`, `jwks.json`) —
+worth re-checking with an unauthenticated
 `curl` after any change to how routers are mounted, since the token requirement is declared
 per router (`dependencies=[Depends(get_current_user)]`) and a new router added without it
 would be open.
@@ -116,10 +134,15 @@ much worse.
 `src/core/mixins.py`), and Render's native runtime installs any released version, so
 `backend/.python-version` is enough. A Dockerfile would only add build time.
 
-**The four maintenance jobs run in GitHub Actions**
+**The nightly maintenance jobs run in GitHub Actions**
 ([`../../.github/workflows/maintenance.yml`](../../.github/workflows/maintenance.yml)), because
-Render's Cron Job is a **paid** service type. They are idempotent housekeeping, so a missed
-night costs nothing.
+Render's Cron Job is a **paid** service type. Eight of them today — the shape reconcile, the
+five purges, the orphan-grant sweep and the calculated-column re-index — and their **order
+matters** where they overlap, which the workflow encodes: the workspace and list purges own
+everything under a deleted parent, so they run before the jobs that sweep individual children,
+and the grant sweep runs after all of them because the purges are what orphan grants in the
+first place. (The re-index is independent and sits at the end.) All
+are idempotent, chunked and safe to kill, so a missed night costs nothing.
 
-Expect a cold start of up to a minute on the first request after a quiet spell: Render spins a
-free web service down after ~15 minutes idle.
+**No cold start.** `starter` is always-on; the ~15-minute spin-down and the up-to-a-minute
+first request belonged to the free plan and no longer apply.

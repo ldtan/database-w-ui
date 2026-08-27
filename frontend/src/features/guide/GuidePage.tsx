@@ -255,6 +255,12 @@ const TYPE_HELP: Record<string, string> = {
   time: "A time of day, with no date.",
   datetime: "A day and a time together.",
   link: "A web address that becomes clickable. You can show friendly words in place of the address.",
+  email: "An e-mail address, checked as you save it and tidied into one spelling — Ada@Example.com and ada@example.com are stored as the same address, so a search for one finds the other and Unique catches the duplicate.",
+  phone: "A phone number. Pick the country and type it however you like — 0917 123 4567, +63 917 123 4567 — and it is stored one way, so the same number typed two ways is one number. Set a default country if most of your numbers are local; without one, every number has to carry its own country code.",
+  location: "A place: an address, a point on a map, or both. Search for the address, or drop a pin — and a cell shows a link out to a map. Filtering and sorting use the address, which is the half a person can read.",
+  color: "A colour, picked from a swatch or typed as a hex code like #3366ff. You can offer a palette of your own; it suggests, it doesn't restrict, because the point of a colour field is picking one.",
+  rating: "A score out of five — or out of whatever you set, up to ten — shown as stars, hearts or a plain number. An empty cell means unrated, so ratings start at 1.",
+  duration: "A length of time — how long a lesson ran, hours worked. Type it as 1:30 or 90m and choose how it is shown (1:30, 1:30:00, 90:00 or 1.5 hours). It totals and averages like a number, so “Total hours” is a metric you can add.",
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
   lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
@@ -677,12 +683,19 @@ export function GuidePage() {
 
         <h3 className="font-semibold pt-1">Nothing changes until you say so</h3>
         <p>
-          Both work the same way, and it’s worth knowing why: the app converts your
-          values into a hidden column <em>first</em>, then shows you exactly what did
-          and didn’t work. While you’re reading that report your list is untouched —
-          every view, filter and form still sees the old column, working normally.
-          Only when you click <Ui>Apply</Ui> (or <Ui>Add column</Ui>, for a copy) does
-          anything actually change. <Ui>Discard</Ui> costs you nothing.
+          Both work the same way, and it’s worth knowing why: the app does a{" "}
+          <strong>trial run</strong> first and shows you exactly what would and
+          wouldn’t convert. That trial writes nothing at all — while you’re reading
+          the report your list is untouched, and every view, filter and form still
+          sees the old column, working normally. Only when you click <Ui>Apply</Ui>{" "}
+          (or <Ui>Add column</Ui>, for a copy) does anything change, and then it all
+          changes at once. <Ui>Cancel</Ui> costs you nothing.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          Because it happens in one go, a busy list is worth converting when nobody
+          else is typing into it: if a record changes while the conversion is running,
+          the app stops and undoes the whole thing rather than half-converting your
+          list. Try again and it goes through.
         </p>
         <Figure name="change-type" />
         <p>
@@ -871,13 +884,20 @@ export function GuidePage() {
         <p>
           A formula refers to a column by its <strong>short name</strong> — the one
           shown in brackets beside it in the columns list, like{" "}
-          <Code>unit_price</Code> — not by its pretty display name. Six kinds of
-          column can be named: <strong>Number</strong>, <strong>Text</strong>{" "}
-          (either input style), <strong>Choice</strong>, <strong>Date</strong>,{" "}
+          <Code>unit_price</Code> — not by its pretty display name. These kinds of
+          column can be named: <strong>Number</strong>, <strong>Rating</strong>,{" "}
+          <strong>Duration</strong>, <strong>Text</strong> (any input style),{" "}
+          <strong>Email</strong>, <strong>Choice</strong>, <strong>Date</strong>,{" "}
           <strong>Date &amp; time</strong>, and another <strong>Calculated</strong>{" "}
           column — so a <em>Total</em> can build on a <em>Subtotal</em>, as long as
-          the two don’t end up depending on each other. Tick boxes, web links,
-          people and linked columns can’t be used in a formula yet.
+          the two don’t end up depending on each other.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          The rest can’t be used in a formula, each for its own reason: a tick box
+          and a colour have no wording to work with; web links, phone numbers, places
+          and times of day aren’t things you calculate over; and people, groups and
+          linked columns hold a pointer to a row somewhere else rather than the words
+          you see.
         </p>
         <p style={{ color: "var(--text-muted)" }}>
           A <strong>Choice</strong> column reads as the option itself, so{" "}
@@ -1455,8 +1475,11 @@ export function GuidePage() {
         <p style={{ color: "var(--text-muted)" }}>
           A column on its own isn’t enough — <Code>hours</Code> is a different number
           on every record, so the box will ask you to say what to do with them all:{" "}
-          <Code>SUM(hours)</Code>. Number, text and calculated columns can be
-          measured; dates, choices and linked columns can’t yet.
+          <Code>SUM(hours)</Code>. Number, <strong>Rating</strong>,{" "}
+          <strong>Duration</strong>, text and calculated columns can be measured — so{" "}
+          <Code>AVG(score)</Code> over a rating and <Code>SUM(length)</Code> over a
+          duration both work. Dates, choices and linked columns can’t yet, though a
+          calculated column that reads one gets you there.
         </p>
 
         <h3 className="font-semibold pt-1">What the number counts</h3>

@@ -92,8 +92,9 @@ promotes those answers, for the same reason there is no cascade-rename.
 
 ## 5. A calculated column's value is stored as an *index*, and that has edges
 
-A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**
-columns, string functions over its **text** and **choice** columns, date functions over its
+A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**,
+**rating** and **duration** columns, string functions over its **text**, **email** and **choice**
+columns, date functions over its
 **date**/**datetime** columns, and references to other **calculated** columns, all by name
 (`min`/`max`/`round`/`abs`/`int`,
 `CONCAT`/`UPPER`/`LOWER`/`TRIM`/`LEN`/`LEFT`/`RIGHT`/`REPLACE`, `AGE`/`DT_FORMAT`/`TODAY()`/
@@ -226,11 +227,17 @@ The remaining edges:
 - **Calc-on-calc is allowed; cycles are refused.** `chain.build_chain` topologically sorts the
   graph so a chain settles in one pass per write — `total` reads *this* write's `subtotal` — and
   `find_cycle` refuses a ring at save time, naming it. What a formula may name is
-  `FORMULA_REFERENCEABLE_TYPES`: number, text, calculated, **choice** (a cell stores its label,
+  `FORMULA_REFERENCEABLE_TYPES`: number, **rating** and **duration** (all three are
+  `NUMERIC_TYPES` — a cell in any of them holds a plain JSON number), text, **email** (plain
+  text with a checked grammar; "the address, or a fallback" and "the part after the @" are
+  ordinary things to ask, and nothing about the check makes the string less readable),
+  calculated, **choice** (a cell stores its label,
   so it is already the text a formula wants; a *multiple* one reads as its labels joined with
   ", "), and **date/datetime** (a cell is an ISO string, which `AGE` and `DT_FORMAT` read and
   which compares and sorts lexically for free). Still excluded: `checkbox` and `link`, which have
-  no text form worth computing over, and the REFERENCE_TYPES, whose ids need a database round
+  no text form worth computing over; `color`, which is a rendering instruction rather than a
+  value; `location`, whose cell is an object; `time`, which the date functions do not read; and
+  the REFERENCE_TYPES, whose ids need a database round
   trip to become a label — the evaluator is a pure function of one record's values and has no
   session to make one with. What a name refers to is
   decided by *where it sits*, not how it is spelled: `column_refs` reports every value-position

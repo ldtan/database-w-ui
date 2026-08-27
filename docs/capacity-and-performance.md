@@ -75,8 +75,12 @@ What the table is meant to settle:
 
 - **The scan costs ~20 µs of app CPU per record**, linear, which is what
   `METRIC_ROW_LIMIT` (50,000 — so ~1 s) exists to bound. On the free tier's 0.1 CPU that
-  cap is still ~10 wall seconds, which is why the strip is hidden by default and polls on
-  its own slower clock (`METRIC_REFRESH_SECONDS`).
+  cap is still ~10 wall seconds, which is why the strip is hidden by default and refreshes
+  on its own slower clock (`METRIC_REFRESH_SECONDS`, default 60). Since live records became
+  a server push that floor **throttles the invalidation** rather than setting a polling
+  interval — the grid refreshes on the event, the strip at most once a minute however many
+  events arrive — which keeps the same cost ceiling on a transport that can now signal far
+  faster than the old timer ticked.
 - **The compiled column is at the measurement floor**, not actually zero: Windows
   `time.process_time` resolves to ~15.6 ms, so these are batch averages. The honest
   reading is "indistinguishable from zero app CPU". The work moved to Postgres, which is
@@ -673,6 +677,22 @@ steady-state column to roughly ~25 / ~125 / ~250. Arithmetic from the per-endpoi
 above; nothing was re-measured. Note this row was never the binding limit anyway (see the
 login burst below), and it counts tabs someone is *using* — `useLiveList` still stops
 polling on a hidden tab and after 5 idle minutes on a visible one.
+
+**Since live records became a server push (2026-08-22), that whole row is a worst case
+rather than the normal one, and it has not been re-measured either.** An open list holds
+an SSE stream and refetches when the server says its records moved, so a quiet list costs
+an active tab *nothing* between changes instead of a request every 15 seconds — the
+interval above is only what the app falls back to when the stream cannot be held open.
+Two caveats keep it from being a free win. A **busy** list now signals faster than the
+timer ever ticked, which is why the count and metric floors were kept through the swap and
+why they throttle invalidations rather than only setting intervals. And a held stream is
+much cheaper than a poll but not free: it is an open socket and an asyncio task for up to
+`SSE_MAX_STREAM_SECONDS`, writing a heartbeat every `SSE_HEARTBEAT_SECONDS` and
+reconnecting when the server closes it. It holds **no pooled database connection** — that
+is the whole reason the route is mounted outside the lists router, and
+`tests/test_live_events.py` pins it — so the fifteen-connection pool is not what bounds
+concurrent viewers here. The two guardrails still apply, so an abandoned tab still costs
+nothing on either transport.
 
 That steady-state row was never the real limit, though. **The limit was a login burst.**
 Thirty people arriving at once cost 30 × 717 ms = 21.5 s of CPU, which on the free tier

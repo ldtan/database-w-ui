@@ -27,17 +27,31 @@ adding, renaming, or removing a column never requires a database migration.
   create lists immediately.
 - **Lists** — tables (scoped to a workspace) with settings and a designated primary/display
   column. Creating a list auto-provisions a default grid view and create/update forms.
-- **Columns** — typed fields: `text` (one line or several, per `config.text_mode`),
-  `number`, `checkbox`, `choice`,
+- **Columns** — typed fields: `text` (one line, several, or rich text, per
+  `config.text_mode`), `number`, `checkbox`, `choice`,
   `lookup` (link to another list's rows), `link` (a URL, restricted to safe schemes),
+  `email` and `phone` (both stored canonicalised — lowercased, and E.164 respectively),
+  `location` (the one cell whose value is an object: `{address, lat, lng}`), `color`,
+  `rating` and `duration` (both plain numbers underneath — see `NUMERIC_TYPES`),
   `user` / `group` (reference an account or a group), `date`, `time`, `datetime`, and
   `calculated` (a formula over the others — see [the formula language](#calculated-columns-the-formula-language)).
-  Type-specific settings live in a per-column JSONB `config`.
+  Type-specific settings live in a per-column JSONB `config`. A column's `type` is not
+  immutable: a **conversion** retypes it in place, keeping its uuid and everything that
+  points at it.
 - **Records** (`list_items`) — stored as JSONB keyed by column UUID; every value is
   validated against its column's type and config on write (required, choice options,
-  lookup existence, etc.).
+  lookup existence, etc.). A record can be **archived** as well as deleted — a second
+  lifecycle axis with no retention window.
 - **Views** — saved sort / filter / group / page-size, stored as structured JSONB.
-- **Forms** — per-list field layouts (order, included, enabled) for create/update.
+- **Forms** — per-list field layouts (order, included, enabled) for create/update/view,
+  with per-field conditions over the record's other cells.
+- **Metrics** — named aggregates over a list's records (`SUM(hours)`), answered per
+  request over exactly the records the caller can see.
+- **Sharing** — grants on workspaces, lists, views, forms and individual records, to
+  users or groups, with an action vocabulary that implies downward (see
+  `src/permissions/`).
+- **Live records** — an open list subscribes to a server-sent event stream and refetches
+  when something changes, falling back to polling where the stream is unavailable.
 - **Two identifiers everywhere** — every list/column/view/form has a code-facing `name`
   (a slug, unique per scope) and a free-text `display_name` for the UI.
 - **Soft deletes** and **owner-scoped access** on every resource.
@@ -56,17 +70,28 @@ backend/
     ├── infrastructure/      # async engine, session, Base, get_db, init_db
     ├── auth/                # authentication domain
     │   ├── users/           # users + groups (models/schemas/services/routers)
-    │   │   └── batch/       # many accounts from one uploaded CSV
+    │   │   ├── batch/       # many accounts from one uploaded CSV
+    │   │   └── bin.py       # the deleted-principals surface (superuser-only)
     │   └── tokens/          # login / refresh tokens
+    ├── people/              # person profiles — private to their owner and superusers
+    ├── permissions/         # grants, the action vocabulary, and the resolver
     ├── workspaces/          # tenancy layer: a user owns workspaces; lists live in them
+    ├── geocode/             # address search for `location`, proxied so the deployment
+    │                        # has one identity and one rate limit
+    ├── maintenance/         # the cron-able jobs (purges, sweeps, re-index) — see below
     ├── demo/                # demo scenarios: a whole plausible tenant, seeded
     └── lists/               # the lists feature (aggregate root = List)
-        ├── models.py schemas.py services.py routers.py dependencies.py
-        ├── columns/         # Column + ColumnType enum
-        ├── items/           # ListItem (record data + validation)
+        ├── models.py schemas.py services.py routers.py dependencies.py purge.py
+        ├── columns/         # Column + ColumnType enum, the formula language,
+        │                    # type conversion and the rich-text sanitiser
+        ├── items/           # ListItem (record data + validation + filtering)
         ├── views/           # View
         ├── forms/           # Form + FormType enum
-        └── metrics/       # Metric + the aggregate formula language (+ its SQL pushdown)
+        ├── metrics/         # Metric + the aggregate formula language (+ its SQL pushdown)
+        ├── transfer/        # CSV/JSON import and export of a list's records
+        ├── events/          # live records: the SSE broker and its one route
+        └── bin/             # the shared deleted/restore/permanent implementation the
+                             # four list-config kinds mount
 ```
 
 Each resource follows the same four-file convention: `models.py`, `schemas.py`,
@@ -162,7 +187,18 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `FIRST_SUPERUSER_USERNAME` | `admin` | Bootstrap user username. |
 | `FIRST_SUPERUSER_EMAIL` | `admin@example.com` | Bootstrap user email. |
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
-| `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. |
+| `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. A policy decision, not a tuning knob; `archived_at` is unaffected by it. |
+| `FORMULA_INLINE_MAX_RECORDS` | `5000` | Above this many records, re-indexing a list's `calculated` columns is handed to a background task and the request answers at once. It decides *who waits*, never how much work is done. |
+| `IMPORT_MAX_ROWS` | `1000` | Rows one uploaded file may carry — read by both the list importer and the user batch importer. Checked before anything is written, so an over-limit file imports nothing. |
+| `MAX_UPLOAD_BYTES` | `8388608` | What an uploaded file may weigh. The file is read whole and a JSON one parsed whole again, so the real ceiling is instance memory. |
+| `BULK_DELETE_MAX` | `500` | Records one bulk delete may name. Also a *published* limit — it reaches the OpenAPI schema, and the SPA keeps its own copy to chunk against, so lowering it needs `BULK_DELETE_MAX` in `ListDetailPage.tsx` changed first. |
+| `SSE_ENABLED` | `true` | Live records. False makes `GET /lists/{uuid}/events` answer `503`, which the client reads as "fall back to polling" — so this is the kill switch, and it is an environment change on the API rather than a rebuild of the SPA. |
+| `SSE_MAX_STREAM_SECONDS` | `300` | How long one stream lives before the server closes it and the client reconnects. Also **the revocation window**: authorization is checked at connect and never again, so losing `view` stops the signals at the next connect and not before. |
+| `SSE_HEARTBEAT_SECONDS` | `15` | How often an idle stream emits a comment frame — keeps proxies from reaping it, and is how the server learns a subscriber has gone away. |
+| `GEOCODE_URL` | Nominatim `/search` | Address search for `location` columns, proxied through the API. **Empty disables it**, and that is a supported way to run: the field still takes a typed address and a dropped pin. |
+| `GEOCODE_USER_AGENT` | `database-w-ui (set …)` | Nominatim's policy asks to be able to contact the caller. Leaving this at the default is what gets a User-Agent blocked — set it. |
+| `GEOCODE_MIN_INTERVAL_SECONDS` | `1.0` | The published rate limit, enforced deployment-wide by a semaphore (same single-instance assumption as the login throttle). |
+| `GEOCODE_TIMEOUT_SECONDS` | `5.0` | Per-request timeout for the geocoder. |
 
 ## API overview
 
@@ -172,8 +208,11 @@ token. Obtain one from `POST /api/auth/tokens/login`.
 The API is public by design and protected by that token, not by its network position: the
 SPA runs in a browser, so anything it can call, any HTTP client can call. `ALLOWED_ORIGINS`
 is not an access control — CORS only governs what other *browser pages* may read, and is
-ignored entirely by scripts. The unauthenticated surface is exactly `/health` and the three
-routes under `…/auth/tokens`; everything else is `401` without a token. `/docs`, `/redoc`
+ignored entirely by scripts. The unauthenticated surface is exactly `/health` and the four
+routes under `…/auth/tokens` (`login`, `refresh`, `revoke`, `jwks.json` — `revoke` is
+unauthenticated on purpose: presenting the token *is* the authorisation, and requiring a
+live access token would exclude the expired session that most needs to sign out);
+everything else is `401` without a token. `/docs`, `/redoc`
 and `/openapi.json` join that list when `DEBUG` is true, which is a development machine and
 not a deployment.
 
@@ -184,14 +223,24 @@ the single-instance assumption the counters rest on.
 
 | Area | Endpoints |
 |------|-----------|
-| Auth | `POST /api/auth/tokens/login`, refresh; `…/users`, `…/groups` CRUD; `PATCH …/users/me/settings` (UI preferences, merged onto the stored blob); `POST …/users/import` (many accounts from one CSV, superuser-only — see below) |
-| Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}` |
-| Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}` |
-| Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side) |
-| Records | `…/lists/{list_uuid}/items` CRUD |
+| Auth | `POST /api/auth/tokens/login`, refresh, revoke, `jwks.json`; `…/users`, `…/groups` CRUD; `PATCH …/users/me/settings` (UI preferences, merged onto the stored blob); `POST …/users/import` (many accounts from one CSV, superuser-only — see below) |
+| People | `/api/people` CRUD — person profiles, **private**: owner or superuser only, which is why a `user` cell renders a username and never a real name |
+| Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}`, `…/transfer` |
+| Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}`, `…/transfer`, `…/clone` |
+| Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side); `…/columns/recompute` (re-index the calculated columns); `…/columns/{uuid}/convert` + `…/convert/apply` (preview a type conversion, then commit it in one transaction) |
+| Records | `…/lists/{list_uuid}/items` CRUD; `…/items/count`; `…/items/bulk-delete`; `…/items/archived`, `…/items/{uuid}/archive` + `…/unarchive`, `…/items/bulk-archive` |
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
-| Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=` (every metric's value over the records the caller can see through that view) |
+| Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=&filters=` (every metric's value, in one pass, over the records the caller can see through that view) |
+| Import/export | `POST …/lists/{list_uuid}/export`, `POST …/lists/{list_uuid}/import` — CSV or JSON, keyed by column **name** |
+| Live records | `GET …/lists/{list_uuid}/events` — an SSE stream that says *something changed* and carries no record data; `503` when `SSE_ENABLED` is false |
+| Permissions | `/api/permissions/grants` CRUD; `GET /api/permissions/effective` and its `POST` batch form (what the caller may do, which is how the UI decides what to render) |
+| Geocode | `GET /api/geocode` — address search for `location` columns. It never fails: an unconfigured or unreachable geocoder answers `available: false` with a sentence |
+
+Every soft-deletable kind has a **bin** on its own collection — `…/deleted`,
+`…/{uuid}/restore` and `…/{uuid}/permanent` — for workspaces, lists, records, columns,
+views, forms, metrics, users and groups. Nothing in this app is deleted outright, and
+destroying something is always two deliberate steps.
 
 Creating a list requires a `workspace_uuid` (owned by the caller) in the body; the list
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a
@@ -276,8 +325,13 @@ The language is a deliberately tiny AST walker in `src/lists/columns/formula.py`
 calls `eval`, and the only names it resolves are that record's own cell values.
 
 A formula names other columns by their **`name`** (the slug), and may name a `number`,
-`text`, `choice`, `date`, `datetime` or another `calculated` column
-(`FORMULA_REFERENCEABLE_TYPES`). A choice cell reads as its label — its labels joined with
+`rating`, `duration`, `text`, `email`, `choice`, `date`, `datetime` or another
+`calculated` column (`FORMULA_REFERENCEABLE_TYPES`) — every type that already stores a
+self-contained scalar a row expression can read. The rest are excluded for a reason
+rather than an omission: `checkbox` has no text form worth having, `link` is a URL
+nobody computes over, `color` is a rendering instruction rather than a value, `location`
+is an object, and the reference types store ids that need a database round trip to
+become the label a person would expect. A choice cell reads as its label — its labels joined with
 `", "` when the column allows several. A date or datetime cell reads as its ISO-8601 string,
 which is what `AGE` and `DT_FORMAT` parse, what `TODAY()` and `NOW()` answer with, and what
 makes `due > "2026-01-01"` and `due < TODAY()` order correctly. Function names are ALL CAPS
@@ -346,11 +400,12 @@ All are chunked, commit per batch, and are safe to kill and re-run. Run them fro
 systemd timer. All take `--dry-run`, which reports without changing anything.
 
 ```bash
+uv run python -m src.maintenance.recompute_calculated        # rebuild the calculated-column index
 uv run python -m src.maintenance.reconcile_shapes            # value shapes -> column config
 uv run python -m src.maintenance.purge_deleted_workspaces    # workspaces past the window, and all under them
 uv run python -m src.maintenance.purge_deleted_lists         # lists past the window, and all under them
 uv run python -m src.maintenance.purge_deleted_items         # empty the bin past the window
-uv run python -m src.maintenance.purge_deleted_list_config   # views/forms/metrics binned on their own
+uv run python -m src.maintenance.purge_deleted_list_config   # views/forms/metrics/columns binned on their own
 uv run python -m src.maintenance.purge_deleted_principals    # finalize deleted accounts
 uv run python -m src.maintenance.sweep_orphan_grants         # grants for things that are gone
 ```
@@ -358,6 +413,25 @@ uv run python -m src.maintenance.sweep_orphan_grants         # grants for things
 Order matters where they overlap: the workspace and list purges own everything *under* a
 deleted parent, so they run before the jobs that sweep individual children, and the grant
 sweep runs last because the purges are what orphan grants in the first place.
+
+Two more are **one-offs** rather than part of that rotation. Both are idempotent, so
+leaving them in the workflow costs nothing on a database with nothing to clean:
+
+```bash
+uv run python -m src.maintenance.drop_conversion_scratch        # hidden columns the old staged conversion stranded
+uv run python -m src.maintenance.clear_dangling_lookup_targets  # lookups that lost their target before the delete path scrubbed config
+```
+
+**`recompute_calculated`** — a calculated cell is rewritten whenever its record is, so
+ordinary editing keeps the index current for free. A *schema* change does not: editing a
+formula, or renaming, deleting or restoring a column some formula reads, changes what every
+record's calculated cells should say without touching a record. `POST
+/lists/{uuid}/columns/recompute` is offered at exactly that moment; this is the backstop for
+the times nobody pressed it. **Nothing depends on it having run** — reads recompute and
+overwrite the stored copy, so a stale index misplaces a row in a sorted or filtered view and
+can never put a wrong number on a screen. A list the app is already re-indexing is *skipped*
+rather than waited for: both take the same per-list advisory lock, and duplicating a scan
+already in flight is the one expensive mistake available here.
 
 **`purge_deleted_workspaces` / `purge_deleted_lists`** — destroy a parent past the window along
 with everything under it: records, columns, views, forms, metrics, and the grants of each, since
@@ -456,10 +530,15 @@ uv run python -m src.demo.school                      # ~740 records, a few seco
 uv run python -m src.demo.school --password letmein   # every seeded account shares one
 ```
 
-It builds 16 accounts with person profiles, 6 groups, 5 workspaces, 17 lists using every
-`ColumnType`, and the views, forms, metrics and permission grants over them — including
-the states a tenant only reaches by being *used*: records and a column and a list in their
-bins, and a list transferred into another user's "Incoming" workspace.
+It builds 16 accounts with person profiles, 6 groups, 5 workspaces, 17 lists, and the
+views, forms, metrics and permission grants over them — including the states a tenant only
+reaches by being *used*: records and a column and a list in their bins, and a list
+transferred into another user's "Incoming" workspace.
+
+It **does not cover every column type any more**: `email`, `phone`, `location`, `color`,
+`rating` and `duration` all shipped after the scenario was written and none of them
+appears in it, so those six have no seeded data to look at. The file's docstring says so
+where somebody editing it will see it.
 
 **Idempotent**: each resource is matched on its natural handle (a username, a `name` slug
 within its scope) and created only when missing, so a re-run fills the gaps left by one
@@ -492,7 +571,14 @@ Both scenarios can live in one database — they share no names.
 ## Notes & roadmap
 
 The schema deliberately trades database-enforced record constraints for a fully dynamic,
-migration-free schema — all record-level validation lives in the service layer. Deferred
-items (documented in the design doc): a `list_item_links` junction table for
-referential-integrity-backed lookups, sharing/permissions (the workspace boundary is
-already in place), rollup columns, and additional column types.
+migration-free schema — all record-level validation lives in the service layer.
+
+Sharing and permissions are built (`src/permissions/`, data-model §12). What is still
+deferred, and documented in [the design doc's §10](../docs/data-model-design.md):
+a `list_item_links` junction table for referential-integrity-backed lookups, per-record
+**rollup** columns, per-group metric subtotals, an `attachment` column type, and
+streaming both ends of import/export rather than reading each file whole.
+
+The largest *unbuilt* piece is search: `?q=` is an `ILIKE` over every record's JSONB and
+is by a wide margin the most expensive read in the app. It has a design and a set of
+measurements in [`../docs/search-design.md`](../docs/search-design.md), and no code yet.

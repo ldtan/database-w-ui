@@ -110,3 +110,9 @@ host:
   records, metrics, and column type conversion (including duplicating a column) are
   built; copying into an *already existing* column is not. What exists to build on, the
   load-bearing details, and the decisions still open.
+- [Capacity and performance](docs/capacity-and-performance.md) — what the app costs to
+  run, measured in CPU-milliseconds per request rather than guessed, and what that means
+  for the deployment above. Read it before choosing a plan or blaming the database.
+- [Search design](docs/search-design.md) — **designed, not built.** `?q=` is an `ILIKE`
+  over every record's JSONB and is by a wide margin the most expensive read in the app.
+  This says what to ask instead, what it changes, and what it costs.

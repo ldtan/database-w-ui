@@ -3,11 +3,17 @@
 // back to the default rather than breaking the build.
 
 /**
- * How often an open list refetches to pick up record changes made by *other*
- * people (or your other tabs) — the "live records" polling interval, in seconds.
- * See `useLiveList`. Set `VITE_LIVE_REFRESH_SECONDS` at build time to tune it;
- * `0` disables polling, so records update only on your own edits (the behaviour
- * before this feature existed).
+ * The "live records" **fallback** polling interval, in seconds.
+ *
+ * An open list normally holds an SSE stream and refetches when the server says its
+ * records moved (`useLiveList`, `liveStream.ts`), so on a healthy deployment this
+ * interval is not used at all. It is what the app falls back to when the stream
+ * cannot be held open — a proxy that buffers `text/event-stream`, a backend with
+ * `SSE_ENABLED=False`, a network that forbids them.
+ *
+ * Set `VITE_LIVE_REFRESH_SECONDS` at build time to tune it. `0` disables the
+ * fallback outright, which leaves a deployment whose stream is blocked refreshing
+ * only on your own edits — so leave it set.
  */
 export const LIVE_REFRESH_SECONDS = readNonNegativeNumber(
   import.meta.env.VITE_LIVE_REFRESH_SECONDS,
@@ -23,11 +29,16 @@ export const LIVE_REFRESH_SECONDS = readNonNegativeNumber(
  * about the same list. The rows underneath a total are what has to be live; a
  * total a minute old is a total.
  *
- * A floor rather than a value, applied by `useLiveList`: the effective interval
- * is `max(LIVE_REFRESH_SECONDS, this)`, and `LIVE_REFRESH_SECONDS = 0` still
- * disables polling outright. That ordering is the point — a deploy that slows
- * the records down must not leave the cards above them refreshing faster, which
- * an independent setting would allow by omission.
+ * A floor rather than a value, applied by `useLiveList`, and it does the same job
+ * on both transports: under the polling fallback the effective interval is
+ * `max(LIVE_REFRESH_SECONDS, this)`, and under push it **throttles the
+ * invalidation** — the grid refreshes on the event, the strip at most this often
+ * however many events arrive. Keeping it through the swap was not optional: a busy
+ * list can signal far faster than the timer ever ticked, so without the floor every
+ * write would put a full scan in front of every viewer.
+ * `LIVE_REFRESH_SECONDS = 0` still disables the fallback outright. The ordering is
+ * the point — a deploy that slows the records down must not leave the cards above
+ * them refreshing faster, which an independent setting would allow by omission.
  */
 export const METRIC_REFRESH_SECONDS = readNonNegativeNumber(
   import.meta.env.VITE_METRIC_REFRESH_SECONDS,
@@ -49,8 +60,8 @@ export const METRIC_REFRESH_SECONDS = readNonNegativeNumber(
  * Shorter than {@link METRIC_REFRESH_SECONDS} on purpose: a total is a number on
  * screen and beside a paginator, where being visibly behind the rows it describes
  * is worse than it is for a metric card. Same floor semantics as the metric one —
- * applied by `useLiveList`, so `LIVE_REFRESH_SECONDS = 0` still disables polling
- * and a slower records clock still wins.
+ * applied by `useLiveList` on both transports, so `LIVE_REFRESH_SECONDS = 0` still
+ * disables the fallback and a slower records clock still wins.
  *
  * Your own edits do not wait for it: the count key is invalidated alongside the
  * items key, so this interval only ever carries *other people's* changes.

@@ -4,9 +4,16 @@
     uv run python -m src.demo.school --password letmein
 
 What it builds: 16 staff accounts with person profiles, 6 groups, 5 workspaces,
-17 lists spanning every column type, ~740 records, and the views, forms, metrics
-and permission grants that make them worth looking at. Safe to re-run — see
-`_builders` for what "already there" means per resource.
+17 lists, ~740 records, and the views, forms, metrics and permission grants that
+make them worth looking at. Safe to re-run — see `_builders` for what "already
+there" means per resource.
+
+**It no longer spans every column type**, and that is a gap rather than a decision:
+`email`, `phone`, `location`, `color`, `rating` and `duration` all shipped after this
+scenario was written, and none of them appears here. Two places would obviously want
+one (the guardian and work e-mail columns are `link` holding `mailto:` URLs, which is
+what `email` exists for), so retrofitting them is worth doing next time this file is
+opened.
 
 Three properties of the app, not of the school, shape the scenario. They are worth
 knowing before editing it, because each one is a wall you would otherwise walk into.

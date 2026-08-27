@@ -294,7 +294,7 @@ export function ColumnsPanel({
             setReview({
               column: converting,
               // The dialog does not report back the type it sent, so read it off
-              // the hidden column the conversion just built.
+              // the preview report instead.
               newType: report.new_type,
               report,
             })

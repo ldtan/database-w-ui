@@ -1,7 +1,7 @@
 # Data Model Design — Lists / Tables App
 
 Status: **Implemented (backend)**
-Last updated: 2026-07-11
+Last updated: 2026-08-27
 
 This document specifies the data model for the app: users create **lists** (tables),
 define **columns** (fields) on them, store records as **list items**, and configure
@@ -203,10 +203,10 @@ Defines one field on a list. This is the schema.
 | `list_id`     | FK → `lists.id`   | Owner list. |
 | `name`        | `str(120)`        | Code-facing slug (D6). Unique **per list** (ignoring soft-deleted). |
 | `display_name`| `str(255)`        | UI label (D6). Not unique. |
-| `type`        | `enum` (`ColumnType`) | See §5. Immutable through `PATCH`; changed only by a **conversion** ([planned features §1](planned-features.md)), which retypes the column at cutover so its `uuid` and every reference to it survive. |
+| `type`        | `enum` (`ColumnType`) | See §5. Immutable through `PATCH`; changed only by a **conversion** ([planned features §1](planned-features.md)), which reads, converts, writes and retypes in **one transaction** so the column's `uuid` and every reference to it survive and no write can land in a gap. |
 | `position`    | `int`             | Ordering within the list's schema. |
 | `config`      | `JSONB` default `{}` | Type-specific settings — see §5. |
-| `hidden`      | `bool` default `false` | Live, but **not part of the list's shape**: the grid, records, export, metrics, forms and the primary column all skip it. Today only a conversion's target column while it is being backfilled. Use `Column.in_shape()` rather than testing it by hand. |
+| `hidden`      | `bool` default `false` | Live, but **not part of the list's shape**: the grid, records, export, metrics, forms and the primary column all skip it. **Nothing sets it any more** — it existed for the staged conversion that §5's `type` row describes, and survives so `src/maintenance/drop_conversion_scratch.py` can find the rows that design stranded. Use `Column.in_shape()` rather than testing it by hand, and do not set it casually: a hidden column is one no code path will read, finish, or offer to clean up. |
 
 `config` is where every per-type detail lives (options, precision, defaults,
 required flag, lookup target). Keeping it in one JSONB blob means adding a new
@@ -477,6 +477,8 @@ Notes:
 A new type must be added to **every** frontend touchpoint or it half-works:
 `lib/columnTypes.ts` (`COLUMN_TYPE_OPTIONS`), `features/records/renderCell.tsx` (how a value
 *displays*), `RecordField` in `features/records/RecordFields.tsx` (how it is *edited*),
+`features/records/inlineEdit.tsx` (how it is edited *in the grid*, which is a separate
+control from the dialog's),
 `FilterConditionsEditor.tsx`, `features/columns/ColumnDialog.tsx` (how it is *configured* —
 state, seeding, `resetDefaults`, and the config emit, where a key must always be sent
 because a `PATCH` merges), `features/columns/columnAdvanced.ts` (`ADVANCED_KEYS`, or a

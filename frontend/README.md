@@ -13,8 +13,12 @@ React + TypeScript SPA for the lists/tables app, talking to the FastAPI backend.
 | Server state | TanStack Query |
 | Routing | React Router |
 | Forms | React Hook Form + Zod |
-| Drag & drop | dnd-kit (for future column/field reordering) |
+| Drag & drop | dnd-kit — behind `components/SortableList.tsx`, which the view's column order and the form editor's field order both use |
+| Rich text | Quill (a `text` column in `rich` mode; the toolbar and the server's sanitiser allowlist are two halves of one decision) |
+| Maps | Leaflet — the `location` picker and cell. Tiles come from the browser, with attribution; address *search* goes through the API's `/geocode` |
+| Phone numbers | `libphonenumber-js` — the counterpart of the backend's `phonenumbers`, so what is shown agrees with what was accepted. **Update the two together.** |
 | QR scanning | html5-qrcode (camera, with an image fallback) |
+| Tests | Vitest (node environment, no jsdom — see below) + Playwright, which drives the guide's screenshot capture |
 | API types | `openapi-typescript` (generate from the backend's OpenAPI schema) |
 
 ## Getting started
@@ -33,9 +37,17 @@ Other scripts:
 ```bash
 npm run build          # typecheck (tsc --noEmit) + production build
 npm run preview        # serve the production build
+npm run test           # vitest, once (npm run test:watch to keep it open)
 npm run gen:api        # regenerate src/lib/api-schema.ts from the backend's OpenAPI document
 npm run capture:guide  # re-photograph the guide's screenshots from the running app
 ```
+
+`vitest` runs in a **node** environment with `include: ["src/**/*.test.ts"]` and no jsdom,
+deliberately: what it pins is the rules a record goes through — what counts as empty, how a
+value serializes, how a phone number or a duration parses, which reordering is a permutation
+— none of which render, and PrimeReact under jsdom is a maintenance cost of its own. A
+component that mounts is out of its reach; `npm run capture:guide` is what covers those,
+because it drives the real app (see below).
 
 ## API types are generated
 
@@ -63,26 +75,38 @@ Two things stay hand-written, on purpose:
 ```
 src/
   lib/            # api client (fetch + auth/refresh), auth + theme + toast contexts,
-                  # themeSync (ties the theme to the account), query client, hand-written
-                  # API types, and small shared helpers: links (safeHref), temporal, slug,
-                  # people, useMediaQuery, useDebounced
+                  # themeSync (ties the theme to the account) and timezoneSync (the
+                  # same for the browser's zone), query client, hand-written API types,
+                  # liveStream + useLiveList (the SSE subscription and the polling
+                  # fallback), columnTypes (the one list of what a column may be), and
+                  # the per-type value helpers each new column type brought with it:
+                  # phone, email, color, rating, duration, location, temporal, links
+                  # (safeHref), plus csv, download, display, slug, people, permissions,
+                  # useMediaQuery, useDebounced
   components/     # app shell: AppLayout, AppSidebar (the rail — beside the page above
                   # 1024px, inside a drawer below it), NavTree (what it renders),
                   # AccountMenu + UserAvatar (the account control), AppDialog,
-                  # NameFields, Breadcrumbs, ThemeSwitcher
+                  # NameFields, Breadcrumbs, ThemeSwitcher, ErrorBoundary
                   # page furniture: PageHeader, EmptyState, Skeleton, SearchInput,
-                  # CreateNameDialog, RowActions
+                  # CreateNameDialog, RowActions, Field (the form primitives),
+                  # SortableList (the one drag-to-reorder control), UserPicker
   features/
     auth/         # login (the only unauthenticated page)
+    dashboard/    # the home page: where you land, and what you were last in
+    onboarding/   # the guided tours, the welcome dialog and the help widget —
+                  # the "show me" half of what the guide page writes down
+    guide/        # GuidePage, the written walkthrough, and its generated figures
     workspaces/   # workspaces + the lists shared with you directly
     lists/        # lists of a workspace; a list's records; the List settings dialog;
                   # DeletedConfigDialog, the bin its four config kinds share
-    columns/      # add/edit a column, and the columns panel in List settings
-    records/      # the record form, the mobile card layout, renderCell, sortRows,
-                  # and the QR scanner (QrScanDialog + qrFill)
+    columns/      # add/edit a column, the columns panel in List settings, and the
+                  # type-conversion report
+    records/      # the record form and its fields, the mobile card layout, renderCell,
+                  # inline cell editing, the archive surface, the per-type editors
+                  # (PhoneInput, TemporalInput), and the QR scanner + submitting session
     views/        # the view bar, filter/group/column controls, filter conditions
-    forms/        # per-list form layouts
-    metrics/    # the aggregate cards above the grid, and their settings panel
+    forms/        # per-list form layouts, and the per-field conditions editor
+    metrics/      # the aggregate cards above the grid, and their settings panel
     permissions/  # Share dialog/panel and the effective-actions hooks
     people/       # accounts and groups (identity administration), their bin,
                   # and batch account creation from a CSV
@@ -90,12 +114,28 @@ src/
     transfer/     # CSV/JSON import + export, for a list's records
     lookups/      # lookup cells, fields and filter inputs
     principals/   # user/group cells, fields and filter inputs
+    locations/    # the map + address picker behind a `location` cell
     references/   # ReferencePicker — the typeahead all of the above share
 ```
 
 A column's `type` and `config` drive everything about it: `renderCell` picks how it
-displays, `RecordFormDialog` picks its input, `FilterConditionsEditor` picks its filter
-control. Adding a column type means teaching those three, not writing per-list code.
+displays, `RecordField` picks its input, `FilterConditionsEditor` picks its filter
+control. Adding a column type means teaching those, not writing per-list code — but
+"those" is now longer than three, and a type taught to only some of them half-works
+silently. The full list, which `docs/data-model-design.md` §5 also carries:
+
+| File | What it decides |
+|------|-----------------|
+| `lib/columnTypes.ts` | that the type is offered at all (`COLUMN_TYPE_OPTIONS`), and what it may convert to |
+| `features/records/renderCell.tsx` | how a value **displays** — in the grid, the cards, the bin and the view dialog |
+| `features/records/RecordFields.tsx` | how it is **edited**, in both the add/edit dialog and a QR session's presets |
+| `features/records/inlineEdit.tsx` | how it is edited **in the grid**, which is a separate control |
+| `features/views/FilterConditionsEditor.tsx` | which operators it offers and what the value input is |
+| `features/columns/ColumnDialog.tsx` | how it is **configured** — state, seeding, `resetDefaults`, and the config emit, where a key must always be sent because a `PATCH` merges |
+| `features/columns/columnAdvanced.ts` | `ADVANCED_KEYS` — leave the new setting out and the column opens with it folded away invisibly |
+| `features/records/qrFill.ts` | `shape()` — how a QR code's JSON becomes the form's value |
+
+The backend half is `src/lists/transfer/services.py` (export and import cell handling).
 
 ## The guide's screenshots are taken from the running app
 
@@ -322,8 +362,10 @@ fingerprints the page's live config against the active view's stored one (defaul
 applied to both sides, since a view saved before `group_by` existed has no key for it)
 and passes `dirty` to `ViewBar`.
 
-Run `npm run gen:api` to keep the TypeScript types in sync with the Python models
-instead of the hand-written `src/lib/types.ts`.
+**Metrics are behind their own toolbar button, and the button gates the query rather
+than just the markup.** A list nobody is totalling costs nothing; rendering the strip
+hidden with its query still enabled would quietly turn every open list into a repeating
+full scan. See `docs/known-gaps.md` §9.
 
 ## Bins
 
@@ -334,17 +376,26 @@ things" screen: you go looking for a missing view where the views are listed.
 
 | Component | Where it is offered | Gated on |
 |-----------|--------------------|----------|
-| `DeletedRecordsDialog` | the list page's overflow menu | list-level `delete` |
+| `BinnedRecordsDialog` | the list page's overflow menu | list-level `delete` |
 | `DeletedListsDialog` | the lists page | the workspace's `delete` |
 | `DeletedWorkspacesDialog` | the workspaces page | ownership (the backend scopes it) |
 | `DeletedConfigDialog` | each tab of List settings | list-level `configure` |
 | `DeletedPrincipalsDialog` | the People page, per section | superuser |
 
-The last two are each **one component covering several kinds**, because the API behind
-them is one module behind several prefixes: same row shape, same three routes
-(`/deleted`, `/{uuid}/restore`, `/{uuid}/permanent`), same gate. What differs per kind is
-wording and which queries a restore invalidates, so that is a lookup table at the top of
-the file rather than four near-identical components to keep in step.
+`DeletedConfigDialog` and `DeletedPrincipalsDialog` are each **one component covering
+several kinds**, because the API behind them is one module behind several prefixes: same
+row shape, same three routes (`/deleted`, `/{uuid}/restore`, `/{uuid}/permanent`), same
+gate. What differs per kind is wording and which queries a restore invalidates, so that is
+a lookup table at the top of the file rather than four near-identical components to keep
+in step.
+
+**The archive is a second axis, not a sixth bin**, and `BinnedRecordsDialog` serves both
+from one `BinKind` — `"deleted"` and `"archived"` — for the same reason: the routes and
+the row shape match. What does *not* match is why they exist. A delete says "this was a
+mistake and it goes for good in thirty days"; an archive says "this happened and I have
+finished with it", so it has **no retention window, no deadline to display and no
+permanent-delete action**. Unarchiving cannot conflict where a restore can. `ArchiveHint`
+is the nudge toward it on a list that has grown long.
 
 Two things are worth copying if a sixth kind ever gets one:
 
@@ -393,6 +444,24 @@ Two things are worth copying if a sixth kind ever gets one:
   `["columns", listUuid]`, `["person", "me"]`…). Two components asking the same question
   make one request, and a dialog's `invalidateQueries` refreshes the page behind it.
   Retries and refetch-on-focus are off on purpose — see `lib/queryClient.ts`.
+- **An open list is kept current by a server push**, through `lib/useLiveList.ts` —
+  spread its result into the items `useQuery` and it does the rest. It subscribes to
+  `GET /lists/{uuid}/events` and invalidates the key you name when the server says that
+  list changed. Four things about it are load-bearing:
+  - **It falls back to polling, and that path is not new code.** A proxy that buffers
+    event streams, a deployment with `SSE_ENABLED=False`, a network that forbids them —
+    any of those and the hook returns the `refetchInterval` it used to return
+    unconditionally, every `LIVE_REFRESH_SECONDS`. So "live" degrades rather than breaks.
+  - **An event carries no record data.** It says *this list changed*; the refetch it
+    provokes is an ordinary permissioned `GET /items/`, so push can no more surface a row
+    the viewer may not see than polling could.
+  - **Each caller names the key it wants refreshed**, and may set a `minSeconds` floor.
+    Invalidating the whole `["items", listUuid]` namespace would be simpler and wrong: the
+    metric values live under that prefix and are a scan of every visible record, so
+    refreshing them per write, per viewer, costs more than the polling this replaced.
+  - **An abandoned tab costs nothing.** The stream closes while the tab is hidden and
+    after five idle minutes, mirroring what the polling implementation did. Reopening
+    fires one change, since whatever happened in the gap was missed.
 - A `link` cell's URL must go through `safeHref` (`lib/links.ts`) before it reaches an
   `href`. The backend already restricts schemes, but rows predating that check, or
   arriving by import, mean a raw `href={value}` is stored XSS.
