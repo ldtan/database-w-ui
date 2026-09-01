@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import NameSlug
+from src.core.schemas import DisplayName, NameSlug
 
 
 class MetricConfig(BaseModel):
@@ -30,7 +30,7 @@ class MetricConfig(BaseModel):
 
 class MetricCreate(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     position: int = 0
     description: Optional[str] = None
     config: MetricConfig
@@ -38,7 +38,7 @@ class MetricCreate(BaseModel):
 
 class MetricUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     position: Optional[int] = None
     description: Optional[str] = None
     config: Optional[MetricConfig] = None

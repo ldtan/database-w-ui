@@ -4,12 +4,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import NameSlug, ResourceLink
+from src.core.schemas import DisplayName, NameSlug, ResourceLink
 
 
 class ListBase(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     description: Optional[str] = None
     settings: dict = Field(default_factory=dict)
 
@@ -21,7 +21,7 @@ class ListCreate(ListBase):
 
 class ListUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     description: Optional[str] = None
     # Point the list's primary/display field at one of its own columns.
     primary_column_uuid: Optional[UUID] = None

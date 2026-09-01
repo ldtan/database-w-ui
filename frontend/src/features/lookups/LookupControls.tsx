@@ -184,6 +184,7 @@ function LookupPicker({
   disabled,
   onChange,
   inputId,
+  ariaLabel,
   style,
   parentValues,
   parentLabel,
@@ -196,6 +197,7 @@ function LookupPicker({
   disabled?: boolean;
   onChange: (v: unknown) => void;
   inputId?: string;
+  ariaLabel?: string;
   style?: React.CSSProperties;
   // Nested lookup, decided by the *caller*: undefined means "not nested in this
   // context" — the grid, filter editors and label resolution stay unfiltered.
@@ -269,6 +271,7 @@ function LookupPicker({
         }
         disabled={disabled || awaitingParent}
         inputId={inputId}
+        ariaLabel={ariaLabel}
         style={style}
         create={
           canCreate
@@ -348,11 +351,17 @@ export function LookupFilterValue({
   column,
   value,
   onChange,
+  inputId,
+  ariaLabel,
 }: {
   listUuid: string;
   column: Column;
   value: unknown;
   onChange: (v: unknown) => void;
+  /** The filter editor's rows are three unlabelled controls repeated; this is how
+   *  the value one gets a name. See FilterConditionsEditor. */
+  inputId?: string;
+  ariaLabel?: string;
 }) {
   return (
     <LookupPicker
@@ -362,6 +371,8 @@ export function LookupFilterValue({
       multiple={false}
       onChange={onChange}
       style={{ width: 160 }}
+      inputId={inputId}
+      ariaLabel={ariaLabel}
     />
   );
 }

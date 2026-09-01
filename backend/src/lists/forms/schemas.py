@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import NameSlug
+from src.core.schemas import DisplayName, NameSlug
 
 from ..views.schemas import FilterGroup
 from .enums import FormType
@@ -54,7 +54,7 @@ class FormConfig(BaseModel):
 
 class FormCreate(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     type: FormType = FormType.custom
     is_default: bool = False
     config: FormConfig = Field(default_factory=FormConfig)
@@ -62,7 +62,7 @@ class FormCreate(BaseModel):
 
 class FormUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     type: Optional[FormType] = None
     is_default: Optional[bool] = None
     config: Optional[FormConfig] = None

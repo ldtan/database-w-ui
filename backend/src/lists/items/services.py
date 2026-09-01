@@ -63,10 +63,41 @@ async def display_column_key(
     (writing one out) and the options endpoint (the picker), so the three cannot
     disagree about what a label is — if they did, a file this app exported would
     not import back into it.
+
+    **Every step checks `in_shape()`, including the first.** It used to return the
+    configured uuid unconditionally, which made it the one step that could name a
+    column that is not there — and because it short-circuits, a dead one stopped the
+    two live fallbacks from ever running. `ColumnService.delete` clears the list's
+    `primary_column_id` and any nesting pairing but has never known about this key,
+    which lives in a *different list's* column config, so deleting the column a
+    lookup labels its rows by left every one of those cells resolving
+    `data['<dead uuid>']` to NULL: the picker offered rows labelled `null`, the
+    export wrote uuids, `_validate_lookup` matched no label, and the column sorted
+    as though every row were blank. `in_shape`'s own docstring already lists "a
+    lookup's label" among the readers that must filter on it; this was the one that
+    did not.
+
+    Checking here rather than scrubbing at delete time is deliberate, and it is
+    about the bin. A scrub would make a column's restore a partial undo — the
+    lookups pointing at it would stay demoted to the primary/first-column fallback
+    forever, with nothing able to report it, which is exactly the loss known-gaps §6
+    already regrets for nesting pairings. Read-time degrades *reversibly*: bin the
+    column and the label falls back, restore it and the label comes back. It also
+    repairs every database that already holds a dangling key, with no sweep. The
+    cost is one query per column per request — never per row, and
+    `_lookup_display_keys` caches it per target list.
     """
     explicit = config.get("display_column_uuid")
     if explicit:
-        return str(explicit)
+        key = await db.scalar(
+            select(Column.uuid).where(
+                Column.uuid == coerce_uuid(explicit),
+                Column.list_id == target_list_id,
+                in_shape(),
+            )
+        )
+        if key is not None:
+            return str(key)
 
     primary_id = await db.scalar(
         select(List.primary_column_id).where(List.id == target_list_id)

@@ -4,12 +4,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import NameSlug
+from src.core.schemas import DisplayName, NameSlug
 
 
 class WorkspaceBase(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     description: Optional[str] = None
     settings: dict = Field(default_factory=dict)
 
@@ -20,7 +20,7 @@ class WorkspaceCreate(WorkspaceBase):
 
 class WorkspaceUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     description: Optional[str] = None
     settings: Optional[dict] = None
 

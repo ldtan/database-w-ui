@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from src.core.schemas import NameSlug
+from src.core.schemas import DisplayName, NameSlug
 
 from ..views.schemas import FilterGroup
 from .enums import ColumnType
@@ -147,7 +147,7 @@ class ColumnConfig(BaseModel):
 
 class ColumnCreate(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     type: ColumnType
     position: int = 0
     description: Optional[str] = None
@@ -156,7 +156,7 @@ class ColumnCreate(BaseModel):
 
 class ColumnUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     position: Optional[int] = None
     description: Optional[str] = None
     config: Optional[ColumnConfig] = None
@@ -205,7 +205,7 @@ class ConversionRequest(BaseModel):
     type: ColumnType
     config: ColumnConfig = Field(default_factory=ColumnConfig)
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
 
     @model_validator(mode="after")
     def _display_name_needs_a_name(self):

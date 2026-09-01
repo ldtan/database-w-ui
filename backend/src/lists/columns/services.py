@@ -16,6 +16,7 @@ from ..items.filtering import apply_filters
 from ..items.models import ListItem
 from ..models import List
 from .enums import (
+    MULTIPLE_TYPES,
     COMPUTED_TYPES,
     FORMULA_REFERENCEABLE_TYPES,
     PRINCIPAL_TYPES,
@@ -416,6 +417,33 @@ class ColumnService:
             raise ValidationError(
                 "A column cannot be both 'unique' and 'multiple': uniqueness is "
                 "not enforced on a multi-valued column. Turn one of them off."
+            )
+
+        # `multiple` is only implemented for the types that have somewhere to put a
+        # second value: a `choice` (whose validator has a list branch) and the
+        # REFERENCE_TYPES (whose values are resolved as a set by `_validate_value`).
+        # It was accepted on all eighteen, and the result was not a column that
+        # ignored the flag — it was a column that could never hold anything.
+        # `coerce_shape` wraps an incoming scalar into a one-element list because the
+        # config says multiple, and `validate_scalar` then measures that list against
+        # the scalar rule for the type and refuses it: "Column 'tags' expects a
+        # string". Sending a list fails identically. So `{"type": "text", "config":
+        # {"multiple": true}}` created a 201 and then rejected every write of that
+        # cell, with no way out but a config PATCH nothing in the UI offers.
+        #
+        # Refused rather than implemented, for the reason the pair above is: making
+        # it work means deciding what `min`/`max`, `unique`, a `default`, a formula
+        # reference and every filter operator mean element-wise, which is the
+        # separate piece of work known-gaps names under "Toggling a column's
+        # `multiple`". A column must not claim something it does not do.
+        #
+        # Checked after the merge, like the pair above, so a PATCH turning it on is
+        # caught too. Existing columns are not retro-validated; the flag simply stops
+        # being settable, and such a column was unusable anyway.
+        if data.get("multiple") and type_ not in MULTIPLE_TYPES:
+            raise ValidationError(
+                f"A '{type_.value}' column cannot be 'multiple'. Only choice, "
+                "lookup, user and group columns hold more than one value."
             )
 
         if type_ == ColumnType.choice:

@@ -544,6 +544,14 @@ export function RecordField({
       }
       return (
         <Rating
+          // A `Rating` renders a row of radio-ish stars and takes no `inputId`, so
+          // the field's `<label htmlFor={`field-${uuid}`}>` had nothing to point at
+          // and the widget announced as unlabelled. Naming the group is the honest
+          // fix: the label belongs to all the stars together, not to any one of
+          // them, and `aria-labelledby` reuses the visible text rather than
+          // duplicating it into an aria-label that can drift.
+          role="group"
+          aria-labelledby={`${id}-label`}
           // `cancel` is how a cell gets emptied again, and it matters more here
           // than on an ordinary rating widget: there is no zero to fall back to,
           // so without it a mis-click is permanent.
@@ -605,6 +613,21 @@ export function RecordField({
           onChange={onChange}
         />
       );
+    case "calculated":
+      // Read-only, explicitly. This is unreachable from the record dialog today —
+      // `resolveFields` drops calculated columns from an input form, and
+      // `cellEditKinds` locks them in the grid — but `resolveFields` also takes
+      // `includeCalculated`, which `RecordViewDialog` passes. Any future caller
+      // pairing that flag with this component would otherwise get the editable
+      // text box below, for a column the server refuses to be written.
+      return (
+        <InputText
+          id={id}
+          value={value === null || value === undefined ? "" : String(value)}
+          readOnly
+          disabled
+        />
+      );
   }
   // Everything that is a plain one-line box: a single-line text column, and any
   // type with no editor of its own.
@@ -643,7 +666,9 @@ export function RecordFields({
     <>
       {fields.map(({ column, enabled, label }) => (
         <div key={column.uuid} className="flex flex-col gap-2">
-          <label htmlFor={`field-${column.uuid}`}>
+          {/* The `id` is what a `role="group"` control points `aria-labelledby`
+              at — see the rating branch, which has no single input to name. */}
+          <label id={`field-${column.uuid}-label`} htmlFor={`field-${column.uuid}`}>
             {label}
             {column.config.required ? " *" : ""}
           </label>

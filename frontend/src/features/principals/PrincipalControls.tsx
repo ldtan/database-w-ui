@@ -162,6 +162,7 @@ function PrincipalPicker({
   disabled,
   onChange,
   inputId,
+  ariaLabel,
   style,
 }: {
   kind: PrincipalType;
@@ -170,6 +171,7 @@ function PrincipalPicker({
   disabled?: boolean;
   onChange: (v: unknown) => void;
   inputId?: string;
+  ariaLabel?: string;
   style?: React.CSSProperties;
 }) {
   const uuids = useMemo(
@@ -201,6 +203,7 @@ function PrincipalPicker({
       placeholder={`Search ${kind}s…`}
       disabled={disabled}
       inputId={inputId}
+      ariaLabel={ariaLabel}
       style={style}
     />
   );
@@ -234,10 +237,15 @@ export function PrincipalFilterValue({
   column,
   value,
   onChange,
+  inputId,
+  ariaLabel,
 }: {
   column: Column;
   value: unknown;
   onChange: (v: unknown) => void;
+  /** See LookupFilterValue — the filter editor names its controls. */
+  inputId?: string;
+  ariaLabel?: string;
 }) {
   return (
     <PrincipalPicker
@@ -246,6 +254,8 @@ export function PrincipalFilterValue({
       multiple={false}
       onChange={onChange}
       style={{ width: 160 }}
+      inputId={inputId}
+      ariaLabel={ariaLabel}
     />
   );
 }

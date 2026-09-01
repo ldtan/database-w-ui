@@ -245,6 +245,61 @@ async def test_labels_fall_back_to_the_first_column(
     assert [o["label"] for o in resp.json()] == ["Springfield High"]
 
 
+async def test_a_deleted_display_column_falls_back_rather_than_blanking(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """Deleting the column a lookup labels its rows by must not blank the labels.
+
+    `display_column_uuid` is the third pointer at a column, alongside the list's
+    `primary_column_id` and a nesting pairing — and the only one nothing cleared,
+    because it lives in a *different list's* config. It also short-circuited the
+    fallbacks, so a dead one did not degrade to the primary or first column, it
+    stopped there: every option came back labelled `null`, the export wrote uuids,
+    and no search matched anything.
+
+    Deliberately checked at read time rather than scrubbed at delete time, which is
+    what the second half of this test is about.
+    """
+    target, _ = await _target_with_rows(
+        client, workspace_uuid, add_column, ["Springfield High"]
+    )
+    # A second column, explicitly named as the label — not the primary one, so the
+    # fallback below is demonstrably doing the work.
+    alias = await add_column(target, name="alias", display_name="Alias", type="text")
+    lookup = await add_column(
+        list_uuid,
+        name="school",
+        display_name="School",
+        type="lookup",
+        config={"target_list_uuid": target, "display_column_uuid": alias},
+    )
+
+    await client.delete(f"/api/lists/{target}/columns/{alias}")
+
+    # Falls through to the primary column rather than answering with nothing.
+    resp = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options?q=spring")
+    assert resp.status_code == 200, resp.text
+    assert [o["label"] for o in resp.json()] == ["Springfield High"]
+
+    # And the config still names it, so restoring the column restores the label —
+    # which is why this is not scrubbed on delete. A scrub would demote the lookup
+    # permanently and a restore could not tell anyone it had.
+    restored = await client.post(
+        f"/api/lists/{target}/columns/{alias}/restore"
+    )
+    assert restored.status_code == 200, restored.text
+    await client.patch(
+        f"/api/lists/{target}/items/{_row_uuid(await client.get(f'/api/lists/{target}/items/'))}",
+        json={"data": {alias: "SHS"}},
+    )
+    again = await client.get(f"/api/lists/{list_uuid}/columns/{lookup}/options?q=shs")
+    assert [o["label"] for o in again.json()] == ["SHS"]
+
+
+def _row_uuid(resp):
+    return resp.json()[0]["uuid"]
+
+
 async def test_export_does_not_leak_labels_from_an_unreadable_target(
     client, make_client, session_factory, workspace_uuid, list_uuid, add_column
 ):

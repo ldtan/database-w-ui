@@ -80,7 +80,12 @@ export function FilterConditionsEditor({
         return (
           // Wraps rather than overflows: column + operator + value + remove is more
           // than a phone's width, so on one it becomes two lines.
-          <div key={i} className="flex flex-wrap items-center gap-2">
+          <div
+            key={i}
+            className="flex flex-wrap items-center gap-2"
+            role="group"
+            aria-label={`Condition ${i + 1}`}
+          >
             <Dropdown
               value={cond.column_uuid}
               options={columns.map((c) => ({
@@ -90,6 +95,11 @@ export function FilterConditionsEditor({
               onChange={(e) => update(i, { column_uuid: e.value })}
               placeholder="Column"
               className="flex-1 min-w-40"
+              // Each row is three unlabelled controls repeated, so without these a
+              // screen reader reads "combo box, combo box, edit" three rows deep
+              // with nothing to say which condition or which part of it. Numbered
+              // from 1 because that is how the rows read on screen.
+              aria-label={`Condition ${i + 1} column`}
             />
             <Dropdown
               value={cond.operator}
@@ -97,6 +107,7 @@ export function FilterConditionsEditor({
               onChange={(e) => update(i, { operator: e.value })}
               placeholder="Op"
               style={{ width: 120 }}
+              aria-label={`Condition ${i + 1} operator`}
             />
             {needsValue &&
               (col?.type === "number" || col?.type === "rating" ? (
@@ -107,6 +118,7 @@ export function FilterConditionsEditor({
                   value={(cond.value as number) ?? null}
                   onValueChange={(e) => update(i, { value: e.value ?? null })}
                   useGrouping={false}
+                  aria-label={`Condition ${i + 1} value`}
                   min={col.type === "rating" ? 1 : undefined}
                   max={col.type === "rating" ? ratingScale(col) : undefined}
                   style={{ width: 120 }}
@@ -119,12 +131,33 @@ export function FilterConditionsEditor({
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
+                  ariaLabel={`Condition ${i + 1} value`}
                 />
               ) : col?.type === "phone" ? (
                 <PhoneFilterValue
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
+                />
+              ) : col?.type === "checkbox" ? (
+                // A checkbox had no branch at all and fell through to the free-text
+                // box, where the only two strings that match anything are "true" and
+                // "false" — `data ->> key` is text and that is what JSONB spells a
+                // boolean. So filtering a checkbox meant guessing the storage format,
+                // and typing the obvious "Yes" returned nothing with no explanation.
+                // The values here are those two strings deliberately: the backend now
+                // also accepts a real JSON boolean (`_as_text`), but sending the text
+                // keeps a view saved by this editor readable by an older server.
+                <Dropdown
+                  value={(cond.value as string) ?? null}
+                  options={[
+                    { label: "Checked", value: "true" },
+                    { label: "Unchecked", value: "false" },
+                  ]}
+                  onChange={(e) => update(i, { value: e.value })}
+                  placeholder="Value"
+                  style={{ width: 120 }}
+                  aria-label={`Condition ${i + 1} value`}
                 />
               ) : col?.type === "choice" ? (
                 // Typable when the column takes answers of its own: those are
@@ -137,6 +170,7 @@ export function FilterConditionsEditor({
                   editable={!!col.config.allow_other}
                   placeholder="Value"
                   style={{ width: 120 }}
+                  aria-label={`Condition ${i + 1} value`}
                 />
               ) : col?.type === "user" || col?.type === "group" ? (
                 // Cells store a uuid, so a text box here could only ever be
@@ -145,6 +179,7 @@ export function FilterConditionsEditor({
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
+                  ariaLabel={`Condition ${i + 1} value`}
                 />
               ) : col?.type === "lookup" ? (
                 // Same: a lookup cell stores a target-row uuid, not its label.
@@ -153,18 +188,21 @@ export function FilterConditionsEditor({
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
+                  ariaLabel={`Condition ${i + 1} value`}
                 />
               ) : col && isTemporal(col.type) ? (
                 <TemporalFilterValue
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
+                  ariaLabel={`Condition ${i + 1} value`}
                 />
               ) : (
                 <InputText
                   value={(cond.value as string) ?? ""}
                   onChange={(e) => update(i, { value: e.target.value })}
                   style={{ width: 120 }}
+                  aria-label={`Condition ${i + 1} value`}
                 />
               ))}
             <Button
@@ -276,10 +314,13 @@ function DurationFilterValue({
   column,
   value,
   onChange,
+  ariaLabel,
 }: {
   column: Column;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** The row has no visible label — see FilterConditionsEditor's aria-labels. */
+  ariaLabel?: string;
 }) {
   const format = durationFormat(column);
   const [draft, setDraft] = useState<string | null>(null);
@@ -295,6 +336,7 @@ function DurationFilterValue({
       onBlur={() => setDraft(null)} // fall back to the canonical rendering
       placeholder={durationPlaceholder(format)}
       style={{ width: 120 }}
+      aria-label={ariaLabel}
     />
   );
 }
@@ -325,10 +367,13 @@ function TemporalFilterValue({
   column,
   value,
   onChange,
+  ariaLabel,
 }: {
   column: Column;
   value: unknown;
   onChange: (value: unknown) => void;
+  /** The row has no visible label — see FilterConditionsEditor's aria-labels. */
+  ariaLabel?: string;
 }) {
   const tokens = filterTokens(column.type);
   const token =
@@ -346,6 +391,7 @@ function TemporalFilterValue({
         // freshly-added condition is in, rather than a stale date left behind.
         onChange={(e) => onChange(e.value === SPECIFIC ? null : e.value)}
         style={{ width: 118 }}
+        aria-label={ariaLabel}
       />
       {token === null && (
         <TemporalInput

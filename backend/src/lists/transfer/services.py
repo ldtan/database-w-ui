@@ -22,6 +22,7 @@ from src.infrastructure import database as db_module
 
 from ..columns.enums import (
     COMPUTED_TYPES,
+    MULTIPLE_TYPES,
     NUMERIC_TYPES,
     PRINCIPAL_TYPES,
     ColumnType,
@@ -482,10 +483,13 @@ def _parse_cell(column: Column, raw: object):
         if s in ("false", "0", "no", "n"):
             return False
         raise ValidationError(f"column '{column.name}': '{raw}' is not true/false")
-    if (
-        column.type in (ColumnType.choice, ColumnType.lookup) or
-        column.type in PRINCIPAL_TYPES
-    ) and multiple:
+    # The same set the config validator now enforces `multiple` against, named once
+    # rather than spelled out again: choice, lookup, user, group. `_csv_cell` joins a
+    # list with `;` for *any* column, which was a latent disagreement while the flag
+    # could be set on a `text` column — the export would join and the import would
+    # not split. It cannot be set there now, so the two agree by construction, and
+    # this reads as the reason rather than as a coincidence.
+    if column.type in MULTIPLE_TYPES and multiple:
         if isinstance(raw, list):
             return raw
         return [p.strip() for p in str(raw).split(";") if p.strip()]

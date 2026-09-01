@@ -291,7 +291,17 @@ export function ColumnDialog({
   // matching `type` is read when the config is built.
   const [defaultText, setDefaultText] = useState(""); // text / link / email / color
   const [defaultNumber, setDefaultNumber] = useState<number | null>(null);
-  const [defaultChecked, setDefaultChecked] = useState(false);
+  // Three-valued on purpose. A checkbox column's default has three meanings and a
+  // boolean can only carry two: "starts checked", "starts unchecked", and "no
+  // default at all". The control used to be a single tick whose off position wrote
+  // `null`, so "starts unchecked" was inexpressible — and since a missing cell and
+  // a `false` one render identically, nobody noticed that `is_not_empty` and
+  // `required` tell them apart. Making it a boolean and always sending it would have
+  // fixed that by silently stamping `default: false` onto every existing checkbox
+  // column the next time anyone opened it for an unrelated edit, which is a worse
+  // trade: the seed below reads `null` as "none", so a column without a default
+  // keeps not having one.
+  const [defaultChecked, setDefaultChecked] = useState<boolean | null>(null);
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
   // The same setting for a `multiple` choice column, which stores a list. Held
   // apart rather than as one union-typed piece of state, following the rule above:
@@ -307,7 +317,7 @@ export function ColumnDialog({
   function resetDefaults() {
     setDefaultText("");
     setDefaultNumber(null);
-    setDefaultChecked(false);
+    setDefaultChecked(null);
     setDefaultChoice(null);
     setDefaultChoices([]);
     setDefaultTemporal("");
@@ -469,7 +479,7 @@ export function ColumnDialog({
     const def = config.default;
     if (typeof def === "string") setDefaultText(def);
     if (typeof def === "number") setDefaultNumber(def);
-    setDefaultChecked(def === true);
+    setDefaultChecked(typeof def === "boolean" ? def : null);
     // A choice default is stored as the option itself — as a list of them on a
     // `multiple` column, which is the shape the server validates it in.
     if (typeof def === "string") setDefaultChoice(def);
@@ -796,7 +806,16 @@ export function ColumnDialog({
           // A duration default is counted in seconds like the cells, and a
           // rating default is a point on the scale.
           defaultValue = defaultNumber;
-        else if (type === "checkbox") defaultValue = defaultChecked ? true : null;
+        else if (type === "checkbox")
+          // `defaultChecked`, not `defaultChecked ? true : null`. Unticking used to
+          // write `null`, so "new records start unchecked" was inexpressible — the
+          // only two states the dialog could produce were "starts checked" and "no
+          // default at all". They render identically (`renderCell` draws a missing
+          // cell and a `false` one the same way), which is why it went unnoticed,
+          // but `is_not_empty` and `required` both disagree with that reading: a
+          // record whose box is deliberately unticked has an answer, and a record
+          // that was never given one does not.
+          defaultValue = defaultChecked;  // true, false, or null for none
         else if (type === "choice")
           // A `multiple` column's cells hold a list, and so must its default —
           // `validate_scalar` refuses a bare string on one.
@@ -1720,12 +1739,18 @@ export function ColumnDialog({
                 </p>
               </div>
               {showDefault && type === "checkbox" && (
-                <CheckboxField
-                  inputId="col-default"
-                  checked={defaultChecked}
-                  onChange={setDefaultChecked}
-                  label="New records start checked"
-                />
+                <Field label="Default value" htmlFor="col-default" optional>
+                  <Dropdown
+                    inputId="col-default"
+                    value={defaultChecked}
+                    options={[
+                      { label: "No default", value: null },
+                      { label: "Checked", value: true },
+                      { label: "Unchecked", value: false },
+                    ]}
+                    onChange={(e) => setDefaultChecked(e.value)}
+                  />
+                </Field>
               )}
               {showDefault && type !== "checkbox" && (
                 <Field label="Default value" htmlFor="col-default" optional>

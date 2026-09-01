@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import NameSlug
+from src.core.schemas import DisplayName, NameSlug
 
 from ..items.filtering import FILTER_OPERATORS
 
@@ -50,7 +50,7 @@ class ViewConfig(BaseModel):
 
 class ViewCreate(BaseModel):
     name: NameSlug
-    display_name: str
+    display_name: DisplayName
     position: int = 0
     description: Optional[str] = None
     config: ViewConfig = Field(default_factory=ViewConfig)
@@ -58,7 +58,7 @@ class ViewCreate(BaseModel):
 
 class ViewUpdate(BaseModel):
     name: Optional[NameSlug] = None
-    display_name: Optional[str] = None
+    display_name: Optional[DisplayName] = None
     position: Optional[int] = None
     description: Optional[str] = None
     config: Optional[ViewConfig] = None

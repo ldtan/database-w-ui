@@ -1344,3 +1344,53 @@ async def test_restore_of_a_live_record_is_a_404(client, list_uuid, add_column):
     uuid = created.json()["uuid"]
     # It is not in the bin, so there is nothing to restore.
     assert (await client.post(f"/api/lists/{list_uuid}/items/{uuid}/restore")).status_code == 404
+
+
+async def test_an_overlong_display_name_is_refused_not_a_500(
+    client, workspace_uuid, list_uuid
+):
+    """Every `display_name` is `String(255)`; the schemas used to accept any length.
+
+    asyncpg raises `StringDataRightTruncationError`, which reaches SQLAlchemy as a
+    `DataError` — **not** an `IntegrityError`, which is the only thing each service
+    wraps its flush in. So a name one character too long was not a 422 about a bad
+    argument, it was an unhandled 500. `conversion_service` already truncated around
+    this locally and its comment named the missing `max_length` as the cause.
+
+    All six resources that carry a display name, since the fix is one shared type and
+    a miss on any of them is the same 500.
+    """
+    too_long = "x" * 256
+    at_the_limit = "y" * 255
+
+    async def post(path, body):
+        return await client.post(path, json=body)
+
+    cases = [
+        ("/api/workspaces/", {"name": "ws_long"}),
+        (
+            "/api/lists/",
+            {"name": "list_long", "workspace_uuid": workspace_uuid},
+        ),
+        (
+            f"/api/lists/{list_uuid}/columns/",
+            {"name": "col_long", "type": "text", "config": {}},
+        ),
+        (f"/api/lists/{list_uuid}/views/", {"name": "view_long", "config": {}}),
+        (
+            f"/api/lists/{list_uuid}/forms/",
+            {"name": "form_long", "type": "create", "config": {}},
+        ),
+        (
+            f"/api/lists/{list_uuid}/metrics/",
+            {"name": "metric_long", "config": {"formula": "COUNT()"}},
+        ),
+    ]
+
+    for path, body in cases:
+        refused = await post(path, {**body, "display_name": too_long})
+        assert refused.status_code == 422, f"{path}: {refused.status_code} {refused.text}"
+
+        # The bound is 255, not "shorter than you thought": the limit itself works.
+        ok = await post(path, {**body, "display_name": at_the_limit})
+        assert ok.status_code == 201, f"{path}: {ok.status_code} {ok.text}"
