@@ -167,3 +167,81 @@ def test_the_window_reopens():
             bucket[i] -= window + 1
 
     assert throttle.retry_after_seconds("waiter", "203.0.113.7") is None
+
+
+async def test_refresh_is_throttled_by_address(client, monkeypatch):
+    """`/refresh` had no limit at all, and it is unauthenticated by construction.
+
+    A refresh token is a bearer credential like any other, so an unbounded route
+    that trades one for an access token is a guessing surface — and since each
+    attempt is a database lookup on a single instance, it is also the cheap way to
+    make the app do work. Keyed on the address alone: there is no username here.
+    """
+    # A small budget so the test is a handful of requests rather than fifty.
+    monkeypatch.setattr(settings, "LOGIN_MAX_FAILURES_PER_IP", 3)
+
+    for _ in range(3):
+        resp = await client.post(
+            "/api/auth/tokens/refresh", json={"refresh_token": "not-a-real-token"}
+        )
+        assert resp.status_code == 401, resp.text
+
+    blocked = await client.post(
+        "/api/auth/tokens/refresh", json={"refresh_token": "not-a-real-token"}
+    )
+    assert blocked.status_code == 429, blocked.text
+    # A client that obeys this comes back at a useful time rather than immediately.
+    assert int(blocked.headers["Retry-After"]) >= 1
+
+
+async def test_revoke_shares_the_bucket_but_does_not_fill_it(client, monkeypatch):
+    """Two halves of one decision.
+
+    `/revoke` cannot record failures — it answers 204 whether or not the token was
+    real, deliberately, so it does not know. Counting every sign-out as a failure
+    would throttle the ordinary case. But it takes the same input as `/refresh`, so
+    it reads the same bucket: an address that has just spent its budget guessing
+    must not simply move next door.
+    """
+    monkeypatch.setattr(settings, "LOGIN_MAX_FAILURES_PER_IP", 2)
+
+    # Revoking does not fill the bucket, however many times it is called.
+    for _ in range(5):
+        resp = await client.post(
+            "/api/auth/tokens/revoke", json={"refresh_token": "not-a-real-token"}
+        )
+        assert resp.status_code == 204, resp.text
+
+    # Spend the budget on /refresh...
+    for _ in range(2):
+        await client.post(
+            "/api/auth/tokens/refresh", json={"refresh_token": "not-a-real-token"}
+        )
+
+    # ...and the sibling route is closed too.
+    blocked = await client.post(
+        "/api/auth/tokens/revoke", json={"refresh_token": "not-a-real-token"}
+    )
+    assert blocked.status_code == 429, blocked.text
+
+
+async def test_a_refused_refresh_does_not_lock_anyone_out_of_logging_in(
+    client, session_factory, monkeypatch
+):
+    """The reason `/refresh` gets its own bucket namespace rather than login's.
+
+    Sharing would mean a stale session in a background tab, retrying on a timer,
+    pushing an address towards a *login* lockout — so the person could not sign in
+    to fix the thing that was failing. That is the opposite of what a throttle is
+    for.
+    """
+    monkeypatch.setattr(settings, "LOGIN_MAX_FAILURES_PER_IP", 2)
+
+    for _ in range(4):
+        await client.post(
+            "/api/auth/tokens/refresh", json={"refresh_token": "not-a-real-token"}
+        )
+
+    # Login is untouched: a correct password still works.
+    await _make_user(session_factory, "stillfine", password="rightpw123")
+    assert (await _login(client, "stillfine", "rightpw123")).status_code == 200

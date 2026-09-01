@@ -35,18 +35,26 @@ class ViewService:
         from src.permissions.enums import Action, ResourceType
         from src.permissions.services import PermissionService
 
-        result = await db.execute(
-            cls._select(list_id).order_by(View.position, View.id)
-        )
+        result = await db.execute(cls._select(list_id).order_by(View.position, View.id))
         views = result.scalars().all()
-        # Few views per list, so resolve visibility per row rather than in SQL.
-        visible = []
-        for view in views:
-            if await PermissionService.has(
-                db, user, ResourceType.view, view.id, Action.view
-            ):
-                visible.append(view)
-        return visible
+        if not views:
+            return []
+
+        # One resolve for the whole collection, not one per row. The comment this
+        # replaces said "few views per list, so resolve visibility per row" — true
+        # in practice and enforced by nothing: there is no cap on views, and this is
+        # what `GET /views/` calls on every list open — so the cost was a
+        # `_security_context` walk plus a grant SELECT per view per page load.
+        # `effective_actions_bulk` answers the same question in a fixed number of
+        # queries; the items router already used it.
+        granted = await PermissionService.effective_actions_bulk(
+            db, user, [(ResourceType.view, view.uuid) for view in views]
+        )
+        return [
+            view
+            for view in views
+            if Action.view in granted.get((ResourceType.view, view.uuid), set())
+        ]
 
     @classmethod
     async def create(cls, db: AsyncSession, lst: List, payload: ViewCreate) -> View:

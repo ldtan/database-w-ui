@@ -60,17 +60,40 @@ async def login_for_access_token(
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_access_token(
+    request: Request,
     payload: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
+    """Trade a refresh token for a new access token.
+
+    Throttled by address. A refresh token is a bearer credential like any other and
+    this route is unauthenticated by construction, so without a limit it is an
+    unbounded guessing surface — and, since each attempt is a database lookup on the
+    single instance, a cheap way to make the app do work. Keyed on the address alone
+    because there is no username here to key on; the check runs *before* the lookup,
+    for the reason login's does.
+    """
+    ip = throttle.client_ip(request)
+    wait = throttle.refresh_retry_after_seconds(ip)
+    if wait is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again shortly.",
+            headers={"Retry-After": str(wait)},
+        )
     try:
         return await TokenService.refresh(db, payload.refresh_token)
     except InvalidRefreshTokenError as exc:
+        throttle.record_refresh_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
     except InactiveUserError as exc:
+        # Counted too: a disabled account being refreshed repeatedly is the same
+        # shape of traffic, and the token is real, so it says nothing about guessing
+        # either way.
+        throttle.record_refresh_failure(ip)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=str(exc),
@@ -79,6 +102,7 @@ async def refresh_access_token(
 
 @router.post("/revoke", status_code=status.HTTP_204_NO_CONTENT)
 async def revoke_refresh_token(
+    request: Request,
     payload: RefreshRequest,
     db: AsyncSession = Depends(get_db),
 ):
@@ -96,7 +120,21 @@ async def revoke_refresh_token(
     Answers 204 whether or not the token existed. A caller signing out has nothing to
     do with either answer, and distinguishing them would turn this into an oracle for
     whether a stolen token is still live.
+
+    Shares `/refresh`'s address bucket for admission, but records nothing into it —
+    it *cannot*, because it deliberately does not know whether the token was real,
+    and counting every sign-out as a failure would throttle the ordinary case. What
+    the shared bucket buys is that an address which has just spent its budget
+    guessing at `/refresh` cannot carry on hammering the sibling route that takes
+    the same input.
     """
+    wait = throttle.refresh_retry_after_seconds(throttle.client_ip(request))
+    if wait is not None:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many attempts. Try again shortly.",
+            headers={"Retry-After": str(wait)},
+        )
     await TokenService.revoke(db, payload.refresh_token)
 
 

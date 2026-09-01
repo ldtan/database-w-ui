@@ -138,7 +138,8 @@ openssl rsa -in keys/private.pem -pubout -out keys/public.pem
 
 ### 3. Configure environment
 
-Create a `.env` file in `backend/` (see the table below). Minimal example:
+Copy `.env.example` to `.env` and fill it in (the full table is below). Minimal
+example:
 
 ```dotenv
 SECRET_KEY=change-me
@@ -196,14 +197,15 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `DISABLE_AUTH` | `false` | Dev-only: bypass auth and act as the first user. Requires `DEBUG=true` — the app refuses to start otherwise, because on a reachable URL it hands every route to anyone, as the superuser, with no token. |
 | `LOGIN_THROTTLE_WINDOW_MINUTES` | `15` | How long a failed sign-in is counted for. |
 | `LOGIN_MAX_FAILURES_PER_USERNAME` | `10` | Failed sign-ins per username per window before login answers `429`. A success clears the tally. |
-| `LOGIN_MAX_FAILURES_PER_IP` | `50` | The same per source address, to catch one host spraying across many usernames. `0` disables it — set that if a proxy in front of the API makes every user arrive as one address. |
+| `LOGIN_MAX_FAILURES_PER_IP` | `50` | The same per source address, to catch one host spraying across many usernames. `0` disables it — set that if a proxy in front of the API makes every user arrive as one address. Also the budget for `POST /auth/tokens/refresh` and `/revoke`, which are unauthenticated by construction and had no limit at all; they use a *separate* bucket, so a stale session retrying in a background tab cannot push an address towards a login lockout. |
 | `FIRST_SUPERUSER_USERNAME` | `admin` | Bootstrap user username. |
 | `FIRST_SUPERUSER_EMAIL` | `admin@example.com` | Bootstrap user email. |
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
 | `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. A policy decision, not a tuning knob; `archived_at` is unaffected by it. |
 | `FORMULA_INLINE_MAX_RECORDS` | `5000` | Above this many records, re-indexing a list's `calculated` columns is handed to a background task and the request answers at once. It decides *who waits*, never how much work is done. |
 | `IMPORT_MAX_ROWS` | `1000` | Rows one uploaded file may carry — read by both the list importer and the user batch importer. Checked before anything is written, so an over-limit file imports nothing. |
-| `MAX_UPLOAD_BYTES` | `8388608` | What an uploaded file may weigh. The file is read whole and a JSON one parsed whole again, so the real ceiling is instance memory. |
+| `MAX_UPLOAD_BYTES` | `8388608` | What an uploaded **file** may weigh. Checked by the import routes, which answer 400 with a message naming the limit. The file is read whole and a JSON one parsed whole again, so the real ceiling is instance memory. |
+| `MAX_REQUEST_BYTES` | `12582912` | What the process will buffer for **any** request body, enforced by `BodySizeLimitMiddleware` as a 413. Nothing bounded a JSON body before: `ListItemCreate.data` is a `dict` to Pydantic and a `text` column's `max_length` is unset by default, so one request could buffer, parse, sanitise and store tens of megabytes. Deliberately **above** `MAX_UPLOAD_BYTES` — a multipart request holding a file exactly at that limit is a body slightly over it, so equal values would make this backstop reject uploads the route was about to accept, with the worse message. |
 | `BULK_DELETE_MAX` | `500` | Records one bulk delete may name. Also a *published* limit — it reaches the OpenAPI schema, and the SPA keeps its own copy to chunk against, so lowering it needs `BULK_DELETE_MAX` in `ListDetailPage.tsx` changed first. |
 | `SSE_ENABLED` | `true` | Live records. False makes `GET /lists/{uuid}/events` answer `503`, which the client reads as "fall back to polling" — so this is the kill switch, and it is an environment change on the API rather than a rebuild of the SPA. |
 | `SSE_MAX_STREAM_SECONDS` | `300` | How long one stream lives before the server closes it and the client reconnects. Also **the revocation window**: authorization is checked at connect and never again, so losing `view` stops the signals at the next connect and not before. |

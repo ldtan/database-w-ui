@@ -236,7 +236,17 @@ async def test_writes_to_another_list_do_not_wake_this_stream(
 async def test_an_import_wakes_watchers_once_not_once_per_row(client, live_list):
     """A 200-row import must cost one refetch, not 200. Half of that is the import
     notifying once; the other half is the Event mailbox, which would coalesce it
-    anyway. Both are worth having — the granularity is deliberate, not incidental."""
+    anyway. Both are worth having — the granularity is deliberate, not incidental.
+
+    The one test here that needs a stream to outlive real work rather than a
+    `sleep`. At the module fixture's one second it was racing a 200-row import —
+    which fits on a warm connection pool and does not on a cold one, so it passed in
+    the full suite and failed whenever it was run on its own. That is the worst kind
+    of test: green in CI, red the moment somebody investigates it. The longer
+    lifetime is what makes the assertion about the *count* of events rather than
+    about how fast the import happened to be.
+    """
+    settings.SSE_MAX_STREAM_SECONDS = 5
     list_uuid, column_uuid, _ = live_list
     csv = "title\n" + "\n".join(f"row {n}" for n in range(200))
 

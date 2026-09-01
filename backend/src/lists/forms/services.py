@@ -37,14 +37,24 @@ class FormService:
 
         result = await db.execute(cls._select(list_id).order_by(Form.id))
         forms = result.scalars().all()
-        # Few forms per list, so resolve visibility per row rather than in SQL.
-        visible = []
-        for form in forms:
-            if await PermissionService.has(
-                db, user, ResourceType.form, form.id, Action.view
-            ):
-                visible.append(form)
-        return visible
+        if not forms:
+            return []
+
+        # One resolve for the whole collection, not one per row. The comment this
+        # replaces said "few forms per list, so resolve visibility per row" — true
+        # in practice and enforced by nothing: there is no cap on forms, and this is
+        # what `GET /forms/` calls on every list open — so the cost was a
+        # `_security_context` walk plus a grant SELECT per form per page load.
+        # `effective_actions_bulk` answers the same question in a fixed number of
+        # queries; the items router already used it.
+        granted = await PermissionService.effective_actions_bulk(
+            db, user, [(ResourceType.form, form.uuid) for form in forms]
+        )
+        return [
+            form
+            for form in forms
+            if Action.view in granted.get((ResourceType.form, form.uuid), set())
+        ]
 
     @classmethod
     async def create(cls, db: AsyncSession, lst: List, payload: FormCreate) -> Form:

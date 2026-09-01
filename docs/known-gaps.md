@@ -1146,10 +1146,72 @@ Change a config's shape in the backend and nothing will tell you; change it here
 The endpoints are still untyped, too: `api.get<T>(path)` takes the caller's word for both.
 A typed client (`openapi-fetch`) would close that, at the cost of touching every call site.
 
+**A collection's visibility is resolved in bulk, never per row.** `ViewService.list`
+and `FormService.list` used to loop `PermissionService.has(...)` per row, with a
+comment saying "few views per list" — true in practice and enforced by nothing: there
+is no cap on views or forms, and both listings are fetched on every list open, so the
+cost was a `_security_context` walk plus a grant SELECT per row per page load. Both go
+through `effective_actions_bulk` now, which the items router already used and which
+answers in a fixed number of queries. Any new listing that filters by permission
+should reach for it rather than the loop.
+
 **Permission-gated controls are hidden while their query is in flight.** `useEffectiveActions`
 returns an empty set until the request resolves, so buttons appear a beat after page load
 rather than showing and then vanishing (which would let someone click a control they don't
 have). Grant and inheritance changes invalidate the cached `["effective"]` queries.
+
+**Every response carries an `X-Request-ID`, and the 500 is the one that needed it
+most.** `src/infrastructure/observability.py` stamps each request, echoes the id, and
+logs one line per request; `@app.exception_handler(Exception)` logs the traceback
+against that id and answers a body that says only "Internal server error". Before
+this the app had two loggers in the whole tree, no configuration, no correlation and
+no catch-all — a production 500 was a traceback in an ephemeral log stream on a
+single instance, with nothing to match it to the report that arrived an hour later.
+
+Two details are easy to get backwards and were, first time:
+
+- **The access line is logged before the ContextVar is reset**, not after. Reset
+  first and the one log entry guaranteed to have an id is the one that answers `-`.
+- **The id is put on `request.state` as well as in the ContextVar.** Starlette's
+  `ServerErrorMiddleware` — which runs the handler on an unhandled exception — sits
+  *outside* the app's own middleware, so by the time it is reached the `finally` has
+  already run. `request.state` is backed by the ASGI scope and survives, which is
+  what lets the 500 carry the same id as the access line for the request that
+  produced it.
+
+Third-party loggers are pinned to WARNING regardless of `DEBUG`. Without that,
+`python_multipart` writes a line per field byte-range of every uploaded form and
+`asyncio`/`httpx` a running commentary — which buries the app's own lines and makes a
+single test unreadable.
+
+**`MAX_REQUEST_BYTES` bounds every request body, and is not `MAX_UPLOAD_BYTES`.**
+`core/uploads.py` capped a *file* while reading it; nothing capped a JSON body, and
+`ListItemCreate.data` is a `dict` to Pydantic while a `text` column's `max_length` is
+unset by default — so one request could buffer, parse, sanitise and store tens of
+megabytes on a 512 MB instance. `BodySizeLimitMiddleware` checks `Content-Length`
+first (cheap, catches every ordinary client) *and* counts the stream (a chunked
+request has no header to check), answering 413.
+
+**The two limits must not be set equal**, and that is the part to get right. The
+upload limit is the *good* error — the route checks it and names it in the message.
+This one is a backstop for bodies nothing else bounds. A multipart request carrying a
+file exactly at `MAX_UPLOAD_BYTES` is a body slightly *over* it, because of the
+boundaries and headers around the file — so equal values make the backstop reject
+uploads the route was about to accept, with the worse message.
+`test_endpoint_rejects_an_oversized_file` catches exactly that, and did.
+
+A per-cell text ceiling is a separate and narrower question — a `text` column can
+legitimately hold a long document.
+
+**`/auth/tokens/refresh` and `/revoke` are throttled by address, in their own
+bucket.** Both are unauthenticated by construction — presenting the token *is* the
+authorisation — and neither had any limit. A refresh token is a bearer credential, so
+an unbounded route trading one for an access token is a guessing surface, and each
+attempt is a database lookup on the single instance. The bucket is deliberately
+*not* login's: sharing it would let a stale session retrying in a background tab push
+an address towards a **login** lockout, so the person could not sign in to fix the
+thing that was failing. `/revoke` reads the bucket but never fills it — it answers 204
+whether or not the token was real, on purpose, so it does not know what a failure was.
 
 **A request must never hold two pooled connections at once.** Export streams rows on a
 server-side cursor *and* resolves reference labels — the obvious way to write that is a second
