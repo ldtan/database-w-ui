@@ -14,6 +14,7 @@ import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { ViewBar } from "./ViewBar";
 import { ViewControls } from "./ViewControls";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 export interface ViewControlsState {
   columns: Column[]; // in display order
@@ -206,9 +207,7 @@ export function ViewsPanel({
         }
       >
         <div className="flex flex-col gap-4">
-          {rename.error instanceof ApiError && (
-            <Message severity="error" text={rename.error.message} />
-          )}
+          <ErrorMessage error={rename.error} />
           <NameFields
             key={renaming?.uuid ?? "none"}
             idPrefix="view"

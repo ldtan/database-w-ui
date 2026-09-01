@@ -12,7 +12,7 @@ import { Message } from "primereact/message";
 import { SelectButton } from "primereact/selectbutton";
 import { confirmDialog } from "primereact/confirmdialog";
 
-import { api, ApiError } from "../../lib/api";
+import { api } from "../../lib/api";
 import {
   CheckboxField,
   Field,
@@ -47,6 +47,7 @@ import type {
 import { FilterConditionsEditor } from "../views/FilterConditionsEditor";
 import { cleanConditions } from "../views/operators";
 import { hasAdvancedConfig } from "./columnAdvanced";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 // The first two are what used to be the `text` and `long_text` column types.
 // "Rich text" is the one that changes what is stored — HTML, not plain text.
@@ -961,9 +962,7 @@ export function ColumnDialog({
       }
     >
       <div className="flex flex-col gap-5">
-        {save.error instanceof ApiError && (
-          <Message severity="error" text={save.error.message} />
-        )}
+        <ErrorMessage error={save.error} />
 
         {copying && (
           <Message

@@ -4,16 +4,16 @@ import { Button } from "primereact/button";
 import { InputNumber } from "primereact/inputnumber";
 import { InputText } from "primereact/inputtext";
 import { InputTextarea } from "primereact/inputtextarea";
-import { Message } from "primereact/message";
 
 import { AppDialog } from "../../components/AppDialog";
 import { Field, FieldRow, FormSection } from "../../components/Field";
 import { NameFields } from "../../components/NameFields";
-import { api, ApiError } from "../../lib/api";
+import { api } from "../../lib/api";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, Metric } from "../../lib/types";
 import { metricsKey } from "./metricKeys";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 interface Props {
   listUuid: string;
@@ -115,9 +115,7 @@ export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
       }
     >
       <div className="flex flex-col gap-5">
-        {save.error instanceof ApiError && (
-          <Message severity="error" text={save.error.message} />
-        )}
+        <ErrorMessage error={save.error} />
 
         <FormSection title="Basics">
           <NameFields

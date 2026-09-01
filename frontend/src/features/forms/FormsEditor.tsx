@@ -17,6 +17,7 @@ import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { FieldSettingsPanel } from "./FieldSettingsPanel";
 import {
   buildFormConfigPatch,
@@ -173,10 +174,22 @@ export function FormsEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active, forms]);
 
+  // Seed the editor from the stored form — on a change of *form*, or when the set
+  // of columns genuinely changes, and not merely because `columns` is a new array.
+  //
+  // It is a prop, so every `invalidateQueries(["columns", listUuid])` gave it a new
+  // identity and re-ran this: reorder six fields and relabel two, switch to the
+  // Columns tab, edit any column's display name, come back — and the layout was
+  // back to the last save. Worse than losing the work quietly, `dirty` went false
+  // with it, so "Save layout" greyed out and the editor looked like it had nothing
+  // to save. Keying on the column *uuids* keeps the one case that has to re-seed (a
+  // column added or removed changes which fields exist) and drops the one that
+  // never should have.
+  const columnKey = columns.map((c) => c.uuid).join(",");
   useEffect(() => {
     if (activeForm) setRows(seedRows(activeForm, columns));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeForm?.uuid, columns]);
+  }, [activeForm?.uuid, columnKey]);
 
   const save = useMutation({
     // Through `buildFormConfigPatch` rather than an object literal: the PATCH replaces
@@ -298,9 +311,7 @@ export function FormsEditor({
   return (
     <>
       <div className="flex flex-col gap-4">
-        {save.error instanceof ApiError && (
-          <Message severity="error" text={save.error.message} />
-        )}
+        <ErrorMessage error={save.error} />
         <div className="flex flex-wrap items-center gap-2">
           <Dropdown
             value={activeForm?.uuid ?? null}
@@ -520,9 +531,7 @@ export function FormsEditor({
         }
       >
         <div className="flex flex-col gap-4">
-          {rename.error instanceof ApiError && (
-            <Message severity="error" text={rename.error.message} />
-          )}
+          <ErrorMessage error={rename.error} />
           <NameFields
             key={activeForm?.uuid ?? "none"}
             idPrefix="form"

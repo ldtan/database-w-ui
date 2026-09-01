@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
@@ -14,6 +14,7 @@ import {
 import { Message } from "primereact/message";
 
 import { api, ApiError } from "../../lib/api";
+import { errorText } from "../../components/ErrorMessage";
 import { Field, FieldRow, FormSection } from "../../components/Field";
 import { useToast } from "../../lib/toast";
 import { toCsv } from "../../lib/csv";
@@ -97,6 +98,11 @@ export function ImportExportDialog({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ImportSummary | null>(null);
+  // An import that never reached the server. Kept apart from `result`, which
+  // means "the server read the file and here is what happened to each row".
+  const [failure, setFailure] = useState<string | null>(null);
+  // Whether the column ticks are the user's doing yet. See the effect below.
+  const chosenByUser = useRef(false);
   const [exportError, setExportError] = useState<string | null>(null);
   // Export query options.
   const [limit, setLimit] = useState<number | null>(null); // null = all rows
@@ -123,11 +129,21 @@ export function ImportExportDialog({
 
   // Default to all columns selected whenever the dialog opens.
   useEffect(() => {
-    if (visible) {
-      setSelected(new Set(columns.map((c) => c.uuid)));
-      setResult(null);
-      setExportError(null);
+    if (!visible) {
+      chosenByUser.current = false;
+      return;
     }
+    setResult(null);
+    setFailure(null);
+    setExportError(null);
+    // `columns` is a prop array, so it is a new identity after any refetch of
+    // ["columns", listUuid] — which meant untick twenty of twenty-five, let an
+    // invalidation land (add a column in another tab, edit one in the settings
+    // behind this dialog), and all twenty-five were ticked again. Re-seeding is
+    // for a dialog that has just opened, or one whose columns arrived after it
+    // did; once the ticks are the user's, they are the user's.
+    if (chosenByUser.current) return;
+    setSelected(new Set(columns.map((c) => c.uuid)));
   }, [visible, columns]);
 
   const chosen = columns.filter((c) => selected.has(c.uuid));
@@ -168,6 +184,7 @@ export function ImportExportDialog({
   }
 
   function toggle(uuid: string, on: boolean) {
+    chosenByUser.current = true;
     setSelected((prev) => {
       const next = new Set(prev);
       if (on) next.add(uuid);
@@ -230,6 +247,7 @@ export function ImportExportDialog({
     if (!file) return;
     setBusy(true);
     setResult(null);
+    setFailure(null);
     try {
       // The server parses and bulk-inserts, validating each row and reporting
       // per-row errors.
@@ -255,18 +273,15 @@ export function ImportExportDialog({
         );
       }
     } catch (err) {
-      setResult({
-        created: 0,
-        errors: [
-          {
-            row: 0,
-            message: err instanceof ApiError ? err.message : "Import failed",
-            // Nothing was parsed, so there are no cells to hand back — which is
-            // also what keeps the download button off a failure like this one.
-            values: {},
-          },
-        ],
-      });
+      // Kept apart from `result` on purpose. Dressing this up as a summary with
+      // one "skipped row" told the user "Imported 0 record(s), 1 skipped." in a
+      // warning tint — which describes a file that was read and mostly rejected,
+      // not a request that never landed. Upload 400 rows with the API down and
+      // you were told one row had a problem. It is its own state, its own
+      // severity, and its own toast, because none of those were firing either.
+      setResult(null);
+      setFailure(errorText(err) ?? "Import failed");
+      toast.error("Import failed", "Nothing was uploaded.");
     } finally {
       setBusy(false);
     }
@@ -487,6 +502,7 @@ export function ImportExportDialog({
                 uploadHandler={handleImport}
                 disabled={busy}
               />
+              {failure && <Message severity="error" text={failure} />}
               {result && (
                 <Message
                   severity={result.errors.length === 0 ? "success" : "warn"}

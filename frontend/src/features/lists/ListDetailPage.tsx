@@ -17,6 +17,7 @@ import { useLiveList } from "../../lib/useLiveList";
 import { SMALL_SCREEN, WIDE_SCREEN, useMediaQuery } from "../../lib/useMediaQuery";
 import type { Crumb } from "../../components/Breadcrumbs";
 import { EmptyState } from "../../components/EmptyState";
+import { QueryError } from "../../components/QueryError";
 import { PageHeader } from "../../components/PageHeader";
 import { RowActions } from "../../components/RowActions";
 import { SearchInput } from "../../components/SearchInput";
@@ -155,7 +156,14 @@ export function ListDetailPage() {
   const [showTransfer, setShowTransfer] = useState(false);
   const [showDeleted, setShowDeleted] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
-  const [sharingItemUuid, setSharingItemUuid] = useState<string | null>(null);
+  // The record whose sharing is open. Held as the *item*, not as a uuid to be
+  // looked up in the current page: `rows` is one server-side page, refreshed by
+  // the live stream and by `scheduleSettle`, so a row that stops matching the
+  // active filter — because somebody else edited it, or because you just changed
+  // its inheritance — drops off the page and the dialog vanished mid-sentence,
+  // taking a half-typed grant with it. `recordDialog` and `viewItem` already hold
+  // their subject this way; this was the one that re-derived it.
+  const [sharingItem, setSharingItem] = useState<ListItem | null>(null);
   const [recordDialog, setRecordDialog] = useState<{
     open: boolean;
     item: ListItem | null;
@@ -379,10 +387,28 @@ export function ListDetailPage() {
     }
   }, [views.data, activeViewUuid]);
 
-  // Apply the active view's saved config.
+  // Apply the active view's saved config — on a *switch*, and only then.
+  //
+  // This used to depend on `views.data` as well, which is a new array identity after
+  // any `invalidateQueries(["views", listUuid])`. Renaming the active view from
+  // Settings → Views does exactly that, and so does `ViewBar`'s own `invalidate()`
+  // after saving one. The effect then re-ran and reset every control on the toolbar
+  // — filters, sort, hidden columns, column order, page size, grouping — throwing
+  // away whatever the user had set up but not yet saved, which is precisely the
+  // state "Save view" lights up to invite them to keep. The grid then refetched
+  // unfiltered, so the work vanished and the rows changed under them with nothing
+  // said.
+  //
+  // The seed belongs to a *change of view*, so the ref is what decides: re-seed when
+  // the uuid this last ran for is not the active one. `views.data` is still read (a
+  // switch can land before the list arrives, and the guard below returns until it
+  // does) but no longer triggers.
+  const seededViewUuid = useRef<string | null>(null);
   useEffect(() => {
     const view = views.data?.find((v) => v.uuid === activeViewUuid);
     if (!view) return;
+    if (seededViewUuid.current === view.uuid) return;
+    seededViewUuid.current = view.uuid;
     const sort = view.config.sorts?.[0];
     setSortField(sort ? `data.${sort.column_uuid}` : undefined);
     setSortOrder(sort ? (sort.direction === "asc" ? 1 : -1) : undefined);
@@ -702,8 +728,11 @@ export function ListDetailPage() {
   );
 
   const formList = forms.data ?? [];
-  const sharingItem =
-    rows.find((i) => i.uuid === sharingItemUuid) ?? null;
+  // Prefer the live row while it is still on the page, so the inheritance toggle
+  // reflects what was just saved; fall back to the held copy once it is not.
+  const sharingRow = sharingItem
+    ? (rows.find((i) => i.uuid === sharingItem.uuid) ?? sharingItem)
+    : null;
   // Editing uses the "update" form; creating uses the "create" form.
   const recordForm =
     formList.find(
@@ -967,6 +996,50 @@ export function ListDetailPage() {
 
   const activeView = views.data?.find((v) => v.uuid === activeViewUuid) ?? null;
   const filterCount = filters.conditions.length;
+
+  /**
+   * What stands in for the rows when there are none — computed once, rendered by
+   * *both* layouts.
+   *
+   * "Records have two renderers, and they must never disagree" (known-gaps): the
+   * grid distinguished a search with no hits, a filter hiding everything, and a
+   * genuinely empty list, and offered a way out of the first — while `RecordCards`,
+   * which is the whole phone experience, said "No records yet" to all three and to
+   * a failed fetch besides. Rather than copy the ladder into the cards and let the
+   * copies drift the way `sortRows` once did, the page decides once and hands the
+   * same node to both. Anything added here reaches the phone for free.
+   */
+  const emptyContent = items.isError ? (
+    <QueryError
+      what="records"
+      error={items.error}
+      onRetry={() => void items.refetch()}
+    />
+  ) : (
+    <EmptyState
+      icon={q.trim() ? "pi pi-search" : "pi pi-inbox"}
+      title={q.trim() ? "No matching records" : "No records yet"}
+      text={
+        q.trim()
+          ? `Nothing in this list matches “${q.trim()}”.`
+          : filterCount > 0
+            ? "This view's filter is hiding everything in the list."
+            : listActions.has("create")
+              ? "Add your first record with the button above."
+              : undefined
+      }
+      action={
+        q.trim() ? (
+          <Button
+            label="Clear search"
+            icon="pi pi-times"
+            text
+            onClick={() => setSearch("")}
+          />
+        ) : undefined
+      }
+    />
+  );
   const groupColumn = groupBy
     ? (cols.find((c) => c.uuid === groupBy) ?? null)
     : null;
@@ -1095,6 +1168,22 @@ export function ListDetailPage() {
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => bulkDelete.mutate(),
+    });
+  }
+  // One row, same question. It was the only destructive row action that fired on
+  // the click — delete confirms, bulk delete confirms, bulk archive confirms — and
+  // under 1280px `maxVisible` collapses the row actions into a kebab where Archive
+  // sits directly above Delete, so the unconfirmed one is the one under the mis-tap.
+  // Archiving takes the record away from everyone who can read the list, and the
+  // way back is to go looking through the Archived records dialog.
+  function confirmArchiveItem(uuid: string) {
+    confirmDialog({
+      message:
+        'Archive this record? It stays in "Archived records" and can be brought ' +
+        "back at any time.",
+      header: "Archive record",
+      icon: "pi pi-box",
+      accept: () => archiveItem.mutate(uuid),
     });
   }
   // Archiving is reversible and destroys nothing, so the message says where the
@@ -1306,15 +1395,28 @@ export function ListDetailPage() {
         </div>
       </div>
 
-      {cols.length === 0 && !columns.isLoading && (
-        <Message
-          severity="info"
-          text={
-            listActions.has("configure")
-              ? "This list has no columns yet. Add them under Settings → Columns, then add records."
-              : "This list has no columns yet."
-          }
+      {/* The schema failing to load and the list genuinely having no columns are
+          the same `cols.length === 0` and must not read the same. A 403 here — the
+          shape an item-only grantee gets, and what a revoked share looks like —
+          used to render as the cheerful "add them under Settings" invitation. */}
+      {columns.isError ? (
+        <QueryError
+          what="the columns"
+          error={columns.error}
+          onRetry={() => void columns.refetch()}
         />
+      ) : (
+        cols.length === 0 &&
+        !columns.isLoading && (
+          <Message
+            severity="info"
+            text={
+              listActions.has("configure")
+                ? "This list has no columns yet. Add them under Settings → Columns, then add records."
+                : "This list has no columns yet."
+            }
+          />
+        )
       )}
 
       {/* Only for someone who can actually archive, matching the gate on the
@@ -1351,6 +1453,7 @@ export function ListDetailPage() {
           items={rows}
           columns={visibleCols}
           loading={columns.isLoading || items.isLoading || count.isLoading}
+          empty={emptyContent}
           principalUuids={principalUuids}
           lookupUuids={lookupUuids}
           selection={selection}
@@ -1366,7 +1469,7 @@ export function ListDetailPage() {
           can={canItem}
           onView={viewForm ? (item) => setViewItem(item) : undefined}
           onEdit={(item) => setRecordDialog({ open: true, item })}
-          onShare={(item) => setSharingItemUuid(item.uuid)}
+          onShare={(item) => setSharingItem(item)}
           onDelete={confirmDeleteItem}
         />
       ) : (
@@ -1480,31 +1583,7 @@ export function ListDetailPage() {
           rowGroupMode={groupColumn ? "subheader" : undefined}
           groupRowsBy={groupColumn ? `data.${groupBy}` : undefined}
           rowGroupHeaderTemplate={groupColumn ? groupHeader : undefined}
-          emptyMessage={
-            <EmptyState
-              icon={q.trim() ? "pi pi-search" : "pi pi-inbox"}
-              title={q.trim() ? "No matching records" : "No records yet"}
-              text={
-                q.trim()
-                  ? `Nothing in this list matches “${q.trim()}”.`
-                  : filterCount > 0
-                    ? "This view's filter is hiding everything in the list."
-                    : listActions.has("create")
-                      ? "Add your first record with the button above."
-                      : undefined
-              }
-              action={
-                q.trim() ? (
-                  <Button
-                    label="Clear search"
-                    icon="pi pi-times"
-                    text
-                    onClick={() => setSearch("")}
-                  />
-                ) : undefined
-              }
-            />
-          }
+          emptyMessage={emptyContent}
           // The way in to a new row, at the end of the rows — where the next one
           // would go. Only while the mode is on, because outside it the grid is for
           // reading and "Add record" in the header is the way to make one; and only
@@ -1715,7 +1794,7 @@ export function ListDetailPage() {
                     icon: "pi pi-share-alt",
                     label: "Share record",
                     visible: canItem(row.uuid, "share"),
-                    onClick: () => setSharingItemUuid(row.uuid),
+                    onClick: () => setSharingItem(row),
                   },
                   {
                     key: "archive",
@@ -1725,7 +1804,7 @@ export function ListDetailPage() {
                     // the non-destructive way to get a finished record out of the
                     // way, and it should be the easier one to reach.
                     visible: canItem(row.uuid, "delete"),
-                    onClick: () => archiveItem.mutate(row.uuid),
+                    onClick: () => confirmArchiveItem(row.uuid),
                   },
                   {
                     key: "delete",
@@ -1902,17 +1981,17 @@ export function ListDetailPage() {
         visible={showFilter}
         onHide={() => setShowFilter(false)}
       />
-      {sharingItem && (
+      {sharingRow && (
         <ShareDialog
-          visible={!!sharingItem}
-          onHide={() => setSharingItemUuid(null)}
+          visible={!!sharingRow}
+          onHide={() => setSharingItem(null)}
           resourceType="item"
-          resourceUuid={sharingItem.uuid}
+          resourceUuid={sharingRow.uuid}
           resourceLabel="Record"
           inherit={{
-            value: sharingItem.permissions_inherit,
+            value: sharingRow.permissions_inherit,
             onChange: (value) =>
-              setItemInherit.mutate({ uuid: sharingItem.uuid, value }),
+              setItemInherit.mutate({ uuid: sharingRow.uuid, value }),
             busy: setItemInherit.isPending,
           }}
         />

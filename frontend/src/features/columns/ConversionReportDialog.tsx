@@ -4,10 +4,11 @@ import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { AppDialog } from "../../components/AppDialog";
-import { api, ApiError } from "../../lib/api";
+import { api } from "../../lib/api";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useToast } from "../../lib/toast";
 import type { Column, ColumnType, ConversionReport } from "../../lib/types";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 const TYPE_LABELS = new Map(COLUMN_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
@@ -143,9 +144,7 @@ export function ConversionReportDialog({
       }
     >
       <div className="flex flex-col gap-4">
-        {apply.error instanceof ApiError && (
-          <Message severity="error" text={apply.error.message} />
-        )}
+        <ErrorMessage error={apply.error} />
 
         <div className="flex gap-6">
           <div>

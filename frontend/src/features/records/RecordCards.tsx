@@ -1,7 +1,7 @@
+import type { ReactNode } from "react";
 import { Checkbox } from "primereact/checkbox";
 import { Paginator } from "primereact/paginator";
 
-import { EmptyState } from "../../components/EmptyState";
 import { RowActions } from "../../components/RowActions";
 import { SkeletonRows } from "../../components/Skeleton";
 
@@ -15,6 +15,11 @@ interface Props {
   /** Visible columns, in display order — the same list the grid renders. */
   columns: Column[];
   loading: boolean;
+  /** What to show when there are no rows, decided by the page so that this layout
+   *  and the grid can never tell different stories about why the list is blank —
+   *  a search with no hits, a filter hiding everything, an empty list, or a failed
+   *  fetch. See `emptyContent` in ListDetailPage. */
+  empty: ReactNode;
   principalUuids: Record<PrincipalType, string[]>;
   lookupUuids: Map<string, string[]>;
   selection: ListItem[];
@@ -60,6 +65,7 @@ export function RecordCards({
   items,
   columns,
   loading,
+  empty,
   principalUuids,
   lookupUuids,
   selection,
@@ -86,15 +92,7 @@ export function RecordCards({
   }
 
   if (loading) return <SkeletonRows count={3} />;
-  if (items.length === 0) {
-    return (
-      <EmptyState
-        icon="pi pi-inbox"
-        title="No records yet"
-        text="Records you add appear here, one card each."
-      />
-    );
-  }
+  if (items.length === 0) return <>{empty}</>;
 
   return (
     <div className="flex flex-col gap-3">
