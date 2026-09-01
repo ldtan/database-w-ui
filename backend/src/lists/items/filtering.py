@@ -23,12 +23,38 @@ from typing import Optional
 
 from sqlalchemy import Numeric, and_, case, cast, func, or_
 
+from src.core.utils import LIKE_ESCAPE, like_pattern
+
 from ..columns.enums import COMPUTED_TYPES, NUMERIC_TYPES, ColumnType
 from ..columns.models import Column
 from ..columns.validation import resolve_filter_token
 from .models import ListItem
 
 _COMPARATORS = {">", ">=", "<", "<=", "gt", "gte", "lt", "lte"}
+
+# Every operator `_condition` below answers, and the authority on that set: the
+# `operator` field of a saved condition is typed against it (views/schemas.py), and
+# `frontend/src/features/views/operators.ts` names the ten the editor offers.
+#
+# Typing it is what makes an unknown operator a 422. Before that, `_condition`
+# returned None for one it did not recognise and `apply_filters` dropped the
+# condition — so a typo, or a client written against a spelling this never had, got
+# *the unfiltered list* rather than an error. That is the wrong direction to fail in
+# for a filter: the answer looks like data, not like a mistake, and a saved view
+# carries it silently from then on. The frontend module already warned that adding an
+# operator on one side only "gets a filter that silently matches everything"; this is
+# the other half of that warning, enforced.
+#
+# The aliases are deliberate and predate the editor: `is`/`eq`/`=` are one operator
+# under three spellings, as are `is_not`/`neq`/`!=` and each comparator.
+FILTER_OPERATORS = (
+    "is", "eq", "=",
+    "is_not", "neq", "!=",
+    "contains", "does_not_contain",
+    "is_empty", "is_not_empty",
+    ">", ">=", "<", "<=",
+    "gt", "gte", "lt", "lte",
+)
 
 
 def first_value(column: Column):
@@ -91,7 +117,26 @@ def _field(column: Column):
 
 
 def _as_text(value: object) -> Optional[str]:
-    return value if value is None else str(value)
+    """The comparison value as the text `data ->> key` would answer for it.
+
+    The `bool` case is not tidiness. JSONB spells its booleans `true`/`false`, so
+    `data ->> key` on a checked `checkbox` cell is the string `"true"` — while
+    Python's `str(True)` is `"True"`, which matches nothing. A JSON `true` in a
+    condition therefore used to filter a checkbox column down to no rows at all,
+    silently, and only ever answered correctly for a client that happened to send
+    the string rather than the boolean. The two other places that stringify a cell
+    for comparison outside Postgres — `transfer.services._csv_cell` and
+    `columns.conversion._render_scalar` — both carry this same branch; this was the
+    one that did not.
+
+    Note `bool` is tested before `str()` and would have to be even if the branch
+    read differently, since `bool` is a subclass of `int`.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
 
 
 def _numeric(column: Column):
@@ -149,10 +194,15 @@ def _condition(cond: dict, columns: dict[str, Column], user=None):
         return field == _as_text(value)
     if op in ("is_not", "neq", "!="):
         return field != _as_text(value)
+    # `like_pattern` rather than an f-string: `%` and `_` are LIKE wildcards, so a
+    # condition whose value contains one matched far more than it named — a lone `%`
+    # matched every non-null cell, and `a_c` matched `abc`. Every other ILIKE in the
+    # app already went through this pair; the filter language was the one that did
+    # not, and it is the one whose values are saved into a view and re-run later.
     if op == "contains":
-        return field.ilike(f"%{value}%")
+        return field.ilike(like_pattern(_as_text(value) or ""), escape=LIKE_ESCAPE)
     if op == "does_not_contain":
-        return field.notilike(f"%{value}%")
+        return field.notilike(like_pattern(_as_text(value) or ""), escape=LIKE_ESCAPE)
     if op == "is_empty":
         return or_(field.is_(None), field == "")
     if op == "is_not_empty":

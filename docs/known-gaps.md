@@ -1185,6 +1185,33 @@ under `permissions_inherit = false` inherits nothing and has no grant of its own
 would be invisible to everyone except the workspace owner, including the person who just
 asked for the copy.
 
+**The filter language fails towards "everything", which is the wrong direction, and three
+places used to.** A filter that cannot answer a question should say so; each of these
+instead returned rows, which reads as data rather than as a mistake and which a saved view
+then repeats forever.
+
+- **An unknown operator was dropped, not refused.** `_condition` returns `None` for an
+  operator it does not recognise and `apply_filters` drops that condition — so a typo in
+  the only condition yielded the *unfiltered list*. `FilterCondition.operator` is now a
+  `Literal` over `filtering.FILTER_OPERATORS`, the tuple `_condition` actually answers, so
+  it is a 422 on write and on the ad-hoc `filters` param. Note what this deliberately does
+  **not** do: `ViewRead.config` is a plain `dict` and `ListItemService` reads
+  `view.config or {}` raw, so a view saved before this still loads and still behaves as it
+  did — the type gates writing one, not reading one. `frontend/src/features/views/
+  operators.ts` already warned that adding an operator on one side only "gets a filter that
+  silently matches everything"; this is that warning enforced from the other end.
+- **`contains` built its pattern by interpolation.** `%` and `_` are LIKE wildcards, so a
+  condition of `%` matched every non-null cell and `a_c` matched `abc`. It goes through
+  `like_pattern()` with `escape=LIKE_ESCAPE` now, like every other ILIKE in the app already
+  did — this was the one that did not, and it is the one whose values get saved and re-run.
+- **A JSON boolean never matched a `checkbox`.** JSONB spells booleans `true`/`false`, so
+  `data ->> key` answers `"true"` while Python's `str(True)` is `"True"`. `_as_text` now
+  carries the same `bool` branch `transfer.services._csv_cell` and
+  `columns.conversion._render_scalar` both already had. The web editor dodged this because
+  it gives a checkbox column a free-text box (fixed separately); every other client hit it.
+
+All three are pinned in `tests/test_view_filtering.py`.
+
 **A page of records can be asked for two ways, and the cursor is not just a faster offset.**
 `GET /items/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —
 or `after=<record uuid>` (`ListItemService._after_id`). `after` is a **400** in a sorted,

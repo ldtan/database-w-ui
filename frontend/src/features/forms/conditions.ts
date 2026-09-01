@@ -22,9 +22,10 @@
  *   (`resolve_filter_token`). Here that is the browser's clock and there it is the
  *   account's recorded zone, which is a cache of this browser's — so the two agree
  *   about what day it is.
- * - `>`/`<` compare **numbers** on a number column and text everywhere else. Text
- *   ordering on numbers puts "9" after "10", which is the wrong answer `_numeric` was
- *   written to avoid.
+ * - `>`/`<` compare **numbers** on a `NUMERIC_TYPES` column — `number`, `rating` and
+ *   `duration`, all three of which store a plain JSON number — and text everywhere
+ *   else. Text ordering on numbers puts "9" after "10", which is the wrong answer
+ *   `_numeric` was written to avoid.
  * - A condition naming a column that no longer exists, or using an operator this build
  *   does not know, is **dropped** — `_condition` returns `None` and `apply_filters`
  *   leaves it out of the WHERE. So an unreadable condition shows the field rather than
@@ -68,9 +69,21 @@ function fieldText(column: Column, raw: unknown): string | null {
   return asText(stored);
 }
 
-/** Should `>`/`<` on this column compare numbers? `_numeric_comparable`'s rule. */
+/**
+ * Should `>`/`<` on this column compare numbers? `_numeric_comparable`'s rule.
+ *
+ * The set is `NUMERIC_TYPES`, not `"number"` alone: a `rating` is a point on a scale
+ * and a `duration` is a count of seconds, but a cell in either holds a plain JSON
+ * number and the backend compares all three numerically. Leaving them out compared
+ * them as text, which is the "9" > "10" answer `_numeric` exists to avoid — so
+ * `Hours > 600` on a duration column read `"3600" > "600"` as false and quietly kept
+ * a field hidden on exactly the records that should have shown it. Copied from
+ * `columns/enums.py::NUMERIC_TYPES`; the two are meant to stay in step.
+ */
+const NUMERIC_TYPES = new Set(["number", "rating", "duration"]);
+
 function numericComparable(column: Column, value: unknown): boolean {
-  if (column.type === "number") return true;
+  if (NUMERIC_TYPES.has(column.type)) return true;
   // A calculated column has no fixed output type — one formula yields numbers and the
   // next yields text — so the value being compared against is the only signal for
   // which comparison was meant.

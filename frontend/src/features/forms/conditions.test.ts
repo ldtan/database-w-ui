@@ -90,6 +90,21 @@ describe("evaluateCondition", () => {
     expect(met(">=", 10, 10, cols)).toBe(true);
   });
 
+  /**
+   * `rating` and `duration` are `NUMERIC_TYPES` too — a cell in either holds a plain
+   * JSON number, and the backend compares all three numerically. Left out, they
+   * compared as text: `"3600" > "600"` is false, so a field conditional on
+   * `Hours > 600` stayed hidden on exactly the records that should have shown it.
+   */
+  it("compares rating and duration numerically, as the backend does", () => {
+    for (const type of ["rating", "duration"] as const) {
+      const cols = [column({ uuid: "status", type })];
+      expect(met(">", 600, 3600, cols)).toBe(true);
+      expect(met(">", 9, 10, cols)).toBe(true);
+      expect(met("<", 10, 9, cols)).toBe(true);
+    }
+  });
+
   it("compares a text column as text", () => {
     expect(met(">", "apple", "banana")).toBe(true);
     expect(met("<", "banana", "apple")).toBe(true);

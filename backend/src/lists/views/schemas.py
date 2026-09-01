@@ -5,10 +5,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from src.core.schemas import NameSlug
 
+from ..items.filtering import FILTER_OPERATORS
+
 
 class FilterCondition(BaseModel):
     column_uuid: UUID
-    operator: str
+    # Typed against the set `filtering._condition` actually answers, so an operator
+    # it does not know is a 422 here rather than a silently dropped condition — which
+    # is to say, rather than the unfiltered list. See FILTER_OPERATORS for why that
+    # failure direction was the wrong one for a filter to have.
+    operator: Literal[FILTER_OPERATORS]  # type: ignore[valid-type]
     value: Any = None
 
 
