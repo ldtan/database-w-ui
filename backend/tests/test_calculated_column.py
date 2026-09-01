@@ -317,7 +317,7 @@ async def test_editing_into_a_taken_answer_is_refused(client, priced_list):
 async def test_a_blank_computed_value_does_not_collide(client, priced_list):
     # `_enforce_unique` skips empty values, and an incomplete row computes to blank —
     # so a unique formula must not make "not filled in yet" a one-record-only state.
-    lst, qty, price = priced_list["list"], priced_list["qty"], priced_list["price"]
+    lst, qty = priced_list["list"], priced_list["qty"]
     resp = await client.post(
         f"/api/lists/{lst}/columns/",
         json={

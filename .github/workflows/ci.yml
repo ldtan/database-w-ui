@@ -1,0 +1,113 @@
+# The gate. Until this existed there was none: `maintenance.yml` was the only
+# workflow in the repo and it is `schedule` + `workflow_dispatch`, so nothing ran on
+# a push or a pull request. Sixty-eight backend test files, twenty frontend ones and
+# `tsc --noEmit` were all gated on a person remembering — while the root README said
+# a missing migration "fails CI rather than production", which was simply not true.
+#
+# A second thing it buys, less obvious and worth keeping in mind before anyone
+# trims the triggers: GitHub disables a `schedule`-only workflow after 60 days of
+# repository inactivity. `maintenance.yml` was one push away from switching itself
+# off at any time. A workflow that runs on push resets that clock.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# A branch pushed twice in a minute does not need both runs; the older one is
+# answering a question nobody is asking any more.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        # Matches `postgresMajorVersion` in deploy/render/render.yaml. The suite
+        # leans on real Postgres throughout — JSONB operators, partial indexes,
+        # advisory locks, savepoints — so there is nothing to gain from a lighter
+        # stand-in and a whole class of difference to lose.
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: database_w_ui
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      # `conftest.py` derives the test database's name from this URL and creates it,
+      # so this names the *server*, and the suite makes its own database on it.
+      DATABASE_URI: postgresql+asyncpg://postgres:postgres@localhost:5432/database_w_ui
+      SECRET_KEY: ci-only-not-a-real-secret
+      AUTH_SALT: ci-only-not-a-real-salt
+      RSA_PRIVATE_KEY_PATH: keys/private.pem
+      RSA_PUBLIC_KEY_PATH: keys/public.pem
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      # `keys/` is gitignored, and `src/auth/helpers.py` reads both PEMs at import
+      # time — so without this the suite does not fail a test, it fails to import
+      # `main` and collects nothing at all.
+      - name: Generate signing keys
+        run: uv run python -m src.auth.keygen
+
+      - name: Lint
+        run: uv run ruff check .
+
+      # One job, never a matrix. The suite shares a single Postgres database
+      # (`conftest.py` creates one per run, by a fixed name), so two concurrent runs
+      # against the same server tear each other's schema down mid-test and produce
+      # around a hundred failures that have nothing to do with the change.
+      - name: Test
+        run: uv run pytest
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # `ci`, not `install`: the lockfile is committed and the deploy uses `npm ci`,
+      # so this builds what Render builds.
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build

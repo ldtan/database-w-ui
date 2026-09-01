@@ -536,7 +536,7 @@ class ConversionService:
             type=target_type,
             config=stored,
         )
-        report = await cls._run(db, lst, source, spec, user, keys=keys)
+        await cls._run(db, lst, source, spec, user, keys=keys)
 
         # After the values are written, because they are what the gates are about,
         # and before the retype, because a failure here has to roll back a column

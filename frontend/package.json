@@ -5,10 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
+    "typecheck": "tsc --noEmit",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "capture:guide": "node scripts/capture-guide.mjs",
     "gen:api": "npm run gen:api:spec && openapi-typescript openapi.json -o src/lib/api-schema.ts",
     "gen:api:spec": "cd ../backend && uv run python -m src.infrastructure.export_openapi > ../frontend/openapi.json"

@@ -8,9 +8,11 @@ never sinks the batch) with periodic commits.
 import csv
 import io
 import json
+import logging
 from typing import AsyncIterator, Iterable, Optional, Tuple
 
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -50,6 +52,8 @@ _EXPORT_BATCH = 500
 _LABEL_CACHE_MAX = 50_000
 
 _SKIP = object()  # sentinel: leave this cell out of the record entirely
+
+logger = logging.getLogger(__name__)
 
 
 # -- export --------------------------------------------------------------
@@ -559,6 +563,19 @@ async def import_records(
 
     for row_number, raw_row in counted:
         try:
+            # A JSON file whose elements are not objects — `["just a string"]`. It
+            # used to reach `raw_row.items()` and be reported by the catch-all as
+            # `unexpected error: 'str' object has no attribute 'items'`, which is a
+            # Python traceback fragment shown to somebody who uploaded a file. Said
+            # here instead, in the file's own terms, and as a `ValidationError` so it
+            # travels the same path as every other thing wrong with a row.
+            # `_error_values` already knows to hand back `{}` for one of these: there
+            # are no headers to correct and re-upload.
+            if not isinstance(raw_row, dict):
+                raise ValidationError(
+                    "each row must be an object of column names to values"
+                )
+
             incoming: dict = {}
             for key, value in raw_row.items():
                 column = by_name.get(key)
@@ -580,14 +597,11 @@ async def import_records(
 
             created += 1
             batch.append(item)
-            if len(batch) >= _IMPORT_BATCH:
-                await db.commit()
-                # Drop the committed rows from the identity map (but not `lst`)
-                # so the session does not retain the whole import.
-                for committed in batch:
-                    db.expunge(committed)
-                batch.clear()
         except (ValidationError, ConflictError, UnknownReferenceError) as exc:
+            # The three the item service raises to say what is wrong with a *row*.
+            # Their messages are written for the person who uploaded the file and
+            # are the whole point of reporting per row rather than failing the
+            # upload, so they go back verbatim.
             errors.append(
                 {
                     "row": row_number,
@@ -595,14 +609,46 @@ async def import_records(
                     "values": _error_values(raw_row),
                 }
             )
-        except Exception as exc:  # pragma: no cover - defensive
+            continue
+        except (SQLAlchemyError, ValueError):
+            # Anything else this row can raise: a driver-level refusal the savepoint
+            # has just rolled back, or a parse that got past `_parse_cell`. It used
+            # to be `except Exception` echoing `str(exc)` into the response, which
+            # for a SQLAlchemy error is the failing statement, its parameters, and
+            # the table and constraint names — an internal detail handed to whoever
+            # can upload a CSV. The detail belongs in the log, where it is useful and
+            # not published; the row gets a message that says which row and no more.
+            #
+            # Narrow rather than bare, so a genuine defect (a missing attribute, a
+            # bad type in this function) still crashes the request instead of being
+            # written into the report as though the file were at fault.
+            logger.exception(
+                "import: row %s of list %s failed", row_number, lst.id
+            )
             errors.append(
                 {
                     "row": row_number,
-                    "message": f"unexpected error: {exc}",
+                    "message": "could not be imported (see server logs)",
                     "values": _error_values(raw_row),
                 }
             )
+            continue
+
+        # Outside the `try`, and that is the point. This commit is not the row's
+        # business: it writes the whole batch, so a failure here is not something to
+        # record against `row_number` and go on from. It used to sit inside, where
+        # the bare `except` caught it, left the session in a failed state, and let
+        # the loop run on — every subsequent row then failed too, and the final
+        # commit below raised out of the endpoint as a 500 after the summary had
+        # already been half-built. Letting it propagate is the honest answer: the
+        # import cannot continue, and nothing pretends it did.
+        if len(batch) >= _IMPORT_BATCH:
+            await db.commit()
+            # Drop the committed rows from the identity map (but not `lst`)
+            # so the session does not retain the whole import.
+            for committed in batch:
+                db.expunge(committed)
+            batch.clear()
 
     await db.commit()
     # Once for the import, not once per row. The rows are committed in batches, so

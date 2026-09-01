@@ -15,9 +15,20 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+# Two runs of housekeeping over the same database is not dangerous — every job here
+# is idempotent — but it is confusing to read in the log, and a manual run kicked off
+# while the nightly one is going would interleave with it.
+concurrency:
+  group: maintenance
+  cancel-in-progress: false
+
 jobs:
   maintain:
     runs-on: ubuntu-latest
+    # Nothing here should take half an hour. Without a ceiling a job that hangs on a
+    # database connection burns the full six-hour default and the failure looks like
+    # a run that is still going.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: backend
@@ -44,27 +55,47 @@ jobs:
 
       - run: uv sync --frozen --no-dev
 
+      # `continue-on-error` on every job below, and it is not laziness. These are
+      # eight independent pieces of housekeeping run in a sensible order, not eight
+      # steps of one procedure — under the default fail-fast, a transient failure in
+      # the *first* one silently skipped all five purges and the grant sweep, so one
+      # bad night became a night with no maintenance at all. Each one now runs and
+      # reports for itself, and the guard step at the end fails the run if any did.
       - name: Converge record shapes
+        id: reconcile
+        continue-on-error: true
         run: uv run python -m src.maintenance.reconcile_shapes
 
       - name: Purge deleted workspaces
+        id: purge_workspaces
+        continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_workspaces
 
       - name: Purge deleted lists
+        id: purge_lists
+        continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_lists
 
       - name: Purge deleted records
+        id: purge_items
+        continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_items
 
       # After the list purge, which owns the children of a deleted list; this one
       # only takes views/forms/metrics binned on their own under a live list.
       - name: Purge deleted views, forms and metrics
+        id: purge_config
+        continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_list_config
 
       - name: Purge deleted users and groups
+        id: purge_principals
+        continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_principals
 
       - name: Sweep orphaned grants
+        id: sweep_grants
+        continue-on-error: true
         run: uv run python -m src.maintenance.sweep_orphan_grants
 
       # Last, because it derives from everything above: a converged shape or a purged
@@ -72,4 +103,24 @@ jobs:
       # re-indexes on demand when a formula changes, and reads recompute regardless, so
       # a missed night costs a stale sort order, never a wrong value.
       - name: Rebuild the calculated-column index
+        id: recompute
+        continue-on-error: true
         run: uv run python -m src.maintenance.recompute_calculated
+
+      # `continue-on-error` makes every step above report success to the *run*, so
+      # without this a night where all eight failed is a green tick. The whole point
+      # of an unattended job is that nobody is watching it, which means the only
+      # signal anyone gets is this one being red.
+      - name: Fail if any job failed
+        if: >-
+          steps.reconcile.outcome == 'failure' ||
+          steps.purge_workspaces.outcome == 'failure' ||
+          steps.purge_lists.outcome == 'failure' ||
+          steps.purge_items.outcome == 'failure' ||
+          steps.purge_config.outcome == 'failure' ||
+          steps.purge_principals.outcome == 'failure' ||
+          steps.sweep_grants.outcome == 'failure' ||
+          steps.recompute.outcome == 'failure'
+        run: |
+          echo "::error::One or more maintenance jobs failed - see the steps above."
+          exit 1

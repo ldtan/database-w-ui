@@ -135,7 +135,7 @@ async def validate_refresh_token(db: AsyncSession, token: str) -> Optional[User]
         .where(
             and_(
                 RefreshToken.token == hashed_token_for_lookup,
-                RefreshToken.revoked == False,
+                RefreshToken.revoked.is_(False),
                 RefreshToken.expires_at > datetime.now(timezone.utc),
             )
         )

@@ -33,6 +33,13 @@ dependencies = [
     # which is exactly the kind of transitive dependency that disappears in a minor
     # release and takes a route with it.
     "httpx>=0.28.1",
+    # Declared for the same reason httpx above is, and it is a sharper case: every
+    # schema in the app imports `pydantic` directly and `core/config.py` imports
+    # `pydantic_settings`, but both arrived only through `fastapi[standard]`. The
+    # settings object is read at import time by `main.py`, so the day that extra
+    # stops pulling `pydantic-settings` the app does not degrade, it fails to start.
+    "pydantic>=2.13",
+    "pydantic-settings>=2.0",
 ]
 
 [dependency-groups]
@@ -40,7 +47,52 @@ dev = [
     "httpx>=0.28.1",
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
+    # Run by hand until now (there is a .ruff_cache to prove it), which means it
+    # was nobody's job. In the dev group it is installed by `uv sync` and can be a
+    # CI step.
+    "ruff>=0.16.0",
+    # No coverage number existed, which means nobody could notice one falling. Not
+    # wired into the CI gate: a floor picked before anyone has seen the number is a
+    # guess, and a failing build over a guess teaches people to raise the guess.
+    # Measure first (`uv run pytest --cov=src --cov-report=term-missing`), then
+    # decide whether a `--cov-fail-under` is worth having.
+    "pytest-cov>=6.0.0",
 ]
+
+[tool.ruff]
+line-length = 90
+target-version = "py314"
+
+[tool.ruff.lint]
+# Deliberately narrow, and chosen by running the wider set first: `E,F,I,UP,B`
+# reports 1,034 findings on this tree, of which seven are defects. A gate that
+# starts 1,027 findings in the red is not a gate — nobody can land a change through
+# it, so it gets `--exit-zero`'d and stops being read. This is the subset that is
+# green today and stays meaningful:
+#
+# - **F (pyflakes)** is the one that is always a defect: an unused import, an
+#   undefined name, a variable assigned and never read. All seven real findings were
+#   here.
+# - **E (pycodestyle errors)** for `E712`/`E741` — a `== False` and an `l` — minus
+#   E501 below.
+#
+# What was left out, and why, so the next person does not have to re-derive it:
+#
+# - **B008** (278) is `Depends(...)` in a default argument, which is how FastAPI
+#   works. It would have to be per-file-ignored across every router to say nothing.
+# - **UP** (660) is style modernisation — `Optional[x]` for `x | None`, `timezone.utc`
+#   for `UTC`. Real enough as a preference, but it is a whole-tree rewrite that would
+#   bury an actual change in a review, and it fixes no bug.
+# - **I001** (71) would reorder import blocks this codebase groups by hand, with
+#   comments explaining which imports are deferred to avoid a cycle. Those comments
+#   are load-bearing (see `permissions.services`) and isort does not read them.
+#
+# Widening is a separate change with its own diff, not a thing to do while fixing
+# something else.
+select = ["E", "F"]
+# Left to judgement. Several comment blocks here are deliberately prose and
+# rewrapping them to 90 columns would cost more than it buys.
+ignore = ["E501"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

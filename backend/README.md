@@ -112,13 +112,26 @@ onto HTTP status codes.
 uv sync
 ```
 
-### 2. Provide JWT signing keys
+### 2. Generate JWT signing keys
 
 The app signs tokens with RS256 and reads the keypair from the paths in `.env`
-(`keys/private.pem` and `keys/public.pem` by default). A pair is already checked in for
-local development; to generate your own:
+(`keys/private.pem` and `keys/public.pem` by default).
+
+**This step is required, not optional.** `keys/` is gitignored, so a fresh clone has
+no pair — and `src/auth/helpers.py` reads both files at *import* time, which means a
+missing one is not a login failure later, it is a `FileNotFoundError` that stops
+`create_app()` and takes the whole test suite (`tests/conftest.py` imports `main`)
+down with it. This README used to say a pair was checked in for local development;
+it was not, and had not been for as long as `keys/` has been ignored.
 
 ```bash
+uv run python -m src.auth.keygen
+```
+
+Or with openssl, which is what that does:
+
+```bash
+mkdir -p keys
 openssl genrsa -out keys/private.pem 2048
 openssl rsa -in keys/private.pem -pubout -out keys/public.pem
 ```

@@ -1,0 +1,41 @@
+# Both lockfiles are committed and both installs are frozen (`uv sync --frozen`,
+# `npm ci`), so builds are already reproducible — what was missing is anything that
+# ever *moves* them. Without this a lockfile only changes when somebody runs an
+# install by hand, which means security patches land whenever someone happens to.
+#
+# Grouped by minor/patch so a quiet week is one PR rather than fifteen. Majors come
+# separately because they are a decision, not an update — and note the two version
+# pairs this repo has to move together whatever Dependabot says: `phonenumbers` with
+# `libphonenumber-js` (they describe the same numbering plans), and PrimeReact with
+# the theme override sheet in `themes.css`, which is unlayered and depends on the
+# base theme's shape.
+version: 2
+
+updates:
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types: ["minor", "patch"]
+
+  # The actions in ci.yml and maintenance.yml. Cheap to keep current and the one
+  # ecosystem where a stale major stops working outright when a runner image moves.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

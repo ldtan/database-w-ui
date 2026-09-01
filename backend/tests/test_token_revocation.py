@@ -124,3 +124,30 @@ async def test_a_revoked_token_does_not_count_against_the_login_throttle(
         assert (await _revoke(client, tokens["refresh_token"])).status_code == 204
 
     assert (await _login(client, "quiet"))["access_token"]
+
+
+async def test_jwks_serves_the_public_key_and_only_that(client):
+    """The one route in the app with no test at all, and one of five that are
+    unauthenticated on a public URL.
+
+    What matters here is not that it answers — it is that what it answers is the
+    *public* half. `TokenService.public_key()` reads a file whose sibling signs
+    every token in the system, so the failure mode worth pinning is a copy-paste
+    that points it at `RSA_PRIVATE_KEY_PATH`: the response would still look like a
+    PEM, still parse, still deploy, and hand the signing key to anyone who asked.
+    """
+    # Deliberately without an Authorization header: this is meant to be reachable
+    # by a verifier that has no account here, which is the whole point of publishing
+    # a public key.
+    resp = await client.get("/api/auth/tokens/jwks.json", headers={})
+    assert resp.status_code == 200, resp.text
+
+    key = resp.json()["public_key"]
+    assert "BEGIN PUBLIC KEY" in key
+
+    # None of the markers a private key carries, in any of the encodings it is
+    # written in — PKCS#8 (`BEGIN PRIVATE KEY`) and PKCS#1 (`BEGIN RSA PRIVATE
+    # KEY`), plus the JWK field names for the private parameters.
+    lowered = key.lower()
+    for marker in ("private", '"d"', '"p"', '"q"'):
+        assert marker not in lowered, f"private material in the response: {marker}"

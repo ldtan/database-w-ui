@@ -375,7 +375,7 @@ class ListItemService:
                 select(model.uuid)
                 .where(
                     model.deleted_at.is_(None),
-                    or_(*(l.ilike(pattern, escape=LIKE_ESCAPE) for l in labels)),
+                    or_(*(col.ilike(pattern, escape=LIKE_ESCAPE) for col in labels)),
                 )
                 .limit(_SEARCH_REF_MAX)
             )
