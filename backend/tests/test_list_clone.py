@@ -468,6 +468,79 @@ async def test_clone_requires_configure_on_workspace(make_client, session_factor
         assert resp.status_code == 403, resp.text
 
 
+async def test_clone_respects_item_permissions(make_client, session_factory):
+    """A clone is a *read* of the records, so it honours the per-record filter.
+
+    The sibling of `test_http_export_respects_item_permissions`. A record whose
+    inheritance is broken and which was never granted to the caller is out of
+    reach of their list-level access — and a clone must not be the way around
+    that, because the copy lands in a list where it inherits and the caller can
+    then read it at leisure. Bob holds `configure` on the workspace, which is
+    what the clone route requires and which confers `view`; that is precisely the
+    access this used to convert into a copy of a record he could never open.
+    """
+    async with session_factory() as db:
+        owner = await _make_user(db, "owner")
+        bob = await _make_user(db, "bob")
+        bob_uuid = str(bob.uuid)
+
+    async with make_client(owner) as client:
+        ws_uuid, lst = await _seed_list(client, "tasks")
+        list_uuid = lst["uuid"]
+        col_uuid = await _add_column(client, list_uuid, "title")
+        for title in ("open", "secret"):
+            resp = await client.post(
+                f"/api/lists/{list_uuid}/items/", json={"data": {col_uuid: title}}
+            )
+            assert resp.status_code == 201, resp.text
+
+        grant = await client.post(
+            "/api/permissions/grants",
+            json={
+                "resource_type": "workspace",
+                "resource_uuid": ws_uuid,
+                "user_uuid": bob_uuid,
+                "actions": ["configure"],
+            },
+        )
+        assert grant.status_code == 201, grant.text
+
+    # The second record goes "unique" with no grant of its own, so neither the
+    # workspace grant nor the list access it confers reaches it any more.
+    secret_id = next(
+        r.id for r in await _rows(session_factory, list_uuid)
+        if r.data.get(col_uuid) == "secret"
+    )
+    async with session_factory() as db:
+        row = (
+            await db.execute(select(ListItem).where(ListItem.id == secret_id))
+        ).scalar_one()
+        row.permissions_inherit = False
+        await db.commit()
+
+    async with make_client(bob) as client:
+        # The grid already hides it; the clone must agree.
+        assert len((await client.get(f"/api/lists/{list_uuid}/items/")).json()) == 1
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": True}
+        )
+        assert resp.status_code == 201, resp.text
+        clone_uuid = resp.json()["uuid"]
+
+    # Read the table directly: the copy is what matters, not what bob can see of it.
+    copied = await _rows(session_factory, clone_uuid)
+    assert [next(iter(r.data.values())) for r in copied] == ["open"]
+
+    # The owner, who can see both, still clones both.
+    async with make_client(owner) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/clone", json={"with_records": True}
+        )
+        assert resp.status_code == 201, resp.text
+        full = await _rows(session_factory, resp.json()["uuid"])
+    assert sorted(next(iter(r.data.values())) for r in full) == ["open", "secret"]
+
+
 # --------------------------------------------------------------------------
 # Copying the records.
 #

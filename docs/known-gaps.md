@@ -921,6 +921,22 @@ field appear broken for a reason that has nothing to do with them. The rate limi
 per-process semaphore, which carries the same single-instance assumption the login
 throttle already documents — two web workers are two callers to Nominatim.
 
+**That semaphore is also why this route authenticates by hand.** It used to carry
+`dependencies=[Depends(get_current_user)]`, which takes `Depends(get_db)`, and a `yield`
+dependency is released only when the response completes — so a caller *queued behind the
+gate*, waiting for a turn it had not been given, held a pooled session the whole time.
+That is the same bug the events route documents, arrived at from the other direction: a
+stream holds a connection because it lasts a long time, a geocode because it waits on a
+one-at-a-time gate and then on somebody else's network. Fifteen of them empty the pool
+(SQLAlchemy's 5 + 10 defaults) and every unrelated request in the app stalls until
+`pool_timeout`, which a location picker debouncing a typed address across a few tabs can
+reach on its own. `_authenticate` now resolves the caller inside a session opened and
+closed before `search` runs, and `oauth2_scheme` stays a dependency so a caller with no
+bearer token is still refused before anything happens and the route keeps its security
+requirement in the OpenAPI document.
+`test_a_queued_geocode_does_not_hold_a_pooled_connection` is what catches a regression —
+nothing else would, until the site froze.
+
 **On some Windows dev machines the geocode call kills the worker, and no amount of
 `try` will catch it.** This is the app's first outbound HTTPS request, so it is the
 first thing to hit a Python/OpenSSL mismatch that was always there:
@@ -1153,6 +1169,21 @@ inheritance was broken and were never granted to them, even though the grid hid 
 correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. Any *new*
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
+
+**And "returns record data" includes copying it somewhere the caller can read.**
+`ListService.clone` missed this for the whole life of the feature, and it was the worse
+half of the same bug: a clone does not hand the rows back in the response, it writes them
+into a list the caller owns, where `_COPY_RECORDS` sets `permissions_inherit = true` and
+they can be read at leisure afterwards. The route requires `configure` on the workspace,
+which confers `view`, so ordinary list access was enough to lift a record whose
+inheritance was broken. `clone` now takes the acting user and applies `item_view_filter`
+to its keyset select, and `test_clone_respects_item_permissions` guards it. Note the
+`permissions_inherit = true` is *correct* given that filter and wrong without it —
+everything copied was visible to the cloner, and the clone starts private with no grants.
+Carrying the source's flag across instead would be worse than either: a record copied
+under `permissions_inherit = false` inherits nothing and has no grant of its own, so it
+would be invisible to everyone except the workspace owner, including the person who just
+asked for the copy.
 
 **A page of records can be asked for two ways, and the cursor is not just a faster offset.**
 `GET /items/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —

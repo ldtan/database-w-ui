@@ -267,13 +267,17 @@ async def clone_list(
     the same gate `create_list` applies. Columns get new uuids and every reference to
     them (record data keys, primary column, view/form configs) is remapped; grants
     are not copied, so the clone starts private like any new list.
+
+    Copying the records is a read of them, so `clone` takes the caller and applies
+    the per-record filter — 'view' on the list does not reach a record whose
+    inheritance was broken and which was never granted to them.
     """
     await PermissionService.require(
         db, current_user, ResourceType.workspace, lst.workspace_id, Action.configure
     )
     try:
         cloned = await ListService.clone(
-            db, lst.uuid, with_records=payload.with_records
+            db, lst.uuid, with_records=payload.with_records, user=current_user
         )
     except ConflictError as exc:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
