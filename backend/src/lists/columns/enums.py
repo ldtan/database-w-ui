@@ -36,6 +36,20 @@ REFERENCE_TYPES = frozenset({ColumnType.lookup, ColumnType.user, ColumnType.grou
 COMPUTED_TYPES = frozenset({ColumnType.calculated})
 # `user`/`group` are lookup with a fixed target — an account or a group, not a row.
 PRINCIPAL_TYPES = frozenset({ColumnType.user, ColumnType.group})
+# Types whose cell may hold more than one value, i.e. the ones `config.multiple` is
+# actually implemented for. `choice` has the list branch in `validate_scalar`; the
+# REFERENCE_TYPES are resolved as a set by `_validate_value`. Nothing else has
+# anywhere to put a second value.
+#
+# This is a *closed* set and the config validator refuses the flag outside it, which
+# it did not always do. The failure was not a column that ignored `multiple` — it was
+# one that could never hold anything: `coerce_shape` wraps the incoming scalar in a
+# list because the config says so, and the scalar validator then refuses the list.
+# A `text` column with the flag set created cleanly and rejected every write of that
+# cell, forever. Two readers depend on the set as well as the validator:
+# `transfer._csv_cell` joins a list with `;` and `_parse_cell` splits on it, and they
+# have to agree about which columns that applies to or an export would not re-import.
+MULTIPLE_TYPES = frozenset({ColumnType.choice}) | REFERENCE_TYPES
 # Types whose cell holds a JSON *number*, whatever it is a number of. A `rating` is
 # a point on a scale and a `duration` is a count of seconds, but both are stored,
 # compared, ordered and totalled exactly as `number` is — the difference between

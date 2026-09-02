@@ -26,10 +26,12 @@ not matter; a private repo deploys fine once the account is connected.
 3. Open **`dbui-db` → Internal Database URL**, and rewrite its scheme:
    `postgresql://` → **`postgresql+asyncpg://`**. Paste that into the `dbui` env group as
    `DATABASE_URI`. No `ssl` parameter — the internal network does not need one.
-4. On **`dbui-api` → Environment → Secret Files**, upload `backend/keys/private.pem` and
-   `backend/keys/public.pem` under exactly those names (the env group points at
-   `/etc/secrets/…`). Use the **existing** pair: RS256 signs every token with it, so a fresh
-   key silently logs out everyone holding one.
+4. On **`dbui-api` → Environment → Secret Files**, upload the RS256 keypair under the
+   names `private.pem` and `public.pem` (the env group points at `/etc/secrets/…`).
+   `backend/keys/` is **gitignored**, so these do not come from a clone — use the pair the
+   running deployment already has, or generate one with
+   `uv run python -m src.auth.keygen`. Reuse beats regenerate: RS256 signs every token
+   with the private key, so a fresh one silently logs out everyone holding a session.
 5. Redeploy `dbui-api`. The log should show the Alembic revisions running, *then*
    `Uvicorn running`.
 6. In **GitHub → Settings → Secrets → Actions**, add `DATABASE_URI` for the maintenance
@@ -56,8 +58,8 @@ for the instance, plus storage at roughly $0.30/GB-month) ends that clock and ad
 backups. It was the **first** thing to buy — before the web service — because the web service
 being slow is survivable and the data vanishing is not. Recovery from a lost database, if it
 ever comes to that, is still manual and takes minutes: create one, paste its internal URL into
-`DATABASE_URI`, redeploy — the start command migrates it from empty and the superuser is seeded
-again.
+`DATABASE_URI`, redeploy — the **pre-deploy hook** migrates it from empty (see below; it moved
+out of the start command) and the superuser is seeded again.
 
 `plan` is one of the few database fields Render *does* apply to an existing database on
 blueprint sync — most of the rest (`databaseName`, `user`, `postgresMajorVersion`) are fixed at

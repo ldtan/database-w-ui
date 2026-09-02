@@ -1,7 +1,6 @@
 from __future__ import annotations
-from typing import Optional, TypeVar
 
-from sqlalchemy.orm import Mapped, declared_attr, mapped_column, relationship
+from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 import sqlalchemy as sa
 
 from src.infrastructure.database import Base

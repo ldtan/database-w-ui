@@ -70,7 +70,20 @@ list shared by the app, the tests, and Alembic. A model missing from it makes au
 emit a `DROP TABLE` for its table.
 
 `tests/test_migrations.py` builds a database *through the migrations* and asserts it matches
-the models, so a missing or wrong revision fails CI rather than production.
+the models, so a missing or wrong revision fails CI rather than production. That claim is only
+true because of [`.github/workflows/ci.yml`](.github/workflows/ci.yml), which runs the suite on
+every push and pull request — for a long time the repo's only workflow was the nightly
+maintenance cron and nothing ran on a change at all.
+
+## Tests
+
+```bash
+cd backend && uv run pytest      # needs Postgres; see backend/README.md
+cd frontend && npm run test      # vitest, node environment, no browser
+```
+
+Both run in CI on every push and pull request, along with `ruff check` and
+`tsc --noEmit`.
 
 ## Deployment
 

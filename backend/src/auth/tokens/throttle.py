@@ -1,4 +1,4 @@
-"""Rate limiting for the login endpoint.
+"""Rate limiting for the endpoints that answer before the caller has proved anything.
 
 Login is the one route that has to answer before the caller has proved anything,
 so it is the only place an attacker can guess at. Without a limit here a public
@@ -53,6 +53,17 @@ def _ip_key(ip: str) -> tuple[str, str]:
     return ("ip", ip)
 
 
+def _refresh_key(ip: str) -> tuple[str, str]:
+    """A separate namespace from `_ip_key`, deliberately.
+
+    Sharing the login bucket would conflate two different things: spent refresh
+    tokens would push an address towards a *login* lockout, so a client with a stale
+    session in a background tab could lock the person out of signing in — which is
+    the opposite of what a throttle is for. Same budget, its own tally.
+    """
+    return ("refresh-ip", ip)
+
+
 def client_ip(request: Request) -> str:
     """The caller's address as well as it can be known from behind a proxy."""
     forwarded = request.headers.get("x-forwarded-for")
@@ -102,6 +113,32 @@ def retry_after_seconds(username: str, ip: str) -> int | None:
     # Never advertise 0: a client obeying `Retry-After: 0` would come straight
     # back and be turned away again.
     return max(1, ceil(max(waits)))
+
+
+def refresh_retry_after_seconds(ip: str) -> int | None:
+    """How long a `/refresh` or `/revoke` from this address must wait.
+
+    These two are unauthenticated by construction — presenting the token *is* the
+    authorisation — and neither had any limit at all. `/refresh` does a database
+    lookup and mints an access token on success, so it is both a guessing surface
+    (a refresh token is a bearer credential like any other) and a cheap way to make
+    the single instance do work. By address only: there is no username to key on,
+    which is also why the budget is the generous per-IP one rather than the tight
+    per-username one.
+    """
+    wait = _wait_for(_refresh_key(ip), settings.LOGIN_MAX_FAILURES_PER_IP, monotonic())
+    return None if wait is None else max(1, ceil(wait))
+
+
+def record_refresh_failure(ip: str) -> None:
+    """Count one refused token against the address.
+
+    Failures only, exactly as login counts them: a client refreshing a valid session
+    on a timer is not something to turn away, however often it does it.
+    """
+    now = monotonic()
+    _sweep(now)
+    _failures.setdefault(_refresh_key(ip), deque()).append(now)
 
 
 def record_failure(username: str, ip: str) -> None:

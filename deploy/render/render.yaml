@@ -75,9 +75,23 @@ services:
     # instance that could not boot. Note the separate instance also means filesystem changes
     # here do not reach the service — this may only touch the database.
     #
-    # numInstances is left unset (one instance), which the per-process login throttle in
-    # src/auth/tokens/throttle.py still depends on. Scaling is now possible; that counter is
-    # what to fix first if it happens.
+    # Set to 1 explicitly rather than left to the default, because **three things in
+    # the app are per-process and silently wrong at two instances**, none of which
+    # raises, logs, or degrades visibly:
+    #
+    #   - `lists/events/broker.py` — the SSE fan-out is a module-level dict, so a
+    #     write handled by instance A never wakes a subscriber held by instance B.
+    #     Half the open lists simply stop updating, and look idle rather than broken.
+    #     The documented swap is Postgres LISTEN/NOTIFY behind the same two methods.
+    #   - `auth/tokens/throttle.py` — the login throttle's counters, so N instances
+    #     allow N times the attempts before locking out.
+    #   - `geocode/services.py` — the one-request-per-second gate and the result
+    #     cache, so N instances are N callers to Nominatim's published limit and each
+    #     one has a colder cache.
+    #
+    # Leaving it unset made "one instance" a default nobody had chosen; writing it
+    # down makes scaling an edit that lands next to the list of what to fix first.
+    numInstances: 1
     preDeployCommand: uv run alembic upgrade head
     startCommand: uv run uvicorn main:create_app --factory --host 0.0.0.0 --port $PORT
     envVars:

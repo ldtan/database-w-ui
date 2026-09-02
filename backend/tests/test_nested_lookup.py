@@ -506,7 +506,7 @@ async def test_import_enforces_the_pairing_per_row(
 ):
     """CSV rows go through the same validation; a bad pair is a row error, not
     a failed import."""
-    s = await _scenario(client, workspace_uuid, list_uuid, add_column)
+    await _scenario(client, workspace_uuid, list_uuid, add_column)
     csv = "country,city\nJapan,Tokyo\nFrance,Tokyo\n"
     resp = await client.post(
         f"/api/lists/{list_uuid}/import",

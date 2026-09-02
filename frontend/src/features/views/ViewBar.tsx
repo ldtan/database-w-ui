@@ -4,7 +4,6 @@ import { Dropdown } from "primereact/dropdown";
 import { Button } from "primereact/button";
 import { AppDialog } from "../../components/AppDialog";
 import { InputText } from "primereact/inputtext";
-import { Message } from "primereact/message";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
@@ -12,6 +11,7 @@ import { Field } from "../../components/Field";
 import { slugify } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { View, ViewConfig } from "../../lib/types";
+import { ErrorMessage } from "../../components/ErrorMessage";
 import { ShareDialog } from "../permissions/ShareDialog";
 import {
   useEffectiveActions,
@@ -279,9 +279,7 @@ export function ViewBar({
         }
       >
         <div className="flex flex-col gap-4">
-          {create.error instanceof ApiError && (
-            <Message severity="error" text={create.error.message} />
-          )}
+          <ErrorMessage error={create.error} />
           <Field
             label="View name"
             htmlFor="new-view-name"

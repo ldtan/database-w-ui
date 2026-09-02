@@ -921,6 +921,22 @@ field appear broken for a reason that has nothing to do with them. The rate limi
 per-process semaphore, which carries the same single-instance assumption the login
 throttle already documents — two web workers are two callers to Nominatim.
 
+**That semaphore is also why this route authenticates by hand.** It used to carry
+`dependencies=[Depends(get_current_user)]`, which takes `Depends(get_db)`, and a `yield`
+dependency is released only when the response completes — so a caller *queued behind the
+gate*, waiting for a turn it had not been given, held a pooled session the whole time.
+That is the same bug the events route documents, arrived at from the other direction: a
+stream holds a connection because it lasts a long time, a geocode because it waits on a
+one-at-a-time gate and then on somebody else's network. Fifteen of them empty the pool
+(SQLAlchemy's 5 + 10 defaults) and every unrelated request in the app stalls until
+`pool_timeout`, which a location picker debouncing a typed address across a few tabs can
+reach on its own. `_authenticate` now resolves the caller inside a session opened and
+closed before `search` runs, and `oauth2_scheme` stays a dependency so a caller with no
+bearer token is still refused before anything happens and the route keeps its security
+requirement in the OpenAPI document.
+`test_a_queued_geocode_does_not_hold_a_pooled_connection` is what catches a regression —
+nothing else would, until the site froze.
+
 **On some Windows dev machines the geocode call kills the worker, and no amount of
 `try` will catch it.** This is the app's first outbound HTTPS request, so it is the
 first thing to hit a Python/OpenSSL mismatch that was always there:
@@ -1130,10 +1146,72 @@ Change a config's shape in the backend and nothing will tell you; change it here
 The endpoints are still untyped, too: `api.get<T>(path)` takes the caller's word for both.
 A typed client (`openapi-fetch`) would close that, at the cost of touching every call site.
 
+**A collection's visibility is resolved in bulk, never per row.** `ViewService.list`
+and `FormService.list` used to loop `PermissionService.has(...)` per row, with a
+comment saying "few views per list" — true in practice and enforced by nothing: there
+is no cap on views or forms, and both listings are fetched on every list open, so the
+cost was a `_security_context` walk plus a grant SELECT per row per page load. Both go
+through `effective_actions_bulk` now, which the items router already used and which
+answers in a fixed number of queries. Any new listing that filters by permission
+should reach for it rather than the loop.
+
 **Permission-gated controls are hidden while their query is in flight.** `useEffectiveActions`
 returns an empty set until the request resolves, so buttons appear a beat after page load
 rather than showing and then vanishing (which would let someone click a control they don't
 have). Grant and inheritance changes invalidate the cached `["effective"]` queries.
+
+**Every response carries an `X-Request-ID`, and the 500 is the one that needed it
+most.** `src/infrastructure/observability.py` stamps each request, echoes the id, and
+logs one line per request; `@app.exception_handler(Exception)` logs the traceback
+against that id and answers a body that says only "Internal server error". Before
+this the app had two loggers in the whole tree, no configuration, no correlation and
+no catch-all — a production 500 was a traceback in an ephemeral log stream on a
+single instance, with nothing to match it to the report that arrived an hour later.
+
+Two details are easy to get backwards and were, first time:
+
+- **The access line is logged before the ContextVar is reset**, not after. Reset
+  first and the one log entry guaranteed to have an id is the one that answers `-`.
+- **The id is put on `request.state` as well as in the ContextVar.** Starlette's
+  `ServerErrorMiddleware` — which runs the handler on an unhandled exception — sits
+  *outside* the app's own middleware, so by the time it is reached the `finally` has
+  already run. `request.state` is backed by the ASGI scope and survives, which is
+  what lets the 500 carry the same id as the access line for the request that
+  produced it.
+
+Third-party loggers are pinned to WARNING regardless of `DEBUG`. Without that,
+`python_multipart` writes a line per field byte-range of every uploaded form and
+`asyncio`/`httpx` a running commentary — which buries the app's own lines and makes a
+single test unreadable.
+
+**`MAX_REQUEST_BYTES` bounds every request body, and is not `MAX_UPLOAD_BYTES`.**
+`core/uploads.py` capped a *file* while reading it; nothing capped a JSON body, and
+`ListItemCreate.data` is a `dict` to Pydantic while a `text` column's `max_length` is
+unset by default — so one request could buffer, parse, sanitise and store tens of
+megabytes on a 512 MB instance. `BodySizeLimitMiddleware` checks `Content-Length`
+first (cheap, catches every ordinary client) *and* counts the stream (a chunked
+request has no header to check), answering 413.
+
+**The two limits must not be set equal**, and that is the part to get right. The
+upload limit is the *good* error — the route checks it and names it in the message.
+This one is a backstop for bodies nothing else bounds. A multipart request carrying a
+file exactly at `MAX_UPLOAD_BYTES` is a body slightly *over* it, because of the
+boundaries and headers around the file — so equal values make the backstop reject
+uploads the route was about to accept, with the worse message.
+`test_endpoint_rejects_an_oversized_file` catches exactly that, and did.
+
+A per-cell text ceiling is a separate and narrower question — a `text` column can
+legitimately hold a long document.
+
+**`/auth/tokens/refresh` and `/revoke` are throttled by address, in their own
+bucket.** Both are unauthenticated by construction — presenting the token *is* the
+authorisation — and neither had any limit. A refresh token is a bearer credential, so
+an unbounded route trading one for an access token is a guessing surface, and each
+attempt is a database lookup on the single instance. The bucket is deliberately
+*not* login's: sharing it would let a stale session retrying in a background tab push
+an address towards a **login** lockout, so the person could not sign in to fix the
+thing that was failing. `/revoke` reads the bucket but never fills it — it answers 204
+whether or not the token was real, on purpose, so it does not know what a failure was.
 
 **A request must never hold two pooled connections at once.** Export streams rows on a
 server-side cursor *and* resolves reference labels — the obvious way to write that is a second
@@ -1153,6 +1231,48 @@ inheritance was broken and were never granted to them, even though the grid hid 
 correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. Any *new*
 endpoint that returns record data needs the same filter; a list-level `view` check is not
 sufficient.
+
+**And "returns record data" includes copying it somewhere the caller can read.**
+`ListService.clone` missed this for the whole life of the feature, and it was the worse
+half of the same bug: a clone does not hand the rows back in the response, it writes them
+into a list the caller owns, where `_COPY_RECORDS` sets `permissions_inherit = true` and
+they can be read at leisure afterwards. The route requires `configure` on the workspace,
+which confers `view`, so ordinary list access was enough to lift a record whose
+inheritance was broken. `clone` now takes the acting user and applies `item_view_filter`
+to its keyset select, and `test_clone_respects_item_permissions` guards it. Note the
+`permissions_inherit = true` is *correct* given that filter and wrong without it —
+everything copied was visible to the cloner, and the clone starts private with no grants.
+Carrying the source's flag across instead would be worse than either: a record copied
+under `permissions_inherit = false` inherits nothing and has no grant of its own, so it
+would be invisible to everyone except the workspace owner, including the person who just
+asked for the copy.
+
+**The filter language fails towards "everything", which is the wrong direction, and three
+places used to.** A filter that cannot answer a question should say so; each of these
+instead returned rows, which reads as data rather than as a mistake and which a saved view
+then repeats forever.
+
+- **An unknown operator was dropped, not refused.** `_condition` returns `None` for an
+  operator it does not recognise and `apply_filters` drops that condition — so a typo in
+  the only condition yielded the *unfiltered list*. `FilterCondition.operator` is now a
+  `Literal` over `filtering.FILTER_OPERATORS`, the tuple `_condition` actually answers, so
+  it is a 422 on write and on the ad-hoc `filters` param. Note what this deliberately does
+  **not** do: `ViewRead.config` is a plain `dict` and `ListItemService` reads
+  `view.config or {}` raw, so a view saved before this still loads and still behaves as it
+  did — the type gates writing one, not reading one. `frontend/src/features/views/
+  operators.ts` already warned that adding an operator on one side only "gets a filter that
+  silently matches everything"; this is that warning enforced from the other end.
+- **`contains` built its pattern by interpolation.** `%` and `_` are LIKE wildcards, so a
+  condition of `%` matched every non-null cell and `a_c` matched `abc`. It goes through
+  `like_pattern()` with `escape=LIKE_ESCAPE` now, like every other ILIKE in the app already
+  did — this was the one that did not, and it is the one whose values get saved and re-run.
+- **A JSON boolean never matched a `checkbox`.** JSONB spells booleans `true`/`false`, so
+  `data ->> key` answers `"true"` while Python's `str(True)` is `"True"`. `_as_text` now
+  carries the same `bool` branch `transfer.services._csv_cell` and
+  `columns.conversion._render_scalar` both already had. The web editor dodged this because
+  it gives a checkbox column a free-text box (fixed separately); every other client hit it.
+
+All three are pinned in `tests/test_view_filtering.py`.
 
 **A page of records can be asked for two ways, and the cursor is not just a faster offset.**
 `GET /items/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —

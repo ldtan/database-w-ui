@@ -204,6 +204,22 @@ async def purge(
         # committing between batches, because a binned column is restorable right up
         # until this succeeds (see src.lists.purge).
         await strip_column_keys(db, list_id, [str(row.uuid)], commit=False)
+        # And the same for a *different* list's lookup that labels its rows by this
+        # column. `display_column_key` tolerates a dangling key by falling through to
+        # the primary/first column, which is what keeps a soft-deleted column's
+        # restore a real undo — so nothing needs scrubbing while the column can come
+        # back. Here it cannot, so the key is dead rather than dormant and the config
+        # should stop claiming otherwise. Global, not list-scoped: the column being
+        # destroyed belongs to the *target* list, and the config naming it sits on the
+        # referring one (the same reason `_clear_dependent_nesting` scans globally).
+        await db.execute(
+            sa.text(
+                "UPDATE columns SET config = config - 'display_column_uuid' "
+                "WHERE deleted_at IS NULL "
+                "AND config ->> 'display_column_uuid' = :uuid"
+            ),
+            {"uuid": str(row.uuid)},
+        )
     await db.execute(sa.delete(model).where(model.id == row.id))
     await db.commit()
     return True

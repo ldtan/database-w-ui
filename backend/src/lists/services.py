@@ -520,6 +520,7 @@ class ListService:
         uuid: Union[str, UUID],
         *,
         with_records: bool,
+        user,
     ) -> Optional[List]:
         """Duplicate a list into its own workspace, structure and (optionally) data.
 
@@ -538,6 +539,13 @@ class ListService:
         duplicate them. Grants are not copied and no inherit flags are carried over:
         the clone is a fresh list the cloner owns, private like any newly created list.
         The router enforces 'view' on the source and 'configure' on its workspace.
+
+        ``user`` is the caller, and copying records needs it: a clone is a *read* of
+        the source's records, so it honours the same per-record visibility the grid
+        and the export do. List-level 'view' is not sufficient — a record whose
+        ``permissions_inherit`` is false and which was never granted to the caller
+        must not arrive in a list they own. This is the same rule, and the same
+        reason, as ``export_rows``.
         """
         source = await cls.get_any_by_uuid(db, uuid)
         if source is None:
@@ -664,6 +672,19 @@ class ListService:
             )
 
         if with_records:
+            from src.permissions.services import PermissionService
+
+            # A clone copies records, so it is a read of them and takes the same
+            # per-record filter every other read applies. Without it, list-level
+            # 'view' plus workspace 'configure' — which the router already requires,
+            # and which `configure` confers `view` for — would be a way to lift rows
+            # whose inheritance was broken and which were never granted to the
+            # caller, into a list where they inherit from a list the caller owns.
+            # `_COPY_RECORDS` writes `permissions_inherit = true`, which is correct
+            # *because* of this filter: everything copied was visible to the cloner,
+            # and the clone itself starts private with no grants.
+            visible = await PermissionService.item_view_filter(db, user, source)
+
             # Keyset-paged, not loaded whole: the source list is the one thing here
             # whose size a caller controls, and holding all of it — twice, once as the
             # source instances and once as the copies — is how a single clone request
@@ -686,6 +707,7 @@ class ListService:
                             ListItem.list_id == source.id,
                             ListItem.deleted_at.is_(None),
                             ListItem.id > after,
+                            visible,
                         )
                         .order_by(ListItem.id)
                         .limit(CLONE_CHUNK)

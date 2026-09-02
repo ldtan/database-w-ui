@@ -23,6 +23,7 @@ import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { DeletedWorkspacesDialog } from "./DeletedWorkspacesDialog";
 import { TransferWorkspaceDialog } from "./TransferWorkspaceDialog";
+import { ErrorMessage, errorText } from "../../components/ErrorMessage";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits — a client-side filter over one fetched page would
@@ -466,7 +467,7 @@ export function WorkspacesPage() {
         placeholder="Marketing"
         hint="You can rename it later; its short name is derived from this."
         loading={create.isPending}
-        error={create.error instanceof ApiError ? create.error.message : null}
+        error={errorText(create.error)}
         onSubmit={(name) => create.mutate(name)}
       />
 
@@ -499,9 +500,7 @@ export function WorkspacesPage() {
         }
       >
         <div className="flex flex-col gap-4">
-          {rename.error instanceof ApiError && (
-            <Message severity="error" text={rename.error.message} />
-          )}
+          <ErrorMessage error={rename.error} />
           <NameFields
             key={renaming?.uuid ?? "none"}
             idPrefix="workspace"

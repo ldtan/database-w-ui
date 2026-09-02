@@ -137,3 +137,49 @@ async def test_an_answer_is_cached_so_a_team_asks_once(client, upstream, no_wait
 async def test_an_empty_query_is_refused_by_the_route(client):
     resp = await client.get("/api/geocode/?q=")
     assert resp.status_code == 422, resp.text
+
+
+async def test_a_queued_geocode_does_not_hold_a_pooled_connection(
+    client, upstream, no_wait
+):
+    """The regression test for why this route authenticates by hand.
+
+    `search` serializes every caller on a one-permit semaphore — Nominatim's
+    published one-request-per-second policy — and then waits on the network. The
+    route used to carry `dependencies=[Depends(get_current_user)]`, which takes
+    `Depends(get_db)`, and a yield dependency is released only once the response
+    completes. So every *queued* geocode held a pooled session while it waited for
+    a turn it had not been given yet. The engine takes SQLAlchemy's defaults
+    (5 + 10 overflow), so a location picker debouncing a typed address across a few
+    tabs could empty the pool and stall every unrelated request in the app until
+    `pool_timeout` — 30 seconds of the whole site hanging, for a third-party
+    address lookup.
+
+    Nothing else in the suite would notice: the route answers correctly, the
+    throttle works, and the failure arrives in production as "the site freezes when
+    someone types in a location field". So: more concurrent geocodes than the pool
+    can hold, all of them stuck behind the gate, and an ordinary database-backed
+    request answered while they are.
+    """
+    import asyncio
+
+    async def _slow(*args, **kwargs):
+        # Long enough that all twenty are still in flight when the assertion runs,
+        # and never actually awaited to completion — they are cancelled below.
+        await asyncio.sleep(5)
+        raise AssertionError("the queued calls should have been cancelled")
+
+    upstream(_slow)
+
+    queued = [
+        asyncio.create_task(client.get(f"/api/geocode/?q=place-{i}"))
+        for i in range(20)
+    ]
+    try:
+        await asyncio.sleep(0.3)
+        resp = await asyncio.wait_for(client.get("/api/workspaces/"), timeout=10)
+        assert resp.status_code == 200, resp.text
+    finally:
+        for task in queued:
+            task.cancel()
+        await asyncio.gather(*queued, return_exceptions=True)

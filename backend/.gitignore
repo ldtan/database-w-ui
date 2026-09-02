@@ -1,6 +1,10 @@
 # Environment variables
 .env
 .env.*
+# ...except the template, which is the point of having one. `.env.*` above would
+# otherwise swallow it and the file would be invisible to a fresh clone — which is
+# exactly the failure the template exists to prevent.
+!.env.example
 
 # Local databases (SQLite)
 *.db

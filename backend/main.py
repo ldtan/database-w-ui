@@ -5,6 +5,12 @@ from contextlib import asynccontextmanager
 
 from src.core.config import settings
 from src.core.exceptions import PermissionDeniedError
+from src.infrastructure.body_limit import BodySizeLimitMiddleware
+from src.infrastructure.observability import (
+    RequestContextMiddleware,
+    configure_logging,
+    install_exception_handler,
+)
 
 
 @asynccontextmanager
@@ -57,6 +63,10 @@ def create_app() -> FastAPI:
     # built. Nor does it affect local work, where DEBUG is true.
     docs_enabled = settings.DEBUG
 
+    # Before the app, so anything the lifespan logs on the way up is formatted and
+    # carries a request id field like everything else.
+    configure_logging(settings.DEBUG)
+
     app = FastAPI(
         title="Database w/ UI",
         description="This app lets you create lists and add records.",
@@ -66,6 +76,20 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json" if docs_enabled else None,
         lifespan=lifespan,
     )
+
+    # The backstop, not the upload limit: `MAX_REQUEST_BYTES` sits above
+    # `MAX_UPLOAD_BYTES` so the import and batch-user routes keep answering with
+    # their own message naming their own limit, and this only catches bodies nothing
+    # else bounds. See the setting for why the two must not be equal.
+    app.add_middleware(
+        BodySizeLimitMiddleware, max_bytes=settings.MAX_REQUEST_BYTES
+    )
+
+    # Added last, so it is outermost: `add_middleware` builds the stack in reverse.
+    # That is deliberate — a request refused by the size limit above is still worth a
+    # log line and still gets an `X-Request-ID` to quote when somebody asks why their
+    # upload failed.
+    app.add_middleware(RequestContextMiddleware)
 
     # CORS configuration
     app.add_middleware(
@@ -85,6 +109,11 @@ def create_app() -> FastAPI:
         return JSONResponse(
             status_code=status.HTTP_403_FORBIDDEN, content={"detail": str(exc)}
         )
+
+    # Last resort. Everything the service layer raises deliberately has a handler
+    # above or is an HTTPException; this is for the ones nobody predicted, and it is
+    # the only place their traceback is written down.
+    install_exception_handler(app)
 
     # Liveness probe for a host's health check (Render, a container orchestrator).
     # It answers from the process alone: a check that queried the database would

@@ -78,6 +78,16 @@ export function LocationField({
   valueRef.current = location;
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Read-only-ness, by the same trick and for the same reason as the two above: the
+  // map effect runs once per column and its Leaflet callbacks close over whatever
+  // `disabled` was at that moment. A field that becomes read-only afterwards — the
+  // update form marking it so, a grant changing — went on taking map clicks, and the
+  // marker was created `draggable: true` unconditionally and its `dragend` never
+  // checked at all. So a greyed-out address box sat above a map that still moved the
+  // pin: the value visibly changed, and `buildRecordData` then dropped it on save,
+  // which is an edit that disappears without a word.
+  const disabledRef = useRef(disabled);
+  disabledRef.current = disabled;
 
   function commit(next: Partial<LocationValue>) {
     const merged: LocationValue = {
@@ -127,8 +137,14 @@ export function LocationField({
         if (markerRef.current) {
           markerRef.current.setLatLng([lat, lng]);
         } else {
-          markerRef.current = L.marker([lat, lng], { icon, draggable: true }).addTo(map);
+          markerRef.current = L.marker([lat, lng], {
+            icon,
+            draggable: !disabledRef.current,
+          }).addTo(map);
           markerRef.current.on("dragend", () => {
+            // Belt and braces with `dragging.disable()` below: a drag that was
+            // already under way when the field went read-only still ends here.
+            if (disabledRef.current) return;
             const at = markerRef.current!.getLatLng();
             commit({ lat: at.lat, lng: at.lng });
           });
@@ -137,7 +153,7 @@ export function LocationField({
 
       if (hasPin(start)) place(start.lat, start.lng);
       map.on("click", (e: { latlng: { lat: number; lng: number } }) => {
-        if (disabled) return;
+        if (disabledRef.current) return;
         place(e.latlng.lat, e.latlng.lng);
         commit({ lat: e.latlng.lat, lng: e.latlng.lng });
       });
@@ -154,6 +170,18 @@ export function LocationField({
     // rebuild it — see `valueRef` above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [column.uuid]);
+
+  // Keep the pin's own draggability in step with the field. The marker is created
+  // once, whenever the first pin lands, so its `draggable` option is a snapshot;
+  // this is what carries a change afterwards. Also covers the ordinary order of
+  // events on a read-only field that already has a value — the marker is placed
+  // during the effect above, before this runs.
+  useEffect(() => {
+    const dragging = markerRef.current?.dragging;
+    if (!dragging) return;
+    if (disabled) dragging.disable();
+    else dragging.enable();
+  }, [disabled, location?.lat, location?.lng]);
 
   // Follow a pin that changed from outside the map: a search result chosen, or the
   // dialog reopened on another record. Imperative for the reason the file's header

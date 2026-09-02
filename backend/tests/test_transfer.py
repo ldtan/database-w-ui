@@ -552,3 +552,76 @@ async def test_import_answers_an_undecodable_file_rather_than_failing(
     )
     assert resp.status_code == 400, resp.text
     assert "UTF-8" in resp.json()["detail"]
+
+
+async def test_an_internal_failure_is_not_echoed_to_the_client(
+    client, list_uuid, add_column, monkeypatch
+):
+    """A row that fails for a reason the caller did not cause says so, and no more.
+
+    The catch-all used to be `except Exception as exc` reporting
+    `f"unexpected error: {exc}"`. For anything raised below the service layer that
+    is the failing SQL, its bound parameters, and the table and constraint names —
+    internal detail handed to whoever can upload a CSV. The three exceptions that
+    describe the *row* (`ValidationError`, `ConflictError`,
+    `UnknownReferenceError`) still come back verbatim, because those messages are
+    written for the person fixing the file and are the whole point of reporting per
+    row rather than failing the upload.
+    """
+    from sqlalchemy.exc import OperationalError
+
+    from src.lists.items.services import ListItemService
+
+    # Created for its effect: the file below is keyed on this column's name.
+    await add_column(list_uuid, name="name", display_name="Name", type="text")
+
+    real = ListItemService._validate_data
+    calls = {"n": 0}
+
+    async def _boom(*args, **kwargs):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise OperationalError(
+                "SELECT secret_internal_table.col FROM secret_internal_table",
+                {"password": "hunter2"},
+                Exception("connection reset by peer"),
+            )
+        return await real(*args, **kwargs)
+
+    monkeypatch.setattr(ListItemService, "_validate_data", _boom)
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", "name\nalpha\nbeta\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    # The second row still lands: one bad row never sinks the batch.
+    assert body["created"] == 1
+    assert len(body["errors"]) == 1
+    message = body["errors"][0]["message"]
+    # Row numbers count the header line, as the rest of this file does.
+    assert body["errors"][0]["row"] == 2
+    # It says which row and nothing about the inside of the server.
+    assert "secret_internal_table" not in message
+    assert "hunter2" not in message
+    assert "could not be imported" in message
+
+
+async def test_a_row_error_still_says_what_is_wrong_with_the_row(
+    client, list_uuid, add_column
+):
+    """The other half: narrowing the catch must not have swallowed the messages
+    that are the reason per-row reporting exists."""
+    await add_column(list_uuid, name="score", display_name="Score", type="number")
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/import",
+        files={"file": ("rows.csv", "score\n12\nnot-a-number\n", "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"] == 1
+    assert len(body["errors"]) == 1
+    # The service's own words, verbatim — a person can act on this.
+    assert "score" in body["errors"][0]["message"]

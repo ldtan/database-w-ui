@@ -490,8 +490,12 @@ class ConversionService:
                 # StringDataRightTruncationError, which is a `DataError` and not an
                 # `IntegrityError` — so the handler below would not catch it and a
                 # conversion of a column with a very long display name answered 500.
-                # `ColumnCreate.display_name` has no `max_length`, so such a column is
-                # creatable today.
+                #
+                # `ColumnCreate.display_name` is `DisplayName` now, so a stored one is
+                # at most 255 rather than unbounded — but this stays, because 255 plus
+                # a 20-character suffix is still 20 too many. What changed is that the
+                # cap here is the *only* thing standing between this and the error,
+                # rather than a patch over a schema that let anything through.
                 display_name=f"{source.display_name[:235]} (before conversion)",
                 position=source.position,
                 type=old_type,
@@ -532,7 +536,7 @@ class ConversionService:
             type=target_type,
             config=stored,
         )
-        report = await cls._run(db, lst, source, spec, user, keys=keys)
+        await cls._run(db, lst, source, spec, user, keys=keys)
 
         # After the values are written, because they are what the gates are about,
         # and before the retype, because a failure here has to roll back a column

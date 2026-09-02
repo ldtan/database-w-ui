@@ -89,6 +89,23 @@ class Settings(BaseSettings):
     # not need a code change to use what it paid for.
     MAX_UPLOAD_BYTES: int = 8 * 1024 * 1024
 
+    # The ceiling on a whole request body, which is a different question from the one
+    # above and needs a different number.
+    #
+    # `MAX_UPLOAD_BYTES` bounds the *file*, is checked by the route, and produces a
+    # message naming the limit — that is the good error and it should keep happening.
+    # This bounds what the process will buffer *at all*, and exists because nothing
+    # did: `ListItemCreate.data` is a `dict` to Pydantic and a `text` column's
+    # `max_length` is unset by default, so a single JSON body could be tens of
+    # megabytes.
+    #
+    # Deliberately **above** the upload limit rather than equal to it. A multipart
+    # upload carries boundaries and headers around the file, so a request holding a
+    # file exactly at `MAX_UPLOAD_BYTES` is a body slightly over it — set the two
+    # equal and the backstop would start refusing files the route was about to accept,
+    # with the worse message. The gap is the envelope; it is not a second budget.
+    MAX_REQUEST_BYTES: int = 12 * 1024 * 1024
+
     # Records one bulk delete may name. Unlike the two above, this one is also a
     # published API limit — it reaches the OpenAPI schema through
     # `BulkDeleteRequest`, and the frontend keeps its own copy to chunk a large

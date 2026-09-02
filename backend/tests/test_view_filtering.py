@@ -1,4 +1,5 @@
 """Server-side filtering and sorting of records via a view's config."""
+import json
 
 
 async def _view_uuid(client, list_uuid):
@@ -70,6 +71,102 @@ async def test_view_contains_filter(client, list_uuid, add_column):
         await client.get(f"/api/lists/{list_uuid}/items/?view_uuid={view}")
     ).json()
     assert sorted(r["data"][name] for r in rows) == ["apple", "apricot"]
+
+
+async def test_a_boolean_matches_a_checkbox_cell(client, list_uuid, add_column):
+    """A JSON `true` in a condition must match a ticked checkbox.
+
+    JSONB spells its booleans `true`/`false`, so `data ->> key` answers `"true"` —
+    while Python's `str(True)` is `"True"`, which matches nothing. The filter used
+    to send the second, so a checkbox filter written by any client that sends a
+    real boolean (rather than the string, which is what the web editor's free-text
+    box happened to produce) silently returned no rows at all.
+    """
+    done = await add_column(list_uuid, name="done", display_name="Done", type="checkbox")
+    label = await add_column(list_uuid, name="label", display_name="Label", type="text")
+    for text, flag in [("packed", True), ("pending", False)]:
+        await client.post(
+            f"/api/lists/{list_uuid}/items/", json={"data": {label: text, done: flag}}
+        )
+
+    async def matching(value):
+        filters = {
+            "conjunction": "and",
+            "conditions": [{"column_uuid": done, "operator": "is", "value": value}],
+        }
+        resp = await client.get(
+            f"/api/lists/{list_uuid}/items/", params={"filters": json.dumps(filters)}
+        )
+        assert resp.status_code == 200, resp.text
+        return sorted(r["data"][label] for r in resp.json())
+
+    assert await matching(True) == ["packed"]
+    assert await matching(False) == ["pending"]
+    # The string spelling keeps working — it is what `data ->> key` literally holds,
+    # and clients that already send it must not break.
+    assert await matching("true") == ["packed"]
+
+
+async def test_contains_treats_a_wildcard_as_a_character(client, list_uuid, add_column):
+    """`%` and `_` are LIKE wildcards, and a filter value is not a pattern.
+
+    Unescaped, a lone `%` matched every non-null cell and `a_c` matched `abc` — so
+    a condition could quietly select far more than it named, and a saved view kept
+    doing it. Every other ILIKE in the app already escaped; this one did not.
+    """
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    for n in ["100%", "abc", "a_c", "plain"]:
+        await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {name: n}})
+
+    async def matching(value):
+        filters = {
+            "conjunction": "and",
+            "conditions": [
+                {"column_uuid": name, "operator": "contains", "value": value}
+            ],
+        }
+        resp = await client.get(
+            f"/api/lists/{list_uuid}/items/", params={"filters": json.dumps(filters)}
+        )
+        assert resp.status_code == 200, resp.text
+        return sorted(r["data"][name] for r in resp.json())
+
+    # A wildcard is a character being searched for, not a pattern being run.
+    assert await matching("%") == ["100%"]
+    assert await matching("a_c") == ["a_c"]
+
+
+async def test_an_unknown_operator_is_refused_not_ignored(client, list_uuid, add_column):
+    """A filter that cannot be understood must not answer with the whole list.
+
+    `_condition` returns None for an operator it does not recognise and
+    `apply_filters` drops the condition — which for the *only* condition means no
+    filter at all. A typo therefore used to read as "everything matched", which
+    looks like data rather than a mistake, and a view saved with one carried it
+    silently. It is a 422 at the schema now, on both the ad-hoc and the saved path.
+    """
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    for n in ["apple", "banana"]:
+        await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {name: n}})
+
+    filters = {
+        "conjunction": "and",
+        "conditions": [
+            {"column_uuid": name, "operator": "kontains", "value": "ap"}
+        ],
+    }
+    resp = await client.get(
+        f"/api/lists/{list_uuid}/items/", params={"filters": json.dumps(filters)}
+    )
+    assert resp.status_code == 422, resp.text
+
+    # And it cannot be stored, so no saved view can hold one either.
+    view = await _view_uuid(client, list_uuid)
+    saved = await client.patch(
+        f"/api/lists/{list_uuid}/views/{view}",
+        json={"config": {"filters": filters}},
+    )
+    assert saved.status_code == 422, saved.text
 
 
 async def test_number_sort_is_numeric_not_lexicographic(client, list_uuid, add_column):

@@ -104,6 +104,20 @@ export function MetricBar({
               <div className="metric-card-label">{metric.display_name}</div>
               {values.isPending ? (
                 <Skeleton width="4rem" height="1.5rem" />
+              ) : values.isError ? (
+                // The request failed, so there is no answer for any card. Without
+                // this the card fell through to `format(null)` and drew "—", which
+                // this strip otherwise uses to mean "no matching records" — the one
+                // reading that makes a failure look like a fact about the data. The
+                // branch below already refuses to let a broken formula read as 0;
+                // this is the same care applied one level up.
+                <div
+                  className="metric-card-error"
+                  title="The totals could not be loaded."
+                >
+                  <i className="pi pi-exclamation-triangle" aria-hidden="true" />
+                  <span>Unavailable</span>
+                </div>
               ) : answer?.error ? (
                 // A formula whose column was renamed reads as broken, never as 0.
                 <div className="metric-card-error" title={answer.error}>

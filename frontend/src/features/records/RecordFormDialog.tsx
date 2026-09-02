@@ -1,15 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
+import { confirmDialog } from "primereact/confirmdialog";
 import { Message } from "primereact/message";
 
-import { api, ApiError } from "../../lib/api";
+import { api } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Column, Form, ListItem } from "../../lib/types";
 import { applyFieldConditions } from "../forms/conditions";
 import { RecordFields } from "./RecordFields";
 import { buildRecordData, deserialize, resolveFields } from "./recordValues";
+import { ErrorMessage } from "../../components/ErrorMessage";
 
 interface Props {
   listUuid: string;
@@ -77,11 +79,26 @@ export function RecordFormDialog({
   const laidOut = resolveFields(columns, form);
   const fields = applyFieldConditions(laidOut, form, values, columns);
 
+  /**
+   * What the dialog opened with, so closing it can tell a filled-in form from an
+   * untouched one.
+   *
+   * Escape, the X and Cancel all discarded everything typed, with no prompt — on a
+   * fifteen-field form, with focus in a text box, one Escape. The app already
+   * treats this as worth confirming for the *one-row* draft in the grid
+   * (`confirmDiscardDraft`), which is strictly less work to lose. Comparing against
+   * the seed rather than raising a flag on the first keystroke means a value typed
+   * and typed back is not a change, and reopening an unedited record still closes
+   * in one press.
+   */
+  const seed = useRef<string>("{}");
+
   useEffect(() => {
     if (!visible) return;
     if (!item) {
       // Read, not depended on: the prefill is handed over as the dialog opens.
       setValues(prefill ?? {});
+      seed.current = JSON.stringify(prefill ?? {});
       return;
     }
     const initial: Record<string, unknown> = {};
@@ -92,8 +109,27 @@ export function RecordFormDialog({
       }
     }
     setValues(initial);
+    seed.current = JSON.stringify(initial);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, item?.uuid]);
+
+  function requestHide() {
+    if (JSON.stringify(values) === seed.current) {
+      onHide();
+      return;
+    }
+    confirmDialog({
+      message: item
+        ? "Discard your changes to this record?"
+        : "Discard this record? Everything filled in will be lost.",
+      header: item ? "Discard changes" : "Discard record",
+      icon: "pi pi-exclamation-triangle",
+      acceptLabel: "Discard",
+      acceptClassName: "p-button-danger",
+      rejectLabel: "Keep editing",
+      accept: onHide,
+    });
+  }
 
   const persist = useMutation({
     mutationFn: () => {
@@ -114,11 +150,11 @@ export function RecordFormDialog({
     <AppDialog
       header={header ?? (item ? "Edit record" : "Add record")}
       visible={visible}
-      onHide={onHide}
+      onHide={requestHide}
       style={{ width: 480 }}
       footer={
         <>
-          <Button label="Cancel" text onClick={onHide} />
+          <Button label="Cancel" text onClick={requestHide} />
           <Button
             label={item ? "Save" : "Add record"}
             icon={item ? "pi pi-check" : "pi pi-plus"}
@@ -132,9 +168,7 @@ export function RecordFormDialog({
       }
     >
       <div className="flex flex-col gap-4">
-        {persist.error instanceof ApiError && (
-          <Message severity="error" text={persist.error.message} />
-        )}
+        <ErrorMessage error={persist.error} />
         {notes && notes.length > 0 && (
           <Message
             severity="warn"

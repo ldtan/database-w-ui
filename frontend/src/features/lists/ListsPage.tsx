@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
-import { Message } from "primereact/message";
 import { Paginator } from "primereact/paginator";
 import { AppDialog } from "../../components/AppDialog";
 import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
@@ -28,6 +27,7 @@ import {
 import { DeletedListsDialog } from "./DeletedListsDialog";
 import { MoveOrTransferDialog } from "./MoveOrTransferDialog";
 import { CloneListDialog } from "./CloneListDialog";
+import { ErrorMessage, errorText } from "../../components/ErrorMessage";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
 // far down the list it sits.
@@ -331,7 +331,7 @@ export function ListsPage() {
         placeholder="Contacts"
         hint="Add its columns once it exists — under Settings on the list itself."
         loading={create.isPending}
-        error={create.error instanceof ApiError ? create.error.message : null}
+        error={errorText(create.error)}
         onSubmit={(name) => create.mutate(name)}
       />
 
@@ -370,9 +370,7 @@ export function ListsPage() {
         }
       >
         <div className="flex flex-col gap-4">
-          {rename.error instanceof ApiError && (
-            <Message severity="error" text={rename.error.message} />
-          )}
+          <ErrorMessage error={rename.error} />
           <NameFields
             key={renaming?.uuid ?? "none"}
             idPrefix="list"
