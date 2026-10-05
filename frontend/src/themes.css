@@ -280,6 +280,19 @@ a {
   color: var(--brand);
 }
 
+/* A layout constant rather than a palette one, so it sits here instead of in the
+   theme blocks above: every theme has the same header.
+
+   A declared *floor*, not a measurement. The header sizes itself from the brand
+   link and the burger inside it — about 65px as it stands — and this only keeps it
+   from collapsing below that if either shrinks. What reads it is the guide's scroll
+   offset, which adds a rem on top, so the gap stays positive even though the real
+   height is a little over the floor. Raise this if the header ever grows past it;
+   the symptom is a guide heading landing under the header again. */
+:root {
+  --app-header-height: 4rem;
+}
+
 /* The shell: a rail on the left that stays put, and everything else beside it.
    Below the desktop breakpoint the rail is not rendered at all and the drawer
    carries the same tree — see AppLayout. */
@@ -333,6 +346,9 @@ a {
   position: sticky;
   top: 0;
   z-index: 9;
+  /* A floor, so the guide's jump offset below has something to be derived from
+     rather than a second hand-guessed number — see `.guide-section`. */
+  min-height: var(--app-header-height);
   /* Translucent so content scrolling under it reads as *under* it. The fallback
      is the solid surface, for the browsers without backdrop-filter. */
   background: var(--surface);
@@ -343,6 +359,26 @@ a {
 }
 .app-header a {
   color: var(--text);
+}
+
+/* The guide is one long page navigated by its own contents list, so every heading
+   in it is a jump target. Below the rail breakpoint `.app-header` is sticky at the
+   top of the viewport, and an anchor lands its target at the very top — i.e.
+   underneath the header, which is the one place the reader cannot see it. Offset
+   by the header's own height so the heading they asked for is the first thing
+   showing.
+   Above the breakpoint AppLayout renders no header at all (see the `!wide` branch),
+   so the offset would just be a gap. The query has to stay in step with
+   DESKTOP_SCREEN in lib/useMediaQuery.ts. */
+.guide-section,
+.guide-contents {
+  scroll-margin-top: calc(var(--app-header-height) + 1rem);
+}
+@media (min-width: 1024px) {
+  .guide-section,
+  .guide-contents {
+    scroll-margin-top: 1rem;
+  }
 }
 
 /* The wordmark, in both the header and the sidebar. */

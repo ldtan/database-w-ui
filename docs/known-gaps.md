@@ -1694,10 +1694,10 @@ those are re-read.** Concretely:
   the whole of it.
 
 The guide's **screenshots are the one part of this that does tell you.**
-`frontend/scripts/capture-guide.mjs` drives the real app with Playwright and photographs
-twenty-two screens into `public/guide/`; each shot clicks controls by the labels the guide's
-own prose quotes, so a renamed button fails the capture run with the id of the shot that
-named it. That is an alarm the prose has never had — but only when someone runs it, so:
+`frontend/scripts/capture-guide.mjs` drives the real app with Playwright and photographs every
+screen in its `SHOTS` list into `public/guide/`; each shot clicks controls by the labels the
+guide's own prose quotes, so a renamed button fails the capture run with the id of the shot
+that named it. That is an alarm the prose has never had — but only when someone runs it, so:
 
 - **`npm run capture:guide` after any UI change**, alongside re-reading the two prose files.
   It needs the backend, the dev server, and `uv run python -m src.demo.guide` (the seeded
@@ -1708,8 +1708,21 @@ named it. That is an alarm the prose has never had — but only when someone run
 - **A failing shot is a finding, not a flake.** Fix the shot, then ask whether the paragraph
   beside it still describes the same control.
 
-Nothing else here is enforceable by a test, which is why it is written down. Treat the guide
-and the tours as part of the UI's surface area rather than as documentation about it.
+The guide's **internal references** are enforceable, and now enforced, by
+`frontend/src/features/guide/guide.test.ts`: every contents entry resolves to a section on the
+page and in the same order, every `<Figure>` names a screenshot that exists, every captured
+screenshot is still shown somewhere, every in-page `#anchor` resolves, and the contents nav
+keeps both the `id` the back-links target and the `data-tour` attribute the tour spotlights.
+The figure check is the one that was most worth having: `Figure` renders *nothing* for an
+unknown name, by design, so before this a mistyped figure was an invisible missing picture.
+The test reads `GuidePage.tsx` as text (via Vite's `?raw`) rather than mounting it, because
+vitest here has no jsdom — which also means `SECTIONS` lives in its own `sections.ts` so a node
+test can import it.
+
+That bounds the problem but does not solve it: what a test cannot check is whether a sentence
+still describes the app. Nothing else here is enforceable, which is why it is written down.
+Treat the guide and the tours as part of the UI's surface area rather than as documentation
+about it.
 
 **The batch-import template's headings are duplicated across the language boundary.**
 `HEADERS` in `features/people/BatchUserDialog.tsx` lists the twelve CSV columns the template

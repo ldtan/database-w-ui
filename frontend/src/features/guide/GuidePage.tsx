@@ -6,14 +6,17 @@ import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
 import { useOnboarding } from "../onboarding/OnboardingProvider";
 import { Figure } from "./Figure";
+import { SECTIONS } from "./sections";
 
 /**
  * A plain-language, start-to-finish guide to the app, written for people with no
  * technical background. It is a static document — no data is fetched — so it works
  * the moment someone signs in and never depends on having built anything yet.
  *
- * The section ids below are the anchor targets of the contents list at the top.
- * Keep SECTIONS and the <Section> ids in step: the list is generated from it.
+ * The ids in `sections.ts` are the anchor targets of the contents list at the top.
+ * SECTIONS and the <Section> ids have to stay in step — the list is generated from
+ * it — and `guide.test.ts` now fails when they don't, along with a figure named
+ * here that nobody captured and an in-page link to a section that isn't there.
  *
  * It names controls in prose, and nothing checks that they still exist or are
  * still called that — this page once spent a release describing a header that
@@ -28,34 +31,6 @@ import { Figure } from "./Figure";
  * leaving a paragraph confidently describing one that is gone. Re-run it after a
  * UI change; the pictures are committed, and are what a reader sees.
  */
-
-const SECTIONS: { id: string; title: string }[] = [
-  { id: "what-it-is", title: "What this app is" },
-  { id: "words", title: "Five words to know" },
-  { id: "signing-in", title: "Signing in" },
-  { id: "getting-around", title: "Getting around" },
-  { id: "workspace", title: "Step 1 · Make a workspace" },
-  { id: "list", title: "Step 2 · Make a list" },
-  { id: "columns", title: "Step 3 · Add columns" },
-  { id: "column-types", title: "The column types, explained" },
-  { id: "change-type", title: "Changing a column’s type, and copying a column" },
-  { id: "records", title: "Step 4 · Add records" },
-  { id: "nested-lookups", title: "Linked columns that narrow each other" },
-  { id: "formulas", title: "Calculated columns: writing a formula" },
-  { id: "qr", title: "Add records with a QR code" },
-  { id: "find", title: "Find records: search, sort, group, filter" },
-  { id: "views", title: "Views: saved ways of looking" },
-  { id: "forms", title: "Forms: shape the entry screen" },
-  { id: "metrics", title: "Metrics: totals, averages and counts" },
-  { id: "sharing", title: "Sharing and permissions" },
-  { id: "transfer", title: "Moving and giving things away" },
-  { id: "duplicate", title: "Duplicating a list" },
-  { id: "people", title: "People, groups, and your profile" },
-  { id: "import-export", title: "Import and export" },
-  { id: "bin", title: "Recovering things you deleted" },
-  { id: "appearance", title: "Appearance and themes" },
-  { id: "tips", title: "Tips and troubleshooting" },
-];
 
 /** One visible on-screen label (a button, menu item, or field name), styled so it
  *  stands out from the surrounding prose — it maps a step to something the reader
@@ -186,22 +161,30 @@ function FunctionTable() {
   );
 }
 
-/** A titled section with a stable id so the contents list can jump to it. */
+/** A titled section with a stable id so the contents list can jump to it.
+ *
+ *  `guide-section` carries the scroll offset (themes.css): the heading is a jump
+ *  target, and on a narrow screen the sticky app header would otherwise cover the
+ *  one the reader just asked for.
+ *
+ *  It ends with a link back to the contents, because this page is long enough that
+ *  the list at the top is off-screen for all but the first section or two, and
+ *  scrolling back up through twenty-odd sections to reach it is the only route
+ *  there otherwise. `topLink={false}` for the first section, where the list is
+ *  already a few lines above. */
 function Section({
   id,
   title,
   children,
+  topLink = true,
 }: {
   id: string;
   title: string;
   children: ReactNode;
+  topLink?: boolean;
 }) {
   return (
-    <section
-      id={id}
-      className="flex flex-col gap-3"
-      style={{ scrollMarginTop: "1rem" }}
-    >
+    <section id={id} className="guide-section flex flex-col gap-3">
       <h2
         className="text-xl font-semibold pt-2"
         style={{ borderTop: "var(--border-width) solid var(--border)" }}
@@ -209,6 +192,17 @@ function Section({
         {title}
       </h2>
       {children}
+      {topLink && (
+        <div className="text-sm" style={{ textAlign: "right" }}>
+          <a
+            href="#guide-contents"
+            aria-label="Back to contents"
+            style={{ color: "var(--text-muted)", textDecoration: "none" }}
+          >
+            ↑ Contents
+          </a>
+        </div>
+      )}
     </section>
   );
 }
@@ -263,7 +257,7 @@ const TYPE_HELP: Record<string, string> = {
   duration: "A length of time — how long a lesson ran, hours worked. Type it as 1:30 or 90m and choose how it is shown (1:30, 1:30:00, 90:00 or 1.5 hours). It totals and averages like a number, so “Total hours” is a metric you can add.",
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
-  lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from.",
+  lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from. It can also let people add a missing row to the other list without leaving the form they are filling in.",
   calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
 };
 
@@ -294,14 +288,18 @@ export function GuidePage() {
       </header>
 
       {/* Contents */}
+      {/* `id` is the target every section's "↑ Contents" link points at; the
+          `data-tour` attribute is separate and load-bearing — a step of the
+          `basics` tour spotlights this nav by it. Neither replaces the other. */}
       <nav
-        className="surface-card p-4"
+        id="guide-contents"
+        className="guide-contents surface-card p-4"
         aria-label="Guide contents"
         data-tour="guide-contents"
       >
         <div className="font-semibold mb-2">On this page</div>
-        {/* Twenty-three entries in one column is most of a screen before the
-            guide has started. Two columns on anything but a phone. */}
+        {/* The whole list in one column is most of a screen before the guide has
+            started. Two columns on anything but a phone. */}
         <ol
           className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1"
           style={{ listStyle: "none", padding: 0, margin: 0 }}
@@ -327,7 +325,7 @@ export function GuidePage() {
         click.
       </Callout>
 
-      <Section id="what-it-is" title="What this app is">
+      <Section id="what-it-is" title="What this app is" topLink={false}>
         <p>
           This app lets you build your own little databases through a screen —
           no code, no spreadsheets to email around. Think of it as a tidy,
@@ -369,6 +367,12 @@ export function GuidePage() {
         <p style={{ color: "var(--text-muted)" }}>
           If you know spreadsheets: a list is a sheet, a column is a column, and a
           record is a row — with the app keeping the rules tidy for you.
+        </p>
+        <p style={{ color: "var(--text-muted)" }}>
+          Two more words turn up later, once you have records to look at:{" "}
+          <strong>forms</strong> shape the screen people fill in, and{" "}
+          <strong>metrics</strong> are the running totals above a list. Both have
+          their own sections below; neither is something you need on day one.
         </p>
       </Section>
 
@@ -777,6 +781,15 @@ export function GuidePage() {
           <Ui>Add a column first.</Ui> Set up at least one column (previous step)
           before adding records.
         </Callout>
+        <Callout tone="tip" title="Other people’s changes arrive on their own">
+          You don’t need to refresh. While you have a list open, records that
+          somebody else adds, edits, archives or deletes appear within a second or
+          so — and so do changes you make in another tab on another device. If a row
+          seems to change under you, that is usually why rather than anything you
+          did. On a connection that won’t hold the live link open, the list falls
+          back to refreshing itself every so often instead, so it still catches up,
+          just less promptly.
+        </Callout>
       </Section>
 
       <Section
@@ -861,6 +874,33 @@ export function GuidePage() {
           Nesting an existing column doesn’t break records already saved, even ones
           whose pairing no longer matches. Nothing is checked until someone edits
           that particular field — so you can tidy old rows at your own pace.
+        </Callout>
+
+        <h3 className="font-semibold pt-1">
+          Letting people add a missing row as they go
+        </h3>
+        <p>
+          The usual snag with a link column is the row that isn’t there yet: someone
+          filling in a contact needs the city <em>Cebu</em>, it has never been added
+          to <em>Cities</em>, and they have to abandon what they were doing, go to
+          the other list, add it, and come back. Ticking{" "}
+          <Ui>Let people add a new row while filling this in</Ui> on the link column
+          removes that trip — searching for something that doesn’t exist offers to
+          create it, right there in the picker.
+        </p>
+        <p>
+          <strong>It is judged person by person, not once when you set it up.</strong>{" "}
+          The box being ticked doesn’t grant anybody anything. Each person filling in
+          the form is checked against their own access to the target list: someone
+          who can already add rows to <em>Cities</em> gets the offer, and someone who
+          can’t simply sees the ordinary search, with no broken button and no error.
+          So turning it on is safe even when the people using the form have a mix of
+          access — including on a list that was only shared with you as a link target.
+        </p>
+        <Callout tone="warn" title="Only in the picker">
+          This is a convenience in the form, not a new rule. Importing a file or
+          using the API with a name that doesn’t exist still fails the same way it
+          always did — nothing is created on your behalf there.
         </Callout>
       </Section>
 
@@ -1824,6 +1864,53 @@ export function GuidePage() {
         </p>
       </Section>
 
+      <Section id="archive" title="Archiving records you’re done with">
+        <p>
+          Lists grow, and most of what fills them stops being interesting long before
+          anyone wants it gone: last year’s orders, closed tickets, people who left.
+          Deleting them is wrong — you may well need them again, and the bin would
+          destroy them in a month. <strong>Archiving</strong> is the answer to that:
+          it puts a record away without throwing it away.
+        </p>
+        <p>
+          An archived record keeps everything it had, and <strong>stays for good</strong>
+          . There is no clock on it: it waits until somebody brings it back or
+          deliberately deletes it.
+        </p>
+        <p>What changes is where it shows up. An archived record drops out of:</p>
+        <ul className="flex flex-col gap-1">
+          <li>the table, and the record count above it;</li>
+          <li>searches, filters and sorting;</li>
+          <li>your metrics — totals and averages stop counting it.</li>
+        </ul>
+        <p>
+          That last one is the point as much as the tidiness is. A list the app no
+          longer has to read through on every search and every total is a list that
+          stays quick, however much history has piled up behind it.
+        </p>
+        <p>
+          <strong>Archiving something.</strong> Open the <Ui>⋯</Ui> menu on a record’s
+          row and choose to archive it, or tick several rows and click{" "}
+          <Ui>Archive selected</Ui>.
+        </p>
+        <p>
+          <strong>Getting it back.</strong> Go to <Ui>⋯</Ui> →{" "}
+          <Ui>Archived records</Ui>, which lists everything put aside, and bring back
+          what you need. It returns exactly as it was.
+        </p>
+        <Callout tone="tip" title="Links to an archived record still read properly">
+          If another list points at a record you archive, that link doesn’t break or
+          empty itself — it goes on showing the name as before. Archiving changes
+          which lists a record appears in, not whether it exists.
+        </Callout>
+        <Callout tone="warn" title="Archiving is not deleting, and the bin is not archiving">
+          They are two separate things and either can be undone, so the only real
+          mistake is reaching for the wrong one. <strong>Archive</strong> what you are
+          finished with — it is kept indefinitely. <strong>Delete</strong> what should
+          never have been there — and that one is on a clock, described next.
+        </Callout>
+      </Section>
+
       <Section id="bin" title="Recovering things you deleted">
         <p>
           Deleting doesn’t destroy anything straight away. Everything you can delete
@@ -1862,20 +1949,23 @@ export function GuidePage() {
           and there is no undo.
         </p>
         <Figure name="bin" />
-        <Callout tone="warn" title="There’s a time limit">
-          Deleted things are only kept for a while (a retention window). Once that
-          passes they’re gone for good and can’t be restored — so recover anything
-          important soon.
+        <Callout tone="warn" title="There’s a time limit — about 30 days">
+          Deleting is not the same as putting something aside: the bin runs on a
+          clock. By default a deleted thing is kept for <strong>30 days</strong> and
+          then destroyed for good, with no way back. Whoever runs this app can set a
+          different length for your organisation, so check with them if it matters —
+          but assume a month unless you have been told otherwise. Each entry in the
+          bin shows when it was deleted, which is how you tell what is nearly out of
+          time.
         </Callout>
-        <Callout tone="tip" title="Finished with a record? Archive it instead">
-          Deleting is for mistakes, and it runs on a clock. <strong>Archiving</strong>{" "}
-          is for records you’re simply done with — last year’s orders, closed
-          tickets. An archived record keeps everything it had and is never removed,
-          but it drops out of the grid, searches, filters and totals, which is what
-          keeps a long list quick. Archive one from the <Ui>⋯</Ui> menu on its row,
-          or select several and click <Ui>Archive selected</Ui>; bring them back from{" "}
-          <Ui>⋯</Ui> → <Ui>Archived records</Ui>. Anything already pointing at an
-          archived record still shows its name.
+        <Callout tone="tip" title="Done with a record rather than sorry you made it?">
+          The bin is for mistakes. For records you are simply finished with — last
+          year’s orders, closed tickets — use <strong>archiving</strong> instead,
+          which has no clock on it at all. See{" "}
+          <a href="#archive" style={{ color: "var(--brand)" }}>
+            Archiving records you’re done with
+          </a>
+          .
         </Callout>
         <Callout tone="tip" title="A list deleted with its workspace">
           Restoring a workspace brings its lists back with it. That’s why a list that
@@ -1915,6 +2005,15 @@ export function GuidePage() {
           another computer or phone brings it with you. Changing it anywhere changes
           it everywhere the next time you open the app.
         </p>
+        <Callout tone="tip" title="Your time zone works the other way round">
+          How the app looks follows your account; what it thinks the date is follows
+          the <em>device you are on</em>. Each time you open the app it quietly tells
+          the server which time zone this browser is in, which is what makes a date
+          box default to your today rather than to somewhere else’s. You never set
+          this and there is nothing to configure — but it does explain a date landing
+          a day out if you are travelling, or on a work laptop whose clock is set to
+          head office. Fix the device’s time zone and the app follows.
+        </Callout>
       </Section>
 
       <Section id="tips" title="Tips and troubleshooting">
