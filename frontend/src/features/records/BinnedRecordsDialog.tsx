@@ -24,6 +24,21 @@ type BinnedRow = DeletedListItem | ArchivedListItem;
 
 export type BinKind = "deleted" | "archived";
 
+/** A record a bulk restore left where it was, and why.
+ *
+ *  Only `bulk-restore` produces these. A binned row releases its `unique` values,
+ *  so one may have been taken while it sat there — an ordinary thing to have
+ *  happened, which is why the server answers 200 with the failures named rather
+ *  than refusing the whole batch for one of them.
+ */
+type BulkConflict = { uuid: string; message: string };
+
+/** Either bulk response: a count under the kind's own key, and conflicts only
+ *  where they are possible. */
+type BulkResponse = Record<string, number | BulkConflict[] | undefined> & {
+  conflicts?: BulkConflict[];
+};
+
 /** Everything that differs between the bin and the archive.
  *
  *  Written against the *kind* rather than copied per kind, matching
@@ -47,16 +62,11 @@ const KINDS = {
     restoreLabel: "Restore",
     restoredToast: "Record restored",
     restoreError: "Could not restore record",
-    // No bulk route yet. A restore can fail per record — a `unique` value may have
-    // been taken while the row sat in the bin — so the batch form needs a response
-    // that can name which rows did not come back, and until that exists the bin
-    // offers one row at a time. `null` rather than absent so both kinds carry the
-    // key and the selection UI can simply ask.
-    bulkPath: null,
-    bulkCountKey: null,
-    bulkLabel: null,
-    bulkToast: null,
-    bulkError: null,
+    bulkPath: "bulk-restore",
+    bulkCountKey: "restored",
+    bulkLabel: "Restore",
+    bulkToast: "Records restored",
+    bulkError: "Could not restore records",
     // Only the bin can destroy: an archived record has no deadline and nothing
     // queued to remove it, so "delete for good" there would be a different
     // decision wearing the same button.
@@ -126,6 +136,10 @@ export function BinnedRecordsDialog({
   // not quietly drop them. PrimeReact only renders ticks for the rows it has, which
   // is why the count below is the honest statement of what is selected.
   const [selection, setSelection] = useState<BinnedRow[]>([]);
+  // Held rather than only toasted: a conflict names a condition on the list that
+  // somebody has to go and resolve, which is not something to read in three seconds
+  // and then have to remember.
+  const [conflicts, setConflicts] = useState<BulkConflict[]>([]);
   // Reopening the dialog starts at the top rather than wherever it was left, and
   // with nothing selected: a selection made before the dialog was closed is not a
   // decision the next person to open it should inherit.
@@ -133,6 +147,7 @@ export function BinnedRecordsDialog({
     if (visible) {
       setFirst(0);
       setSelection([]);
+      setConflicts([]);
     }
   }, [visible]);
 
@@ -185,21 +200,40 @@ export function BinnedRecordsDialog({
       // the same constant — as the grid's bulk delete.
       const uuids = selection.map((row) => row.uuid);
       let moved = 0;
+      const conflicts: BulkConflict[] = [];
       for (let i = 0; i < uuids.length; i += BULK_MAX) {
-        const res = await api.post<Record<string, number>>(
+        const res = await api.post<BulkResponse>(
           `/lists/${listUuid}/items/${spec.bulkPath}`,
           { uuids: uuids.slice(i, i + BULK_MAX) },
         );
-        moved += res[spec.bulkCountKey!] ?? 0;
+        moved += (res[spec.bulkCountKey] as number) ?? 0;
+        // Only a restore can answer with these; unarchive cannot conflict, so its
+        // response carries a count and nothing else.
+        if (res.conflicts) conflicts.push(...res.conflicts);
       }
-      return moved;
+      return { moved, conflicts };
     },
-    onSuccess: (moved) => {
+    onSuccess: ({ moved, conflicts }) => {
       queryClient.invalidateQueries({ queryKey: [kind, listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       queryClient.invalidateQueries({ queryKey: ["effective"] });
-      setSelection([]);
-      toast.success(spec.bulkToast!, `${moved} record(s)`);
+      setConflicts(conflicts);
+      // The rows that came back leave this surface; the ones that did not stay
+      // selected, so the next thing the person sees is the set still to deal with
+      // rather than a cleared table and a toast they have to remember.
+      const blocked = new Set(conflicts.map((c) => c.uuid));
+      setSelection((prev) => prev.filter((row) => blocked.has(row.uuid)));
+      if (conflicts.length > 0) {
+        // Not `success`: some of what was asked for did not happen, and a green
+        // toast over a partial result is how that gets missed. The detail below the
+        // table is the durable statement — this is just the nudge towards it.
+        toast.warn(
+          `${moved} of ${moved + conflicts.length} restored`,
+          `${conflicts.length} record(s) could not come back`,
+        );
+      } else {
+        toast.success(spec.bulkToast, `${moved} record(s)`);
+      }
     },
     onError: (err) => {
       // An earlier chunk may already have gone, so both surfaces are refetched
@@ -207,7 +241,7 @@ export function BinnedRecordsDialog({
       queryClient.invalidateQueries({ queryKey: [kind, listUuid] });
       queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
       toast.error(
-        spec.bulkError!,
+        spec.bulkError,
         err instanceof ApiError ? err.message : undefined,
       );
     },
@@ -342,6 +376,31 @@ export function BinnedRecordsDialog({
                 )}
               />
             </DataTable>
+
+            {/* What did not come back, and why — one line per distinct reason
+                rather than per record, since fifty rows blocked by one taken value
+                is one thing to go and fix, not fifty. The rows themselves are still
+                selected and still in the table above. */}
+            {conflicts.length > 0 && (
+              <Message
+                severity="warn"
+                content={
+                  <div className="flex flex-col gap-1 text-sm">
+                    <span className="font-medium">
+                      {conflicts.length} record(s) stayed in the bin
+                    </span>
+                    {[...new Set(conflicts.map((c) => c.message))].map(
+                      (message) => (
+                        <span key={message}>{message}</span>
+                      ),
+                    )}
+                    <span style={{ color: "var(--text-muted)" }}>
+                      Resolve the clash and try again — they are still restorable.
+                    </span>
+                  </div>
+                }
+              />
+            )}
 
             {/* After the table, matching the grid's selection bar: the rows it
                 applies to are what you were just looking at. */}

@@ -818,6 +818,76 @@ async def test_http_bulk_delete_skips_records_the_caller_cannot_delete(
         assert [row["uuid"] for row in remaining] == [uuids[1]]
 
 
+async def test_http_bulk_restore_is_gated_on_the_list_not_per_record(
+    make_client, session_factory
+):
+    """List-gated for a reason that is not a choice: a soft-deleted record resolves
+    to no permission context at all, so there is nothing to check per record even in
+    principle. `effective_actions_bulk` could not answer here either — it filters to
+    `deleted_at IS NULL`, so everything in the bin is absent from its result.
+
+    Which means a broken-inheritance row comes back along with the rest, where a
+    bulk *delete* naming the same two would have skipped it.
+    """
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        plain = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        detached = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view, Action.delete],
+            ),
+        )
+        detached.permissions_inherit = False
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        uuids = [str(plain.uuid), str(detached.uuid)]
+        for uuid in uuids:
+            await ListItemService.delete(db, lst, uuid)
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-restore", json={"uuids": uuids}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json() == {"restored": 2, "conflicts": []}
+
+
+async def test_http_bulk_restore_refused_without_delete_on_the_list(
+    make_client, session_factory
+):
+    """Same gate as the bin listing: `view` does not reach it."""
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        item = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        uuid = str(item.uuid)
+        await ListItemService.delete(db, lst, uuid)
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-restore", json={"uuids": [uuid]}
+        )
+        assert resp.status_code == 403, resp.text
+
+
 async def test_http_bulk_unarchive_is_gated_on_the_list_not_per_record(
     make_client, session_factory
 ):

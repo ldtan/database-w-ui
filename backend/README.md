@@ -243,7 +243,7 @@ the single-instance assumption the counters rest on.
 | Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}`, `…/transfer` |
 | Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}`, `…/transfer`, `…/clone` |
 | Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side); `…/columns/recompute` (re-index the calculated columns); `…/columns/{uuid}/convert` + `…/convert/apply` (preview a type conversion, then commit it in one transaction) |
-| Records | `…/lists/{list_uuid}/items` CRUD; `…/items/count`; `…/items/bulk-delete`; `…/items/archived`, `…/items/{uuid}/archive` + `…/unarchive`, `…/items/bulk-archive` + `…/items/bulk-unarchive` |
+| Records | `…/lists/{list_uuid}/items` CRUD; `…/items/count`; `…/items/bulk-delete` + `…/items/bulk-restore`; `…/items/archived`, `…/items/{uuid}/archive` + `…/unarchive`, `…/items/bulk-archive` + `…/items/bulk-unarchive` |
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
 | Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=&filters=` (every metric's value, in one pass, over the records the caller can see through that view) |
@@ -256,6 +256,14 @@ Every soft-deletable kind has a **bin** on its own collection — `…/deleted`,
 `…/{uuid}/restore` and `…/{uuid}/permanent` — for workspaces, lists, records, columns,
 views, forms, metrics, users and groups. Nothing in this app is deleted outright, and
 destroying something is always two deliberate steps.
+
+Records are the one kind whose bin and archive also take a **set**: `bulk-delete`,
+`bulk-restore`, `bulk-archive` and `bulk-unarchive`, because a selection of records is
+a thing the grid can produce and a selection of columns is not. The three that cannot
+fail per record answer with a count. `bulk-restore` answers with a count **and**
+`conflicts` — a binned row releases its `unique` values, so one may have been taken
+while it sat there, and that is reported per record rather than failing the batch.
+All four cap the body at `BULK_DELETE_MAX`.
 
 Creating a list requires a `workspace_uuid` (owned by the caller) in the body; the list
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a

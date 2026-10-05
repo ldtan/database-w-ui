@@ -19,6 +19,9 @@ from .schemas import (
     BulkArchiveResult,
     BulkDeleteRequest,
     BulkDeleteResult,
+    BulkRestoreConflict,
+    BulkRestoreRequest,
+    BulkRestoreResult,
     BulkUnarchiveRequest,
     BulkUnarchiveResult,
     DeletedListItemRead,
@@ -284,6 +287,42 @@ async def bulk_archive_items(
     ]
     archived = await ListItemService.bulk_archive(db, lst, permitted)
     return {"archived": archived}
+
+
+@router.post("/bulk-restore", response_model=BulkRestoreResult)
+async def bulk_restore_items(
+    payload: BulkRestoreRequest,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Bring several records back from the bin. Partial success by design.
+
+    Gated on list-level `delete`, like `restore_item` and the bin listing it is
+    reached from — a soft-deleted record resolves to no permission context of its
+    own, so there is nothing to check per record even in principle. That is also
+    why `effective_actions_bulk` is not used here as the delete and archive routes
+    use it: it filters to `deleted_at IS NULL`, so it cannot answer about anything
+    in the bin.
+
+    **200 with conflicts, not 409.** A `unique` value taken while a row sat in the
+    bin is an ordinary thing to have happened, and refusing the whole request for
+    one of them would make a large restore hostage to a single duplicate. The rows
+    that came back are counted; the rows that could not are named, with the message
+    the single-record restore would have 409'd with. Both halves matter to the
+    caller, so both are in the body.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    restored, conflicts = await ListItemService.bulk_restore(db, lst, payload.uuids)
+    return BulkRestoreResult(
+        restored=restored,
+        conflicts=[
+            BulkRestoreConflict(uuid=uuid, message=message)
+            for uuid, message in conflicts
+        ],
+    )
 
 
 @router.post("/bulk-unarchive", response_model=BulkUnarchiveResult)
