@@ -1171,6 +1171,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/bulk-create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Create Items
+         * @description Create many records from one JSON body. Rows are keyed by column **name**.
+         *
+         *     The import path without the file. `POST /lists/{uuid}/import` already accepts
+         *     JSON, but only wrapped in a multipart upload — so a script with records in hand
+         *     had to either synthesise a CSV or loop `POST /items/`, one request and several
+         *     round trips per record. This is for that caller; the UI keeps uploading files.
+         *
+         *     It is a thin router over `import_records` on purpose, not a second
+         *     implementation. Everything a file gets, a body gets: per-type coercion
+         *     (`1:30` as a duration, `a;b` split for a `multiple` column), lookup and
+         *     principal cells resolved from *labels* under this caller's permissions, the
+         *     per-row savepoint so one bad row never sinks the batch, and the periodic
+         *     commit. Two parsers for one vocabulary is how the export and import drifted
+         *     once before (see `_parse_cell`), and there is no reason to open that again.
+         *
+         *     `create` **and** `edit`, matching the upload route: naming an existing
+         *     `unique` value is a conflict rather than an update, but a row can carry a
+         *     reference that resolves against records this caller must be able to write.
+         *
+         *     Rows are numbered by position from 1, so `errors[].row` points at an index in
+         *     the array the caller sent rather than at a line in a file nobody uploaded.
+         */
+        post: operations["bulk_create_items_api_lists__list_uuid__items_bulk_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/{uuid}": {
         parameters: {
             query?: never;
@@ -1918,6 +1958,30 @@ export interface components {
         BulkArchiveResult: {
             /** Archived */
             archived: number;
+        };
+        /**
+         * BulkCreateRequest
+         * @description Records to create, as objects of column **name** to value.
+         *
+         *     The same shape a JSON import file carries, which is the point: this is the
+         *     import without the multipart envelope, for a client that has records in hand
+         *     rather than a file to upload. It goes through `import_records` unchanged, so
+         *     the coercion a file gets — `1:30` as a duration, `a;b` split for a `multiple`
+         *     column, a lookup cell given as a *label* — is the coercion a body gets, and
+         *     there is no second parser to keep in step.
+         *
+         *     ``max_length`` rather than only `import_records`' own check, which stays as
+         *     the authority for the upload route. A JSON array can be measured by the schema
+         *     before anything is read, so the limit is published in the OpenAPI document and
+         *     costs nothing to enforce; an over-long body is a 422 here where an over-long
+         *     *file* is the 400 the route words itself. Total body size is bounded
+         *     separately and bluntly by `MAX_REQUEST_BYTES`.
+         */
+        BulkCreateRequest: {
+            /** Records */
+            records?: {
+                [key: string]: unknown;
+            }[];
         };
         /** BulkDeleteRequest */
         BulkDeleteRequest: {
@@ -5402,6 +5466,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkUnarchiveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_create_items_api_lists__list_uuid__items_bulk_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportSummary"];
                 };
             };
             /** @description Validation Error */

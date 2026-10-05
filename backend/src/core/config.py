@@ -71,15 +71,18 @@ class Settings(BaseSettings):
     GEOCODE_MIN_INTERVAL_SECONDS: float = 1.0
     GEOCODE_TIMEOUT_SECONDS: float = 5.0
 
-    # How many rows one import may carry — the list importer and the user batch
-    # importer both read this. A policy decision rather than a tuning knob: every row
-    # is validated and inserted through the ordinary service, several round trips
-    # apiece, so what this really sets is how long one import may occupy the single
-    # worker. Someone whose spreadsheets are routinely larger has a fair reason to
-    # raise it and no need to read the code to decide.
+    # How many rows one import may carry — the list importer, the user batch importer
+    # and `items/bulk-create` all read this. A policy decision rather than a tuning
+    # knob: every row is validated and inserted through the ordinary service, several
+    # round trips apiece, so what this really sets is how long one import may occupy
+    # the single worker. Someone whose spreadsheets are routinely larger has a fair
+    # reason to raise it and no need to read the code to decide.
     #
-    # Both importers check it before writing anything, so whatever it is set to, a
-    # file over the limit imports nothing rather than part of itself.
+    # Every importer checks it before writing anything, so whatever it is set to, an
+    # over-limit import writes nothing rather than part of itself. `bulk-create` also
+    # declares it as a `max_length`, which means that one route's limit is fixed at
+    # process start and published in the OpenAPI document — a monkeypatch in a test
+    # moves the runtime check but not the schema's.
     IMPORT_MAX_ROWS: int = 1_000
 
     # What an uploaded file may weigh. Belongs to the instance rather than to the
@@ -106,9 +109,12 @@ class Settings(BaseSettings):
     # with the worse message. The gap is the envelope; it is not a second budget.
     MAX_REQUEST_BYTES: int = 12 * 1024 * 1024
 
-    # Records one bulk record body may name — the delete, archive and unarchive
-    # routes all read it, since each does one UPDATE over the uuids given and there
-    # is no reason for them to disagree about how many is too many.
+    # Records one bulk record body may name — the delete, restore, archive and
+    # unarchive routes all read it, and there is no reason for them to disagree about
+    # how many is too many. Three of them do one UPDATE over the uuids given, so what
+    # the cap bounds there is round-trip latency. `bulk-restore` is the exception and
+    # the one this number really matters for: it re-checks `unique` values before
+    # letting rows back, so the cap bounds a scan per unique column as well.
     #
     # Unlike the two above, this one is also a published API limit — it reaches the
     # OpenAPI schema through `BulkDeleteRequest` and its siblings, and the frontend
