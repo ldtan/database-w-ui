@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Sequence, Union
 from uuid import UUID
@@ -908,6 +909,204 @@ class ListItemService:
         await db.commit()
         broker.notify(lst.id)
         return await cls.get_for_read(db, lst.id, uuid)
+
+    @classmethod
+    async def bulk_restore(
+        cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
+    ) -> tuple[int, list[tuple[UUID, str]]]:
+        """Bring several records back from the bin. Returns ``(restored, conflicts)``.
+
+        The only bulk write that cannot be one UPDATE, and the reason is `unique`: a
+        binned row *releases* its values, so each one has to be re-checked before it
+        may come back. Two things follow, and they are why this returns conflicts
+        rather than a bare count.
+
+        **A conflict is per record, so one must not sink the batch.** A value taken
+        while the row sat in the bin is an ordinary thing to have happened; refusing
+        the whole request for it would make a 500-record restore hostage to one
+        duplicate. Conflicted rows stay in the bin and are named in the return.
+
+        **The batch can collide with itself.** The uniqueness scan reads live rows
+        only, so two binned records may legitimately hold the same value — nothing
+        was enforcing anything while both were away. Checked independently they
+        would both pass and both come back, breaking the invariant the single-record
+        path protects. So each survivor's value joins the taken set as it is
+        accepted, and the first row in id order wins.
+
+        Cost is one query per unique column rather than one per record: the single
+        `restore` can afford a scan apiece, but 500 of them is 500 round trips for a
+        question that can be asked once. Lists with no unique column skip the pass
+        entirely and take the single-UPDATE path the other bulk routes use.
+        """
+        parsed = {
+            value
+            for value in (coerce_uuid(uuid) for uuid in uuids)
+            if value is not None
+        }
+        if not parsed:
+            return 0, []
+
+        # One query for the batch. `_select_deleted` is what scopes this: it carries
+        # the list, `deleted_at IS NOT NULL` and the retention cutoff, so a uuid from
+        # another list, a live record and a row already past the window all simply
+        # fail to come back and are skipped — the same silence a single restore's 404
+        # means, and the same silence `bulk_delete` gives an unknown uuid.
+        rows = (
+            await db.execute(
+                cls._select_deleted(lst.id)
+                .where(ListItem.uuid.in_(parsed))
+                # Deterministic, so "which of two colliding rows comes back" has a
+                # stable answer rather than one the planner picks. Oldest first.
+                .order_by(ListItem.id)
+            )
+        ).scalars().all()
+        if not rows:
+            return 0, []
+
+        columns = await cls._columns_by_key(db, lst.id)
+        unique_columns = {
+            key: column
+            for key, column in columns.items()
+            if (column.config or {}).get("unique")
+        }
+
+        conflicts: list[tuple[UUID, str]] = []
+        if unique_columns:
+            # Held for the whole pass, not per row, and for the same reason
+            # `_enforce_unique` takes it at all: between the scan and the UPDATE
+            # another writer must not be able to take one of these values. One lock
+            # for the batch is also what keeps the pass from interleaving with
+            # itself if two callers restore overlapping sets.
+            await db.execute(
+                select(func.pg_advisory_xact_lock(_UNIQUE_LOCK_NS, lst.id))
+            )
+            taken = await cls._taken_unique_values(db, lst.id, unique_columns, rows)
+            keep: list[ListItem] = []
+            for item in rows:
+                clash = cls._first_unique_clash(unique_columns, item, taken)
+                if clash is not None:
+                    conflicts.append((item.uuid, clash))
+                    continue
+                # Accepted, so its values are now spoken for — which is what makes a
+                # second row in this same batch holding one of them conflict.
+                cls._claim_unique_values(unique_columns, item, taken)
+                keep.append(item)
+            rows = keep
+
+        if not rows:
+            return 0, conflicts
+
+        result = await db.execute(
+            sa.update(ListItem)
+            .where(ListItem.id.in_([item.id for item in rows]))
+            .values(deleted_at=None)
+            # These rows are loaded above, so update the in-memory copies rather
+            # than leave them claiming to be deleted — see `bulk_delete`.
+            .execution_options(synchronize_session="evaluate")
+        )
+        restored = result.rowcount
+        if restored:
+            await db.commit()
+            broker.notify(lst.id)
+        return restored, conflicts
+
+    # The value a `unique` check compares on, as something hashable. A cell can hold
+    # a dict (a location) or a number, so neither the raw value nor `str` will do:
+    # `str` would make 1 and "1" the same value, and a dict is not hashable at all.
+    @staticmethod
+    def _unique_key(value) -> str:
+        return json.dumps(value, sort_keys=True, default=str)
+
+    @classmethod
+    async def _taken_unique_values(
+        cls,
+        db: AsyncSession,
+        list_id: int,
+        unique_columns: dict[str, Column],
+        rows: Sequence[ListItem],
+    ) -> dict[str, set[str]]:
+        """Which of the batch's unique values are already held by a *live* row.
+
+        One statement per unique column, each asking about every value the batch
+        wants at once — `data @> {key: value}` OR-ed over the candidates, which is
+        the same containment test `_enforce_unique` makes one value at a time and so
+        agrees with it on JSONB equality (`1` and `1.0` are one value; `1` and `"1"`
+        are not). Returning `data -> key` is what lets the answer be matched back to
+        the candidate that caused it.
+
+        Live rows only, exactly as `_enforce_unique` scans: `deleted_at IS NULL`, so
+        an archived row still reserves its value and nothing in the batch can match
+        another binned row.
+        """
+        taken: dict[str, set[str]] = {}
+        for key, _column in unique_columns.items():
+            candidates = [
+                item.data.get(key)
+                for item in rows
+                if item.data is not None
+                and not cls._is_empty(item.data.get(key))
+                # A list is not checked, for the reason `_enforce_unique` gives:
+                # there is no single value to compare, and `unique` with `multiple`
+                # is refused at config time now.
+                and not isinstance(item.data.get(key), list)
+            ]
+            if not candidates:
+                continue
+            found = (
+                await db.execute(
+                    select(ListItem.data[key]).where(
+                        ListItem.list_id == list_id,
+                        ListItem.deleted_at.is_(None),
+                        or_(
+                            *[
+                                ListItem.data.contains({key: value})
+                                for value in candidates
+                            ]
+                        ),
+                    )
+                )
+            ).scalars().all()
+            taken[key] = {cls._unique_key(value) for value in found}
+        return taken
+
+    @classmethod
+    def _first_unique_clash(
+        cls,
+        unique_columns: dict[str, Column],
+        item: ListItem,
+        taken: dict[str, set[str]],
+    ) -> Optional[str]:
+        """The message for the first unique column this record cannot have back, or
+        None. Worded as `_enforce_unique` words it, including the separate sentence a
+        `calculated` column gets — the writer did not type the value that collided,
+        so a complaint about "that value" would be about a cell they cannot see."""
+        for key, column in unique_columns.items():
+            value = (item.data or {}).get(key)
+            if cls._is_empty(value) or isinstance(value, list):
+                continue
+            if cls._unique_key(value) in taken.get(key, ()):
+                if column.type in COMPUTED_TYPES:
+                    return (
+                        f"Column '{column.name}' must be unique; this record computes "
+                        f"{value!r}, which another record already has"
+                    )
+                return (
+                    f"Column '{column.name}' must be unique; that value already exists"
+                )
+        return None
+
+    @classmethod
+    def _claim_unique_values(
+        cls,
+        unique_columns: dict[str, Column],
+        item: ListItem,
+        taken: dict[str, set[str]],
+    ) -> None:
+        for key in unique_columns:
+            value = (item.data or {}).get(key)
+            if cls._is_empty(value) or isinstance(value, list):
+                continue
+            taken.setdefault(key, set()).add(cls._unique_key(value))
 
     @classmethod
     async def purge(
