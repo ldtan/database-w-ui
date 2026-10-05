@@ -19,6 +19,8 @@ from .schemas import (
     BulkArchiveResult,
     BulkDeleteRequest,
     BulkDeleteResult,
+    BulkUnarchiveRequest,
+    BulkUnarchiveResult,
     DeletedListItemRead,
     ListItemCountRead,
     ListItemCreate,
@@ -282,6 +284,31 @@ async def bulk_archive_items(
     ]
     archived = await ListItemService.bulk_archive(db, lst, permitted)
     return {"archived": archived}
+
+
+@router.post("/bulk-unarchive", response_model=BulkUnarchiveResult)
+async def bulk_unarchive_items(
+    payload: BulkUnarchiveRequest,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Bring several records back from the archive. Returns how many moved.
+
+    Gated on *list-level* `delete`, which is where this parts company with
+    `bulk_archive_items` above. The two bulk writes that take records away resolve
+    permissions per record, because a live record has a context of its own and a
+    selection may legitimately mix rows the caller may remove with rows they may
+    not. This one matches the surface it is reached from instead: the archive
+    listing is list-gated, `unarchive_item` is list-gated, and whoever had the
+    authority to put records in the archive has the authority to take them out.
+    One `require` for the request, not one resolution per uuid.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.delete
+    )
+    unarchived = await ListItemService.bulk_unarchive(db, lst, payload.uuids)
+    return {"unarchived": unarchived}
 
 
 @router.get("/{uuid}", response_model=ListItemRead)

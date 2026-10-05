@@ -1088,6 +1088,49 @@ class ListItemService:
         return await cls.get_for_read(db, lst.id, uuid)
 
     @classmethod
+    async def bulk_unarchive(
+        cls, db: AsyncSession, lst: List, uuids: Sequence[Union[str, UUID]]
+    ) -> int:
+        """Unarchive several records in one transaction. Returns how many moved.
+
+        The exact inverse of `bulk_archive`, and the simplest of the four bulk
+        operations for the reason `unarchive` gives: an archived row never released
+        its `unique` values, so there is nothing to re-check and nothing that can
+        conflict. That is what lets this be one UPDATE where `bulk_restore` cannot be
+        — the asymmetry is a property of the archive, not a shortcut taken here.
+
+        `archived_at IS NOT NULL` is what makes this idempotent: a uuid that is
+        already live matches nothing and is skipped like an unknown one. `deleted_at
+        IS NULL` keeps a binned record out, matching `_select_archived` — delete wins
+        over archive, so a record in the bin is not the archive's to hand back.
+        """
+        parsed = {
+            value
+            for value in (coerce_uuid(uuid) for uuid in uuids)
+            if value is not None
+        }
+        if not parsed:
+            return 0
+        result = await db.execute(
+            sa.update(ListItem)
+            .where(
+                ListItem.list_id == lst.id,
+                ListItem.uuid.in_(parsed),
+                ListItem.archived_at.is_not(None),
+                ListItem.deleted_at.is_(None),
+            )
+            .values(archived_at=None)
+            # See `bulk_delete`: the rows may be in the identity map, so "evaluate"
+            # updates the in-memory copies without the SELECT "fetch" would issue.
+            .execution_options(synchronize_session="evaluate")
+        )
+        unarchived = result.rowcount
+        if unarchived:
+            await db.commit()
+            broker.notify(lst.id)  # only when something moved — see `bulk_delete`
+        return unarchived
+
+    @classmethod
     async def _scrub_lookup_references(
         cls, db: AsyncSession, list_uuid: UUID, deleted_item_uuid: UUID
     ) -> None:

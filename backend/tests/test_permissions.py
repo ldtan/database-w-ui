@@ -818,6 +818,87 @@ async def test_http_bulk_delete_skips_records_the_caller_cannot_delete(
         assert [row["uuid"] for row in remaining] == [uuids[1]]
 
 
+async def test_http_bulk_unarchive_is_gated_on_the_list_not_per_record(
+    make_client, session_factory
+):
+    """The deliberate difference from `bulk-delete`, pinned so it is not "fixed" into
+    a per-record check later.
+
+    Taking records *away* resolves per record, because a live record has a context of
+    its own and a selection can mix rows the caller may remove with rows they may
+    not. Bringing them back matches the surface it is reached from: the archive
+    listing and `unarchive` are both list-gated, so a caller with list-level `delete`
+    unarchives everything they named — including a row whose inheritance is broken,
+    which `bulk-delete` would have skipped.
+    """
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        plain = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        detached = await ListItemService.create(db, lst, ListItemCreate(data={}))
+
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view, Action.delete],
+            ),
+        )
+        # Out of the list grant's reach for anything resolved per record.
+        detached.permissions_inherit = False
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        uuids = [str(plain.uuid), str(detached.uuid)]
+        for uuid in uuids:
+            await ListItemService.archive(db, lst, uuid)
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-unarchive", json={"uuids": uuids}
+        )
+        assert resp.status_code == 200, resp.text
+        # Both, where a bulk delete of the same two would have moved one.
+        assert resp.json() == {"unarchived": 2}
+
+    async with make_client(owner) as client:
+        archived = (
+            await client.get(f"/api/lists/{list_uuid}/items/archived")
+        ).json()
+        assert archived == []
+
+
+async def test_http_bulk_unarchive_refused_without_delete_on_the_list(
+    make_client, session_factory
+):
+    """`view` is not enough: the authority to see the archive is the authority to
+    have put things in it, so the same gate gates taking them out."""
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        item = await ListItemService.create(db, lst, ListItemCreate(data={}))
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=[Action.view],
+            ),
+        )
+        await db.commit()
+        list_uuid = str(lst.uuid)
+        uuid = str(item.uuid)
+        await ListItemService.archive(db, lst, uuid)
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-unarchive", json={"uuids": [uuid]}
+        )
+        assert resp.status_code == 403, resp.text
+
+
 async def test_http_effective_batch(make_client, session_factory):
     """The batch endpoint backs the UI's per-row control gating: one call must
     return the caller's actions per resource, mixing inherited and direct grants."""
