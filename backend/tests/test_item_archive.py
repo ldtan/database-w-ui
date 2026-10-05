@@ -23,11 +23,13 @@ The load-bearing subtleties, each pinned by a test whose name says so:
   answers a search or a picker in the list that points at it.
 """
 from datetime import datetime, timedelta, timezone
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select, update
 
+from src.core.config import settings
 from src.lists.items.models import ListItem
 from src.maintenance.purge_deleted_items import purge
 
@@ -194,6 +196,137 @@ async def test_the_archive_has_no_retention_window(
 
     archived = (await client.get(f"/api/lists/{list_uuid}/items/archived")).json()
     assert _titles(archived, ledger["title"]) == ["alpha"]
+
+
+async def test_bulk_unarchive_returns_records_and_counts_rows_not_uuids(
+    client, list_uuid, ledger
+):
+    """The inverse of `bulk_archive`, and idempotent in the same way: a uuid that is
+    already live matches nothing rather than erroring, so a double-click on a
+    selection is not a different outcome from a single one."""
+    await _archive(client, list_uuid, ledger["uuids"][0])
+    await _archive(client, list_uuid, ledger["uuids"][1])
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive",
+        # A repeat and an already-live uuid, both of which must count for nothing.
+        json={
+            "uuids": [
+                ledger["uuids"][0],
+                ledger["uuids"][0],
+                ledger["uuids"][1],
+                ledger["uuids"][2],
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"unarchived": 2}
+
+    page = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert _titles(page, ledger["title"]) == ["alpha", "beta", "delta", "gamma"]
+    assert (await client.get(f"/api/lists/{list_uuid}/items/archived")).json() == []
+
+    # And again, now that nothing is archived: still 200, still nothing moved.
+    again = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive",
+        json={"uuids": [ledger["uuids"][0]]},
+    )
+    assert again.status_code == 200
+    assert again.json() == {"unarchived": 0}
+
+
+async def test_bulk_unarchive_skips_uuids_from_another_list(
+    client, list_uuid, workspace_uuid, add_column, ledger
+):
+    other = (
+        await client.post(
+            "/api/lists/",
+            json={"name": "other2", "display_name": "Other 2",
+                  "workspace_uuid": workspace_uuid},
+        )
+    ).json()["uuid"]
+    other_col = await add_column(other, name="t", display_name="T", type="text")
+    stray = (
+        await client.post(
+            f"/api/lists/{other}/items/", json={"data": {other_col: "x"}}
+        )
+    ).json()["uuid"]
+    await _archive(client, other, stray)
+    await _archive(client, list_uuid, ledger["uuids"][0])
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive",
+        json={"uuids": [ledger["uuids"][0], stray]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"unarchived": 1}
+
+    # The stray is still archived in its own list — `list_id` is what scoped it out,
+    # exactly as in `bulk_delete`.
+    still = (await client.get(f"/api/lists/{other}/items/archived")).json()
+    assert [row["uuid"] for row in still] == [stray]
+
+
+async def test_bulk_unarchive_cannot_conflict_on_a_unique_value(
+    client, list_uuid, add_column
+):
+    """The whole reason this endpoint returns a bare count where a bulk *restore*
+    has to report per-uuid conflicts. Two archived rows holding `unique` values
+    never released them, so bringing both back at once cannot fail."""
+    code = await add_column(
+        list_uuid,
+        name="code",
+        display_name="Code",
+        type="text",
+        config={"unique": True},
+    )
+    uuids = []
+    for value in ("AB-1", "AB-2"):
+        uuids.append(
+            (
+                await client.post(
+                    f"/api/lists/{list_uuid}/items/", json={"data": {code: value}}
+                )
+            ).json()["uuid"]
+        )
+        await _archive(client, list_uuid, uuids[-1])
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive", json={"uuids": uuids}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"unarchived": 2}
+    page = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert sorted(row["data"][code] for row in page) == ["AB-1", "AB-2"]
+
+
+async def test_bulk_unarchive_leaves_a_binned_record_in_the_bin(
+    client, list_uuid, ledger
+):
+    """Delete wins over archive, so the archive's bulk route must not be a way to
+    pull a record off the surface that has the purge deadline on it."""
+    await _archive(client, list_uuid, ledger["uuids"][0])
+    await client.delete(f"/api/lists/{list_uuid}/items/{ledger['uuids'][0]}")
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive",
+        json={"uuids": [ledger["uuids"][0]]},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"unarchived": 0}
+
+    binned = (await client.get(f"/api/lists/{list_uuid}/items/deleted")).json()
+    assert _titles(binned, ledger["title"]) == ["alpha"]
+
+
+async def test_bulk_unarchive_refuses_a_payload_over_the_cap(client, list_uuid):
+    """Rejected by the schema before any work happens, which is what makes the limit
+    a published one the SPA can chunk against rather than a surprise."""
+    too_many = [str(uuid4()) for _ in range(settings.BULK_DELETE_MAX + 1)]
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-unarchive", json={"uuids": too_many}
+    )
+    assert resp.status_code == 422
 
 
 async def test_bulk_archive_skips_uuids_from_another_list(

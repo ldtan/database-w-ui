@@ -1108,6 +1108,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/bulk-restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Restore Items
+         * @description Bring several records back from the bin. Partial success by design.
+         *
+         *     Gated on list-level `delete`, like `restore_item` and the bin listing it is
+         *     reached from — a soft-deleted record resolves to no permission context of its
+         *     own, so there is nothing to check per record even in principle. That is also
+         *     why `effective_actions_bulk` is not used here as the delete and archive routes
+         *     use it: it filters to `deleted_at IS NULL`, so it cannot answer about anything
+         *     in the bin.
+         *
+         *     **200 with conflicts, not 409.** A `unique` value taken while a row sat in the
+         *     bin is an ordinary thing to have happened, and refusing the whole request for
+         *     one of them would make a large restore hostage to a single duplicate. The rows
+         *     that came back are counted; the rows that could not are named, with the message
+         *     the single-record restore would have 409'd with. Both halves matter to the
+         *     caller, so both are in the body.
+         */
+        post: operations["bulk_restore_items_api_lists__list_uuid__items_bulk_restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/bulk-unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Unarchive Items
+         * @description Bring several records back from the archive. Returns how many moved.
+         *
+         *     Gated on *list-level* `delete`, which is where this parts company with
+         *     `bulk_archive_items` above. The two bulk writes that take records away resolve
+         *     permissions per record, because a live record has a context of its own and a
+         *     selection may legitimately mix rows the caller may remove with rows they may
+         *     not. This one matches the surface it is reached from instead: the archive
+         *     listing is list-gated, `unarchive_item` is list-gated, and whoever had the
+         *     authority to put records in the archive has the authority to take them out.
+         *     One `require` for the request, not one resolution per uuid.
+         */
+        post: operations["bulk_unarchive_items_api_lists__list_uuid__items_bulk_unarchive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/bulk-create": {
         parameters: {
             query?: never;
@@ -1929,6 +1992,57 @@ export interface components {
         BulkDeleteResult: {
             /** Deleted */
             deleted: number;
+        };
+        /**
+         * BulkRestoreConflict
+         * @description A record the restore left in the bin, and why.
+         *
+         *     Named for the record rather than for the error, like `ImportRowError`: the uuid
+         *     is what the client has, and the message is written for the person who asked.
+         */
+        BulkRestoreConflict: {
+            /**
+             * Uuid
+             * Format: uuid
+             */
+            uuid: string;
+            /** Message */
+            message: string;
+        };
+        /** BulkRestoreRequest */
+        BulkRestoreRequest: {
+            /** Uuids */
+            uuids?: string[];
+        };
+        /**
+         * BulkRestoreResult
+         * @description Partial success, deliberately.
+         *
+         *     A restore can fail per record — a `unique` value may have been taken while the
+         *     row sat in the bin — and all-or-nothing would let one stale duplicate block the
+         *     other 499. So the conflicts come back *beside* the count, the way the user batch
+         *     import reports a bad row beside the rows that were saved. A bare count would
+         *     hide them: "restored 497" does not say which three, or why.
+         *
+         *     Silent skips are not conflicts and are not listed: an unknown uuid, one from
+         *     another list, one that is not in the bin, and one past the retention window all
+         *     simply do not appear in `restored`. Nothing was wrong with the request.
+         */
+        BulkRestoreResult: {
+            /** Restored */
+            restored: number;
+            /** Conflicts */
+            conflicts?: components["schemas"]["BulkRestoreConflict"][];
+        };
+        /** BulkUnarchiveRequest */
+        BulkUnarchiveRequest: {
+            /** Uuids */
+            uuids?: string[];
+        };
+        /** BulkUnarchiveResult */
+        BulkUnarchiveResult: {
+            /** Unarchived */
+            unarchived: number;
         };
         /**
          * ColumnConfig
@@ -5282,6 +5396,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkArchiveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_restore_items_api_lists__list_uuid__items_bulk_restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkRestoreRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkRestoreResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_unarchive_items_api_lists__list_uuid__items_bulk_unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkUnarchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkUnarchiveResult"];
                 };
             };
             /** @description Validation Error */

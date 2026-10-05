@@ -40,6 +40,60 @@ class BulkArchiveResult(BaseModel):
     archived: int
 
 
+class BulkRestoreRequest(BaseModel):
+    # Same cap as the rest, and the same knob — but this is the one bulk body whose
+    # cost is not a single UPDATE: see `ListItemService.bulk_restore` for the
+    # uniqueness pass the cap is really bounding here.
+    uuids: list[UUID] = Field(
+        default_factory=list, max_length=settings.BULK_DELETE_MAX
+    )
+
+
+class BulkRestoreConflict(BaseModel):
+    """A record the restore left in the bin, and why.
+
+    Named for the record rather than for the error, like `ImportRowError`: the uuid
+    is what the client has, and the message is written for the person who asked.
+    """
+
+    uuid: UUID
+    message: str
+
+
+class BulkRestoreResult(BaseModel):
+    """Partial success, deliberately.
+
+    A restore can fail per record — a `unique` value may have been taken while the
+    row sat in the bin — and all-or-nothing would let one stale duplicate block the
+    other 499. So the conflicts come back *beside* the count, the way the user batch
+    import reports a bad row beside the rows that were saved. A bare count would
+    hide them: "restored 497" does not say which three, or why.
+
+    Silent skips are not conflicts and are not listed: an unknown uuid, one from
+    another list, one that is not in the bin, and one past the retention window all
+    simply do not appear in `restored`. Nothing was wrong with the request.
+    """
+
+    restored: int
+    conflicts: list[BulkRestoreConflict] = Field(default_factory=list)
+
+
+class BulkUnarchiveRequest(BaseModel):
+    # Same cap again, for the reason `BulkArchiveRequest` gives: the frontend mirrors
+    # one number, so a surface that chunked against a different one would be a second
+    # thing to keep in step for no gain.
+    uuids: list[UUID] = Field(
+        default_factory=list, max_length=settings.BULK_DELETE_MAX
+    )
+
+
+class BulkUnarchiveResult(BaseModel):
+    # A count and nothing else, unlike a bulk restore's. Coming back from the archive
+    # cannot fail per record — an archived row never released its `unique` values, so
+    # there is no conflict to report (see `ListItemService.unarchive`).
+    unarchived: int
+
+
 class ListItemCountRead(BaseModel):
     total: int
 

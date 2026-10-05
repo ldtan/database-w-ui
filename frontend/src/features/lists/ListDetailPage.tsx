@@ -11,6 +11,7 @@ import { ConfirmDialog, confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
 import { COUNT_REFRESH_SECONDS } from "../../lib/config";
+import { BULK_MAX } from "../../lib/limits";
 import { useToast } from "../../lib/toast";
 import { useDebounced } from "../../lib/useDebounced";
 import { useLiveList } from "../../lib/useLiveList";
@@ -76,15 +77,6 @@ const EMPTY_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
  *  what else moved. Long enough that tabbing across a row is one burst, short
  *  enough that a single edit settles while you are still looking at it. */
 const SETTLE_DELAY_MS = 800;
-
-/** Uuids the bulk-delete endpoint accepts per call. A larger selection is sent as
- *  several calls.
- *
- *  The server's limit is `BULK_DELETE_MAX` in its config, defaulting to the same
- *  500. This is a static build and cannot read that, so the two are kept in step by
- *  hand: the server's may be raised freely, but lowering it below this number would
- *  produce a validation error naming a limit the person never saw. */
-const BULK_DELETE_MAX = 500;
 
 /** One page with one record replaced, or the page untouched if it is not on it. */
 function withItem(
@@ -622,10 +614,10 @@ export function ListDetailPage() {
       // request costs the server, which several at once would defeat.
       const uuids = deletableSelection.map((item) => item.uuid);
       let deleted = 0;
-      for (let i = 0; i < uuids.length; i += BULK_DELETE_MAX) {
+      for (let i = 0; i < uuids.length; i += BULK_MAX) {
         const res = await api.post<{ deleted: number }>(
           `/lists/${listUuid}/items/bulk-delete`,
-          { uuids: uuids.slice(i, i + BULK_DELETE_MAX) },
+          { uuids: uuids.slice(i, i + BULK_MAX) },
         );
         deleted += res.deleted;
       }
@@ -668,10 +660,10 @@ export function ListDetailPage() {
     mutationFn: async () => {
       const uuids = deletableSelection.map((item) => item.uuid);
       let archived = 0;
-      for (let i = 0; i < uuids.length; i += BULK_DELETE_MAX) {
+      for (let i = 0; i < uuids.length; i += BULK_MAX) {
         const res = await api.post<{ archived: number }>(
           `/lists/${listUuid}/items/bulk-archive`,
-          { uuids: uuids.slice(i, i + BULK_DELETE_MAX) },
+          { uuids: uuids.slice(i, i + BULK_MAX) },
         );
         archived += res.archived;
       }

@@ -109,13 +109,19 @@ class Settings(BaseSettings):
     # with the worse message. The gap is the envelope; it is not a second budget.
     MAX_REQUEST_BYTES: int = 12 * 1024 * 1024
 
-    # Records one bulk delete may name. Unlike the two above, this one is also a
-    # published API limit — it reaches the OpenAPI schema through
-    # `BulkDeleteRequest`, and the frontend keeps its own copy to chunk a large
-    # selection against (a static build cannot read this). So it may be raised
-    # freely, but lowering it below the client's 500 would produce a validation
-    # error nobody could act on; change `BULK_DELETE_MAX` in ListDetailPage.tsx
-    # first if it ever needs to go down.
+    # Records one bulk record body may name — the delete, restore, archive and
+    # unarchive routes all read it, and there is no reason for them to disagree about
+    # how many is too many. Three of them do one UPDATE over the uuids given, so what
+    # the cap bounds there is round-trip latency. `bulk-restore` is the exception and
+    # the one this number really matters for: it re-checks `unique` values before
+    # letting rows back, so the cap bounds a scan per unique column as well.
+    #
+    # Unlike the two above, this one is also a published API limit — it reaches the
+    # OpenAPI schema through `BulkDeleteRequest` and its siblings, and the frontend
+    # keeps its own copy to chunk a large selection against (a static build cannot
+    # read this). So it may be raised freely, but lowering it below the client's 500
+    # would produce a validation error nobody could act on; change `BULK_MAX` in
+    # frontend/src/lib/limits.ts first if it ever needs to go down.
     BULK_DELETE_MAX: int = 500
 
     # "Live records": an open list subscribes to GET /lists/{uuid}/events and

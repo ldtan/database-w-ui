@@ -206,7 +206,7 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `IMPORT_MAX_ROWS` | `1000` | Rows one import may carry — read by the list importer, the user batch importer, and `items/bulk-create`. Checked before anything is written, so an over-limit file imports nothing. The JSON-body route also publishes it as a `max_length`, so an over-long array is a 422 rather than the upload's worded 400. |
 | `MAX_UPLOAD_BYTES` | `8388608` | What an uploaded **file** may weigh. Checked by the import routes, which answer 400 with a message naming the limit. The file is read whole and a JSON one parsed whole again, so the real ceiling is instance memory. |
 | `MAX_REQUEST_BYTES` | `12582912` | What the process will buffer for **any** request body, enforced by `BodySizeLimitMiddleware` as a 413. Nothing bounded a JSON body before: `ListItemCreate.data` is a `dict` to Pydantic and a `text` column's `max_length` is unset by default, so one request could buffer, parse, sanitise and store tens of megabytes. Deliberately **above** `MAX_UPLOAD_BYTES` — a multipart request holding a file exactly at that limit is a body slightly over it, so equal values would make this backstop reject uploads the route was about to accept, with the worse message. |
-| `BULK_DELETE_MAX` | `500` | Records one bulk delete may name. Also a *published* limit — it reaches the OpenAPI schema, and the SPA keeps its own copy to chunk against, so lowering it needs `BULK_DELETE_MAX` in `ListDetailPage.tsx` changed first. |
+| `BULK_DELETE_MAX` | `500` | Records one bulk record body may name — delete, restore, archive and unarchive all share it. Also a *published* limit: it reaches the OpenAPI schema, and the SPA keeps its own copy to chunk against, so lowering it needs `BULK_MAX` in `frontend/src/lib/limits.ts` changed first. |
 | `SSE_ENABLED` | `true` | Live records. False makes `GET /lists/{uuid}/events` answer `503`, which the client reads as "fall back to polling" — so this is the kill switch, and it is an environment change on the API rather than a rebuild of the SPA. |
 | `SSE_MAX_STREAM_SECONDS` | `300` | How long one stream lives before the server closes it and the client reconnects. Also **the revocation window**: authorization is checked at connect and never again, so losing `view` stops the signals at the next connect and not before. |
 | `SSE_HEARTBEAT_SECONDS` | `15` | How often an idle stream emits a comment frame — keeps proxies from reaping it, and is how the server learns a subscriber has gone away. |
@@ -243,7 +243,7 @@ the single-instance assumption the counters rest on.
 | Workspaces | `GET/POST /api/workspaces`, `GET/PATCH/DELETE /api/workspaces/{workspace_uuid}`, `…/transfer` |
 | Lists | `GET/POST /api/lists`, `GET/PATCH/DELETE /api/lists/{list_uuid}`, `…/transfer`, `…/clone` |
 | Columns | `…/lists/{list_uuid}/columns` CRUD; `…/columns/{uuid}/options` (a lookup's selectable rows, searched server-side); `…/columns/recompute` (re-index the calculated columns); `…/columns/{uuid}/convert` + `…/convert/apply` (preview a type conversion, then commit it in one transaction) |
-| Records | `…/lists/{list_uuid}/items` CRUD; `…/items/count`; `…/items/bulk-delete`; `…/items/archived`, `…/items/{uuid}/archive` + `…/unarchive`, `…/items/bulk-archive` |
+| Records | `…/lists/{list_uuid}/items` CRUD; `…/items/count`; `…/items/bulk-delete` + `…/items/bulk-restore`; `…/items/archived`, `…/items/{uuid}/archive` + `…/unarchive`, `…/items/bulk-archive` + `…/items/bulk-unarchive` |
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
 | Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=&filters=` (every metric's value, in one pass, over the records the caller can see through that view) |
@@ -256,6 +256,14 @@ Every soft-deletable kind has a **bin** on its own collection — `…/deleted`,
 `…/{uuid}/restore` and `…/{uuid}/permanent` — for workspaces, lists, records, columns,
 views, forms, metrics, users and groups. Nothing in this app is deleted outright, and
 destroying something is always two deliberate steps.
+
+Records are the one kind whose bin and archive also take a **set**: `bulk-delete`,
+`bulk-restore`, `bulk-archive` and `bulk-unarchive`, because a selection of records is
+a thing the grid can produce and a selection of columns is not. The three that cannot
+fail per record answer with a count. `bulk-restore` answers with a count **and**
+`conflicts` — a binned row releases its `unique` values, so one may have been taken
+while it sat there, and that is reported per record rather than failing the batch.
+All four cap the body at `BULK_DELETE_MAX`.
 
 Creating a list requires a `workspace_uuid` (owned by the caller) in the body; the list
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a
