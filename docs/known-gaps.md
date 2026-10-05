@@ -19,6 +19,19 @@ It would also want rate limiting and email verification. Note `UserService.creat
 auto-provisions a personal workspace for every new user, which is the right behavior for
 signup.
 
+**This gap now has a page pointing at it.** A deployment with `VITE_HOME_ENABLED` serves
+a public landing page at `/` (frontend/README.md, "The public home page"), and its call
+to action is **Log in** rather than "Sign up" precisely because of the above — a signup
+button there would be a dead end. The page says in as many words that accounts are
+created by whoever runs the deployment, which is the honest version of this gap rather
+than a workaround for it.
+
+So whoever ships `POST /auth/register` has two files to finish the job in, not one:
+`features/home/HomePage.tsx` (the hero's buttons and the closing paragraph, which
+currently explains where an account comes from) and `features/auth/LoginPage.tsx`, which
+offers nowhere to go but in. The guide's "Signing in" section says the same thing a
+third time and would need the same edit.
+
 ## 2. A record shared without its list can't be viewed in the UI
 
 The API supports this on purpose — item routes use `resolve_list_or_404` (existence only)

@@ -163,6 +163,29 @@ services:
       # See docs/capacity-and-performance.md § "When to archive".
       - key: VITE_ARCHIVE_HINT_THRESHOLD
         value: "25000"
+      # Serve a public landing page at `/`, and the guide with it, to visitors who
+      # have no session. True here because this deployment is the public one: a
+      # stranger who opens the URL should be told what this is before being asked
+      # for a password. Somebody running the app for their own team wants the
+      # opposite and gets it by leaving this unset — it is off by default.
+      #
+      # It hides nothing either way. The landing page describes the app and the
+      # guide explains it, both of which are in the repository; every route that
+      # reads data stays behind the token. What the flag chooses is whether this
+      # deployment has a front door.
+      #
+      # Baked in at build time (Vite), so flipping it is a rebuild and redeploy of
+      # this static site — unlike SSE_ENABLED on the API, which is an env change
+      # and a restart. Deliberate: this is a property of what the deployment *is*,
+      # not something to reach for in an incident, and a backend flag would mean
+      # the one page a stranger sees could not render until an unauthenticated
+      # request came back.
+      #
+      # The signed-in app is untouched by it: the dashboard is still `/`, because
+      # the public routes are only declared for a visitor without a session. See
+      # "The public home page" in frontend/README.md.
+      - key: VITE_HOME_ENABLED
+        value: "true"
     routes:
       # src/lib/api.ts builds every call as a relative `/api/...` — there is no configurable
       # base URL — so the SPA and the API must share an origin. This rewrite is what makes

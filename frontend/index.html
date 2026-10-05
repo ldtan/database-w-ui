@@ -4,6 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Database w/ UI</title>
+    <!-- For the one page that gets linked and pasted into a chat: the home page,
+         on a deployment with VITE_HOME_ENABLED. Static, because a crawler and a
+         link preview both read the document rather than running the app, so there
+         is no point writing these per route. No og:image — there is no asset to
+         point at, and a broken one previews worse than none. -->
+    <meta
+      name="description"
+      content="Build your own little databases through a screen: typed columns, saved views, forms, metrics and sharing — self-hostable, and no code."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Database w/ UI" />
+    <meta
+      property="og:description"
+      content="Build your own little databases through a screen: typed columns, saved views, forms, metrics and sharing — self-hostable, and no code."
+    />
     <script>
       // Apply the saved theme before first paint to avoid a flash of the default.
       (function () {

@@ -91,8 +91,10 @@ src/
                   # CreateNameDialog, RowActions, Field (the form primitives),
                   # SortableList (the one drag-to-reorder control), UserPicker
   features/
-    auth/         # login (the only unauthenticated page)
-    dashboard/    # the home page: where you land, and what you were last in
+    auth/         # login — the one unauthenticated page every deployment has
+    home/         # the public landing page, served at / to signed-out visitors
+                  # when VITE_HOME_ENABLED is on (see below)
+    dashboard/    # where you land once you are signed in, and what you were last in
     onboarding/   # the guided tours, the welcome dialog and the help widget —
                   # the "show me" half of what the guide page writes down
     guide/        # GuidePage, the written walkthrough, and its generated figures
@@ -116,6 +118,65 @@ src/
     principals/   # user/group cells, fields and filter inputs
     locations/    # the map + address picker behind a `location` cell
     references/   # ReferencePicker — the typeahead all of the above share
+```
+
+## The public home page
+
+`VITE_HOME_ENABLED=true` gives a deployment a front door: a landing page at `/` for
+visitors with no session, and the guide readable alongside it. **Off by default**, so
+a deployment that configures nothing behaves exactly as it always has — `/` is the
+dashboard, and a visitor without a token is sent to `/login`.
+
+It is one flag because it is one decision. A public instance wants to say what it is
+before asking for a password; a team running this for themselves wants the opposite,
+and should not have to take anything out to get it.
+
+**What it does not do is hide anything.** The landing page describes the app and the
+guide explains how to use it — both are in this repository. The flag decides whether
+the deployment has a front door, not whether anything is secret; every route that
+reads data stays behind `RequireAuth` either way.
+
+How it is wired, in `App.tsx`:
+
+```tsx
+const showPublic = HOME_ENABLED && !isAuthenticated;
+```
+
+That second condition is why **the dashboard never moved off `/`**. The public routes
+simply are not declared for somebody holding a session, so a signed-out visitor gets
+the landing page at `/`, a signed-in user gets the dashboard at `/`, and no link,
+redirect or breadcrumb anywhere else had to learn a new path. Two consequences worth
+knowing:
+
+- The public block must stay **declared before** the guarded layout. With the flag on,
+  `/` and `/guide` match in both, equally specifically, and React Router breaks the
+  tie by declaration order. Reversed, `/` sends a visitor to the sign-in form.
+- `HomePage` is `lazy`, so a deployment with the flag off never downloads it. Vite
+  still *emits* the chunk — the flag reaches the condition through a function call and
+  cannot be folded into a constant — so this is bytes on the wire, not concealment.
+
+The guide is the same component in both shells (`<GuidePage standalone />` for the
+public one), which is the whole point: one document, not two that drift. `standalone`
+drops the breadcrumb, and the tour button disappears on its own via
+`useOptionalOnboarding` — a tour walks the real screens, and there is no session to
+walk them with. Both pages fetch nothing, which is what lets them render for a caller
+with no token; it is also why the guide's figures work there, since they are committed
+PNGs rather than anything the API serves.
+
+Being build-time is the cost: flipping it is a rebuild and redeploy of the static
+site, where `SSE_ENABLED` on the API is an env change and a restart. That is the right
+trade here — this is a property of what a deployment *is*, decided once, not a switch
+anybody reaches for during an incident — and putting it on the API would mean the one
+page a stranger sees could not render until an unauthenticated request came back.
+
+The call to action is **Log in**, not "Sign up", because there is no public
+registration (`docs/known-gaps.md` §1) and the page says so in as many words. When
+`POST /auth/register` ships, this page is where it gains a button.
+
+To see it locally, put it in `.env.local` and restart Vite:
+
+```
+VITE_HOME_ENABLED=true
 ```
 
 A column's `type` and `config` drive everything about it: `renderCell` picks how it

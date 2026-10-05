@@ -9,7 +9,8 @@ import { Message } from "primereact/message";
 import { useAuth } from "../../lib/auth";
 
 /**
- * The only unauthenticated page.
+ * Signing in. The only unauthenticated page a deployment always has — a deployment
+ * with `HOME_ENABLED` also serves the home page and the guide (`lib/config.ts`).
  *
  * There is no sign-up: accounts are minted by a superuser (or seeded into an empty
  * database), so this offers nowhere to go but in. `login` stores the token pair and

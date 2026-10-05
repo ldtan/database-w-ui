@@ -90,6 +90,31 @@ export const ARCHIVE_HINT_THRESHOLD = readNonNegativeNumber(
   25000,
 );
 
+/**
+ * Whether this deployment serves a public home page at `/` to signed-out visitors,
+ * and with it a publicly readable copy of the guide.
+ *
+ * Off by default, which is the deliberate direction for a flag that changes what a
+ * stranger can reach: a deployment that sets nothing keeps the behaviour it has
+ * always had — `/` is the dashboard, and a visitor without a session is sent to the
+ * sign-in form. Turning it on is an act, not an omission. The hosted instance sets
+ * `VITE_HOME_ENABLED=true` (see `deploy/render/render.yaml`); somebody running this
+ * for their own team wants the opposite and gets it for free.
+ *
+ * Nothing is hidden by switching it off. The home page is a description of the app
+ * and the guide is a document about how to use it — both are in the public repository
+ * — so this chooses whether the deployment has a front door, not whether anything is
+ * secret. Every route that reads data stays behind `RequireAuth` either way.
+ *
+ * Build-time, and that is the cost: flipping it is a rebuild and redeploy of the
+ * static site, where a setting on the API (`SSE_ENABLED`) is an env change and a
+ * restart. Accepted here because this is not a switch anybody reaches for in an
+ * incident — it is a property of what a deployment *is*, decided once — and because
+ * putting it on the API would mean the one page a stranger sees could not render
+ * until an unauthenticated request came back.
+ */
+export const HOME_ENABLED = readBoolean(import.meta.env.VITE_HOME_ENABLED, false);
+
 function readNonNegativeNumber(
   raw: string | undefined,
   fallback: number,
@@ -97,4 +122,23 @@ function readNonNegativeNumber(
   if (raw == null || raw === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/**
+ * Read a flag. `true`/`1`/`yes`/`on` are true, `false`/`0`/`no`/`off` are false, and
+ * anything else — including a value somebody left as `"TRUE "` or misspelled — falls
+ * back rather than guessing.
+ *
+ * Case and surrounding whitespace are forgiven because this is typed into a
+ * deployment dashboard by hand, where `True` is what a Python habit produces and the
+ * field keeps whatever was pasted into it. What is *not* forgiven is an unrecognised
+ * word: `readNonNegativeNumber` falls back on nonsense for the same reason, and
+ * silently treating `"maybe"` as off would be indistinguishable from the flag working.
+ */
+function readBoolean(raw: string | undefined, fallback: boolean): boolean {
+  if (raw == null) return fallback;
+  const v = raw.trim().toLowerCase();
+  if (v === "true" || v === "1" || v === "yes" || v === "on") return true;
+  if (v === "false" || v === "0" || v === "no" || v === "off") return false;
+  return fallback;
 }
