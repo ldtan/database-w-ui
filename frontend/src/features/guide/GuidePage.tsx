@@ -1,10 +1,10 @@
-import type { ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { useEffect, type ReactNode } from "react";
+import { Link, useLocation } from "react-router-dom";
 import { Button } from "primereact/button";
 
 import { Breadcrumbs } from "../../components/Breadcrumbs";
 import { COLUMN_TYPE_OPTIONS } from "../../lib/columnTypes";
-import { useOnboarding } from "../onboarding/OnboardingProvider";
+import { useOptionalOnboarding } from "../onboarding/OnboardingProvider";
 import { Figure } from "./Figure";
 import { SECTIONS } from "./sections";
 
@@ -12,6 +12,13 @@ import { SECTIONS } from "./sections";
  * A plain-language, start-to-finish guide to the app, written for people with no
  * technical background. It is a static document — no data is fetched — so it works
  * the moment someone signs in and never depends on having built anything yet.
+ *
+ * Because it fetches nothing, it is also the one page that reads correctly to
+ * somebody who has not signed in, and a deployment with `HOME_ENABLED` serves it to
+ * them from the public home page. `standalone` is that case: no breadcrumb back into
+ * an app the reader is not in, and no tour button, because a tour walks the real
+ * screens and there is no session to walk them with. Everything else is identical —
+ * one document, not two, which is the point.
  *
  * The ids in `sections.ts` are the anchor targets of the contents list at the top.
  * SECTIONS and the <Section> ids have to stay in step — the list is generated from
@@ -261,12 +268,78 @@ const TYPE_HELP: Record<string, string> = {
   calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
 };
 
-export function GuidePage() {
-  const { startTour } = useOnboarding();
+/**
+ * Land on the section a `#fragment` names, when the reader *arrives* at the guide
+ * already asking for one.
+ *
+ * The contents list at the top of this page has never needed it: those are same-page
+ * fragment anchors, which the browser handles by itself. What does need it is a link
+ * from somewhere else — the home page points at `#columns`, `#views`, `#sharing` —
+ * and neither way of arriving works on its own. A client-side navigation does not
+ * scroll at all, because React Router's declarative router has no opinion about
+ * fragments. A cold load does scroll, and then lands nowhere: this page carries
+ * twenty-five `loading="lazy"` figures with no reserved height, so the document grows
+ * by thousands of pixels *after* the browser has already jumped. Measured, before
+ * this existed: a click from the home page to `#sharing` left the reader 21,000px
+ * above it.
+ *
+ * Hence the retries. One pass is the jump; the later ones are the correction after
+ * the figures around the target have resolved and moved it. They stop the moment the
+ * reader touches the page — a scroll of their own means they have taken over, and
+ * yanking them back would be worse than landing imprecisely.
+ *
+ * The honest fix is for a figure to reserve its space, which means its dimensions in
+ * `figures.ts` — a change to `capture-guide.mjs` and a re-run against a seeded
+ * database. Worth doing; this is what works without one.
+ *
+ * One editing note, since this file is checked as *text*: do not write a literal
+ * fragment anchor in a comment here. `guide.test.ts` scans the whole source for them
+ * and would read it as a link to a section that does not exist.
+ */
+function useHashLanding() {
+  const { hash } = useLocation();
+
+  useEffect(() => {
+    if (!hash) return;
+    const id = decodeURIComponent(hash.slice(1));
+    if (!document.getElementById(id)) return;
+
+    let cancelled = false;
+    const land = () => {
+      if (!cancelled) document.getElementById(id)?.scrollIntoView();
+    };
+    // `scrollIntoView` honours `scroll-margin-top`, which is what keeps the heading
+    // clear of the sticky header — see `.guide-section` in themes.css.
+    land();
+    const timers = [60, 250, 600].map((ms) => window.setTimeout(land, ms));
+
+    const stop = () => {
+      cancelled = true;
+    };
+    const options = { passive: true, once: true } as const;
+    window.addEventListener("wheel", stop, options);
+    window.addEventListener("touchstart", stop, options);
+    window.addEventListener("keydown", stop, { once: true });
+
+    return () => {
+      cancelled = true;
+      timers.forEach((t) => window.clearTimeout(t));
+      window.removeEventListener("wheel", stop);
+      window.removeEventListener("touchstart", stop);
+      window.removeEventListener("keydown", stop);
+    };
+  }, [hash]);
+}
+
+export function GuidePage({ standalone = false }: { standalone?: boolean }) {
+  // Null outside the authenticated shell — see `useOptionalOnboarding`. Called
+  // unconditionally, as a hook must be; what is conditional is the button below.
+  const onboarding = useOptionalOnboarding();
+  useHashLanding();
 
   return (
     <div className="flex flex-col gap-6" style={{ maxWidth: 820 }}>
-      <Breadcrumbs items={[{ label: "Guide" }]} />
+      {!standalone && <Breadcrumbs items={[{ label: "Guide" }]} />}
 
       <header className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold">How to use this app</h1>
@@ -276,15 +349,18 @@ export function GuidePage() {
           can use a spreadsheet, you can use this.
         </p>
         {/* For the people who would rather be shown than read. The tour is the
-            first quarter of this page, pointed at the real controls. */}
-        <div>
-          <Button
-            label="Show me around instead"
-            icon="pi pi-compass"
-            outlined
-            onClick={() => startTour("basics")}
-          />
-        </div>
+            first quarter of this page, pointed at the real controls — which is why
+            it is offered only to a reader who has a session to point it at. */}
+        {onboarding && (
+          <div>
+            <Button
+              label="Show me around instead"
+              icon="pi pi-compass"
+              outlined
+              onClick={() => onboarding.startTour("basics")}
+            />
+          </div>
+        )}
       </header>
 
       {/* Contents */}

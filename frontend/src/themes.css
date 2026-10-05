@@ -369,14 +369,20 @@ a {
    showing.
    Above the breakpoint AppLayout renders no header at all (see the `!wide` branch),
    so the offset would just be a gap. The query has to stay in step with
-   DESKTOP_SCREEN in lib/useMediaQuery.ts. */
+   DESKTOP_SCREEN in lib/useMediaQuery.ts.
+
+   The reset is scoped to `.app-shell` because PublicLayout's header *is* there at
+   every width, and the guide renders in both shells. Unscoped, every heading in the
+   public copy of the guide landed under the bar on a desktop — the exact bug the
+   offset above exists to prevent, reintroduced by the one shell it did not know
+   about. The base rule is therefore the general case and this is the exception. */
 .guide-section,
 .guide-contents {
   scroll-margin-top: calc(var(--app-header-height) + 1rem);
 }
 @media (min-width: 1024px) {
-  .guide-section,
-  .guide-contents {
+  .app-shell .guide-section,
+  .app-shell .guide-contents {
     scroll-margin-top: 1rem;
   }
 }
@@ -2428,6 +2434,91 @@ td:hover > .phone-cell .phone-actions,
   max-width: 24rem;
   padding: 2rem;
   box-shadow: var(--shadow-lg);
+}
+
+/* The public shell — the home page and the guide read without an account. See
+   components/PublicLayout.tsx. Four classes, because the bar itself reuses
+   `.app-header`: what is new here is a page that is a column rather than a shell
+   with a rail beside it, and a footer, which the app does not have. */
+.public-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background: var(--bg);
+}
+.public-main {
+  flex: 1;
+  /* A wide figure inside a flex child pushes the page sideways without this,
+     exactly as it does in `.app-content`. */
+  min-width: 0;
+}
+/* The one measure every band lines up to — the bar, the footer and each section of
+   the home page — so the wordmark sits over the hero's first line instead of out in
+   the corner on a wide screen. */
+.public-bar {
+  width: 100%;
+  max-width: 69rem;
+  margin-inline: auto;
+}
+.public-footer {
+  padding: 1.25rem 1rem;
+  border-top: var(--border-width) solid var(--border);
+  background: var(--surface);
+}
+.public-footer a {
+  text-decoration: none;
+}
+.public-footer a:hover {
+  text-decoration: underline;
+}
+
+/* The home page's opening band. The same two radial gradients as `.login-page`, at
+   the width of the window rather than centred in it: the first thing a stranger sees
+   and the first thing they see after signing in are then the same palette, which is
+   the whole argument for not inventing a landing-page look of its own.
+
+   It is a band rather than the whole page so what follows sits on the plain
+   background and reads as the document after the pitch. */
+.home-hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: var(--border-width) solid var(--border);
+  background:
+    radial-gradient(
+      80% 70% at 50% 0%,
+      color-mix(in srgb, var(--brand) 20%, transparent),
+      transparent 70%
+    ),
+    radial-gradient(
+      55% 60% at 100% 100%,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 70%
+    ),
+    var(--bg);
+}
+/* A section of the home page: the shared measure, plus the vertical rhythm between
+   bands. Tailwind carries the layout inside one; this is only what every band
+   shares, so a new section cannot arrive a different width from the rest. */
+.home-section {
+  width: 100%;
+  max-width: 69rem;
+  margin-inline: auto;
+  padding: 2.5rem 1rem;
+}
+@media (min-width: 640px) {
+  .home-section {
+    padding: 3.5rem 1.5rem;
+  }
+}
+/* The small line above a heading that says what kind of section this is. Letter-spaced
+   small caps rather than another size of heading, so it never competes with the
+   heading underneath it. */
+.home-eyebrow {
+  font-size: 0.78rem;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--brand);
 }
 
 /* The dashboard's greeting. A gradient rather than a flat tint: it is the only

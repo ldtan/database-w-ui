@@ -170,3 +170,22 @@ export function useOnboarding(): OnboardingApi {
     throw new Error("useOnboarding must be used within an OnboardingProvider");
   return ctx;
 }
+
+/**
+ * The same thing for a page that can render on both sides of the sign-in line, and
+ * therefore cannot insist on a provider: `null` where there is no onboarding to be
+ * had, rather than a crash.
+ *
+ * The guide is the only such page. It is a static document, so it reads perfectly
+ * well to a stranger on the public home page — but the provider above is mounted
+ * inside the authenticated shell and keyed by username, so there is nothing for it
+ * to offer there. A caller that gets `null` should drop the affordance, not fake it;
+ * the tour it would start navigates around an app the reader has not signed in to.
+ *
+ * Deliberately a second hook rather than a loosening of {@link useOnboarding}: every
+ * other caller lives inside the shell, where a missing provider is a wiring mistake
+ * worth a loud failure, and that failure is the only thing keeping it loud.
+ */
+export function useOptionalOnboarding(): OnboardingApi | null {
+  return useContext(OnboardingContext);
+}

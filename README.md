@@ -8,6 +8,12 @@ Airtable/NocoDB.
 A list's schema is fully dynamic — records are stored as `JSONB` keyed by column UUID, so
 adding, renaming, or removing a column never requires a database migration.
 
+Everything is behind a sign-in. A deployment may optionally put a **public landing page**
+at `/` — a description of the app, and the in-app guide readable without an account —
+with one build-time flag, `VITE_HOME_ENABLED`; it is off by default, so a private
+instance stays private without taking anything out. See
+["The public home page"](frontend/README.md#the-public-home-page).
+
 ## Repository layout
 
 | Directory | Description |
