@@ -8,6 +8,7 @@ import { Paginator } from "primereact/paginator";
 import { confirmDialog } from "primereact/confirmdialog";
 
 import { api, ApiError } from "../../lib/api";
+import { BULK_MAX } from "../../lib/limits";
 import { useToast } from "../../lib/toast";
 import type { ArchivedListItem, Column, DeletedListItem } from "../../lib/types";
 import { AppDialog } from "../../components/AppDialog";
@@ -46,6 +47,16 @@ const KINDS = {
     restoreLabel: "Restore",
     restoredToast: "Record restored",
     restoreError: "Could not restore record",
+    // No bulk route yet. A restore can fail per record — a `unique` value may have
+    // been taken while the row sat in the bin — so the batch form needs a response
+    // that can name which rows did not come back, and until that exists the bin
+    // offers one row at a time. `null` rather than absent so both kinds carry the
+    // key and the selection UI can simply ask.
+    bulkPath: null,
+    bulkCountKey: null,
+    bulkLabel: null,
+    bulkToast: null,
+    bulkError: null,
     // Only the bin can destroy: an archived record has no deadline and nothing
     // queued to remove it, so "delete for good" there would be a different
     // decision wearing the same button.
@@ -63,6 +74,14 @@ const KINDS = {
     restoreLabel: "Unarchive",
     restoredToast: "Record unarchived",
     restoreError: "Could not unarchive record",
+    // Safe to offer in bulk precisely because coming back from the archive cannot
+    // fail: an archived row never released its `unique` values, so the server
+    // answers with a count and there is nothing per-row to report.
+    bulkPath: "bulk-unarchive",
+    bulkCountKey: "unarchived",
+    bulkLabel: "Unarchive",
+    bulkToast: "Records unarchived",
+    bulkError: "Could not unarchive records",
     purgeable: false,
   },
 } as const;
@@ -102,9 +121,19 @@ export function BinnedRecordsDialog({
 
   const [first, setFirst] = useState(0);
   const [rows, setRows] = useState(ROWS);
-  // Reopening the dialog starts at the top rather than wherever it was left.
+  // Held as rows rather than uuids so the table can mark them, and accumulated
+  // across pages like the grid's — picking rows off page one and then paging must
+  // not quietly drop them. PrimeReact only renders ticks for the rows it has, which
+  // is why the count below is the honest statement of what is selected.
+  const [selection, setSelection] = useState<BinnedRow[]>([]);
+  // Reopening the dialog starts at the top rather than wherever it was left, and
+  // with nothing selected: a selection made before the dialog was closed is not a
+  // decision the next person to open it should inherit.
   useEffect(() => {
-    if (visible) setFirst(0);
+    if (visible) {
+      setFirst(0);
+      setSelection([]);
+    }
   }, [visible]);
 
   const binned = useQuery({
@@ -147,6 +176,41 @@ export function BinnedRecordsDialog({
         spec.restoreError,
         err instanceof ApiError ? err.message : undefined,
       ),
+  });
+
+  const bulkRestore = useMutation({
+    mutationFn: async () => {
+      // Chunked against the server's cap, and sequentially: the cap bounds what one
+      // request costs, which several in flight would defeat. Same reasoning — and
+      // the same constant — as the grid's bulk delete.
+      const uuids = selection.map((row) => row.uuid);
+      let moved = 0;
+      for (let i = 0; i < uuids.length; i += BULK_MAX) {
+        const res = await api.post<Record<string, number>>(
+          `/lists/${listUuid}/items/${spec.bulkPath}`,
+          { uuids: uuids.slice(i, i + BULK_MAX) },
+        );
+        moved += res[spec.bulkCountKey!] ?? 0;
+      }
+      return moved;
+    },
+    onSuccess: (moved) => {
+      queryClient.invalidateQueries({ queryKey: [kind, listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["effective"] });
+      setSelection([]);
+      toast.success(spec.bulkToast!, `${moved} record(s)`);
+    },
+    onError: (err) => {
+      // An earlier chunk may already have gone, so both surfaces are refetched
+      // here too rather than left showing rows that have moved.
+      queryClient.invalidateQueries({ queryKey: [kind, listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      toast.error(
+        spec.bulkError!,
+        err instanceof ApiError ? err.message : undefined,
+      );
+    },
   });
 
   const purge = useMutation({
@@ -206,7 +270,29 @@ export function BinnedRecordsDialog({
               currentPageReportTemplate="{first}–{last} of {totalRecords}"
             />
 
-            <DataTable value={items} dataKey="uuid" stripedRows>
+            <DataTable
+              value={items}
+              dataKey="uuid"
+              stripedRows
+              // "checkbox", not "multiple", for the reason the grid gives: a click
+              // in the row should stay available for something else later, and a
+              // selection belongs to the checkbox that shows it.
+              //
+              // `null` rather than left off when the kind has no bulk route —
+              // PrimeReact's props are discriminated on this field, so an
+              // `undefined` from a conditional spread matches neither variant.
+              selectionMode={spec.bulkPath ? "checkbox" : null}
+              selection={selection}
+              onSelectionChange={(e: { value: unknown }) =>
+                setSelection(e.value as BinnedRow[])
+              }
+            >
+              {spec.bulkPath && (
+                <DataColumn
+                  selectionMode="multiple"
+                  headerStyle={{ width: "3rem" }}
+                />
+              )}
               {columns.map((col) => (
                 <DataColumn
                   key={col.uuid}
@@ -256,6 +342,30 @@ export function BinnedRecordsDialog({
                 )}
               />
             </DataTable>
+
+            {/* After the table, matching the grid's selection bar: the rows it
+                applies to are what you were just looking at. */}
+            {spec.bulkPath && selection.length > 0 && (
+              <div className="flex items-center gap-3">
+                <span className="text-sm font-medium">
+                  {selection.length} selected
+                </span>
+                <Button
+                  label={`${spec.bulkLabel} selected`}
+                  icon="pi pi-replay"
+                  text
+                  size="small"
+                  onClick={() => bulkRestore.mutate()}
+                  loading={bulkRestore.isPending}
+                />
+                <Button
+                  label="Clear"
+                  text
+                  size="small"
+                  onClick={() => setSelection([])}
+                />
+              </div>
+            )}
           </>
         )}
       </div>

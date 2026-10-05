@@ -40,6 +40,22 @@ class BulkArchiveResult(BaseModel):
     archived: int
 
 
+class BulkUnarchiveRequest(BaseModel):
+    # Same cap again, for the reason `BulkArchiveRequest` gives: the frontend mirrors
+    # one number, so a surface that chunked against a different one would be a second
+    # thing to keep in step for no gain.
+    uuids: list[UUID] = Field(
+        default_factory=list, max_length=settings.BULK_DELETE_MAX
+    )
+
+
+class BulkUnarchiveResult(BaseModel):
+    # A count and nothing else, unlike a bulk restore's. Coming back from the archive
+    # cannot fail per record — an archived row never released its `unique` values, so
+    # there is no conflict to report (see `ListItemService.unarchive`).
+    unarchived: int
+
+
 class ListItemCountRead(BaseModel):
     total: int
 

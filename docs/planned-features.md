@@ -595,7 +595,8 @@ single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
 - **Fan-out behind a two-method broker** (`subscribe(list_id)` / `notify(list_id)`,
   `src/lists/events/broker.py`), called after commit from every record write:
   `ListItemService.create`/`update`/`delete`/`bulk_delete`/`restore`/`archive`/
-  `bulk_archive`/`unarchive`, the CSV/JSON import (once per import), a calculated re-index,
+  `bulk_archive`/`unarchive`/`bulk_unarchive`, the CSV/JSON import (once per import),
+  a calculated re-index,
   a column conversion, and the lookup scrub a list or workspace delete runs across *other*
   lists. The in-process asyncio broker is correct on today's single instance
   (`numInstances` unset); **Postgres `LISTEN/NOTIFY`** is the swap behind the same interface

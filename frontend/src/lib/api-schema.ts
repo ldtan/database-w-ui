@@ -47,7 +47,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Refresh Access Token */
+        /**
+         * Refresh Access Token
+         * @description Trade a refresh token for a new access token.
+         *
+         *     Throttled by address. A refresh token is a bearer credential like any other and
+         *     this route is unauthenticated by construction, so without a limit it is an
+         *     unbounded guessing surface — and, since each attempt is a database lookup on the
+         *     single instance, a cheap way to make the app do work. Keyed on the address alone
+         *     because there is no username here to key on; the check runs *before* the lookup,
+         *     for the reason login's does.
+         */
         post: operations["refresh_access_token_api_auth_tokens_refresh_post"];
         delete?: never;
         options?: never;
@@ -80,6 +90,13 @@ export interface paths {
          *     Answers 204 whether or not the token existed. A caller signing out has nothing to
          *     do with either answer, and distinguishing them would turn this into an oracle for
          *     whether a stolen token is still live.
+         *
+         *     Shares `/refresh`'s address bucket for admission, but records nothing into it —
+         *     it *cannot*, because it deliberately does not know whether the token was real,
+         *     and counting every sign-out as a failure would throttle the ordinary case. What
+         *     the shared bucket buys is that an address which has just spent its budget
+         *     guessing at `/refresh` cannot carry on hammering the sibling route that takes
+         *     the same input.
          */
         post: operations["revoke_refresh_token_api_auth_tokens_revoke_post"];
         delete?: never;
@@ -648,6 +665,10 @@ export interface paths {
          *     the same gate `create_list` applies. Columns get new uuids and every reference to
          *     them (record data keys, primary column, view/form configs) is remapped; grants
          *     are not copied, so the clone starts private like any new list.
+         *
+         *     Copying the records is a read of them, so `clone` takes the caller and applies
+         *     the per-record filter — 'view' on the list does not reach a record whose
+         *     inheritance was broken and which was never granted to them.
          */
         post: operations["clone_list_api_lists__list_uuid__clone_post"];
         delete?: never;
@@ -1081,6 +1102,35 @@ export interface paths {
         put?: never;
         /** Bulk Archive Items */
         post: operations["bulk_archive_items_api_lists__list_uuid__items_bulk_archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/bulk-unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Unarchive Items
+         * @description Bring several records back from the archive. Returns how many moved.
+         *
+         *     Gated on *list-level* `delete`, which is where this parts company with
+         *     `bulk_archive_items` above. The two bulk writes that take records away resolve
+         *     permissions per record, because a live record has a context of its own and a
+         *     selection may legitimately mix rows the caller may remove with rows they may
+         *     not. This one matches the surface it is reached from instead: the archive
+         *     listing is list-gated, `unarchive_item` is list-gated, and whoever had the
+         *     authority to put records in the archive has the authority to take them out.
+         *     One `require` for the request, not one resolution per uuid.
+         */
+        post: operations["bulk_unarchive_items_api_lists__list_uuid__items_bulk_unarchive_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1845,6 +1895,16 @@ export interface components {
             /** Deleted */
             deleted: number;
         };
+        /** BulkUnarchiveRequest */
+        BulkUnarchiveRequest: {
+            /** Uuids */
+            uuids?: string[];
+        };
+        /** BulkUnarchiveResult */
+        BulkUnarchiveResult: {
+            /** Unarchived */
+            unarchived: number;
+        };
         /**
          * ColumnConfig
          * @description Type-specific column settings. Only the keys relevant to a column's
@@ -2235,8 +2295,11 @@ export interface components {
              * Format: uuid
              */
             column_uuid: string;
-            /** Operator */
-            operator: string;
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: "is" | "eq" | "=" | "is_not" | "neq" | "!=" | "contains" | "does_not_contain" | "is_empty" | "is_not_empty" | ">" | ">=" | "<" | "<=" | "gt" | "gte" | "lt" | "lte";
             /** Value */
             value?: unknown;
         };
@@ -5194,6 +5257,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkArchiveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_unarchive_items_api_lists__list_uuid__items_bulk_unarchive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkUnarchiveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BulkUnarchiveResult"];
                 };
             };
             /** @description Validation Error */
