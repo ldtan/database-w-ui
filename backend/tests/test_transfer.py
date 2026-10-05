@@ -625,3 +625,140 @@ async def test_a_row_error_still_says_what_is_wrong_with_the_row(
     assert len(body["errors"]) == 1
     # The service's own words, verbatim — a person can act on this.
     assert "score" in body["errors"][0]["message"]
+
+
+# -- bulk-create: the import without the file -------------------------------
+#
+# `POST .../items/bulk-create` is a thin router over `import_records`, so these
+# tests are about that being true rather than about the coercion itself — which the
+# tests above already cover for both upload formats. What is worth pinning is that
+# the body path gets the same treatment, because the reason this endpoint exists at
+# all is to avoid a second parser that could drift from the first.
+
+
+async def test_bulk_create_takes_records_in_the_body(client, list_uuid, add_column):
+    name, age = await _seed(client, list_uuid, add_column)
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create",
+        json={"records": [{"name": "Ann", "age": 30}, {"name": "Bo", "age": 25}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"created": 2, "errors": []}
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    # Numbers, not strings: a JSON body's native types reach `_parse_cell` the way
+    # a JSON file's do.
+    assert sorted(it["data"][age] for it in items) == [25, 30]
+    assert sorted(it["data"][name] for it in items) == ["Ann", "Bo"]
+
+
+async def test_bulk_create_reports_a_bad_record_beside_the_good_ones(
+    client, list_uuid, add_column
+):
+    """Per-record savepoints, exactly as for a file: one bad record does not sink
+    the batch, and the row number is its 1-based position in the array — there is no
+    file line to point at."""
+    await _seed(client, list_uuid, add_column)
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create",
+        json={
+            "records": [
+                {"name": "Ann", "age": 30},
+                {"name": "Bo", "age": "nonsense"},
+                {"name": "Cy", "age": 40},
+            ]
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["created"] == 2
+    assert [e["row"] for e in body["errors"]] == [2]
+    assert "age" in body["errors"][0]["message"]
+    # The record comes back the way a failed file row does, so the caller can fix
+    # and resend exactly what it sent.
+    assert body["errors"][0]["values"] == {"name": "Bo", "age": "nonsense"}
+
+
+async def test_bulk_create_resolves_a_lookup_from_its_label(
+    client, workspace_uuid, list_uuid, add_column
+):
+    """The reason this is a server-side endpoint rather than something the client
+    could assemble: a lookup cell may arrive as a *label*, and resolving it needs
+    the target list's label index under this caller's permissions."""
+    name = await add_column(list_uuid, name="name", display_name="Name", type="text")
+    lookup, rows = await _seed_lookup(
+        client, add_column, workspace_uuid, list_uuid, ["Springfield High"]
+    )
+
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create",
+        json={"records": [{"name": "Ann", "school": "Springfield High"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] == 1
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert items[0]["data"][lookup] == rows["Springfield High"]
+    assert items[0]["data"][name] == "Ann"
+
+
+async def test_bulk_create_splits_a_multiple_cell_like_the_file_path(
+    client, list_uuid, add_column
+):
+    """`a;b` for a `multiple` column, and a native array too — both are what
+    `_parse_cell` already does, reached through the body instead of a file."""
+    tags = await add_column(
+        list_uuid,
+        name="tags",
+        display_name="Tags",
+        type="choice",
+        config={"options": ["red", "green", "blue"], "multiple": True},
+    )
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create",
+        json={"records": [{"tags": "red;blue"}, {"tags": ["green"]}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["created"] == 2
+
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert sorted(tuple(it["data"][tags]) for it in items) == [
+        ("green",),
+        ("red", "blue"),
+    ]
+
+
+async def test_bulk_create_refuses_a_body_over_the_row_cap(client, list_uuid):
+    """Rejected by the schema, before anything is read. Unlike the upload route's
+    400 — which `import_records` words itself — a JSON array can be measured up
+    front, so the limit is published in the OpenAPI document and costs nothing.
+
+    Not monkeypatched: `max_length` is read at import, which is what makes it
+    publishable, so the real limit is the one in force here.
+    """
+    too_many = [{} for _ in range(settings.IMPORT_MAX_ROWS + 1)]
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create", json={"records": too_many}
+    )
+    assert resp.status_code == 422
+    assert (await client.get(f"/api/lists/{list_uuid}/items/")).json() == []
+
+
+async def test_bulk_create_ignores_a_key_that_matches_no_column(
+    client, list_uuid, add_column
+):
+    """Same forgiveness a hand-made file gets: an unknown header is skipped rather
+    than refused, so a body assembled from a wider source still imports."""
+    name, _ = await _seed(client, list_uuid, add_column)
+    resp = await client.post(
+        f"/api/lists/{list_uuid}/items/bulk-create",
+        json={"records": [{"name": "Ann", "nope": "ignored"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"created": 1, "errors": []}
+    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    assert items[0]["data"][name] == "Ann"
+    # Ignored means *nothing stored*, not stored under some other key. Asserted
+    # against the values rather than the keys because a record also carries the
+    # four default columns every list is provisioned with.
+    assert "ignored" not in items[0]["data"].values()

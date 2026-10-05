@@ -203,7 +203,7 @@ All settings are read from `.env` (see `src/core/config.py`).
 | `FIRST_SUPERUSER_PASSWORD` | `changeme` | Bootstrap user password. |
 | `PURGE_DELETED_AFTER_DAYS` | `30` | How long a deleted record is recoverable before the purge job may destroy it. A policy decision, not a tuning knob; `archived_at` is unaffected by it. |
 | `FORMULA_INLINE_MAX_RECORDS` | `5000` | Above this many records, re-indexing a list's `calculated` columns is handed to a background task and the request answers at once. It decides *who waits*, never how much work is done. |
-| `IMPORT_MAX_ROWS` | `1000` | Rows one uploaded file may carry — read by both the list importer and the user batch importer. Checked before anything is written, so an over-limit file imports nothing. |
+| `IMPORT_MAX_ROWS` | `1000` | Rows one import may carry — read by the list importer, the user batch importer, and `items/bulk-create`. Checked before anything is written, so an over-limit file imports nothing. The JSON-body route also publishes it as a `max_length`, so an over-long array is a 422 rather than the upload's worded 400. |
 | `MAX_UPLOAD_BYTES` | `8388608` | What an uploaded **file** may weigh. Checked by the import routes, which answer 400 with a message naming the limit. The file is read whole and a JSON one parsed whole again, so the real ceiling is instance memory. |
 | `MAX_REQUEST_BYTES` | `12582912` | What the process will buffer for **any** request body, enforced by `BodySizeLimitMiddleware` as a 413. Nothing bounded a JSON body before: `ListItemCreate.data` is a `dict` to Pydantic and a `text` column's `max_length` is unset by default, so one request could buffer, parse, sanitise and store tens of megabytes. Deliberately **above** `MAX_UPLOAD_BYTES` — a multipart request holding a file exactly at that limit is a body slightly over it, so equal values would make this backstop reject uploads the route was about to accept, with the worse message. |
 | `BULK_DELETE_MAX` | `500` | Records one bulk delete may name. Also a *published* limit — it reaches the OpenAPI schema, and the SPA keeps its own copy to chunk against, so lowering it needs `BULK_DELETE_MAX` in `ListDetailPage.tsx` changed first. |
@@ -247,7 +247,7 @@ the single-instance assumption the counters rest on.
 | Views | `…/lists/{list_uuid}/views` CRUD |
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
 | Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=&filters=` (every metric's value, in one pass, over the records the caller can see through that view) |
-| Import/export | `POST …/lists/{list_uuid}/export`, `POST …/lists/{list_uuid}/import` — CSV or JSON, keyed by column **name** |
+| Import/export | `POST …/lists/{list_uuid}/export`, `POST …/lists/{list_uuid}/import` — CSV or JSON, keyed by column **name**; `POST …/items/bulk-create` — the same import from a JSON body instead of an upload, for a client that has records rather than a file |
 | Live records | `GET …/lists/{list_uuid}/events` — an SSE stream that says *something changed* and carries no record data; `503` when `SSE_ENABLED` is false |
 | Permissions | `/api/permissions/grants` CRUD; `GET /api/permissions/effective` and its `POST` batch form (what the caller may do, which is how the UI decides what to render) |
 | Geocode | `GET /api/geocode` — address search for `location` columns. It never fails: an unconfigured or unreachable geocoder answers `available: false` with a sentence |

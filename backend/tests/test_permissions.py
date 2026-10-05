@@ -818,6 +818,43 @@ async def test_http_bulk_delete_skips_records_the_caller_cannot_delete(
         assert [row["uuid"] for row in remaining] == [uuids[1]]
 
 
+@pytest.mark.parametrize(
+    "actions, expected",
+    [
+        ([Action.view], 403),
+        # `create` alone is not enough, and that is the upload route's rule rather
+        # than a new one: a record can carry a reference that resolves against rows
+        # the caller has to be able to write.
+        ([Action.view, Action.create], 403),
+        ([Action.view, Action.create, Action.edit], 200),
+    ],
+)
+async def test_http_bulk_create_needs_create_and_edit_on_the_list(
+    make_client, session_factory, actions, expected
+):
+    async with session_factory() as db:
+        owner, other, _, lst = await _fixture_world(db)
+        await PermissionService.upsert_grant(
+            db,
+            owner,
+            GrantCreate(
+                resource_type=ResourceType.list,
+                resource_uuid=lst.uuid,
+                user_uuid=other.uuid,
+                actions=actions,
+            ),
+        )
+        await db.commit()
+        list_uuid = str(lst.uuid)
+
+    async with make_client(other) as client:
+        resp = await client.post(
+            f"/api/lists/{list_uuid}/items/bulk-create",
+            json={"records": [{}]},
+        )
+        assert resp.status_code == expected, resp.text
+
+
 async def test_http_effective_batch(make_client, session_factory):
     """The batch endpoint backs the UI's per-row control gating: one call must
     return the caller's actions per resource, mixing inherited and direct grants."""

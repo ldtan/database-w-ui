@@ -47,7 +47,17 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Refresh Access Token */
+        /**
+         * Refresh Access Token
+         * @description Trade a refresh token for a new access token.
+         *
+         *     Throttled by address. A refresh token is a bearer credential like any other and
+         *     this route is unauthenticated by construction, so without a limit it is an
+         *     unbounded guessing surface — and, since each attempt is a database lookup on the
+         *     single instance, a cheap way to make the app do work. Keyed on the address alone
+         *     because there is no username here to key on; the check runs *before* the lookup,
+         *     for the reason login's does.
+         */
         post: operations["refresh_access_token_api_auth_tokens_refresh_post"];
         delete?: never;
         options?: never;
@@ -80,6 +90,13 @@ export interface paths {
          *     Answers 204 whether or not the token existed. A caller signing out has nothing to
          *     do with either answer, and distinguishing them would turn this into an oracle for
          *     whether a stolen token is still live.
+         *
+         *     Shares `/refresh`'s address bucket for admission, but records nothing into it —
+         *     it *cannot*, because it deliberately does not know whether the token was real,
+         *     and counting every sign-out as a failure would throttle the ordinary case. What
+         *     the shared bucket buys is that an address which has just spent its budget
+         *     guessing at `/refresh` cannot carry on hammering the sibling route that takes
+         *     the same input.
          */
         post: operations["revoke_refresh_token_api_auth_tokens_revoke_post"];
         delete?: never;
@@ -648,6 +665,10 @@ export interface paths {
          *     the same gate `create_list` applies. Columns get new uuids and every reference to
          *     them (record data keys, primary column, view/form configs) is remapped; grants
          *     are not copied, so the clone starts private like any new list.
+         *
+         *     Copying the records is a read of them, so `clone` takes the caller and applies
+         *     the per-record filter — 'view' on the list does not reach a record whose
+         *     inheritance was broken and which was never granted to them.
          */
         post: operations["clone_list_api_lists__list_uuid__clone_post"];
         delete?: never;
@@ -1081,6 +1102,46 @@ export interface paths {
         put?: never;
         /** Bulk Archive Items */
         post: operations["bulk_archive_items_api_lists__list_uuid__items_bulk_archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/lists/{list_uuid}/items/bulk-create": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bulk Create Items
+         * @description Create many records from one JSON body. Rows are keyed by column **name**.
+         *
+         *     The import path without the file. `POST /lists/{uuid}/import` already accepts
+         *     JSON, but only wrapped in a multipart upload — so a script with records in hand
+         *     had to either synthesise a CSV or loop `POST /items/`, one request and several
+         *     round trips per record. This is for that caller; the UI keeps uploading files.
+         *
+         *     It is a thin router over `import_records` on purpose, not a second
+         *     implementation. Everything a file gets, a body gets: per-type coercion
+         *     (`1:30` as a duration, `a;b` split for a `multiple` column), lookup and
+         *     principal cells resolved from *labels* under this caller's permissions, the
+         *     per-row savepoint so one bad row never sinks the batch, and the periodic
+         *     commit. Two parsers for one vocabulary is how the export and import drifted
+         *     once before (see `_parse_cell`), and there is no reason to open that again.
+         *
+         *     `create` **and** `edit`, matching the upload route: naming an existing
+         *     `unique` value is a conflict rather than an update, but a row can carry a
+         *     reference that resolves against records this caller must be able to write.
+         *
+         *     Rows are numbered by position from 1, so `errors[].row` points at an index in
+         *     the array the caller sent rather than at a line in a file nobody uploaded.
+         */
+        post: operations["bulk_create_items_api_lists__list_uuid__items_bulk_create_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1835,6 +1896,30 @@ export interface components {
             /** Archived */
             archived: number;
         };
+        /**
+         * BulkCreateRequest
+         * @description Records to create, as objects of column **name** to value.
+         *
+         *     The same shape a JSON import file carries, which is the point: this is the
+         *     import without the multipart envelope, for a client that has records in hand
+         *     rather than a file to upload. It goes through `import_records` unchanged, so
+         *     the coercion a file gets — `1:30` as a duration, `a;b` split for a `multiple`
+         *     column, a lookup cell given as a *label* — is the coercion a body gets, and
+         *     there is no second parser to keep in step.
+         *
+         *     ``max_length`` rather than only `import_records`' own check, which stays as
+         *     the authority for the upload route. A JSON array can be measured by the schema
+         *     before anything is read, so the limit is published in the OpenAPI document and
+         *     costs nothing to enforce; an over-long body is a 422 here where an over-long
+         *     *file* is the 400 the route words itself. Total body size is bounded
+         *     separately and bluntly by `MAX_REQUEST_BYTES`.
+         */
+        BulkCreateRequest: {
+            /** Records */
+            records?: {
+                [key: string]: unknown;
+            }[];
+        };
         /** BulkDeleteRequest */
         BulkDeleteRequest: {
             /** Uuids */
@@ -2235,8 +2320,11 @@ export interface components {
              * Format: uuid
              */
             column_uuid: string;
-            /** Operator */
-            operator: string;
+            /**
+             * Operator
+             * @enum {string}
+             */
+            operator: "is" | "eq" | "=" | "is_not" | "neq" | "!=" | "contains" | "does_not_contain" | "is_empty" | "is_not_empty" | ">" | ">=" | "<" | "<=" | "gt" | "gte" | "lt" | "lte";
             /** Value */
             value?: unknown;
         };
@@ -5194,6 +5282,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkArchiveResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    bulk_create_items_api_lists__list_uuid__items_bulk_create_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BulkCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportSummary"];
                 };
             };
             /** @description Validation Error */

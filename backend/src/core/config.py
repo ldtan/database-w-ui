@@ -71,15 +71,18 @@ class Settings(BaseSettings):
     GEOCODE_MIN_INTERVAL_SECONDS: float = 1.0
     GEOCODE_TIMEOUT_SECONDS: float = 5.0
 
-    # How many rows one import may carry — the list importer and the user batch
-    # importer both read this. A policy decision rather than a tuning knob: every row
-    # is validated and inserted through the ordinary service, several round trips
-    # apiece, so what this really sets is how long one import may occupy the single
-    # worker. Someone whose spreadsheets are routinely larger has a fair reason to
-    # raise it and no need to read the code to decide.
+    # How many rows one import may carry — the list importer, the user batch importer
+    # and `items/bulk-create` all read this. A policy decision rather than a tuning
+    # knob: every row is validated and inserted through the ordinary service, several
+    # round trips apiece, so what this really sets is how long one import may occupy
+    # the single worker. Someone whose spreadsheets are routinely larger has a fair
+    # reason to raise it and no need to read the code to decide.
     #
-    # Both importers check it before writing anything, so whatever it is set to, a
-    # file over the limit imports nothing rather than part of itself.
+    # Every importer checks it before writing anything, so whatever it is set to, an
+    # over-limit import writes nothing rather than part of itself. `bulk-create` also
+    # declares it as a `max_length`, which means that one route's limit is fixed at
+    # process start and published in the OpenAPI document — a monkeypatch in a test
+    # moves the runtime check but not the schema's.
     IMPORT_MAX_ROWS: int = 1_000
 
     # What an uploaded file may weigh. Belongs to the instance rather than to the

@@ -13,6 +13,8 @@ from src.permissions.services import PermissionService
 
 from ..dependencies import filter_param, resolve_list_or_404
 from ..models import List
+from ..transfer.schemas import BulkCreateRequest, ImportSummary
+from ..transfer.services import import_records
 from .schemas import (
     ArchivedListItemRead,
     BulkArchiveRequest,
@@ -282,6 +284,50 @@ async def bulk_archive_items(
     ]
     archived = await ListItemService.bulk_archive(db, lst, permitted)
     return {"archived": archived}
+
+
+@router.post("/bulk-create", response_model=ImportSummary)
+async def bulk_create_items(
+    payload: BulkCreateRequest,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create many records from one JSON body. Rows are keyed by column **name**.
+
+    The import path without the file. `POST /lists/{uuid}/import` already accepts
+    JSON, but only wrapped in a multipart upload — so a script with records in hand
+    had to either synthesise a CSV or loop `POST /items/`, one request and several
+    round trips per record. This is for that caller; the UI keeps uploading files.
+
+    It is a thin router over `import_records` on purpose, not a second
+    implementation. Everything a file gets, a body gets: per-type coercion
+    (`1:30` as a duration, `a;b` split for a `multiple` column), lookup and
+    principal cells resolved from *labels* under this caller's permissions, the
+    per-row savepoint so one bad row never sinks the batch, and the periodic
+    commit. Two parsers for one vocabulary is how the export and import drifted
+    once before (see `_parse_cell`), and there is no reason to open that again.
+
+    `create` **and** `edit`, matching the upload route: naming an existing
+    `unique` value is a conflict rather than an update, but a row can carry a
+    reference that resolves against records this caller must be able to write.
+
+    Rows are numbered by position from 1, so `errors[].row` points at an index in
+    the array the caller sent rather than at a line in a file nobody uploaded.
+    """
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.create
+    )
+    await PermissionService.require(
+        db, current_user, ResourceType.list, lst.id, Action.edit
+    )
+    rows = ((i, record) for i, record in enumerate(payload.records, start=1))
+    try:
+        return await import_records(db, lst, rows, user=current_user)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
 
 
 @router.get("/{uuid}", response_model=ListItemRead)
