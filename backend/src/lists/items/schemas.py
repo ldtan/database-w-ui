@@ -27,6 +27,40 @@ class BulkDeleteResult(BaseModel):
     deleted: int
 
 
+class QrPayloadRequest(BaseModel):
+    """Which records to build QR payloads for, and what goes in them."""
+
+    # Same cap and the same knob as every other bulk body: a sheet of badges is a bulk
+    # read, and there is no reason for it to disagree with the writes about how many
+    # records one request may name. The frontend chunks against its mirror of it.
+    item_uuids: list[UUID] = Field(
+        default_factory=list, max_length=settings.BULK_DELETE_MAX
+    )
+    # Column **names**, not uuids — the same key an export's `columns` takes and the same
+    # key the payload itself is written under, so one vocabulary covers the request, the
+    # code, and the import that reads the code back.
+    #
+    # An unknown name is **ignored rather than refused** (`_ordered_columns` drops it).
+    # A saved selection outlives the columns it names: renaming or deleting one should
+    # quietly stop it appearing on the badge, not make every badge un-printable until
+    # somebody edits a setting they have never seen.
+    columns: list[str] = Field(default_factory=list)
+    # Whether to include the record's own uuid, under `_uuid`. On by default: a badge that
+    # cannot say which record it belongs to is only a label.
+    include_uuid: bool = True
+
+
+class QrPayload(BaseModel):
+    """One record's QR payload.
+
+    `item_uuid` is echoed outside `payload` as well as (usually) inside it, because the
+    caller needs to match a code to the row it came from even when `include_uuid` is off.
+    """
+
+    item_uuid: UUID
+    payload: dict
+
+
 class BulkArchiveRequest(BaseModel):
     # Same cap as a bulk delete, and the same knob: both do one UPDATE over the
     # uuids given, so there is no reason for the two to disagree about how many is

@@ -124,9 +124,9 @@ host:
   unfinished, behavior that surprises people, and the traps waiting for whoever edits the
   code next. **Read before touching permissions, theming, the schema, or any control the
   guide and the in-app tours describe by name.**
-- [Planned features](docs/planned-features.md) — nine asked-for capabilities: list
+- [Planned features](docs/planned-features.md) — ten asked-for capabilities: list
   transfer, cross-workspace moves, cloning, nested and cross-workspace lookups, live
-  records, metrics, and column type conversion (including duplicating a column) are
+  records, metrics, QR codes for records, and column type conversion (including duplicating a column) are
   built; copying into an *already existing* column is not. What exists to build on, the
   load-bearing details, and the decisions still open.
 - [Capacity and performance](docs/capacity-and-performance.md) — what the app costs to

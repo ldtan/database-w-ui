@@ -248,6 +248,7 @@ the single-instance assumption the counters rest on.
 | Forms | `…/lists/{list_uuid}/forms` CRUD |
 | Metrics | `…/lists/{list_uuid}/metrics` CRUD; `…/metrics/values?view_uuid=&q=&filters=` (every metric's value, in one pass, over the records the caller can see through that view) |
 | Import/export | `POST …/lists/{list_uuid}/export`, `POST …/lists/{list_uuid}/import` — CSV or JSON, keyed by column **name**; `POST …/items/bulk-create` — the same import from a JSON body instead of an upload, for a client that has records rather than a file |
+| QR payloads | `POST …/lists/{list_uuid}/items/qr` — the JSON each named record's QR code should carry, keyed by column **name** like an export, plus the record's id under `_uuid`. Capped by `BULK_DELETE_MAX`; a record the caller cannot see is omitted. See below |
 | Live records | `GET …/lists/{list_uuid}/events` — an SSE stream that says *something changed* and carries no record data; `503` when `SSE_ENABLED` is false |
 | Permissions | `/api/permissions/grants` CRUD; `GET /api/permissions/effective` and its `POST` batch form (what the caller may do, which is how the UI decides what to render) |
 | Geocode | `GET /api/geocode` — address search for `location` columns. It never fails: an unconfigured or unreachable geocoder answers `available: false` with a sentence |
@@ -269,6 +270,41 @@ Creating a list requires a `workspace_uuid` (owned by the caller) in the body; t
 collection can be filtered with `?workspace_uuid=…`. Child resources are scoped under a
 list; the `get_list_or_404` dependency resolves the list through its workspace and enforces
 ownership, so an unowned list (and all its children) returns `404`.
+
+### QR payloads (`POST /lists/{uuid}/items/qr`)
+
+The JSON a record's QR code should carry. The frontend encodes it; the server decides what
+is in it, which is the part worth explaining.
+
+**It shares `json_row` with the export, and that is the feature.** A code this app generates
+is meant to be scannable back by "Fill using QR code", so its values have to be the ones
+`_parse_cell` reads. That means resolving a reference cell to the label an export writes —
+which needs the database and the caller's permissions on the *target* list, and differs
+subtly from what the screen shows (a group displays its `display_name` and exports its slug
+`name`). Building the payload in the browser from the grid's own labels would therefore have
+produced codes that do not import. One function, two callers, and
+`tests/test_item_qr.py::test_the_payload_matches_what_the_json_export_writes` is what keeps
+it that way.
+
+Three details that are decisions rather than mechanics:
+
+- **`_uuid` is the record's own id**, and the underscore makes the key collision-proof: a
+  column `name` is a `NameSlug` and cannot start with one, where a plain `uuid` *is* a legal
+  column name and would have been overwritten silently. `qrFill.ts` skips `_`-prefixed keys
+  without reporting them.
+- **An empty `columns` means *no* columns here, where it means *every* column to an export.**
+  Asking for a file with nothing named is asking for the data; asking for a badge with
+  nothing named is asking for a code that only identifies the record — which is a sensible
+  badge, and the only safe default. Inheriting "all" would put the four audit columns on
+  every badge and overrun what a code can hold.
+- **An unknown column name is ignored**, so a saved field choice outlives the columns it
+  names: renaming one quietly drops it off the badge instead of making every badge
+  un-printable.
+
+Which fields a list's codes carry is stored in `lists.settings.qr` (column **names**, so a
+clone keeps them without remapping). That blob is free-form by design, so it is validated
+*per known key* — `qr` is strict, everything else passes through — and `PATCH /lists/{uuid}`
+**merges** `settings` rather than replacing it, which it did not before anything wrote to it.
 
 ### Batch account creation (`POST /api/auth/users/import`)
 

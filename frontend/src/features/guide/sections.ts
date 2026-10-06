@@ -24,7 +24,7 @@ export const SECTIONS: { id: string; title: string }[] = [
   { id: "records", title: "Step 4 · Add records" },
   { id: "nested-lookups", title: "Linked columns that narrow each other" },
   { id: "formulas", title: "Calculated columns: writing a formula" },
-  { id: "qr", title: "Add records with a QR code" },
+  { id: "qr", title: "QR codes: scan records in, print badges out" },
   { id: "find", title: "Find records: search, sort, group, filter" },
   { id: "views", title: "Views: saved ways of looking" },
   { id: "forms", title: "Forms: shape the entry screen" },

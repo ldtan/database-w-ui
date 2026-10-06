@@ -14,7 +14,7 @@ from src.permissions.services import PermissionService
 from ..dependencies import filter_param, resolve_list_or_404
 from ..models import List
 from ..transfer.schemas import BulkCreateRequest, ImportSummary
-from ..transfer.services import import_records
+from ..transfer.services import import_records, qr_payloads
 from .schemas import (
     ArchivedListItemRead,
     BulkArchiveRequest,
@@ -31,6 +31,8 @@ from .schemas import (
     ListItemCreate,
     ListItemRead,
     ListItemUpdate,
+    QrPayload,
+    QrPayloadRequest,
 )
 from .services import ListItemService
 
@@ -245,6 +247,43 @@ async def bulk_delete_items(
     ]
     deleted = await ListItemService.bulk_delete(db, lst, permitted)
     return {"deleted": deleted}
+
+
+@router.post("/qr", response_model=list[QrPayload])
+async def item_qr_payloads(
+    payload: QrPayloadRequest,
+    lst: List = Depends(resolve_list_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """The JSON each record's QR code should carry.
+
+    **The server builds the payload, not the client**, and that is the whole point of the
+    route. A code this app generates is meant to be scannable *back* by "Fill using QR
+    code", which means its values have to be the ones `_parse_cell` reads — which means
+    resolving a reference cell to the label an export writes. That resolution needs the
+    database and the caller's permissions on the *target* list, and it differs subtly from
+    what the screen shows (a group displays its `display_name` and exports its slug), so a
+    client building the payload from the grid would produce codes that do not round-trip.
+    `qr_payloads` shares `json_row` with the export for exactly that reason.
+
+    Declared **above `/{uuid}`** along with the other non-uuid routes. A literal path
+    segment and a uuid parameter compete for the same slot, and this project has already
+    lost that race once — `/metrics/values` was shadowed by `/{uuid}`, making a metric
+    named `values` permanently unreachable (data-model §D6).
+
+    No list-level `view` check, like every route on this router: an item can be shared
+    directly. `qr_payloads` applies `item_view_filter` per record and omits what the caller
+    cannot see, so a sheet of badges is the records they can read and no more.
+    """
+    return await qr_payloads(
+        db,
+        lst,
+        current_user,
+        payload.item_uuids,
+        payload.columns,
+        include_uuid=payload.include_uuid,
+    )
 
 
 @router.get("/archived", response_model=list[ArchivedListItemRead])

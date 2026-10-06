@@ -100,6 +100,13 @@ const QrSubmitSession = lazy(() =>
     default: m.QrSubmitSession,
   })),
 );
+// Generating codes is the other half of the same story and splits for the same reason:
+// the *encoder* is its own ~10 kB, which `lib/qr.ts` already imports dynamically — but
+// loading this dialog eagerly would still pull the picker and its query in for every
+// session that never prints a badge.
+const QrCodeDialog = lazy(() =>
+  import("../records/QrCodeDialog").then((m) => ({ default: m.QrCodeDialog })),
+);
 
 /**
  * A list's records, and everything you do to them.
@@ -175,6 +182,10 @@ export function ListDetailPage() {
   // are taking attendance for. Deliberately not persisted any further than that:
   // it is the answer to "what is happening right now", not a setting.
   const [qrPresets, setQrPresets] = useState<Record<string, unknown>>({});
+  // The records a QR dialog is open over: one from a row action, or the selection from
+  // the bar. One piece of state for both, because the dialog is one dialog — a sheet of
+  // forty and a sheet of one differ only in layout. Empty means closed.
+  const [qrItems, setQrItems] = useState<ListItem[]>([]);
 
   const [activeViewUuid, setActiveViewUuid] = useState<string | null>(null);
   const [sortField, setSortField] = useState<string | undefined>(undefined);
@@ -194,9 +205,16 @@ export function ListDetailPage() {
   // everyone and needed `configure` to ask.
   const [filters, setFilters] = useState<FilterGroup>(EMPTY_FILTER);
   // Starts hidden, and is page state like the rest of this bar rather than
-  // something saved: the app has no per-list UI preferences to hang it on, and
-  // reaching for localStorage or the view config for one boolean would be the
-  // first of those rather than a use of one.
+  // something saved: whether the strip is showing is how you are working right now,
+  // not a property of the list.
+  //
+  // `lists.settings` does now hold one saved per-list thing — `settings.qr`, the fields
+  // a printed QR code carries — so the old form of this note ("the app has no per-list
+  // UI preferences to hang it on") is no longer true as stated. The distinction that
+  // matters is still the one it was reaching for: that key describes a *printed
+  // artifact*, the same kind of thing a view or a form is, where this boolean describes
+  // a person's current screen. Reaching for the blob to remember a toggle would still
+  // be the first of those.
   const [showMetrics, setShowMetrics] = useState(false);
   // "Edit cells": the grid's values become editable in place, and a row can be
   // added at the foot of it. Page state for the same reason `showMetrics` is — it
@@ -1462,6 +1480,7 @@ export function ListDetailPage() {
           onView={viewForm ? (item) => setViewItem(item) : undefined}
           onEdit={(item) => setRecordDialog({ open: true, item })}
           onShare={(item) => setSharingItem(item)}
+          onQr={(item) => setQrItems([item])}
           onDelete={confirmDeleteItem}
         />
       ) : (
@@ -1789,6 +1808,18 @@ export function ListDetailPage() {
                     onClick: () => setSharingItem(row),
                   },
                   {
+                    key: "qr",
+                    icon: "pi pi-qrcode",
+                    label: "QR code",
+                    // No gate. Generating a code is a *read* of a record, and the row
+                    // is only on screen because the caller may read it — so there is
+                    // nothing left to check. The server re-applies `item_view_filter`
+                    // when it builds the payload regardless, which is what actually
+                    // enforces it; `visible` here is about offering an action that
+                    // would work, and this one always does.
+                    onClick: () => setQrItems([row]),
+                  },
+                  {
                     key: "archive",
                     icon: "pi pi-box",
                     label: "Archive record",
@@ -1823,6 +1854,17 @@ export function ListDetailPage() {
             {selection.length} selected
           </span>
           <span className="toolbar-divider" aria-hidden />
+          {/* The first non-destructive action in this bar, and first on purpose: it is
+              what somebody selecting forty rows most often means to do with them, and
+              it reads better next to "N selected" than between Archive and Delete.
+              Ungated for the same reason the row action is — printing is a read. */}
+          <Button
+            label="QR codes"
+            icon="pi pi-qrcode"
+            text
+            size="small"
+            onClick={() => setQrItems(selection)}
+          />
           {deletableSelection.length > 0 && (
             <>
               {/* Archive first, and not in danger red: of the two ways to clear a
@@ -1932,6 +1974,22 @@ export function ListDetailPage() {
             presets={qrPresets}
             onPresetsChange={setQrPresets}
             onHide={() => setQrMode(null)}
+          />
+        )}
+        {qrItems.length > 0 && (
+          <QrCodeDialog
+            listUuid={listUuid}
+            // The list object carries `settings.qr`, the saved field choice.
+            lst={list.data}
+            // `cols` (the view's visible columns) would be wrong: what a badge carries is
+            // a property of the list, not of whichever view happens to be open, and a
+            // saved selection must not quietly lose a field because a column is hidden
+            // on screen.
+            columns={columns.data ?? []}
+            items={qrItems}
+            canConfigure={listActions.has("configure")}
+            visible
+            onHide={() => setQrItems([])}
           />
         )}
       </Suspense>

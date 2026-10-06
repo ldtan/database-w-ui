@@ -41,6 +41,30 @@ type Response<T> = { [K in keyof T]-?: T[K] };
 export type ResourceLink = Response<Schemas["ResourceLink"]>;
 export type Workspace = Response<Schemas["WorkspaceRead"]>;
 export type ListRead = Response<Schemas["ListRead"]>;
+/** The keys of `lists.settings` this build reads.
+ *
+ *  Hand-written for the same reason `ColumnConfig` is: the backend types `settings` as a
+ *  free-form blob (`{[key: string]: unknown}`) because it *is* one — only the keys the app
+ *  understands are validated server-side, and stripping the rest on read would destroy
+ *  them on the next write. So the generated type cannot narrow this, and this is the
+ *  frontend's own claim about it.
+ *
+ *  Every field optional, because a list that has never been configured has none of them.
+ *  Read it through `listSettings()` rather than casting at each call site. */
+export interface ListSettings {
+  /** Which fields a record's QR code carries. Columns are **names** — the payload's own
+   *  key, and what makes the setting survive a clone. */
+  qr?: {
+    columns?: string[];
+    include_uuid?: boolean;
+  };
+  [key: string]: unknown;
+}
+
+/** A list's settings, typed. The cast lives here once rather than at each reader. */
+export function listSettings(lst: ListRead | undefined): ListSettings {
+  return (lst?.settings ?? {}) as ListSettings;
+}
 export type ListItem = Response<Schemas["ListItemRead"]>;
 // A record in the bin: a ListItem plus when it was deleted.
 export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
