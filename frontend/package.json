@@ -25,7 +25,7 @@
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "libphonenumber-js": "^1.13.11",
-    "primeicons": "^7.0.0",
+    "primeicons": "^8.0.0",
     "primereact": "^10.9.2",
     "qrcode": "^1.5.4",
     "quill": "^2.0.3",
