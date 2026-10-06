@@ -1,12 +1,12 @@
 # Planned features
 
-Nine capabilities that have been asked for. Each section says what it is, what already
+Ten capabilities that have been asked for. Each section says what it is, what already
 exists to build on, the load-bearing implementation details, and the decisions still
 open. The heading of each says where it stands, and where a section shipped narrower than
 it was scoped, it says what was left out. Only §2 is still partly unbuilt: duplicating a
 column ships, copying into an **already existing** column does not.
 
-These share two roots in the existing model, so read them once here rather than nine times below:
+These share two roots in the existing model, so read them once here rather than ten times below:
 
 - **Records are JSONB keyed by column `uuid`** (data-model D2). A rename is free because the
   key never changes; a **type change, a data copy, or a clone is not free**, because it touches
@@ -712,13 +712,88 @@ chain is topologically sorted and its cycles refused at save time, while a metri
   (badged with how many the list has, so a hidden strip is distinguishable from a list with
   none). `visible` gates the *query*, not just the markup, which is what stops every open
   list from running a repeating full scan on the live interval. Page state, like the rest of
-  that bar — the app has no per-list UI preferences to persist it in.
+  that bar: whether the strip is showing is how somebody is working right now, not a
+  property of the list. (This used to read "the app has no per-list UI preferences to
+  persist it in", which stopped being true when `lists.settings.qr` arrived with §10 — but
+  the distinction it was reaching for stands. That key describes a *printed artifact*, the
+  same kind of thing a view or a form is; a toggle's position is not one.)
 
 **Deliberately not built:** per-group subtotals (a view's `group_by` is a sort, not a
 `GROUP BY`, and the strip sits above the grid), standalone metric sharing (no
 `permissions_inherit`, so no new `ResourceType`), a SQL fast path, and any caching. See
 [known gaps §9](known-gaps.md).
 
+---
+
+## 10. QR codes for records (generating them) — **implemented**
+
+Pick which columns go into a record's QR code, get a code per record, print a sheet of them.
+
+**The half that already existed.** The app could *read* a code since the submitting session
+shipped (§8's sibling, documented in `frontend/README.md`): one QR holding a JSON object
+keyed by **column name** — the same key a CSV import uses — becomes a record. The
+motivating case was attendance, where "a badge's code says *who* someone is". Nothing wrote
+those badges, so producing them meant hand-authoring JSON per person. This closes the loop,
+and the format was therefore *already specified* by the code that reads it: a generator had
+a target to hit rather than a convention to invent.
+
+**The payload is built server-side, and that is the design.** `POST /lists/{uuid}/items/qr`
+returns the JSON each code should hold. It would have been less work to build it in the
+browser — the grid already resolves lookup and principal labels for display — and it would
+have been wrong: a code's values have to be the ones `_parse_cell` reads back, and the
+screen's label rules are not quite the export's (a group shows its `display_name` and
+exports its slug `name`). So the route shares `json_row` with `export_rows`, which makes
+"a generated code round-trips through import" a property of one implementation rather than
+an agreement between two that could quietly lapse. `tests/test_item_qr.py` asserts the
+payload equals a JSON export of the same columns, which is the test that would catch a
+reimplementation.
+
+**One reserved key, `_uuid`.** The record's own id, so a code identifies the record it came
+from rather than only describing it. Not `uuid`: a column `name` is a `NameSlug`, so `uuid`
+is a *legal column name* — a list may already have one, and the record id landing on that
+key would overwrite the column's value undetectably. A leading underscore cannot be a column
+name, which makes `_` the metadata namespace and the collision impossible rather than
+unlikely. `qrFill.ts` skips `_`-prefixed keys **silently**, because reporting them would put
+a spurious "there is no such field" on every scan of every generated code.
+
+**One input read two opposite ways, deliberately.** An empty `columns` means *every* column
+to an export and *no* columns to a QR payload. Asking for a file with nothing named is
+asking for the data; asking for a badge with nothing named is asking for a code that
+identifies the record and says nothing else — which is a sensible badge, and the only safe
+default. Inheriting "all" would put the four audit columns on every badge and blow the size
+budget a code actually has. `qr_payloads` short-circuits rather than passing an empty list
+to `_ordered_columns`.
+
+**Size is a real constraint, not a footnote.** A code's capacity is ~2,331 bytes at the
+error-correction level used, and the encoder throws past it — but the *useful* limit is
+lower and is about density, not capacity: a version-40 symbol is 177x177 modules and will
+not scan off a printed badge with a phone. So `lib/qr.ts` reports the version the encoder
+chose, the dialog warns from version 16 (81x81) and turns an overflow into "remove a
+column — a long text column is usually the cause". The column picker sits in the same
+dialog because it is the fix.
+
+**The field choice is saved on the list**, in `lists.settings.qr`. It describes a printed
+artifact, so every badge for a list should carry the same fields; re-picking per print is
+how two batches come out disagreeing. Two things had to change for that blob to be safe to
+write, and both were latent bugs rather than new work:
+
+- **`settings` now merges instead of replacing.** `ListService.update` did a plain
+  `setattr`, so the first writer of any one key would have wiped every other. Nothing wrote
+  it at all before this, which made now the moment to fix it rather than the moment after
+  something was lost.
+- **The `qr` key is validated** (`extra="forbid"`), so a mistyped field is a 422 rather than
+  a setting that silently never takes effect — the rule `UserSettingsUpdate` already
+  states. Every other key stays free-form: validating a blob per *known* key is what lets it
+  go on being a blob.
+
+Columns are stored by **name**, which is what makes a clone work: `clone` deep-copies
+`settings` and a clone keeps every column name, where uuids would need remapping through
+`col_map` as a view's config does.
+
+**Deliberately not built:** a URL-mode code (scan with a phone camera, the record opens) —
+a useful shape, and `_uuid` is the piece that would make it possible; a configurable caption
+on the sheet (it is the first selected field's value); and server-side image rendering,
+which would want Pillow on a 512 MB instance to draw something the browser already can.
 ---
 
 ## How these compose
@@ -733,6 +808,12 @@ chain is topologically sorted and its cycles refused at save time, while a metri
 - **8** stands alone and touches none of the data-shape work; its one shared idea is the
   permission boundary — a live signal never carries record data, so every client re-reads
   through the endpoint that already enforces `item_view_filter`.
+- **10** is the only one that composes with the *import*, and it is the one place in the app
+  where two features are wired together by a shared function rather than by a convention: a
+  generated code and a JSON export are the same bytes because they are the same `json_row`,
+  which is what makes a printed badge scannable back into a record. It also reaches **8**'s
+  sibling from the other end — the submitting session reads the codes this writes — so the
+  payload format was specified before the generator existed.
 - **9** inherits that same boundary — a total is a permissioned read of the records, which
   is why it goes through the grid's own statement — and rides **8**'s polling seam, at its
   own floor, so the cards stay in step with the rows they describe without a full scan

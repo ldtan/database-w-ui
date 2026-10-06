@@ -967,6 +967,53 @@ is exactly the fallback it is designed around — or fix the interpreter's OpenS
 not "fix" it by wrapping the call in a broader `except`; there is no exception to
 catch, and the next person will waste an afternoon proving that again.
 
+## 14. A generated QR code is a payload, not a link — and four smaller things
+
+**The one people expect and do not get: scanning a generated code with a phone's camera
+shows JSON, not the record.** The camera app will offer to copy the text and nothing more,
+because the code holds `{"_uuid": …, "full_name": "Ana Cruz"}` rather than a URL. That is
+what was asked for and it is right for the badge case — the codes exist to be read by *this
+app's* scanner, which turns them into records — but it is not what somebody tapping a badge
+with their phone assumes. A URL mode is the obvious addition and `_uuid` is the piece that
+would make it possible; it is deliberately not built.
+
+**`_` is now a reserved key namespace, and that is a constraint on whoever adds the next
+payload key.** `_uuid` is safe precisely because a column `name` cannot begin with an
+underscore, so it cannot collide with a real column — where a plain `uuid` *would* have,
+silently, since `uuid` is a legal column name. Two rules follow: metadata keys must keep the
+prefix, and `qrFill.ts` skips every `_`-prefixed key **without reporting it**, so a key added
+there is invisible to the scanner rather than an error. If a future key needs to be *acted
+on* when scanned, that skip is what has to change.
+
+**One over-long payload fails the whole sheet, deliberately.** Every code in a batch carries
+the same fields, so if one record's values do not fit then the field choice is wrong for the
+list rather than for that record. Rendering thirty-nine codes and quietly omitting the
+fortieth is how somebody hands out a badge that does not exist, which is worse than being
+told to take a column off.
+
+**The size advice fires on density, not capacity, and the numbers are not the same.** A code
+holds ~2,331 bytes at the error-correction level used, but it stops being *scannable off
+paper* well before that: the module count grows with the symbol version, and a version-40
+code is 177x177 modules. At badge size those modules are finer than a phone camera resolves.
+So the warning starts at version 16 and the hard failure is much later — if somebody reports
+a code that "looks fine but will not scan", density is the thing to check, not length.
+
+**Printing is global, and the next print view has to cooperate.** `window.print()` prints the
+document, and the sheet lives in a dialog that PrimeReact portals to `<body>` — so "print
+only this" cannot be expressed structurally. The arrangement is: mark the subtree
+`[data-qr-print]`, stamp `qr-printing` on `<html>` for the duration, and let the single
+`@media print` block in `index.css` hide everything else. **A second print view must reuse
+that pattern rather than add a parallel one**, or the two blocks will each hide the other's
+content. The class is removed on `afterprint` with a timeout fallback, because a browser that
+never fires that event would otherwise leave the app blank.
+
+**`lists.settings` merges shallowly.** Sending `qr` replaces the whole `qr` object rather
+than merging into it — right, because `columns` and `include_uuid` are one answer to "what is
+on the badge" and half of one means nothing. But it does mean a client cannot patch one field
+of it, and the frontend sends both every time. Validation is also **per known key**: `qr` is
+strict (`extra="forbid"`), everything beside it stays free-form, which is what lets the blob
+go on being a blob.
+
 ## Behavior that surprises people
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers
@@ -1153,7 +1200,16 @@ after any backend schema change.**
 What it *cannot* generate is the shape of a `config`: a column's, view's and form's config is
 a `dict` to Pydantic — its contents depend on the column type and are validated per type — so
 OpenAPI says only "object". `ColumnConfig` / `ViewConfig` / `FormConfig` in `types.ts` are the
-frontend's own claim about those blobs, and are the one thing left that can quietly go stale.
+frontend's own claim about those blobs, and are what can still quietly go stale.
+
+**`ListSettings` joined them**, for a slightly different reason worth distinguishing.
+`lists.settings` is not "typed per column type" — it is a genuinely free-form bag, validated
+server-side only for the keys this build understands (`qr` today) and passed through
+otherwise, because stripping a key a newer deploy wrote would destroy it on the next write.
+So OpenAPI says "object" there and always will, and `ListSettings` is the frontend's claim
+about the keys it reads. Read it through `listSettings(lst)` rather than casting at each call
+site, so there is one place to update when a second key appears.
+Change a config's shape in the backend and nothing will tell you; change it here too.
 Change a config's shape in the backend and nothing will tell you; change it here too.
 
 The endpoints are still untyped, too: `api.get<T>(path)` takes the caller's word for both.

@@ -221,6 +221,19 @@ export async function fillFromQr(
   const issues: QrIssue[] = [];
 
   for (const [key, raw] of Object.entries(payload)) {
+    if (key.startsWith("_")) {
+      // **Payload metadata, skipped silently.** A column name cannot begin with an
+      // underscore (`NameSlug` is `^[a-z][a-z0-9_]*$`), which is what makes `_` a safe
+      // reserved namespace — and what the generator uses for `_uuid`, the record's own id
+      // (see `lib/qr.ts` and `transfer/services.py::QR_UUID_KEY`).
+      //
+      // Silently, not as an issue: reporting an unrecognised key is right for a typo in a
+      // hand-written code and wrong for a key this app wrote itself, which would put a
+      // spurious "there is no such field" on every scan of every generated code. Nothing
+      // is lost by ignoring it here — a fill creates a *new* record, so the id of the one
+      // the code came from has nothing to say about it.
+      continue;
+    }
     const field = byKey.get(key.trim().toLowerCase());
     if (!field) {
       issues.push({ key, message: "there is no such field on this form" });

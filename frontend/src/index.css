@@ -62,3 +62,137 @@ a:focus-visible {
 .row-action-danger .p-menuitem-link .p-menuitem-icon {
   color: var(--danger);
 }
+
+/* ============================================================
+   QR codes, on screen and on paper
+
+   The app's **first print stylesheet**, so the convention lives here: a print view
+   stamps `qr-printing` on <html>, marks its own subtree `[data-qr-print]`, and this
+   block hides everything else. The next print view should follow the same shape
+   rather than invent a second one.
+
+   Why a class and not structure: the sheet renders inside a PrimeReact Dialog, which
+   portals to <body> — so "the page minus the app" cannot be expressed as a selector,
+   and there is nothing to hang `display: none` on except an explicit marker. The class
+   is removed on `afterprint` (with a timeout fallback, because a browser that never
+   fires it would otherwise leave the app blank).
+   ============================================================ */
+
+/* A sheet: as many codes per row as fit, each one whole. */
+.qr-sheet {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-content: flex-start;
+}
+.qr-single {
+  display: flex;
+  justify-content: center;
+  padding: 0.5rem 0;
+}
+.qr-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  /* `avoid` on the figure, so a code is never split across two sheets of paper — the
+     one layout bug that makes a printed badge useless rather than ugly. */
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+/* White behind every code, in every theme. A QR reader needs the light modules light,
+   and in dark mode the surface behind a transparent PNG is not. */
+.qr-cell img {
+  background: #fff;
+  padding: 2px;
+  border-radius: 2px;
+}
+/* On screen the size is about *reading* the code, not about matching the paper. A single
+   code is drawn big enough to scan off a monitor — the chosen 25-50 mm is 95-190 px, and
+   the small end of that is a miserable thing to point a phone at — while a sheet shows a
+   compact preview so forty of them fit in a dialog. `--qr-size` (set by the dialog) is
+   used only by the print block below, which is the one place the millimetres are real. */
+.qr-single .qr-cell img {
+  width: 240px;
+  height: 240px;
+}
+.qr-sheet .qr-cell img {
+  width: 96px;
+  height: 96px;
+}
+.qr-caption {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.qr-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.qr-payload {
+  margin: 0;
+  padding: 0.5rem;
+  max-height: 12rem;
+  overflow: auto;
+  font-size: 0.75rem;
+  background: var(--surface-2);
+  border: var(--border-width) solid var(--border);
+  border-radius: var(--radius, 4px);
+}
+
+/* The print container. A *copy* of the codes is moved here, as a direct child of <body>,
+   for the duration of printing — see `QrCodeDialog.print()`. Off-screen otherwise. */
+#qr-print-root {
+  display: none;
+}
+
+@media print {
+  /* Hide the app, keep the codes — by `display`, and that choice is the whole lesson
+     here. The obvious approach is `visibility: hidden` on everything and `visible` on the
+     printable subtree, because visibility is the one property a descendant can turn back
+     on. That is exactly why it does not work: it is also the one property a *third party*
+     can turn back on. PrimeReact sets `visibility: visible` on `.p-button-label`, which
+     out-specifies a `body *` selector, so every button's text printed straight through a
+     hidden parent — "Settings", "Add record", "Delete selected" and the rest, scattered
+     over the page around the codes.
+
+     `display: none` on an ancestor cannot be undone by a descendant at any specificity,
+     so this cannot be re-broken by a component library's stylesheet. The cost is that the
+     printable content has to be a *sibling* of everything being hidden rather than nested
+     inside it, which is what the clone into `#qr-print-root` is for. */
+  :root.qr-printing body > *:not(#qr-print-root) {
+    display: none !important;
+  }
+  :root.qr-printing #qr-print-root {
+    display: block;
+    /* Explicitly white-on-black. Browsers drop background colours in print by default,
+       but somebody with "background graphics" enabled would otherwise get the app's grey
+       surface washed across the page and the theme's text colour on top — which in dark
+       mode is nearly white on nearly white. */
+    background: #fff;
+    color: #000;
+  }
+  /* Codes start flush in the corner otherwise. A margin is also what keeps them inside
+     most printers' unprintable edge. */
+  @page {
+    margin: 10mm;
+  }
+  /* The caption prints as real text, not muted grey — on paper there is no hierarchy to
+     signal and grey is just faint. */
+  :root.qr-printing .qr-caption {
+    color: #000;
+  }
+  /* Here the millimetres are real: `--qr-size` rides along on the cloned node's inline
+     style, and overrides the pixel sizes used on screen. A code printed at a known
+     physical size is the whole point of offering the control. */
+  :root.qr-printing .qr-cell img {
+    width: var(--qr-size, 35mm);
+    height: var(--qr-size, 35mm);
+  }
+}

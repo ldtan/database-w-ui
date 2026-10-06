@@ -1333,7 +1333,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </Callout>
       </Section>
 
-      <Section id="qr" title="Add records with a QR code">
+      <Section id="qr" title="QR codes: scan records in, print badges out">
         <p>
           If your information already lives in a QR code, you can add a record by
           scanning it instead of typing.
@@ -1406,7 +1406,60 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
             count — useful when the session changes but the queue doesn’t.
           </li>
         </ul>
-      </Section>
+
+<h3 className="font-semibold pt-1">Making the badges in the first place</h3>
+        <p>
+          The codes above have to come from somewhere, and that somewhere can be this
+          app. Any record can be turned into a QR code, and a whole batch can be printed
+          as a sheet — which is how you get a badge per person without authoring
+          anything by hand.
+        </p>
+        <ol className="flex flex-col gap-2">
+          <li>
+            For one record, open its <Ui>QR code</Ui> action (the little square-ish icon
+            on the row, or under the <Ui>⋮</Ui> menu if the row is narrow).
+          </li>
+          <li>
+            For many, tick the records you want and click <Ui>QR codes</Ui> in the bar
+            that appears at the bottom of the screen.
+          </li>
+          <li>
+            Choose which fields each code should carry, pick a printed size, and click
+            <Ui>Print</Ui>. A single code can also be saved as a picture (<Ui>PNG</Ui> or
+            <Ui>SVG</Ui>) if you want to put it somewhere else.
+          </li>
+        </ol>
+        <ul className="flex flex-col gap-1">
+          <li>
+            <strong>Fewer fields make a better code.</strong> Every field adds to what the
+            code has to hold, and a code holding more is printed with finer detail —
+            which is harder for a phone to read off paper. If you are warned that the
+            codes are dense, take a field off or print them larger. A name is usually
+            enough.
+          </li>
+          <li>
+            <strong>Record id</strong> is on by default. It is what lets a code say{" "}
+            <em>which</em> record it belongs to, which matters if something outside this
+            app will read the codes. Scanning one back in here ignores it — a scan
+            makes a new record rather than finding the old one.
+          </li>
+          <li>
+            The fields you choose are remembered <strong>for the list</strong>, so every
+            batch of badges you print comes out the same. Saving that choice needs
+            permission to configure the list; without it you can still change the fields
+            for the print in front of you.
+          </li>
+          <li>
+            A code made here can be scanned straight back in with <Ui>Fill using QR
+            code</Ui> above — which is the quickest way to check one is right.
+          </li>
+          <li>
+            Files are the one thing a code cannot carry. An attachment column puts the
+            file’s <em>name</em> on the code, and scanning that back will not bring the
+            file with it.
+          </li>
+        </ul>
+            </Section>
 
       <Section id="find" title="Find records: search, sort, group, filter">
         <p>

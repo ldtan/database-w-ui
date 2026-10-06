@@ -724,6 +724,9 @@ immutably cacheable. Against 100 GB/month that is ~85,000 first-time visits.
 list page itself, not behind a dialog — worth knowing if the entry bundle ever needs
 trimming, though at 6% it is not where the weight is.)
 
+
+
+
 The tempting "consolidation" — serving `dist/` from FastAPI with `StaticFiles` to run one
 service instead of two — is a **downgrade**. It moves work that a CDN does for free onto
 the one resource that is actually scarce, and it gives up the edge caching. The two-service

@@ -346,6 +346,23 @@ class ListService:
                 # workspace_id change on flush, leaving the list in place.
                 lst.workspace = workspace
 
+        if "settings" in data:
+            # **Merged, not replaced.** `settings` is a shared bag of misc list-level
+            # settings, so a `setattr` here — which is what this used to be — means the
+            # first writer of one key silently drops every other. Nothing wrote it at all
+            # until `settings.qr` (the QR payload's column selection), so this is the
+            # moment to fix it rather than the moment after something is lost: the rule
+            # `UserSettingsUpdate` already states, that only the keys sent are touched and
+            # a client that has never heard of a key cannot drop it.
+            #
+            # Shallow, at the top level: sending `qr` replaces the whole `qr` object rather
+            # than merging into it. That is deliberate — `columns` and `include_uuid` are
+            # one answer to "what is on the badge", and a half-sent one has no meaning.
+            #
+            # A new dict, not a mutation, so SQLAlchemy sees the JSONB change (the same
+            # reason `ListItemService.update` reassigns `item.data`).
+            data["settings"] = {**(lst.settings or {}), **(data["settings"] or {})}
+
         # Treat an explicit null name as "leave unchanged" rather than clearing it.
         if data.get("name") is None:
             data.pop("name", None)

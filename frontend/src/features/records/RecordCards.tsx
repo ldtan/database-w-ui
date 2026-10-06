@@ -40,6 +40,7 @@ interface Props {
   onView?: (item: ListItem) => void;
   onEdit: (item: ListItem) => void;
   onShare: (item: ListItem) => void;
+  onQr: (item: ListItem) => void;
   onDelete: (item: ListItem) => void;
 }
 
@@ -79,6 +80,7 @@ export function RecordCards({
   onView,
   onEdit,
   onShare,
+  onQr,
   onDelete,
 }: Props) {
   const selected = new Set(selection.map((item) => item.uuid));
@@ -198,6 +200,15 @@ export function RecordCards({
                       label: "Share record",
                       visible: can(item.uuid, "share"),
                       onClick: () => onShare(item),
+                    },
+                    {
+                      key: "qr",
+                      icon: "pi pi-qrcode",
+                      label: "QR code",
+                      // Ungated, as in the grid: generating a code is a read of a
+                      // record, and the card is on screen because the caller may read
+                      // it. The server re-checks when it builds the payload.
+                      onClick: () => onQr(item),
                     },
                     {
                       key: "delete",

@@ -18,6 +18,7 @@ React + TypeScript SPA for the lists/tables app, talking to the FastAPI backend.
 | Maps | Leaflet — the `location` picker and cell. Tiles come from the browser, with attribution; address *search* goes through the API's `/geocode` |
 | Phone numbers | `libphonenumber-js` — the counterpart of the backend's `phonenumbers`, so what is shown agrees with what was accepted. **Update the two together.** |
 | QR scanning | html5-qrcode (camera, with an image fallback) |
+| QR generation | qrcode (dynamically imported — see "QR codes") |
 | Tests | Vitest (node environment, no jsdom — see below) + Playwright, which drives the guide's screenshot capture |
 | API types | `openapi-typescript` (generate from the backend's OpenAPI schema) |
 
@@ -105,7 +106,8 @@ src/
                   # type-conversion report
     records/      # the record form and its fields, the mobile card layout, renderCell,
                   # inline cell editing, the archive surface, the per-type editors
-                  # (PhoneInput, TemporalInput), and the QR scanner + submitting session
+                  # (PhoneInput, TemporalInput), the QR scanner + submitting session,
+                  # and QR *generation* (QrCodeDialog, QrColumnPicker)
     views/        # the view bar, filter/group/column controls, filter conditions
     forms/        # per-list form layouts, and the per-field conditions editor
     metrics/      # the aggregate cards above the grid, and their settings panel
@@ -225,7 +227,13 @@ Two things follow from it that are worth knowing:
 The images and the manifest are committed: the guide has to render for anyone who checks
 the repo out, and rebuilding them needs a database.
 
-## Adding a record from a QR code
+## QR codes
+
+The app both **reads** codes (filling or submitting a record from one) and **writes** them
+(a badge per record, printable as a sheet). They are two halves of one format, so the
+reading half is described first — it is what the writing half has to produce.
+
+### Adding a record from a QR code
 
 "Add record" is a `SplitButton`: the button adds a record by hand, and its menu offers
 **Fill using QR code** and **Submit using QR code**. Both read one QR code holding a JSON
@@ -241,7 +249,7 @@ person (a column uuid works as a key too, for a code a machine generated):
   user to check.
 - **Submit** opens a *scanning session*: see below.
 
-### The submitting session
+#### The submitting session
 
 Submitting exists for attendance — a queue of people, each holding a badge — and that shape
 drives everything about it (`QrSubmitSession.tsx`).
@@ -318,6 +326,58 @@ decoder is ~110 kB gzipped, a quarter of the whole bundle, and most sessions nev
 the scanner. Import it that way, not directly — and note that `QrSubmitSession` renders it,
 so that must be lazy too or the decoder returns to the main bundle by the back door.
 `qrFill` is small and pure, and stays in the main bundle.
+
+### Generating a code for a record
+
+A row's `pi pi-qrcode` action opens one code; selecting rows and pressing **QR codes** in
+the selection bar lays out a printable sheet of them. Both are `QrCodeDialog` — one dialog,
+because a sheet of forty and a sheet of one differ only in layout, and two would mean two
+copies of the picker, the request, the size advice and the print path.
+
+**The payload comes from the server**, `POST /lists/{uuid}/items/qr`, and that is the
+load-bearing decision rather than an arbitrary split. A generated code has to be scannable
+*back* by the Fill flow above, which means its values must be the ones the importer reads —
+and resolving a reference cell to that value needs the database and the caller's permissions
+on the *target* list. The grid does already hold labels for the rows on screen, so building
+the payload here was the cheaper option and the wrong one: the screen's rules are not quite
+the export's (a group shows its `display_name` and exports its slug `name`), so some codes
+would not have round-tripped. The route shares `json_row` with the export for exactly that
+reason.
+
+**`_uuid` carries the record's own id**, and the underscore is why it is safe: a column
+`name` cannot start with one, so it cannot collide with a real column — where a plain `uuid`
+could, silently, since `uuid` is a legal column name. `qrFill` skips `_`-prefixed keys
+**without reporting them**, because an "unknown field" issue on every scan of every code the
+app itself generated is noise rather than information.
+
+**Which fields go on the code is saved on the list** (`lists.settings.qr`, column *names*),
+because it describes a printed artifact: every badge for a list should carry the same
+fields. Saving needs `configure`, so a viewer gets the layout and cannot change it; changing
+the ticks without that permission still applies to the print in front of them. The default
+for a list that has saved nothing is the primary column plus `_uuid` — a badge that says who
+it is and carries a machine id.
+
+**Size is the constraint to design around, and it is density rather than capacity.** A code
+holds ~2,331 bytes at the error-correction level used, but long before that it stops being
+*scannable*: the module count grows with the symbol version, and a version-40 code is
+177x177 modules, which at badge size is finer than a phone camera resolves. So `lib/qr.ts`
+reports the version the encoder picked, the dialog warns from version 16 and turns an
+overflow into "remove a column" rather than the library's wording. The column picker is in
+the same dialog because it is the fix.
+
+**`qrcode` is dynamically imported** inside `lib/qr.ts`, and `QrCodeDialog` is itself lazy —
+the encoder is its own ~10 kB gzipped chunk and the dialog ~3 kB, neither of which belongs in
+the entry bundle for the many sessions that never print a badge. Same discipline as the
+decoder above, for a tenth of the weight.
+
+**Printing** is the app's first and only print view. The sheet marks its own subtree
+`[data-qr-print]`, `print()` stamps `qr-printing` on `<html>`, and the `@media print` block
+in `index.css` hides everything else. It has to work that way rather than by structure
+because the dialog is portalled to `<body>`, so "the page minus the app" is not expressible
+as a selector. The class comes off on `afterprint`, with a timeout fallback — a browser that
+never fires it would otherwise leave the app blank.
+
+### Where the record inputs live
 
 The record inputs themselves are in `RecordFields.tsx` — `RecordField` (one editor, chosen
 by column type) and `RecordFields` (all of a form's fields, labelled, clearing nested

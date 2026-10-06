@@ -151,7 +151,7 @@ A table/list definition and its settings, scoped to a workspace.
 | `display_name`     | `str(255)`      | UI label (D6). Not unique. |
 | `description`      | `Text` nullable | Optional. |
 | `primary_column_id`| FK → `columns.id` nullable | The "display field" used to label a row when it is referenced by a lookup (Airtable's primary field). Nullable to break the chicken/egg on creation. |
-| `settings`         | `JSONB` default `{}` | Misc list-level settings (color, icon, default view id, etc.). |
+| `settings`         | `JSONB` default `{}` | Misc list-level settings. Free-form **except for the keys this build reads**, which are validated individually (`qr` today — the fields a printed QR code carries, by column *name*). A `PATCH` **merges**: only the keys sent are touched, so a client that has never heard of one cannot drop it — the same rule `users.settings` follows. Shallow, so a known key is replaced whole. |
 
 Notes:
 - Ownership is transitive: list queries join `workspaces` and filter on

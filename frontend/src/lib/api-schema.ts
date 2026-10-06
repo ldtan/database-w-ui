@@ -1074,6 +1074,44 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/lists/{list_uuid}/items/qr": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Item Qr Payloads
+         * @description The JSON each record's QR code should carry.
+         *
+         *     **The server builds the payload, not the client**, and that is the whole point of the
+         *     route. A code this app generates is meant to be scannable *back* by "Fill using QR
+         *     code", which means its values have to be the ones `_parse_cell` reads — which means
+         *     resolving a reference cell to the label an export writes. That resolution needs the
+         *     database and the caller's permissions on the *target* list, and it differs subtly from
+         *     what the screen shows (a group displays its `display_name` and exports its slug), so a
+         *     client building the payload from the grid would produce codes that do not round-trip.
+         *     `qr_payloads` shares `json_row` with the export for exactly that reason.
+         *
+         *     Declared **above `/{uuid}`** along with the other non-uuid routes. A literal path
+         *     segment and a uuid parameter compete for the same slot, and this project has already
+         *     lost that race once — `/metrics/values` was shadowed by `/{uuid}`, making a metric
+         *     named `values` permanently unreachable (data-model §D6).
+         *
+         *     No list-level `view` check, like every route on this router: an item can be shared
+         *     directly. `qr_payloads` applies `item_view_filter` per record and omits what the caller
+         *     cannot see, so a sheet of badges is the records they can read and no more.
+         */
+        post: operations["item_qr_payloads_api_lists__list_uuid__items_qr_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/lists/{list_uuid}/items/archived": {
         parameters: {
             query?: never;
@@ -2954,6 +2992,39 @@ export interface components {
             name_suffix?: string | null;
             /** Birth Date */
             birth_date?: string | null;
+        };
+        /**
+         * QrPayload
+         * @description One record's QR payload.
+         *
+         *     `item_uuid` is echoed outside `payload` as well as (usually) inside it, because the
+         *     caller needs to match a code to the row it came from even when `include_uuid` is off.
+         */
+        QrPayload: {
+            /**
+             * Item Uuid
+             * Format: uuid
+             */
+            item_uuid: string;
+            /** Payload */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /**
+         * QrPayloadRequest
+         * @description Which records to build QR payloads for, and what goes in them.
+         */
+        QrPayloadRequest: {
+            /** Item Uuids */
+            item_uuids?: string[];
+            /** Columns */
+            columns?: string[];
+            /**
+             * Include Uuid
+             * @default true
+             */
+            include_uuid: boolean;
         };
         /**
          * RecomputeReport
@@ -5327,6 +5398,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BulkDeleteResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    item_qr_payloads_api_lists__list_uuid__items_qr_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                list_uuid: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["QrPayloadRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["QrPayload"][];
                 };
             };
             /** @description Validation Error */
