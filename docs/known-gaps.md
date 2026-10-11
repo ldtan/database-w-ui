@@ -1806,10 +1806,10 @@ rejected by `check_headers` with a `400` naming it, so the template breaks loudl
 first use rather than silently dropping a column. Adding a column to the import means
 editing both, plus the example row beside `HEADERS` and the guide's People section.
 
-**The `List` → `Table` rename left four things deliberately un-renamed, and one dated
-shim.** The domain noun became `Table` and `ListItem` became `TableRecord` on 2026-10-11
-(migration `f4a9c2e71b85`). Four spellings were kept on purpose, so nobody "finishes the
-job" and breaks something:
+**The `List` → `Table` rename left four things deliberately un-renamed.** The domain noun
+became `Table` and `ListItem` became `TableRecord` on 2026-10-11 (migration
+`f4a9c2e71b85`). Four spellings were kept on purpose, so nobody "finishes the job" and
+breaks something:
 
 - **`_UNIQUE_LOCK_NS = 0x4C495354` still spells `"LIST"`** (`src/tables/records/services.py`).
   It is a Postgres advisory-lock *namespace*: its only requirement is that every writer
@@ -1827,14 +1827,17 @@ job" and breaks something:
 - **`"item"` remains the slug fallback** in `core/utils.py` and `frontend/src/lib/slug.ts`,
   for any resource whose name slugifies to nothing. It never meant a record.
 
-The shim: **`src/tables/legacy.py` 308-redirects `/api/lists/*` → `/api/tables/*`, and
-must be deleted after 2026-11-11** along with `tests/test_legacy_list_routes.py`. It
-exists because `dbui-api` and `dbui-web` are separate Render services, so the API moves
-before the bundle that calls it — without it, an open tab or a cached bundle gets 404s
-that look like deleted data. It is `include_in_schema=False`, so `npm run gen:api` never
-learns the routes exist and nothing new can come to depend on them. The client-side
-`/lists/:uuid` → `/tables/:uuid` redirect in `App.tsx` is *not* dated: it costs one route
-and keeps every bookmark anyone ever made working.
+**`App.tsx` still routes `/lists/:uuid` → `/tables/:uuid`, and that one is permanent.**
+It is the only deep link this app has ever had, so it is the URL people bookmarked and
+pasted to each other; without it a saved link falls through to the catch-all redirect to
+`/`, which reads like the table was deleted. One route, no API surface, no expiry.
+
+A matching server-side shim (`src/tables/legacy.py`, 308-redirecting `/api/lists/*`)
+carried the deploy itself, because `dbui-api` and `dbui-web` are separate Render services
+and the bundle that calls the API does not move at the same moment the API does. It was
+removed once the deploy had settled and the live numbers were checked. If a future rename
+needs the same trick, that is the shape: `include_in_schema=False` so `gen:api` never
+learns the dead routes exist, and 308 rather than 302 so a redirected write stays a write.
 
 One behavioural note: the onboarding tour id `list` became `table`, and
 `onboardingState.ts` maps the old value on read. Without that, everyone who had already

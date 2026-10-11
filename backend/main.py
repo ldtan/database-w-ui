@@ -136,9 +136,6 @@ def create_app() -> FastAPI:
     # dependency is released only once the response completes — which for a stream
     # is when the browser closes it. See src/tables/events/routers.py.
     from src.tables.events.routers import router as table_events_router
-    # Temporary: `/api/lists/*` -> `/api/tables/*`. Delete after 2026-11-11, along
-    # with src/tables/legacy.py — see that module for why it exists at all.
-    from src.tables.legacy import router as legacy_list_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
     app.include_router(tables_router, prefix=settings.API_PREFIX)
@@ -146,7 +143,6 @@ def create_app() -> FastAPI:
     app.include_router(permissions_router, prefix=settings.API_PREFIX)
     app.include_router(people_router, prefix=settings.API_PREFIX)
     app.include_router(geocode_router, prefix=settings.API_PREFIX)
-    app.include_router(legacy_list_router, prefix=settings.API_PREFIX)
 
     return app
 
