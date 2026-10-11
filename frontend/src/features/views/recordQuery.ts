@@ -57,7 +57,7 @@ export function recordParams(page: RecordPage): string {
   // The total comes from `items/count`, asked once per scope rather than once per
   // page. Left on, every page turn would make the server count every matching
   // record again to arrive at the number it returned last time — 12 ms against a
-  // list of 100,000 where the page itself is 4 ms, and 268 ms under a search.
+  // table of 100,000 where the page itself is 4 ms, and 268 ms under a search.
   params.set("total", "false");
   params.set("group_by", page.groupBy ?? "");
   params.set(

@@ -1,7 +1,7 @@
 """Converge stored records on the shape their columns declare.
 
 Toggling a column's `multiple` deliberately does **not** rewrite its records: on a
-million-row list that is a ~25s UPDATE holding row locks on every record, inside a
+million-row table that is a ~25s UPDATE holding row locks on every record, inside a
 web request. Instead the service tolerates both shapes at its edges (`coerce_shape`
 on the way out, `_validate_data` on the way in) and this job converges the data
 afterwards, out of band.
@@ -13,7 +13,7 @@ schema says.
 
 Run it from cron / a systemd timer:
 
-    uv run python -m src.maintenance.reconcile_shapes          # every list
+    uv run python -m src.maintenance.reconcile_shapes          # every table
     uv run python -m src.maintenance.reconcile_shapes --dry-run
 
 Safe to run repeatedly (idempotent), safe to kill (each chunk commits on its own,
@@ -27,15 +27,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 # Registers every model. An entry point that imports only the models it names leaves
-# the mappers half-configured — `Column.list` cannot resolve `List` — so this import
+# the mappers half-configured — `Column.table` cannot resolve `Table` — so this import
 # is load-bearing, exactly as it is for main.py, the tests and Alembic's env.py.
 import src.infrastructure.model_registry  # noqa: F401
 from src.infrastructure import database as db_module
-from src.lists.columns.enums import REFERENCE_TYPES, ColumnType
-from src.lists.columns.models import Column
+from src.tables.columns.enums import REFERENCE_TYPES, ColumnType
+from src.tables.columns.models import Column
 
 # Rows rewritten per transaction. Small enough that locks are held for
-# milliseconds; large enough that a big list does not take all day.
+# milliseconds; large enough that a big table does not take all day.
 CHUNK = 5_000
 
 # The column types where `multiple` means anything.
@@ -59,32 +59,32 @@ async def _reconcile_column(
     db: AsyncSession, column: Column, dry_run: bool
 ) -> int:
     multiple = bool((column.config or {}).get("multiple"))
-    params = {"list_id": column.list_id, "key": str(column.uuid), "chunk": CHUNK}
-    where = f"list_id = :list_id AND {_MISMATCHED[multiple]}"
+    params = {"table_id": column.table_id, "key": str(column.uuid), "chunk": CHUNK}
+    where = f"table_id = :table_id AND {_MISMATCHED[multiple]}"
 
     if dry_run:
         return await db.scalar(
-            sa.text(f"SELECT count(*) FROM list_items WHERE {where}"), params
+            sa.text(f"SELECT count(*) FROM table_records WHERE {where}"), params
         )
 
     # Chunked by primary key so each transaction is bounded: a long UPDATE over a
-    # huge list would hold locks on every row it touches for its whole duration.
+    # huge table would hold locks on every row it touches for its whole duration.
     total = 0
     while True:
         result = await db.execute(
             sa.text(
                 f"""
                 WITH batch AS (
-                    SELECT id FROM list_items
+                    SELECT id FROM table_records
                      WHERE {where}
                      ORDER BY id
                      LIMIT :chunk
                      FOR UPDATE SKIP LOCKED
                 )
-                UPDATE list_items
+                UPDATE table_records
                    SET data = jsonb_set(data, ARRAY[:key], {_REWRITE[multiple]})
                   FROM batch
-                 WHERE list_items.id = batch.id
+                 WHERE table_records.id = batch.id
                 """
             ),
             params,

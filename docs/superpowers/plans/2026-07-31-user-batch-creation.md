@@ -4,14 +4,14 @@
 
 **Goal:** A superuser uploads one CSV and gets many accounts — each with an optional person record, group membership and activation state — instead of working the Add user dialog once per person.
 
-**Architecture:** A new `backend/src/auth/users/batch/` package laid out like `lists/transfer/`, exposing `POST /api/auth/users/import`. The file is parsed whole and validated in memory first (pure, no database), then each row is created through the *existing* `UserService` / `PersonService`, so a batch-created account is indistinguishable from a form-created one. Those services commit internally, so every row is already its own transaction — which is exactly the isolation skip-and-report wants.
+**Architecture:** A new `backend/src/auth/users/batch/` package laid out like `tables/transfer/`, exposing `POST /api/auth/users/import`. The file is parsed whole and validated in memory first (pure, no database), then each row is created through the *existing* `UserService` / `PersonService`, so a batch-created account is indistinguishable from a form-created one. Those services commit internally, so every row is already its own transaction — which is exactly the isolation skip-and-report wants.
 
 **Tech Stack:** FastAPI, Pydantic v2, SQLAlchemy 2 async, PostgreSQL, pytest/pytest-asyncio, httpx ASGITransport · React 18, TanStack Query, PrimeReact, vitest (node environment, no jsdom)
 
 **Global Constraints:**
 - Design doc is `docs/superpowers/specs/2026-07-31-user-batch-creation-design.md` (commit `273bce8`). It is binding; deviations need a note in the commit message.
 - Twelve CSV headers exactly: `username`, `email`, `password`, `is_active`, `is_superuser`, `groups`, `name_prefix`, `first_name`, `middle_name`, `last_name`, `name_suffix`, `birth_date`.
-- `;` is the multi-value separator and `true/false/1/0/yes/no` the boolean spellings — both taken from `lists/transfer/services.py::_parse_cell` so users meet one file convention, not two.
+- `;` is the multi-value separator and `true/false/1/0/yes/no` the boolean spellings — both taken from `tables/transfer/services.py::_parse_cell` so users meet one file convention, not two.
 - Unknown headers → 400. Missing `username`/`email` header → 400. More than 1000 data rows → 400. Headers with no data rows → 200 and an empty summary.
 - Generated passwords appear in the response body only. Never logged, never persisted, never re-retrievable.
 - Row pipeline order is fixed: validate in memory → generate password → create account → create profile → attach groups → promote. Promotion is last so the row-undo never trips `_guard_last_superuser`.
@@ -21,9 +21,9 @@
 **User decisions (already made):**
 - "Optional column, generate if blank" — the `password` column may be filled per row; blank means the server mints one.
 - "groups, is_active, is_superuser" — all three optional columns are in scope.
-- "Skip and report, like list import" — per-row errors, good rows commit; no dry-run, no all-or-nothing.
+- "Skip and report, like table import" — per-row errors, good rows commit; no dry-run, no all-or-nothing.
 - "One-time credentials CSV download" — generated passwords leave via a browser-built CSV, not an on-screen table.
-- "Go with A" — dedicated batch module reusing the existing services, rather than generalizing the list-import engine or looping the API from the browser.
+- "Go with A" — dedicated batch module reusing the existing services, rather than generalizing the table-import engine or looping the API from the browser.
 
 ---
 
@@ -44,7 +44,7 @@
 | `frontend/src/features/people/BatchUserDialog.tsx` | the dialog |
 | `frontend/src/features/people/PeoplePage.tsx` | modified: "Import users" button + dialog |
 
-**Note on `parsing.py`:** the design doc names three files (`schemas`/`services`/`routers`, mirroring `lists/transfer/`). Splitting the pure parsing rules into a fourth is a deliberate refinement: it keeps `services.py` about the database and makes every file-format rule testable without Postgres, which is where most of the behaviour lives. Mention it in the Task 1 commit body.
+**Note on `parsing.py`:** the design doc names three files (`schemas`/`services`/`routers`, mirroring `tables/transfer/`). Splitting the pure parsing rules into a fourth is a deliberate refinement: it keeps `services.py` about the database and makes every file-format rule testable without Postgres, which is where most of the behaviour lives. Mention it in the Task 1 commit body.
 
 ---
 
@@ -225,8 +225,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.people.schemas import PersonCreate
 
-# The spellings list import already accepts, so someone who has used that file format
-# does not have to learn a second one. See lists/transfer/services.py::_parse_cell.
+# The spellings table import already accepts, so someone who has used that file format
+# does not have to learn a second one. See tables/transfer/services.py::_parse_cell.
 _TRUE = {"true", "1", "yes", "y"}
 _FALSE = {"false", "0", "no", "n"}
 
@@ -351,8 +351,8 @@ def _flatten(exc: PydanticValidationError) -> str:
 def check_headers(fieldnames: Optional[list[str]]) -> None:
     """Reject a file whose columns are wrong, before a single account exists.
 
-    Unknown headers are an error here where list import ignores them, because this
-    column set is *closed*: `frist_name` cannot be another list's column, so it is a
+    Unknown headers are an error here where table import ignores them, because this
+    column set is *closed*: `frist_name` cannot be another table's column, so it is a
     file that would silently drop every name in it. Missing required headers get
     their own message for the same reason read the other way -- without it every row
     fails identically, and a thousand copies of one error describe a file-level
@@ -382,7 +382,7 @@ def _person_from(values: dict) -> Optional[PersonCreate]:
     filled but a name missing is an error rather than a profile quietly dropped:
     dropping it is the one outcome nothing would report.
     """
-    given = {key: value for key, value in values.items() if key in PERSON_HEADERS}
+    given = {key: value for key, value in values.records() if key in PERSON_HEADERS}
     if not given:
         return None
     missing = [key for key in ("first_name", "last_name") if not given.get(key)]
@@ -410,7 +410,7 @@ def parse_file(text: str) -> ParsedFile:
     for raw in reader:
         # reader.line_num is the row's real source line, so a reported number still
         # points at the right line when the file has blank ones. Same reasoning as
-        # lists/transfer/routers.py.
+        # tables/transfer/routers.py.
         number = reader.line_num
         if len(rows) + len(errors) >= MAX_ROWS:
             raise ValidationError(
@@ -423,7 +423,7 @@ def parse_file(text: str) -> ParsedFile:
         # "mint one". The None check guards a short row, which DictReader pads.
         values = {
             key: value.strip()
-            for key, value in raw.items()
+            for key, value in raw.records()
             if key in KNOWN_HEADERS and value is not None and value.strip()
         }
 
@@ -431,7 +431,7 @@ def parse_file(text: str) -> ParsedFile:
             person = _person_from(values)
             row = BatchUserRow(
                 person=person,
-                **{k: v for k, v in values.items() if k in ACCOUNT_HEADERS},
+                **{k: v for k, v in values.records() if k in ACCOUNT_HEADERS},
             )
         except ValidationError as exc:
             errors.append(BatchUserError(row=number, message=str(exc)))
@@ -461,8 +461,8 @@ the import service that follows only ever deals with rows that are already
 well-formed. Pure and synchronous, which also means these rules test in
 milliseconds instead of against Postgres.
 
-Unknown headers are rejected rather than ignored, inverting what list import
-does. There, a header this list lacks may well be another list's column; here
+Unknown headers are rejected rather than ignored, inverting what table import
+does. There, a header this table lacks may well be another table's column; here
 the set is closed, so `frist_name` is a file that would silently drop every
 name in it. A missing `username` header gets its own message for the same
 reason read backwards -- otherwise every row fails identically and a thousand
@@ -494,7 +494,7 @@ EOF
 - [ ] An unknown group name errors the row and creates no account; a known one attaches
 - [ ] `is_superuser` promotion takes effect and is counted in `superusers_created`
 - [ ] A row that fails after its account exists leaves no live account behind
-- [ ] Parse errors and pipeline errors come back in one list, ordered by row
+- [ ] Parse errors and pipeline errors come back in one table, ordered by row
 
 **Verify:** `cd backend && uv run --system-certs pytest tests/test_user_batch_import.py -v` → all pass
 
@@ -689,7 +689,7 @@ stops bootstrapping a workspace months after anyone remembers there are two path
 ``UserService.create`` and ``WorkspaceService.create`` each commit internally, so
 every row is already its own transaction. That is exactly the isolation
 skip-and-report wants, which is why there is no savepoint machinery here -- unlike
-list import, which inserts into one session and commits in batches for speed.
+table import, which inserts into one session and commits in batches for speed.
 """
 import secrets
 from uuid import UUID
@@ -835,7 +835,7 @@ personal workspace is exactly the sort of step a second creation path stops
 doing quietly, long after anyone remembers there are two.
 
 Those services commit internally, which means every row is already its own
-transaction, so skip-and-report needs no savepoint machinery here -- list
+transaction, so skip-and-report needs no savepoint machinery here -- table
 import has it because it batches inserts into one session for speed, and this
 does not.
 
@@ -1277,13 +1277,13 @@ EOF
 - [ ] An "Import users" button sits beside "Add user", superuser-only
 - [ ] "Download template" produces a CSV with all twelve headers and one example row
 - [ ] Uploading posts to `/auth/users/import` as multipart and renders the summary
-- [ ] Row errors list as `Row N: message`, scrollable
+- [ ] Row errors table as `Row N: message`, scrollable
 - [ ] A "Download credentials" button appears only when a password was generated, with copy saying they cannot be retrieved again
 - [ ] A warning appears when `superusers_created > 0`
 - [ ] Success invalidates the `users` and `people` query keys
 - [ ] `npm run build` reports no type errors
 
-**Verify:** `cd frontend && npm run build` → no errors; then by hand: log in as a superuser, People & Groups → Import users, download the template, add two rows, upload, confirm both accounts appear in the Users list and the credentials file downloads
+**Verify:** `cd frontend && npm run build` → no errors; then by hand: log in as a superuser, People & Groups → Import users, download the template, add two rows, upload, confirm both accounts appear in the Users table and the credentials file downloads
 
 **Steps:**
 
@@ -1354,7 +1354,7 @@ const EXAMPLE = [
  * fill the name columns and the row gets a profile, leave them blank and it does
  * not.
  *
- * Bad rows are skipped and reported rather than sinking the file, matching what list
+ * Bad rows are skipped and reported rather than sinking the file, matching what table
  * import already does. A bad *file* — wrong columns, too many rows — is refused
  * whole, because nothing in it can be trusted.
  *
@@ -1562,7 +1562,7 @@ Start both servers (backend `uv run --system-certs uvicorn main:create_app --fac
 1. People & Groups → **Import users** → **Download template** — confirm twelve headers and the example row
 2. Edit it to two rows, one with names and one without, leaving `password` blank
 3. Upload — confirm "Created 2 account(s)", the credentials warning, and that the file downloads with two rows
-4. Confirm both accounts appear in the Users list, one showing its full name
+4. Confirm both accounts appear in the Users table, one showing its full name
 5. Upload a file with a `frist_name` header — confirm a single 400 message, not a list of row errors
 
 - [ ] **Step 6: Commit**
@@ -1596,7 +1596,7 @@ EOF
 
 ## Self-Review
 
-**Spec coverage:** every section of the design maps to a task — CSV contract and template → Tasks 1 and 5; backend package, pipeline order, response shape → Tasks 1–3; frontend → Tasks 4–5; the test list → Tasks 1–3 and 4. The design's "What this does not do" items stay undone.
+**Spec coverage:** every section of the design maps to a task — CSV contract and template → Tasks 1 and 5; backend package, pipeline order, response shape → Tasks 1–3; frontend → Tasks 4–5; the test table → Tasks 1–3 and 4. The design's "What this does not do" records stay undone.
 
 **Placeholder scan:** no TBD/TODO; every code step carries real code.
 

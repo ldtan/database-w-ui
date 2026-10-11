@@ -9,7 +9,7 @@ import { ErrorBoundary } from "./ErrorBoundary";
  * The shell for the pages a signed-out visitor can reach: the home page and, with
  * it, the guide. Only mounted when `HOME_ENABLED` — see `App.tsx`.
  *
- * It is deliberately thin, and the list of what it must *not* touch is the design:
+ * It is deliberately thin, and the table of what it must *not* touch is the design:
  * no `OnboardingProvider`, no `AppSidebar`, no `useCurrentUser`, no `Breadcrumbs`.
  * Every one of those reads an account, and there is no account here. A visitor gets
  * a bar with the wordmark, the theme controls and a way in — nothing that implies a

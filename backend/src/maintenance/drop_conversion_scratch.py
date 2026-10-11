@@ -28,9 +28,9 @@ spelled the bookkeeping differently. Nothing else in the schema has ever set `hi
 so the predicate is exact rather than merely broad.
 
 **The values go first.** A hidden column's values live under its uuid in every record
-of its list, exactly like a visible one's, and dropping the row alone would strand
+of its table, exactly like a visible one's, and dropping the row alone would strand
 them with nothing left to name them. `strip_column_keys` is the same helper the column
-bin's permanent delete and `purge_deleted_list_config` use, chunked a list at a time.
+bin's permanent delete and `purge_deleted_table_config` use, chunked a table at a time.
 """
 import argparse
 import asyncio
@@ -40,7 +40,7 @@ import sqlalchemy as sa
 # Registers every model; without it the mappers half-configure (see model_registry).
 import src.infrastructure.model_registry  # noqa: F401
 from src.infrastructure import database as db_module
-from src.lists.purge import strip_column_keys
+from src.tables.purge import strip_column_keys
 
 # Rows destroyed per transaction — bounded so locks are held for milliseconds.
 CHUNK = 5_000
@@ -51,9 +51,9 @@ CHUNK = 5_000
 # waiting out a retention window for a row nobody can restore into anything useful.
 _DUE = "FROM columns WHERE hidden IS TRUE"
 
-# The doomed columns of one batch, as {list_id: [uuid, ...]} — the shape
-# `strip_column_keys` takes, so it can batch the records it rewrites per list.
-_BATCH_KEYS = "SELECT list_id, uuid::text FROM columns WHERE id = ANY(:ids)"
+# The doomed columns of one batch, as {table_id: [uuid, ...]} — the shape
+# `strip_column_keys` takes, so it can batch the records it rewrites per table.
+_BATCH_KEYS = "SELECT table_id, uuid::text FROM columns WHERE id = ANY(:ids)"
 
 
 async def drop_scratch(dry_run: bool = False) -> int:
@@ -73,15 +73,15 @@ async def drop_scratch(dry_run: bool = False) -> int:
             if not ids:
                 break
 
-            by_list: dict[int, list[str]] = {}
-            for list_id, uuid in await db.execute(
+            by_table: dict[int, list[str]] = {}
+            for table_id, uuid in await db.execute(
                 sa.text(_BATCH_KEYS), {"ids": list(ids)}
             ):
-                by_list.setdefault(list_id, []).append(uuid)
-            for list_id, keys in by_list.items():
+                by_table.setdefault(table_id, []).append(uuid)
+            for table_id, keys in by_table.items():
                 # `commit=False` — the keys and the column rows go in one transaction,
                 # so a killed run never leaves a column whose values are already gone.
-                await strip_column_keys(db, list_id, keys, commit=False)
+                await strip_column_keys(db, table_id, keys, commit=False)
 
             await db.execute(
                 sa.text("DELETE FROM columns WHERE id = ANY(:ids)"), {"ids": list(ids)}

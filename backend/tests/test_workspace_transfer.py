@@ -1,12 +1,12 @@
 """Workspace ownership transfer.
 
 A workspace *is* the ownership boundary — ``owner_id`` on the row itself — so unlike
-a list transfer there is no inbox to move into: the workspace changes hands where it
-stands and its lists follow, because a list belongs to whoever owns its workspace.
+a table transfer there is no inbox to move into: the workspace changes hands where it
+stands and its tables follow, because a table belongs to whoever owns its workspace.
 The giver must be the current owner; the recipient becomes the new one; the giver's
 implicit access ends while existing shares survive.
 
-DISABLE_AUTH resolves the caller to the first user, so — like test_list_transfer —
+DISABLE_AUTH resolves the caller to the first user, so — like test_table_transfer —
 these drive HTTP as a chosen user via a get_current_user override.
 """
 from contextlib import asynccontextmanager
@@ -19,8 +19,8 @@ from src.auth.dependencies import get_current_user
 from src.auth.users.schemas import UserCreate
 from src.auth.users.services import UserService
 from src.infrastructure import database as db_module
-from src.lists.schemas import ListCreate
-from src.lists.services import ListService
+from src.tables.schemas import TableCreate
+from src.tables.services import TableService
 from src.workspaces.schemas import WorkspaceCreate
 from src.workspaces.services import WorkspaceService
 
@@ -69,17 +69,17 @@ def make_client(engine, session_factory):
 # --------------------------------------------------------------------------
 
 
-async def test_owner_transfers_workspace_and_its_lists(make_client, session_factory):
-    """The workspace changes hands and takes its lists with it — same uuids, new
+async def test_owner_transfers_workspace_and_its_tables(make_client, session_factory):
+    """The workspace changes hands and takes its tables with it — same uuids, new
     owner. The giver loses access to both."""
     async with session_factory() as db:
         owner = await _make_user(db, "owner")
         alice = await _make_user(db, "alice")
         ws = await _make_workspace(db, owner, "team")
-        lst = await ListService.create(
-            db, ListCreate(name="tasks", display_name="Tasks", workspace_uuid=ws.uuid)
+        table = await TableService.create(
+            db, TableCreate(name="tasks", display_name="Tasks", workspace_uuid=ws.uuid)
         )
-        ws_uuid, list_uuid, alice_uuid = str(ws.uuid), str(lst.uuid), str(alice.uuid)
+        ws_uuid, table_uuid, alice_uuid = str(ws.uuid), str(table.uuid), str(alice.uuid)
 
     async with make_client(owner) as client:
         resp = await client.post(
@@ -90,14 +90,14 @@ async def test_owner_transfers_workspace_and_its_lists(make_client, session_fact
         assert resp.json()["uuid"] == ws_uuid
         assert resp.json()["name"] == "team"
 
-    # The giver has lost the workspace and, with it, the list inside.
+    # The giver has lost the workspace and, with it, the table inside.
     async with make_client(owner) as client:
         assert (await client.get(f"/api/workspaces/{ws_uuid}")).status_code == 403
-        assert (await client.get(f"/api/lists/{list_uuid}")).status_code == 403
+        assert (await client.get(f"/api/tables/{table_uuid}")).status_code == 403
 
     async with make_client(alice) as client:
         assert (await client.get(f"/api/workspaces/{ws_uuid}")).status_code == 200
-        got = await client.get(f"/api/lists/{list_uuid}")
+        got = await client.get(f"/api/tables/{table_uuid}")
         assert got.status_code == 200, got.text
 
 
@@ -238,17 +238,17 @@ async def test_the_inbox_cannot_be_transferred(make_client, session_factory):
         alice = await _make_user(db, "alice")
         bob = await _make_user(db, "bob")
         lst_ws = await _make_workspace(db, owner, "src")
-        lst = await ListService.create(
+        table = await TableService.create(
             db,
-            ListCreate(name="tasks", display_name="Tasks", workspace_uuid=lst_ws.uuid),
+            TableCreate(name="tasks", display_name="Tasks", workspace_uuid=lst_ws.uuid),
         )
-        list_uuid = str(lst.uuid)
+        table_uuid = str(table.uuid)
         alice_uuid, bob_uuid = str(alice.uuid), str(bob.uuid)
 
-    # Mint Alice's inbox the only way it is minted — by transferring a list to her.
+    # Mint Alice's inbox the only way it is minted — by transferring a table to her.
     async with make_client(owner) as client:
         resp = await client.post(
-            f"/api/lists/{list_uuid}/transfer", json={"user_uuid": alice_uuid}
+            f"/api/tables/{table_uuid}/transfer", json={"user_uuid": alice_uuid}
         )
         assert resp.status_code == 200, resp.text
         inbox_uuid = resp.json()["workspace"]["uuid"]

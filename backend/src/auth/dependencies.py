@@ -51,7 +51,7 @@ async def require_superuser(current_user: User = Depends(get_current_user)) -> U
 
     Note this is orthogonal to the permission model in src/permissions: a superuser
     administers *identities*, and is not thereby granted access to other people's
-    workspaces, lists, or records.
+    workspaces, tables, or records.
     """
     if not current_user.is_superuser:
         raise HTTPException(

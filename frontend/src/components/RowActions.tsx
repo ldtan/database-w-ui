@@ -24,7 +24,7 @@ interface Props {
    * How many actions show as icon buttons before the rest collapse into a "⋮"
    * overflow menu. Defaults to 3 — enough that a typical row (share/edit/delete)
    * never overflows. Rows with a fourth action, or a lot of them, pass 2 and keep
-   * only what the row is *for* inline: the lists page and both record layouts do.
+   * only what the row is *for* inline: the tables page and both record layouts do.
    * 0 collapses everything, which is what a narrow records grid wants — there the
    * column is pinned, so its width is spent whether or not it is being looked at.
    */
@@ -36,8 +36,8 @@ interface Props {
 /**
  * A row's cluster of action buttons, with automatic overflow.
  *
- * Every list/workspace/record row grew the same hand-rolled strip of icon buttons,
- * each gated by a permission check, and the busiest of them (a list, once cloning
+ * Every table/workspace/record row grew the same hand-rolled strip of icon buttons,
+ * each gated by a permission check, and the busiest of them (a table, once cloning
  * arrived) got crowded. This centralizes the pattern: pass the actions and how many
  * to keep visible, and the rest fold into a dropdown. Permission-hidden actions drop
  * out first, so the count is of what the caller can actually do — a viewer with one

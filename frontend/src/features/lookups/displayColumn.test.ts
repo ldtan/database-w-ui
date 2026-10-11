@@ -33,16 +33,16 @@ describe("resolveDisplayColumn", () => {
     );
   });
 
-  /** Deleting a column nulls the list's pointer server-side, but a cached list payload
+  /** Deleting a column nulls the table's pointer server-side, but a cached table payload
    *  can outlive that — so a primary naming nothing must not win over the first column. */
-  it("skips a primary column that has left the list's shape", () => {
+  it("skips a primary column that has left the table's shape", () => {
     expect(resolveDisplayColumn(null, { uuid: "c-gone" }, [first, second])).toBe(
       "c-first",
     );
   });
 
   /** The load-bearing step: `primary_column` is only ever set by an explicit PATCH, so
-   *  most lists have none and this is the branch that actually runs. */
+   *  most tables have none and this is the branch that actually runs. */
   it("falls back to the first column, in the order the API returned them", () => {
     expect(resolveDisplayColumn(null, null, [first, second])).toBe("c-first");
     expect(resolveDisplayColumn(undefined, undefined, [second, first])).toBe("c-second");

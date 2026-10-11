@@ -66,7 +66,7 @@ def upgrade() -> None:
     ).all()
 
     # list_id -> {column uuid -> {old id -> label}}, for the view pass below.
-    maps_by_list: dict[int, dict[str, dict[str, str]]] = {}
+    maps_by_table: dict[int, dict[str, dict[str, str]]] = {}
 
     for col_id, col_uuid, list_id, config in cols:
         config = config or {}
@@ -97,7 +97,7 @@ def upgrade() -> None:
 
         if not id_to_label:
             continue
-        maps_by_list.setdefault(list_id, {})[str(col_uuid)] = id_to_label
+        maps_by_table.setdefault(list_id, {})[str(col_uuid)] = id_to_label
 
         # Record cells: id -> label, element-wise when the cell holds a list.
         key = str(col_uuid)
@@ -134,16 +134,16 @@ def upgrade() -> None:
                     )
 
     # View filters: a saved condition on a choice column stores the option value.
-    if maps_by_list:
+    if maps_by_table:
         views = bind.execute(
             sa.select(views_t.c.id, views_t.c.list_id, views_t.c.config).where(
-                views_t.c.list_id.in_(list(maps_by_list))
+                views_t.c.list_id.in_(list(maps_by_table))
             )
         ).all()
         for view_id, list_id, config in views:
             config = config or {}
             conditions = (config.get("filters") or {}).get("conditions") or []
-            col_maps = maps_by_list[list_id]
+            col_maps = maps_by_table[list_id]
             changed = False
             for cond in conditions:
                 mapping = col_maps.get(str(cond.get("column_uuid")))

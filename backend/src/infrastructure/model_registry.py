@@ -16,12 +16,12 @@ adding one line, here.
 
 import src.auth.tokens.models  # noqa: F401
 import src.auth.users.models  # noqa: F401
-import src.lists.columns.models  # noqa: F401
-import src.lists.forms.models  # noqa: F401
-import src.lists.items.models  # noqa: F401
-import src.lists.metrics.models  # noqa: F401
-import src.lists.models  # noqa: F401
-import src.lists.views.models  # noqa: F401
 import src.people.models  # noqa: F401
 import src.permissions.models  # noqa: F401
+import src.tables.columns.models  # noqa: F401
+import src.tables.forms.models  # noqa: F401
+import src.tables.metrics.models  # noqa: F401
+import src.tables.models  # noqa: F401
+import src.tables.records.models  # noqa: F401
+import src.tables.views.models  # noqa: F401
 import src.workspaces.models  # noqa: F401

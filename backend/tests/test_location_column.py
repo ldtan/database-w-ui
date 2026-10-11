@@ -12,9 +12,9 @@ import json
 import pytest
 
 
-async def _add_location_column(client, list_uuid: str, name="site", **config) -> str:
+async def _add_location_column(client, table_uuid: str, name="site", **config) -> str:
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": name,
             "display_name": name.title(),
@@ -26,10 +26,10 @@ async def _add_location_column(client, list_uuid: str, name="site", **config) ->
     return resp.json()["uuid"]
 
 
-async def test_stores_an_address_and_a_pin(client, list_uuid):
-    col = await _add_location_column(client, list_uuid)
+async def test_stores_an_address_and_a_pin(client, table_uuid):
+    col = await _add_location_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={
             "data": {
                 col: {"address": "12 Rizal St, Cebu City", "lat": 10.3157, "lng": 123.8854}
@@ -44,10 +44,10 @@ async def test_stores_an_address_and_a_pin(client, list_uuid):
     }
 
 
-async def test_either_half_alone_is_a_location(client, list_uuid):
-    col = await _add_location_column(client, list_uuid)
+async def test_either_half_alone_is_a_location(client, table_uuid):
+    col = await _add_location_column(client, table_uuid)
     address_only = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"address": "12 Rizal St, Cebu City"}}},
     )
     assert address_only.status_code == 201, address_only.text
@@ -61,7 +61,7 @@ async def test_either_half_alone_is_a_location(client, list_uuid):
     }
 
     pin_only = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"lat": 10.3157, "lng": 123.8854}}},
     )
     assert pin_only.status_code == 201, pin_only.text
@@ -84,24 +84,24 @@ async def test_either_half_alone_is_a_location(client, list_uuid):
         {"address": "x", "note": "smuggled"},
     ],
 )
-async def test_rejects_what_is_not_a_location(client, list_uuid, value):
-    col = await _add_location_column(client, list_uuid)
+async def test_rejects_what_is_not_a_location(client, table_uuid, value):
+    col = await _add_location_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert resp.status_code == 400, f"{value!r} was accepted: {resp.text}"
 
 
-async def test_require_coordinates_refuses_an_address_with_no_pin(client, list_uuid):
-    col = await _add_location_column(client, list_uuid, require_coordinates=True)
+async def test_require_coordinates_refuses_an_address_with_no_pin(client, table_uuid):
+    col = await _add_location_column(client, table_uuid, require_coordinates=True)
     nope = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"address": "12 Rizal St"}}},
     )
     assert nope.status_code == 400, nope.text
 
     ok = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"address": "12 Rizal St", "lat": 10.3, "lng": 123.8}}},
     )
     assert ok.status_code == 201, ok.text
@@ -118,9 +118,9 @@ async def test_require_coordinates_refuses_an_address_with_no_pin(client, list_u
         {"map_link": "mapquest"},
     ],
 )
-async def test_a_broken_config_is_refused_at_config_time(client, list_uuid, config):
+async def test_a_broken_config_is_refused_at_config_time(client, table_uuid, config):
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "site",
             "display_name": "Site",
@@ -134,19 +134,19 @@ async def test_a_broken_config_is_refused_at_config_time(client, list_uuid, conf
     assert resp.status_code in (400, 422), resp.text
 
 
-async def test_filters_and_sorts_by_the_address_not_the_blob(client, list_uuid):
+async def test_filters_and_sorts_by_the_address_not_the_blob(client, table_uuid):
     """The reason `_field` has a branch: `->>` on an object is `{"address": …}`, so
     without one a filter would be asking questions of that string."""
-    col = await _add_location_column(client, list_uuid)
+    col = await _add_location_column(client, table_uuid)
     for address in ("Cebu City", "Angeles City", "Baguio City"):
         resp = await client.post(
-            f"/api/lists/{list_uuid}/items/",
+            f"/api/tables/{table_uuid}/records/",
             json={"data": {col: {"address": address, "lat": 10.0, "lng": 123.0}}},
         )
         assert resp.status_code == 201, resp.text
 
     ordered = await client.get(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         params={"sort_by": col, "sort_dir": "asc"},
     )
     assert [r["data"][col]["address"] for r in ordered.json()] == [
@@ -164,7 +164,7 @@ async def test_filters_and_sorts_by_the_address_not_the_blob(client, list_uuid):
         }
     )
     matching = await client.get(
-        f"/api/lists/{list_uuid}/items/", params={"filters": filters}
+        f"/api/tables/{table_uuid}/records/", params={"filters": filters}
     )
     assert [r["data"][col]["address"] for r in matching.json()] == ["Cebu City"]
 
@@ -178,35 +178,35 @@ async def test_filters_and_sorts_by_the_address_not_the_blob(client, list_uuid):
         }
     )
     none_of_them = await client.get(
-        f"/api/lists/{list_uuid}/items/", params={"filters": blob}
+        f"/api/tables/{table_uuid}/records/", params={"filters": blob}
     )
     assert none_of_them.json() == []
 
 
-async def test_search_matches_the_address_not_the_blob(client, list_uuid):
-    col = await _add_location_column(client, list_uuid)
+async def test_search_matches_the_address_not_the_blob(client, table_uuid):
+    col = await _add_location_column(client, table_uuid)
     await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"address": "Cebu City", "lat": 10.3157, "lng": 123.8854}}},
     )
 
-    found = await client.get(f"/api/lists/{list_uuid}/items/", params={"q": "cebu"})
+    found = await client.get(f"/api/tables/{table_uuid}/records/", params={"q": "cebu"})
     assert len(found.json()) == 1
 
     # Neither the key names nor a digit of the latitude may match.
     for term in ("address", "lat", "10.3157"):
         missed = await client.get(
-            f"/api/lists/{list_uuid}/items/", params={"q": term}
+            f"/api/tables/{table_uuid}/records/", params={"q": term}
         )
         assert missed.json() == [], f"{term!r} matched the serialized blob"
 
 
-async def test_export_writes_one_line_and_reimports_unchanged(client, list_uuid):
+async def test_export_writes_one_line_and_reimports_unchanged(client, table_uuid):
     """The canonical text form is what makes a location column round-trip through a
     file — and what a conversion to `text` produces."""
-    col = await _add_location_column(client, list_uuid)
+    col = await _add_location_column(client, table_uuid)
     await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={
             "data": {
                 col: {"address": "12 Rizal St, Cebu City", "lat": 10.3157, "lng": 123.8854}
@@ -215,7 +215,7 @@ async def test_export_writes_one_line_and_reimports_unchanged(client, list_uuid)
     )
 
     exported = await client.post(
-        f"/api/lists/{list_uuid}/export", json={"format": "csv"}
+        f"/api/tables/{table_uuid}/export", json={"format": "csv"}
     )
     assert exported.status_code == 200, exported.text
     assert "12 Rizal St, Cebu City @10.31570,123.88540" in exported.text
@@ -223,12 +223,12 @@ async def test_export_writes_one_line_and_reimports_unchanged(client, list_uuid)
     assert "'address'" not in exported.text
 
     again = await client.post(
-        f"/api/lists/{list_uuid}/import",
+        f"/api/tables/{table_uuid}/import",
         files={"file": ("rows.csv", exported.text, "text/csv")},
     )
     assert again.status_code == 200, again.text
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert [r["data"][col] for r in items] == [
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert [r["data"][col] for r in records] == [
         {"address": "12 Rizal St, Cebu City", "lat": 10.3157, "lng": 123.8854},
     ] * 2
 
@@ -248,30 +248,30 @@ async def test_export_writes_one_line_and_reimports_unchanged(client, list_uuid)
         ),
     ],
 )
-async def test_import_reads_the_written_form(client, list_uuid, written, expected):
-    col = await _add_location_column(client, list_uuid)
+async def test_import_reads_the_written_form(client, table_uuid, written, expected):
+    col = await _add_location_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/import",
+        f"/api/tables/{table_uuid}/import",
         files={"file": ("rows.csv", f'site\n"{written}"\n', "text/csv")},
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["created"] == 1, resp.text
 
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert items[0]["data"][col] == expected
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert records[0]["data"][col] == expected
 
 
-async def test_converting_to_text_writes_the_line_not_a_dict(client, list_uuid):
+async def test_converting_to_text_writes_the_line_not_a_dict(client, table_uuid):
     """A conversion is the point of no return, so a dict repr baked into every
     record would be permanent."""
-    col = await _add_location_column(client, list_uuid)
+    col = await _add_location_column(client, table_uuid)
     await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {"address": "Cebu City", "lat": 10.3157, "lng": 123.8854}}},
     )
 
     report = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert",
+        f"/api/tables/{table_uuid}/columns/{col}/convert",
         json={"type": "text", "config": {}},
     )
     assert report.status_code == 200, report.text
@@ -279,60 +279,60 @@ async def test_converting_to_text_writes_the_line_not_a_dict(client, list_uuid):
     assert report.json()["failed"] == 0
 
     applied = await client.post(
-        f"/api/lists/{list_uuid}/columns/{col}/convert/apply",
+        f"/api/tables/{table_uuid}/columns/{col}/convert/apply",
         json={"type": "text", "config": report.json()["config"]},
     )
     assert applied.status_code == 200, applied.text
 
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert items[0]["data"][col] == "Cebu City @10.31570,123.88540"
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert records[0]["data"][col] == "Cebu City @10.31570,123.88540"
 
 
-async def test_converting_from_text_reads_the_line_back(client, list_uuid, add_column):
-    text = await add_column(list_uuid, name="site", display_name="Site", type="text")
+async def test_converting_from_text_reads_the_line_back(client, table_uuid, add_column):
+    text = await add_column(table_uuid, name="site", display_name="Site", type="text")
     await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {text: "Cebu City @10.31570,123.88540"}},
     )
 
     report = await client.post(
-        f"/api/lists/{list_uuid}/columns/{text}/convert",
+        f"/api/tables/{table_uuid}/columns/{text}/convert",
         json={"type": "location", "config": {}},
     )
     assert report.status_code == 200, report.text
     assert report.json()["converted"] == 1
 
     applied = await client.post(
-        f"/api/lists/{list_uuid}/columns/{text}/convert/apply",
+        f"/api/tables/{table_uuid}/columns/{text}/convert/apply",
         json={"type": "location", "config": report.json()["config"]},
     )
     assert applied.status_code == 200, applied.text
 
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert items[0]["data"][text] == {
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert records[0]["data"][text] == {
         "address": "Cebu City",
         "lat": 10.3157,
         "lng": 123.8854,
     }
 
 
-async def test_unique_compares_the_whole_place(client, list_uuid):
+async def test_unique_compares_the_whole_place(client, table_uuid):
     """JSONB containment compares objects natively, so `unique` needed nothing."""
-    col = await _add_location_column(client, list_uuid, unique=True)
+    col = await _add_location_column(client, table_uuid, unique=True)
     place = {"address": "12 Rizal St", "lat": 10.3157, "lng": 123.8854}
     first = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: place}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: place}}
     )
     assert first.status_code == 201, first.text
 
     same = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: place}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: place}}
     )
     assert same.status_code == 409, same.text
 
     # A different pin at the same address is a different place.
     moved = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: {**place, "lat": 10.4}}},
     )
     assert moved.status_code == 201, moved.text

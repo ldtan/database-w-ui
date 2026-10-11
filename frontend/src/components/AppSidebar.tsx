@@ -8,7 +8,7 @@ interface Props {
   /**
    * False while the mobile drawer is shut. The tree fetches nothing until this
    * turns true, so a panel nobody has opened costs no requests — and a workspace's
-   * lists still wait for that workspace to be expanded.
+   * tables still wait for that workspace to be expanded.
    */
   enabled?: boolean;
   /**
@@ -21,8 +21,8 @@ interface Props {
 /**
  * The navigation rail — the whole of it, at both widths.
  *
- * It exists because reaching a list used to be three page loads every time —
- * home, then the workspace, then the list — with nothing on screen to say what
+ * It exists because reaching a table used to be three page loads every time —
+ * home, then the workspace, then the table — with nothing on screen to say what
  * else there was. A rail that is simply *there* turns that into one click and,
  * more to the point, keeps the shape of your data visible while you work in it.
  *
@@ -49,7 +49,7 @@ export function AppSidebar({ enabled = true, onNavigate }: Props) {
         </Link>
       </div>
 
-      {/* Only this band scrolls. A long list of workspaces must not push the
+      {/* Only this band scrolls. A long table of workspaces must not push the
           account off the bottom of the world, which is exactly what one
           scrolling column does. */}
       <div className="flex-1 overflow-y-auto px-3 pb-3">

@@ -168,7 +168,7 @@ class UserService:
             await db.rollback()
             raise ConflictError("Username or email is already in use") from exc
 
-        # Bootstrap a personal workspace so the account can create lists right away.
+        # Bootstrap a personal workspace so the account can create tables right away.
         await WorkspaceService.create_default(db, new_id)
 
         return await cls.get_by_uuid(db, new_uuid)

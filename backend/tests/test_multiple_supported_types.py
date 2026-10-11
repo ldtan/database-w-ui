@@ -3,14 +3,14 @@
 It used to be accepted on all eighteen, and the result was not a column that
 ignored the flag — it was a column that could never hold anything at all.
 `coerce_shape` wraps an incoming scalar in a one-element list because the config
-says the column is multiple, and `validate_scalar` then measures that list against
+says the column is multiple, and `validate_scalar` then measures that table against
 the *scalar* rule for the type and refuses it: `Column 'tags' expects a string`.
-Sending a list fails identically, so there is no value that works. The 201 came
+Sending a table fails identically, so there is no value that works. The 201 came
 back clean and every subsequent write of that cell was a 400, with no way out that
 the UI offers.
 
 Only `choice` and the three REFERENCE_TYPES have anywhere to put a second value —
-`choice` through the list branch in `validate_scalar`, the references through
+`choice` through the table branch in `validate_scalar`, the references through
 `_validate_value` resolving a set. That set is `MULTIPLE_TYPES`, and it is closed.
 
 Refused rather than implemented, for the same reason `unique` + `multiple` is (see
@@ -40,17 +40,17 @@ UNSUPPORTED = [
 ]
 
 
-async def _create(client, list_uuid, **body):
-    return await client.post(f"/api/lists/{list_uuid}/columns/", json=body)
+async def _create(client, table_uuid, **body):
+    return await client.post(f"/api/tables/{table_uuid}/columns/", json=body)
 
 
 @pytest.mark.parametrize("type_", UNSUPPORTED)
 async def test_multiple_is_refused_on_a_type_that_cannot_hold_it(
-    client, list_uuid, type_
+    client, table_uuid, type_
 ):
     resp = await _create(
         client,
-        list_uuid,
+        table_uuid,
         name=f"c_{type_}",
         display_name=type_.title(),
         type=type_,
@@ -65,7 +65,7 @@ async def test_multiple_is_refused_on_a_type_that_cannot_hold_it(
 
 @pytest.mark.parametrize("type_", ["choice", "lookup", "user", "group"])
 async def test_multiple_is_allowed_where_it_is_implemented(
-    client, workspace_uuid, list_uuid, type_
+    client, workspace_uuid, table_uuid, type_
 ):
     config: dict = {"multiple": True}
     if type_ == "choice":
@@ -73,7 +73,7 @@ async def test_multiple_is_allowed_where_it_is_implemented(
     elif type_ == "lookup":
         target = (
             await client.post(
-                "/api/lists/",
+                "/api/tables/",
                 json={
                     "name": "targets",
                     "display_name": "Targets",
@@ -81,11 +81,11 @@ async def test_multiple_is_allowed_where_it_is_implemented(
                 },
             )
         ).json()["uuid"]
-        config["target_list_uuid"] = target
+        config["target_table_uuid"] = target
 
     resp = await _create(
         client,
-        list_uuid,
+        table_uuid,
         name=f"m_{type_}",
         display_name=type_.title(),
         type=type_,
@@ -95,29 +95,29 @@ async def test_multiple_is_allowed_where_it_is_implemented(
     assert resp.json()["config"]["multiple"] is True
 
 
-async def test_a_patch_cannot_turn_it_on_either(client, list_uuid):
+async def test_a_patch_cannot_turn_it_on_either(client, table_uuid):
     """The check sits after the config merge, so an update is caught like a create.
 
     This is the shape that would have slipped through a create-only check: make an
     ordinary text column, then PATCH the flag onto it.
     """
     created = await _create(
-        client, list_uuid, name="notes", display_name="Notes", type="text", config={}
+        client, table_uuid, name="notes", display_name="Notes", type="text", config={}
     )
     assert created.status_code == 201, created.text
     uuid = created.json()["uuid"]
 
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/columns/{uuid}", json={"config": {"multiple": True}}
+        f"/api/tables/{table_uuid}/columns/{uuid}", json={"config": {"multiple": True}}
     )
     assert resp.status_code == 400, resp.text
 
 
-async def test_a_supported_column_still_takes_a_list(client, list_uuid):
+async def test_a_supported_column_still_takes_a_table(client, table_uuid):
     """The guard refuses a type, not the feature: what worked before still works."""
     created = await _create(
         client,
-        list_uuid,
+        table_uuid,
         name="tags",
         display_name="Tags",
         type="choice",
@@ -125,7 +125,7 @@ async def test_a_supported_column_still_takes_a_list(client, list_uuid):
     )
     uuid = created.json()["uuid"]
     written = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {uuid: ["a", "c"]}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {uuid: ["a", "c"]}}
     )
     assert written.status_code == 201, written.text
     assert written.json()["data"][uuid] == ["a", "c"]

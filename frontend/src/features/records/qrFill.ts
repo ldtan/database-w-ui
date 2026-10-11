@@ -10,7 +10,7 @@
  * A column uuid is accepted as a key too, for a QR a machine generated.
  *
  * **This file does not validate, on purpose.** The backend validates every value
- * on write (`src/lists/columns/validation.py`), and it is the *only* thing that
+ * on write (`src/tables/columns/validation.py`), and it is the *only* thing that
  * does: a second copy of "what a link's scheme may be" or "what this choice
  * column's options are" living here would be two rulebooks to keep in step, and
  * the frontend's would be the one that silently fell behind. So a value the code
@@ -23,7 +23,7 @@
  * boolean for the `Checkbox`, an ISO string into the `Date` a `Calendar` holds,
  * and a person's name into the uuid a reference cell stores so its picker can
  * render it. The first two mirror the backend's own importer (`_parse_cell` in
- * `src/lists/transfer/services.py`), which is where a QR's laxness comes from.
+ * `src/tables/transfer/services.py`), which is where a QR's laxness comes from.
  *
  * Every translation **falls back to the raw value** rather than dropping it: a
  * name matching no user still gets submitted, because the server resolves names
@@ -109,7 +109,7 @@ function toBoolean(raw: unknown): unknown {
  * server has the last word on it, as it does on everything else here.
  */
 async function toReference(
-  listUuid: string,
+  tableUuid: string,
   column: Column,
   raw: unknown,
 ): Promise<unknown> {
@@ -123,7 +123,7 @@ async function toReference(
     if (column.type === "lookup") {
       const rows = await api.get<
         { uuid: string; label: string | null; deleted?: boolean }[]
-      >(`/lists/${listUuid}/columns/${column.uuid}/options?${q}`);
+      >(`/tables/${tableUuid}/columns/${column.uuid}/options?${q}`);
       matches = rows
         .filter((r) => !r.deleted && (r.label ?? "").toLowerCase() === term.toLowerCase())
         .map((r) => r.uuid);
@@ -154,7 +154,7 @@ async function toReference(
 
 /** The value a form input can hold, from the value the QR carried. */
 async function shape(
-  listUuid: string,
+  tableUuid: string,
   column: Column,
   raw: unknown,
 ): Promise<unknown> {
@@ -189,9 +189,9 @@ async function shape(
     case "user":
     case "group":
       if (Array.isArray(raw)) {
-        return Promise.all(raw.map((one) => toReference(listUuid, column, one)));
+        return Promise.all(raw.map((one) => toReference(tableUuid, column, one)));
       }
-      return toReference(listUuid, column, raw);
+      return toReference(tableUuid, column, raw);
     default:
       return raw;
   }
@@ -206,7 +206,7 @@ async function shape(
  * refused here, and it is a fact about the form, not a judgement about a value.
  */
 export async function fillFromQr(
-  listUuid: string,
+  tableUuid: string,
   fields: ResolvedField[],
   payload: Record<string, unknown>,
 ): Promise<QrFill> {
@@ -246,7 +246,7 @@ export async function fillFromQr(
     // An explicit null/"" is the QR saying "leave it blank".
     if (isEmptyValue(raw)) continue;
 
-    values[field.column.uuid] = await shape(listUuid, field.column, raw);
+    values[field.column.uuid] = await shape(tableUuid, field.column, raw);
     filled.push(field.label);
   }
 

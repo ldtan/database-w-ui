@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from src.people.schemas import PersonCreate
 
-# The spellings list import already accepts, so someone who has used that file format
-# does not have to learn a second one. See lists/transfer/services.py::_parse_cell.
+# The spellings table import already accepts, so someone who has used that file format
+# does not have to learn a second one. See tables/transfer/services.py::_parse_cell.
 _TRUE = {"true", "1", "yes", "y"}
 _FALSE = {"false", "0", "no", "n"}
 

@@ -70,8 +70,8 @@ describe("expandActions mirrors the backend's _IMPLIES", () => {
   /**
    * The asymmetry that makes lookup-only sharing work, and the one most likely to
    * be "tidied" into symmetry: everything that reads confers `lookup`, and
-   * `lookup` confers nothing. It is what lets a list be shared as a reference
-   * target while staying out of the grantee's lists — see known-gaps.
+   * `lookup` confers nothing. It is what lets a table be shared as a reference
+   * target while staying out of the grantee's tables — see known-gaps.
    */
   it("does not let lookup confer view", () => {
     expect(expandActions(["lookup"]).has("view")).toBe(false);
@@ -98,18 +98,18 @@ describe("expandActions mirrors the backend's _IMPLIES", () => {
 
 describe("actionsFor", () => {
   it("offers lookup only where a lookup can point", () => {
-    for (const type of ["list", "workspace"] as ResourceType[]) {
+    for (const type of ["table", "workspace"] as ResourceType[]) {
       expect(actionsFor(type).map((a) => a.value)).toContain("lookup");
     }
     // On a record, view or form the grant would be inert.
-    for (const type of ["item", "view", "form"] as ResourceType[]) {
+    for (const type of ["record", "view", "form"] as ResourceType[]) {
       expect(actionsFor(type).map((a) => a.value)).not.toContain("lookup");
     }
   });
 
   it("offers every unrestricted action on every resource type", () => {
     const unrestricted = ACTIONS.filter((a) => !a.only).map((a) => a.value);
-    for (const type of ["list", "workspace", "item", "view", "form"] as ResourceType[]) {
+    for (const type of ["table", "workspace", "record", "view", "form"] as ResourceType[]) {
       expect(actionsFor(type).map((a) => a.value)).toEqual(
         expect.arrayContaining(unrestricted),
       );
@@ -121,12 +121,12 @@ describe("presetsFor", () => {
   it("hides a preset that would grant nothing on this resource", () => {
     // "Lookup only" on a record is a grant of no actions at all — the degenerate
     // case the backend's CONFERRED_BY note calls out.
-    expect(presetsFor("item").map((p) => p.label)).not.toContain("Lookup only");
-    expect(presetsFor("list").map((p) => p.label)).toContain("Lookup only");
+    expect(presetsFor("record").map((p) => p.label)).not.toContain("Lookup only");
+    expect(presetsFor("table").map((p) => p.label)).toContain("Lookup only");
   });
 
   it("keeps every preset whose actions all apply", () => {
-    expect(presetsFor("list").map((p) => p.label)).toEqual(
+    expect(presetsFor("table").map((p) => p.label)).toEqual(
       ROLE_PRESETS.map((p) => p.label),
     );
   });

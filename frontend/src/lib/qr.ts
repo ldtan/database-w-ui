@@ -1,23 +1,23 @@
 /** Turning a record's payload into a QR code.
  *
- *  The payload itself is built by the **server** (`POST /lists/{uuid}/items/qr`), not here,
+ *  The payload itself is built by the **server** (`POST /tables/{uuid}/records/qr`), not here,
  *  and that split is deliberate: a generated code is meant to be scannable back by "Fill
  *  using QR code", which means its values have to be the ones the importer reads — and
  *  resolving a reference cell to that value needs the database and the caller's permissions
- *  on the target list. See `transfer/services.py::json_row`, which the export shares.
+ *  on the target table. See `transfer/services.py::json_row`, which the export shares.
  *
  *  So this module does the half that is genuinely the browser's: encoding, measuring, and
  *  saying when a payload has grown past what one code can usefully carry.
  */
 
 /** The key the record's own uuid arrives under. Mirrors `QR_UUID_KEY` in
- *  `backend/src/lists/transfer/services.py` — the underscore is what makes it impossible
+ *  `backend/src/tables/transfer/services.py` — the underscore is what makes it impossible
  *  for a column named `uuid` to collide with it, since a column name cannot start with one. */
 export const QR_UUID_KEY = "_uuid";
 
 /** A payload as the bytes the code will hold.
  *
- *  Key order is the server's (`_uuid` first, then the columns in list order) and
+ *  Key order is the server's (`_uuid` first, then the columns in table order) and
  *  `JSON.stringify` preserves it, so what a person reads in the dialog is the order the
  *  code encodes. No pretty-printing: whitespace is bytes, and bytes are modules. */
 export function payloadText(payload: Record<string, unknown>): string {

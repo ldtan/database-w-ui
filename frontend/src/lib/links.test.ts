@@ -45,7 +45,7 @@ describe("safeHref", () => {
   ])("refuses %s", (value) => {
     expect(safeHref(column(), value)).toBeNull();
     // Even if a hand-edited config claims to allow it: SAFE_SCHEMES is the ceiling
-    // and the column's list can only narrow it, never widen it.
+    // and the column's table can only narrow it, never widen it.
     expect(
       safeHref(column({ allowed_schemes: ["javascript", "data", "vbscript", "file"] }), value),
     ).toBeNull();
@@ -80,12 +80,12 @@ describe("safeHref", () => {
 describe("linkSchemes", () => {
   it("defaults to http and https when the column says nothing", () => {
     expect(linkSchemes(column())).toEqual(["http", "https"]);
-    // An empty list is "unset", not "nothing allowed" — otherwise clearing the
+    // An empty table is "unset", not "nothing allowed" — otherwise clearing the
     // control in the dialog would silently stop every link rendering.
     expect(linkSchemes(column({ allowed_schemes: [] }))).toEqual(["http", "https"]);
   });
 
-  it("uses the column's list when it has one", () => {
+  it("uses the column's table when it has one", () => {
     expect(linkSchemes(column({ allowed_schemes: ["mailto", "tel"] }))).toEqual([
       "mailto",
       "tel",

@@ -11,11 +11,11 @@ Chunked and committed per batch, so a purge of a million rows never holds a long
 transaction; safe to kill and re-run.
 
 The workspace batch bounds nothing on its own, though — one workspace can hold any
-number of lists and each of those any number of records — so the records are batched
-again inside it, by the loop in src.lists.purge that the list purge and both
+number of tables and each of those any number of records — so the records are batched
+again inside it, by the loop in src.tables.purge that the table purge and both
 `permanent` routes share.
 
-It deletes each workspace's lists, columns, records, views, forms, metrics, and
+It deletes each workspace's tables, columns, records, views, forms, metrics, and
 their permission grants too.
 """
 import argparse
@@ -29,10 +29,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import src.infrastructure.model_registry  # noqa: F401
 from src.core.config import settings
 from src.infrastructure import database as db_module
-from src.lists.purge import drain_records
+from src.tables.purge import drain_records
 
 # Workspaces destroyed per transaction — bounded so locks are held for milliseconds.
-# Their lists' records are bounded separately, by `drain_records`.
+# Their tables' records are bounded separately, by `drain_records`.
 CHUNK = 5_000
 
 
@@ -72,70 +72,70 @@ async def purge(days: int, dry_run: bool = False) -> int:
             if not workspace_ids:
                 return total
 
-            # Find all lists that belong to these workspaces
-            list_ids = (
+            # Find all tables that belong to these workspaces
+            table_ids = (
                 await db.execute(
                     sa.text(
-                        "SELECT id FROM lists WHERE workspace_id = ANY(:workspace_ids)"
+                        "SELECT id FROM tables WHERE workspace_id = ANY(:workspace_ids)"
                     ),
                     {"workspace_ids": list(workspace_ids)},
                 )
             ).scalars().all()
 
-            list_ids = list(list_ids)
-            if list_ids:
+            table_ids = list(table_ids)
+            if table_ids:
                 # Records first, in batches of their own with their own grants — the
-                # only part of the cascade a single list can make arbitrarily large.
-                # It commits as it goes; see src.lists.purge for why that is safe here.
-                await drain_records(db, list_ids, commit=True)
+                # only part of the cascade a single table can make arbitrarily large.
+                # It commits as it goes; see src.tables.purge for why that is safe here.
+                await drain_records(db, table_ids, commit=True)
 
                 # Break the circular dependency first
                 await db.execute(
                     sa.text(
-                        "UPDATE lists SET primary_column_id = NULL WHERE id = ANY(:list_ids)"
+                        "UPDATE tables SET primary_column_id = NULL WHERE id = ANY(:table_ids)"
                     ),
-                    {"list_ids": list_ids},
+                    {"table_ids": table_ids},
                 )
 
-                # Grants for the lists and their views and forms. The records' went
+                # Grants for the tables and their views and forms. The records' went
                 # with them above, which is the only place they can go: once a batch
                 # of records is deleted nothing is left to find their grants by.
                 await db.execute(
                     sa.text(
                         """
                         DELETE FROM permission_grants
-                         WHERE (resource_type = 'list' AND resource_id = ANY(:list_ids))
-                            OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:list_ids)))
-                            OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:list_ids)))
+                         WHERE (resource_type = 'table' AND resource_id = ANY(:table_ids))
+                            OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE table_id = ANY(:table_ids)))
+                            OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE table_id = ANY(:table_ids)))
                         """
                     ),
-                    {"list_ids": list_ids},
+                    {"table_ids": table_ids},
                 )
 
                 # The remaining children
                 await db.execute(
-                    sa.text("DELETE FROM views WHERE list_id = ANY(:list_ids)"),
-                    {"list_ids": list_ids},
+                    sa.text("DELETE FROM views WHERE table_id = ANY(:table_ids)"),
+                    {"table_ids": table_ids},
                 )
                 await db.execute(
-                    sa.text("DELETE FROM forms WHERE list_id = ANY(:list_ids)"),
-                    {"list_ids": list_ids},
+                    sa.text("DELETE FROM forms WHERE table_id = ANY(:table_ids)"),
+                    {"table_ids": table_ids},
                 )
-                # Metrics have no grants of their own — they are always their list's —
+                # Metrics have no grants of their own — they are always their table's —
                 # so unlike views and forms there is nothing above to clear first.
                 await db.execute(
-                    sa.text("DELETE FROM metrics WHERE list_id = ANY(:list_ids)"),
-                    {"list_ids": list_ids},
+                    sa.text("DELETE FROM metrics WHERE table_id = ANY(:table_ids)"),
+                    {"table_ids": table_ids},
                 )
                 await db.execute(
-                    sa.text("DELETE FROM columns WHERE list_id = ANY(:list_ids)"),
-                    {"list_ids": list_ids},
+                    sa.text("DELETE FROM columns WHERE table_id = ANY(:table_ids)"),
+                    {"table_ids": table_ids},
                 )
 
-                # The lists themselves
+                # The tables themselves
                 await db.execute(
-                    sa.text("DELETE FROM lists WHERE id = ANY(:list_ids)"),
-                    {"list_ids": list_ids},
+                    sa.text("DELETE FROM tables WHERE id = ANY(:table_ids)"),
+                    {"table_ids": table_ids},
                 )
 
             # Workspace-level permission grants
@@ -180,7 +180,7 @@ async def _main() -> None:
     if args.dry_run:
         print(f"Would destroy {count:,} workspace(s) {window}.")
     else:
-        print(f"Destroyed {count:,} workspace(s) {window}, and their lists, columns, records, views, forms, metrics, and permission grants.")
+        print(f"Destroyed {count:,} workspace(s) {window}, and their tables, columns, records, views, forms, metrics, and permission grants.")
 
 
 if __name__ == "__main__":

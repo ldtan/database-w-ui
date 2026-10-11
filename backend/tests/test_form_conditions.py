@@ -1,6 +1,6 @@
 """A form field's `condition` — the block that decides when the field applies.
 
-The server stores and validates it and never acts on it: `ListItemService._validate_data`
+The server stores and validates it and never acts on it: `TableRecordService._validate_data`
 enforces `required` and `unique` whatever a form says, and CSV import, a QR fill and a
 direct API write reach no form at all. So what is pinned here is exactly what the server
 is responsible for — that the block round-trips intact, and that it cannot be saved
@@ -10,9 +10,9 @@ import pytest_asyncio
 
 
 @pytest_asyncio.fixture
-async def form_uuid(client, list_uuid):
-    """The list's auto-provisioned create form."""
-    forms = (await client.get(f"/api/lists/{list_uuid}/forms/")).json()
+async def form_uuid(client, table_uuid):
+    """The table's auto-provisioned create form."""
+    forms = (await client.get(f"/api/tables/{table_uuid}/forms/")).json()
     return next(f for f in forms if f["type"] == "create")["uuid"]
 
 
@@ -46,16 +46,16 @@ def _when(column_uuid, operator="is", value="Rejected", conjunction="and"):
     }
 
 
-async def test_condition_round_trips(client, list_uuid, form_uuid, add_column):
+async def test_condition_round_trips(client, table_uuid, form_uuid, add_column):
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
 
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(status), _field(reason, _when(status), order=1)]),
     )
     assert resp.status_code == 200, resp.text
@@ -75,7 +75,7 @@ async def test_condition_round_trips(client, list_uuid, form_uuid, add_column):
 
 
 async def test_a_field_without_a_condition_stays_unconditional(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     """The absent case is the one every existing form is in, so it has to survive.
 
@@ -84,24 +84,24 @@ async def test_a_field_without_a_condition_stays_unconditional(
     existed.
     """
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}", json=_config([_field(status)])
+        f"/api/tables/{table_uuid}/forms/{form_uuid}", json=_config([_field(status)])
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["config"]["fields"][0]["condition"] is None
 
 
-async def test_effect_defaults_to_hide(client, list_uuid, form_uuid, add_column):
+async def test_effect_defaults_to_hide(client, table_uuid, form_uuid, add_column):
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config(
             [
                 _field(status),
@@ -126,40 +126,40 @@ async def test_effect_defaults_to_hide(client, list_uuid, form_uuid, add_column)
     assert stored["condition"]["effect"] == "hide"
 
 
-async def test_disable_is_the_other_effect(client, list_uuid, form_uuid, add_column):
+async def test_disable_is_the_other_effect(client, table_uuid, form_uuid, add_column):
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     condition = _when(status)
     condition["effect"] = "disable"
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(status), _field(reason, condition, order=1)]),
     )
     assert resp.status_code == 200, resp.text
 
 
-async def test_an_unknown_effect_is_refused(client, list_uuid, form_uuid, add_column):
+async def test_an_unknown_effect_is_refused(client, table_uuid, form_uuid, add_column):
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     condition = _when(status)
     condition["effect"] = "vanish"
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(status), _field(reason, condition, order=1)]),
     )
     assert resp.status_code == 422, resp.text
 
 
 async def test_an_empty_condition_is_accepted_and_inert(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     """Empty means *always*, matching `apply_filters` on an empty filter group.
 
@@ -168,10 +168,10 @@ async def test_an_empty_condition_is_accepted_and_inert(
     would do.
     """
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config(
             [_field(reason, {"when": {"conjunction": "and", "conditions": []}})]
         ),
@@ -181,12 +181,12 @@ async def test_an_empty_condition_is_accepted_and_inert(
     assert stored["condition"]["when"]["conditions"] == []
 
 
-async def test_a_condition_naming_a_column_of_another_list_is_refused(
-    client, workspace_uuid, list_uuid, form_uuid, add_column
+async def test_a_condition_naming_a_column_of_another_table_is_refused(
+    client, workspace_uuid, table_uuid, form_uuid, add_column
 ):
     other = (
         await client.post(
-            "/api/lists/",
+            "/api/tables/",
             json={
                 "name": "other",
                 "display_name": "Other",
@@ -198,11 +198,11 @@ async def test_a_condition_naming_a_column_of_another_list_is_refused(
         other, name="stranger", display_name="Stranger", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
 
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(reason, _when(stranger))]),
     )
     assert resp.status_code == 400, resp.text
@@ -210,35 +210,35 @@ async def test_a_condition_naming_a_column_of_another_list_is_refused(
 
 
 async def test_a_condition_naming_a_deleted_column_is_refused(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     assert (
-        await client.delete(f"/api/lists/{list_uuid}/columns/{status}")
+        await client.delete(f"/api/tables/{table_uuid}/columns/{status}")
     ).status_code == 204
 
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(reason, _when(status))]),
     )
     assert resp.status_code == 400, resp.text
 
 
 async def test_a_field_cannot_condition_on_itself(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     """It is not a cycle — conditions are one pass over the draft's raw values — but a
     field that hides on its own value keeps that value, so it never comes back."""
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config([_field(reason, _when(reason))]),
     )
     assert resp.status_code == 400, resp.text
@@ -246,7 +246,7 @@ async def test_a_field_cannot_condition_on_itself(
 
 
 async def test_a_condition_may_name_a_column_the_form_excludes(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     """Excluded from the layout is not excluded from the record.
 
@@ -255,13 +255,13 @@ async def test_a_condition_may_name_a_column_the_form_excludes(
     "ask for a reason only when the imported status says Rejected".
     """
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid, name="reason", display_name="Reason", type="text"
+        table_uuid, name="reason", display_name="Reason", type="text"
     )
     resp = await client.patch(
-        f"/api/lists/{list_uuid}/forms/{form_uuid}",
+        f"/api/tables/{table_uuid}/forms/{form_uuid}",
         json=_config(
             [
                 _field(status, included=False),
@@ -273,7 +273,7 @@ async def test_a_condition_may_name_a_column_the_form_excludes(
 
 
 async def test_a_condition_does_not_change_what_a_write_requires(
-    client, list_uuid, form_uuid, add_column
+    client, table_uuid, form_uuid, add_column
 ):
     """The line this feature must not blur: conditions are presentational.
 
@@ -282,10 +282,10 @@ async def test_a_condition_does_not_change_what_a_write_requires(
     it is why hiding a field can never be a way to bypass validation.
     """
     status = await add_column(
-        list_uuid, name="status", display_name="Status", type="text"
+        table_uuid, name="status", display_name="Status", type="text"
     )
     reason = await add_column(
-        list_uuid,
+        table_uuid,
         name="reason",
         display_name="Reason",
         type="text",
@@ -293,13 +293,13 @@ async def test_a_condition_does_not_change_what_a_write_requires(
     )
     assert (
         await client.patch(
-            f"/api/lists/{list_uuid}/forms/{form_uuid}",
+            f"/api/tables/{table_uuid}/forms/{form_uuid}",
             json=_config([_field(status), _field(reason, _when(status), order=1)]),
         )
     ).status_code == 200
 
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {status: "Approved"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {status: "Approved"}}
     )
     assert resp.status_code == 400, resp.text
     assert "required" in resp.json()["detail"]

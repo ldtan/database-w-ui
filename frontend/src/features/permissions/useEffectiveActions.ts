@@ -41,7 +41,7 @@ interface ResourceActions {
 
 /**
  * Effective actions for a whole collection (a page of records, a workspace's
- * lists) in a single request — permissions can differ per row, so gating them
+ * tables) in a single request — permissions can differ per row, so gating them
  * one query at a time would mean one round trip per row.
  */
 export function useEffectiveActionsMap(
@@ -51,7 +51,7 @@ export function useEffectiveActionsMap(
 ): (uuid: string, action: PermissionAction) => boolean {
   // Sorted so a reorder of the same rows reuses the cached response. Memoised on
   // the *contents* rather than the array identity, because callers rebuild the uuid
-  // list on every render and an unstable `key` would re-key the query every time.
+  // table on every render and an unstable `key` would re-key the query every time.
   const key = useMemo(() => [...uuids].sort(), [uuids.join(",")]);
   const query = useQuery({
     queryKey: ["effective", "batch", resourceType, key],
@@ -79,7 +79,7 @@ export function useEffectiveActionsMap(
   // per component — a cell only calls the returned closure, which is a `Map.get`. So
   // memoising saves one Map of page-size per render of the caller, not one per cell.
   //
-  // It is emphatically **not** the reason `ListDetailPage` runs with `cellMemo` off.
+  // It is emphatically **not** the reason `TableDetailPage` runs with `cellMemo` off.
   // PrimeReact compares a body cell against twelve fixed prop names, and this
   // predicate is not among them, so its referential stability is invisible to that
   // memo either way. The note at `cellMemo={false}` has the argument in full; do not

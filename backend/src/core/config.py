@@ -41,13 +41,13 @@ class Settings(BaseSettings):
     # per-username limit doing the work.
     LOGIN_MAX_FAILURES_PER_IP: int = 50
 
-    # Above this many records, re-indexing a list's calculated columns is handed to a
+    # Above this many records, re-indexing a table's calculated columns is handed to a
     # background task and the request answers at once. Below it the work happens in the
-    # request, so the response is already correct when it goes out — which is every list
+    # request, so the response is already correct when it goes out — which is every table
     # in a deployment this size, and why the deferred path is rarely reached.
     #
     # The threshold decides who waits, **not** how much work is done: a deferred run
-    # still walks the whole list. Stopping partway would leave the index holding two
+    # still walks the whole table. Stopping partway would leave the index holding two
     # formulas' answers at once, which filters incoherently — strictly worse than one
     # that is uniformly a version behind. Measured at ~0.035 ms of app CPU per record,
     # so this threshold is ~0.2 s of CPU — under two seconds of wall time even on a
@@ -71,8 +71,8 @@ class Settings(BaseSettings):
     GEOCODE_MIN_INTERVAL_SECONDS: float = 1.0
     GEOCODE_TIMEOUT_SECONDS: float = 5.0
 
-    # How many rows one import may carry — the list importer, the user batch importer
-    # and `items/bulk-create` all read this. A policy decision rather than a tuning
+    # How many rows one import may carry — the table importer, the user batch importer
+    # and `records/bulk-create` all read this. A policy decision rather than a tuning
     # knob: every row is validated and inserted through the ordinary service, several
     # round trips apiece, so what this really sets is how long one import may occupy
     # the single worker. Someone whose spreadsheets are routinely larger has a fair
@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     # `MAX_UPLOAD_BYTES` bounds the *file*, is checked by the route, and produces a
     # message naming the limit — that is the good error and it should keep happening.
     # This bounds what the process will buffer *at all*, and exists because nothing
-    # did: `ListItemCreate.data` is a `dict` to Pydantic and a `text` column's
+    # did: `TableRecordCreate.data` is a `dict` to Pydantic and a `text` column's
     # `max_length` is unset by default, so a single JSON body could be tens of
     # megabytes.
     #
@@ -124,9 +124,9 @@ class Settings(BaseSettings):
     # frontend/src/lib/limits.ts first if it ever needs to go down.
     BULK_DELETE_MAX: int = 500
 
-    # "Live records": an open list subscribes to GET /lists/{uuid}/events and
+    # "Live records": an open table subscribes to GET /tables/{uuid}/events and
     # refetches when it is told something changed, instead of polling on a timer.
-    # See src/lists/events/ and docs/planned-features.md #8.
+    # See src/tables/events/ and docs/planned-features.md #8.
     #
     # False makes the route answer 503, which the client reads as "fall back to
     # polling" — so this is the kill switch, and it is deliberately here rather
@@ -141,13 +141,13 @@ class Settings(BaseSettings):
     #   - An access token lasts ACCESS_TOKEN_EXPIRE_MINUTES. Authorization is
     #     checked at connect and never again, so a stream that outlived its token
     #     would be a session with no expiry.
-    #   - **It is the revocation window.** Losing `view` on the list, or a grant
+    #   - **It is the revocation window.** Losing `view` on the table, or a grant
     #     expiring, stops the signals reaching a subscriber at their next connect
     #     and not before. Nothing leaks meanwhile — the events carry no data and
     #     every refetch they trigger is separately permissioned — but the tap
     #     closes late, and this is how late.
     #   - Graceful shutdown: uvicorn waits for in-flight requests, and a stream is
-    #     one. The shutdown event in src/lists/events/broker.py ends a stream
+    #     one. The shutdown event in src/tables/events/broker.py ends a stream
     #     immediately; this bounds the case where that is not reached.
     #   - Proxies cap connection age on their own schedules. Reconnecting on ours
     #     makes that ordinary rather than a symptom.

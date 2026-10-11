@@ -9,8 +9,8 @@ interface Props extends Omit<SharePanelProps, "active"> {
   resourceLabel: string;
 }
 
-/** Sharing as a dialog of its own — for records and forms. A list's permissions
- *  live in List settings instead, but both render the same SharePanel. */
+/** Sharing as a dialog of its own — for records and forms. A table's permissions
+ *  live in Table settings instead, but both render the same SharePanel. */
 export function ShareDialog({
   visible,
   onHide,

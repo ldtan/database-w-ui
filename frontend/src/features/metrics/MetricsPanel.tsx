@@ -7,20 +7,20 @@ import { confirmDialog } from "primereact/confirmdialog";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
 import type { Metric } from "../../lib/types";
-import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
+import { DeletedConfigDialog } from "../tables/DeletedConfigDialog";
 import { MetricDialog } from "./MetricDialog";
 import { metricsKey } from "./metricKeys";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   metrics: Metric[];
   canConfigure: boolean;
 }
 
-/** The list's metrics: add, modify, delete. Beside Columns and Views in list
- *  settings, because a metric is part of how the list is set up rather than
+/** The table's metrics: add, modify, delete. Beside Columns and Views in table
+ *  settings, because a metric is part of how the table is set up rather than
  *  something you change while reading it. */
-export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
+export function MetricsPanel({ tableUuid, metrics, canConfigure }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const [editing, setEditing] = useState<{ open: boolean; metric: Metric | null }>({
@@ -30,10 +30,10 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
   const [showDeleted, setShowDeleted] = useState(false);
 
   const remove = useMutation({
-    mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/metrics/${uuid}`),
+    mutationFn: (uuid: string) => api.del(`/tables/${tableUuid}/metrics/${uuid}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: metricsKey(listUuid) });
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: metricsKey(tableUuid) });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       toast.success("Metric deleted");
     },
     onError: (err) =>
@@ -60,7 +60,7 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
           text={
             canConfigure
               ? "No metrics yet. Add one to show a total, average or count above the records."
-              : "This list has no metrics yet."
+              : "This table has no metrics yet."
           }
         />
       )}
@@ -119,13 +119,13 @@ export function MetricsPanel({ listUuid, metrics, canConfigure }: Props) {
       )}
 
       <MetricDialog
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         metric={editing.metric}
         visible={editing.open}
         onHide={() => setEditing({ open: false, metric: null })}
       />
       <DeletedConfigDialog
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         kind="metrics"
         visible={showDeleted}
         onHide={() => setShowDeleted(false)}

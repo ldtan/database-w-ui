@@ -37,11 +37,26 @@ function readAll(): Stored {
   }
 }
 
+/** Tour ids that have been renamed since they were first written to a device.
+ *
+ *  The stored value is whatever the app called the tour on the day it was taken, so
+ *  a rename would otherwise re-offer a tour someone has already sat through — the
+ *  one failure this file exists to avoid. Mapping on read rather than migrating the
+ *  stored blob keeps it to one line and stays correct for a device that has not been
+ *  opened since.
+ *
+ *  `list` became `table` when the domain noun was renamed. */
+const RENAMED_TOURS: Record<string, string> = { list: "table" };
+
 export function readOnboarding(username: string): OnboardingState {
   const mine = readAll()[username];
   return {
     welcomed: mine?.welcomed === true,
-    seen: Array.isArray(mine?.seen) ? mine.seen.filter((s) => typeof s === "string") : [],
+    seen: Array.isArray(mine?.seen)
+      ? mine.seen
+          .filter((s) => typeof s === "string")
+          .map((s) => RENAMED_TOURS[s] ?? s)
+      : [],
   };
 }
 

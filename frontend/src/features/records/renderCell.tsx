@@ -9,7 +9,7 @@ import { locationLabel, mapHref } from "../../lib/location";
 import { formatPhone, splitPhone, telHref } from "../../lib/phone";
 import { ratingScale, ratingValue } from "../../lib/rating";
 import { displayTemporal, isTemporal } from "../../lib/temporal";
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, TableRecord } from "../../lib/types";
 import { LookupCell } from "../lookups/LookupControls";
 import { PrincipalCell, type PrincipalType } from "../principals/PrincipalControls";
 import { textMode } from "./recordValues";
@@ -17,7 +17,7 @@ import { textMode } from "./recordValues";
 /**
  * One record's value for one column, as the UI shows it.
  *
- * Shared by the grid and the card list — the two are different layouts of the same
+ * Shared by the grid and the card table — the two are different layouts of the same
  * data, and a value that renders one way in a table and another way in a card is a
  * bug waiting to happen (it already would have been: link and temporal
  * columns each have rules that live only here).
@@ -34,13 +34,13 @@ export type CellVariant = "compact" | "full";
 
 export function renderCell(
   column: Column,
-  row: ListItem,
-  listUuid: string,
+  row: TableRecord,
+  tableUuid: string,
   principalUuids: Record<PrincipalType, string[]>,
   lookupUuids: Map<string, string[]>,
   variant: CellVariant = "compact",
   /** The grid is in edit mode and this cell will open an editor. Defaults to
-   *  false so the card list and the read-only dialog are unaffected. */
+   *  false so the card table and the read-only dialog are unaffected. */
   editing = false,
 ) {
   const value = row.data?.[column.uuid];
@@ -52,7 +52,7 @@ export function renderCell(
   if (column.type === "lookup") {
     return (
       <LookupCell
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         column={column}
         value={value}
         pageUuids={lookupUuids.get(column.uuid) ?? []}
@@ -246,7 +246,7 @@ export function renderCell(
  * number, and `parsed.number` is the only form that is both.
  *
  * `sms:` is not in the backend's `SAFE_LINK_SCHEMES`, and that is not an
- * inconsistency: that list governs schemes a *`link` cell's value* may carry, where
+ * inconsistency: that table governs schemes a *`link` cell's value* may carry, where
  * the scheme is chosen by whoever typed the value. Here the scheme is ours and the
  * number is parsed before it is used — the same argument `telHref` already makes.
  */
@@ -286,7 +286,7 @@ function PhoneCell({
           onClick={(e) => {
             e.stopPropagation();
             // The tick is the whole acknowledgement. A toast per cell would be
-            // noise in a grid, and this renderer is shared with the card list and
+            // noise in a grid, and this renderer is shared with the card table and
             // the bin, neither of which has anywhere sensible to put one.
             void navigator.clipboard?.writeText(e164).then(
               () => {

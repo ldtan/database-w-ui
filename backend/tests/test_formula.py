@@ -9,8 +9,8 @@ from datetime import date, datetime
 import pytest
 
 from src.core.exceptions import ValidationError
-from src.lists.columns import formula as formula_module
-from src.lists.columns.formula import column_refs, evaluate, parse
+from src.tables.columns import formula as formula_module
+from src.tables.columns.formula import column_refs, evaluate, parse
 
 
 def calc(source, **values):
@@ -306,7 +306,7 @@ def test_a_formula_over_the_length_limit_is_rejected():
 def test_a_deeply_nested_formula_is_rejected_not_a_crash(source):
     # Length is not a bound on depth: each of these is inside the character limit
     # and every one of them used to overflow the stack — either here, or later in
-    # `evaluate`, which would take down every read of the list rather than one cell.
+    # `evaluate`, which would take down every read of the table rather than one cell.
     assert len(source) <= 1000
     with pytest.raises(ValidationError):
         parse(source)
@@ -343,7 +343,7 @@ def test_replace_measures_an_empty_search_string_correctly():
 
 def test_a_multiple_choice_cell_reads_as_its_labels_joined():
     # The one column value that is neither a scalar nor a reference. Joining is what
-    # makes a multi-select usable at all — every other treatment of a list blanks it.
+    # makes a multi-select usable at all — every other treatment of a table blanks it.
     assert calc("tags", tags=["Red", "Blue"]) == "Red, Blue"
     assert calc("CONCAT(tags, '!')", tags=["Red", "Blue"]) == "Red, Blue!"
     assert calc("LEN(tags)", tags=["Red", "Blue"]) == 9

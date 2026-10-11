@@ -18,15 +18,15 @@ interface Props {
  * The app had no way to say this. `retry: false` is the right default here —
  * most failures are 401/403/404, which are *answers* — but nothing rendered the
  * answer, so every failed query fell through to whatever the component drew for
- * *no data*. The result was that stopping the API and reloading a list produced
+ * *no data*. The result was that stopping the API and reloading a table produced
  * "No records yet — Add your first record with the button above.", and losing
- * access to a list produced "This list has no columns yet." Both are inviting,
- * confident, and wrong: they describe an empty list, and the one thing the user
+ * access to a table produced "This table has no columns yet." Both are inviting,
+ * confident, and wrong: they describe an empty table, and the one thing the user
  * needs to know is that they are not looking at their data.
  *
  * Deliberately **not** a global `QueryCache({ onError })` toast. Several queries
  * in this app are *supposed* to fail and degrade: `LookupCell` falls back to uuid
- * stubs when the reader cannot see the target list, `ColumnDialog` reads a 403 on
+ * stubs when the reader cannot see the target table, `ColumnDialog` reads a 403 on
  * the target's columns as `targetSchemaHidden`, and `useEffectiveActions` treats a
  * refusal as "no actions". Those are documented, routine, and per-cell — a blanket
  * toast would fire a stack of them for one ordinary lookup grid. So the fix is

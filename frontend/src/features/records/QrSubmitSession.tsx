@@ -31,7 +31,7 @@ import { Button } from "primereact/button";
 import { AppDialog } from "../../components/AppDialog";
 import { api, ApiError } from "../../lib/api";
 import { useToast } from "../../lib/toast";
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, TableRecord } from "../../lib/types";
 import { QrScanDialog } from "./QrScanDialog";
 import { RecordFields } from "./RecordFields";
 import { fillFromQr, parseQrPayload } from "./qrFill";
@@ -44,7 +44,7 @@ import {
 } from "./recordValues";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   /** The *create* form's fields — what a preset or a code may write, and no more. */
   fields: ResolvedField[];
@@ -95,7 +95,7 @@ function describePreset(field: ResolvedField, value: unknown): string {
 }
 
 export function QrSubmitSession({
-  listUuid,
+  tableUuid,
   columns,
   fields,
   presets,
@@ -112,11 +112,11 @@ export function QrSubmitSession({
 
   const submit = useMutation({
     mutationFn: (values: Record<string, unknown>) =>
-      api.post<ListItem>(`/lists/${listUuid}/items/`, {
+      api.post<TableRecord>(`/tables/${tableUuid}/records/`, {
         data: buildRecordData(fields, values, false),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
     },
     // No toast per scan: at a scan every few seconds it would be a wall of them,
     // and it would cover the camera. The log below the preview is the feedback.
@@ -135,9 +135,9 @@ export function QrSubmitSession({
     setError(null);
     try {
       const payload = parseQrPayload(text);
-      const fill = await fillFromQr(listUuid, fields, payload);
+      const fill = await fillFromQr(tableUuid, fields, payload);
       if (fill.filled.length === 0 && fill.issues.length === 0) {
-        setError("This QR code has no fields for this list.");
+        setError("This QR code has no fields for this table.");
         return;
       }
 
@@ -224,7 +224,7 @@ export function QrSubmitSession({
             <p className="field-hint">Add a column first.</p>
           )}
           <RecordFields
-            listUuid={listUuid}
+            tableUuid={tableUuid}
             fields={fields}
             columns={columns}
             values={presets}

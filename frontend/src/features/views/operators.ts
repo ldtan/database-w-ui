@@ -7,7 +7,7 @@
  * asked of one draft (`features/forms/conditions.ts`). A test can import a `.ts`; the
  * suite runs in node and deliberately keeps PrimeReact out of it (see vite.config.ts).
  *
- * The list is the contract `backend/src/lists/items/filtering.py::_condition` answers.
+ * The table is the contract `backend/src/tables/records/filtering.py::_condition` answers.
  * Adding one here without adding it there gets a filter that silently matches
  * everything, so the two are meant to be edited together.
  */

@@ -18,7 +18,7 @@ import SOURCE from "./GuidePage.tsx?raw";
  * that is simply absent, with no error anywhere to say so.
  *
  * Vitest runs in a node environment with no jsdom (see `vite.config.ts`), so this
- * cannot mount the page. It doesn't need to: the contents list and the figure
+ * cannot mount the page. It doesn't need to: the contents table and the figure
  * captions are plain data modules, and the references into them are literals in
  * the page's source. Reading that source as text is enough, and it keeps the test
  * free of React, the router and PrimeReact, none of which it has any opinion about.
@@ -45,7 +45,7 @@ function inPageAnchorTargets(): string[] {
   return [...SOURCE.matchAll(/href="#([^"]+)"/g)].map((m) => m[1]);
 }
 
-describe("the guide's contents list", () => {
+describe("the guide's contents table", () => {
   it("has a section on the page for every entry, and no others", () => {
     const listed = SECTIONS.map((s) => s.id);
     // Compared as sorted sets so the failure names the id that is wrong rather
@@ -53,8 +53,8 @@ describe("the guide's contents list", () => {
     expect([...renderedSectionIds()].sort()).toEqual([...listed].sort());
   });
 
-  it("lists sections in the order the page renders them", () => {
-    // The contents list is a reading order, not a set: an entry in the wrong
+  it("tables sections in the order the page renders them", () => {
+    // The contents table is a reading order, not a set: an entry in the wrong
     // place sends people backwards through the page.
     expect(renderedSectionIds()).toEqual(SECTIONS.map((s) => s.id));
   });

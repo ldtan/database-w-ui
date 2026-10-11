@@ -1,22 +1,22 @@
 import { AppDialog } from "../../components/AppDialog";
 import { Button } from "primereact/button";
 
-import type { Column, Form, ListItem } from "../../lib/types";
+import type { Column, Form, TableRecord } from "../../lib/types";
 import type { PrincipalType } from "../principals/PrincipalControls";
 import { resolveFields } from "./recordValues";
 import { renderCell } from "./renderCell";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
-  /** The list's `view` form, whose config decides which fields show and in what
-   *  order. Null renders every column — the dialog stays usable on a list whose
+  /** The table's `view` form, whose config decides which fields show and in what
+   *  order. Null renders every column — the dialog stays usable on a table whose
    *  form is missing. */
   form: Form | null;
-  item: ListItem | null;
+  item: TableRecord | null;
   /** The reference uuids the *page* holds, passed straight through to renderCell.
    *  Sharing the page's arrays is what makes the labels come from cache instead of
-   *  a second request — see the note on the collectors in ListDetailPage. */
+   *  a second request — see the note on the collectors in TableDetailPage. */
   principalUuids: Record<PrincipalType, string[]>;
   lookupUuids: Map<string, string[]>;
   canEdit: boolean;
@@ -26,7 +26,7 @@ interface Props {
 }
 
 /**
- * One record, read-only, laid out by the list's view form.
+ * One record, read-only, laid out by the table's view form.
  *
  * This exists so a *view* does not have to carry every column to stay useful. A
  * grid is for scanning many records and goes unreadable past a dozen columns; the
@@ -49,7 +49,7 @@ interface Props {
  * fourth way to disagree about one.
  */
 export function RecordViewDialog({
-  listUuid,
+  tableUuid,
   columns,
   form,
   item,
@@ -80,9 +80,9 @@ export function RecordViewDialog({
       {fields.length === 0 && (
         <p className="field-hint">This form has no fields to show.</p>
       )}
-      {/* A definition list rather than a stack of rows: hairlines between the
+      {/* A definition table rather than a stack of rows: hairlines between the
           fields are what let the eye find a label without reading every one. */}
-      <dl className="detail-list">
+      <dl className="detail-table">
         {item &&
           fields.map(({ column, label }) => (
             <div key={column.uuid} className="detail-row">
@@ -93,7 +93,7 @@ export function RecordViewDialog({
                 {renderCell(
                   column,
                   item,
-                  listUuid,
+                  tableUuid,
                   principalUuids,
                   lookupUuids,
                   "full",

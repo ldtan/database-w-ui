@@ -53,7 +53,7 @@ not make sense without them.
 
 `commitCell` currently discards a draft whose row or column does not match the one on
 the event, with no feedback. PrimeReact keys body cells by `${rowIndex}_${field}_${index}`,
-so a `useLiveList` poll that reorders or repages rows leaves an open editor sitting at
+so a `useLiveTable` poll that reorders or repages rows leaves an open editor sitting at
 a position now held by a different record. The guard correctly prevents a wrong write,
 but turns it into invisible data loss.
 
@@ -90,7 +90,7 @@ Three changes to `saveCell`:
   cannot refetch, and the rejected value sits on screen indefinitely — contradicting
   the "the refetch is the revert" comment the code carries.
 
-- **`onSuccess` writes the record the PATCH already returned.** `api.patch<ListItem>`
+- **`onSuccess` writes the record the PATCH already returned.** `api.patch<TableRecord>`
   resolves to the server's own rendering of the record, with calculated columns
   recomputed and `onupdate` columns stamped. Discarding it and refetching the page is
   strictly more work for a strictly worse answer.
@@ -222,7 +222,7 @@ aria-label naming the column.
 
 A column with an `config.onupdate` token is offered as an editable inline cell whose
 typed value the server unconditionally replaces with the stamp
-(`backend/src/lists/items/services.py:846-849`). The optimistic update makes this worse
+(`backend/src/tables/records/services.py:846-849`). The optimistic update makes this worse
 than the dialog's version of the same gap: the typed value shows for the round trip,
 then the refetch silently replaces it.
 
@@ -247,7 +247,7 @@ refuses the value, so offering an input for it is a lie.
 
 ### #8 — `cellMemo={false}`
 
-`BodyCell`'s comparator uses a fixed `cellMemoProps` list (`datatable.cjs.js:493`) that
+`BodyCell`'s comparator uses a fixed `cellMemoProps` table (`datatable.cjs.js:493`) that
 does not include the column, and `cellMemo` defaults to `true`. When
 `useEffectiveActionsMap` resolves after the grid has rendered with `editMode="cell"`,
 cells that just became editable never gain the `cell-editable` affordance and their
@@ -258,7 +258,7 @@ recreated every render, so it would never compare equal — the memo would be of
 but name.
 
 **Rejected:** gating `editMode="cell"` on the effective-actions query settling.
-`editMode` *is* in the compare list, so cells would re-render when it flips, with a
+`editMode` *is* in the compare table, so cells would re-render when it flips, with a
 final `canItem`. But it leaves a hole: a permission changed through the Share dialog
 invalidates `["effective"]` mid-session without busting the cell memo.
 
@@ -282,7 +282,7 @@ for every cell of every row, and `kind` already encodes "locked". One helper def
 once per column drives all three:
 
 ```ts
-const isEditable = (row: ListItem) => kind !== "locked" && canItem(row.uuid, "edit");
+const isEditable = (row: TableRecord) => kind !== "locked" && canItem(row.uuid, "edit");
 ```
 
 The point is not the saved lookups — `canItem` is a Map read — it is that the class,
@@ -319,7 +319,7 @@ the `defaultPrevented` mistake in #10 before it was written.
 - **Batching cell writes behind a "Save Changes" button.** Considered earlier and
   rejected: it fixes the self-race but not multi-user races, and introduces
   unsaved-client-state problems. The row lock in PR #42 addresses the actual defect.
-- **The remaining `["items", listUuid]` invalidation call sites.** A dozen files spell
+- **The remaining `["records", tableUuid]` invalidation call sites.** A dozen files spell
   the namespace literally. They are correct as written; converting them to a shared
   helper is churn unrelated to these findings.
 

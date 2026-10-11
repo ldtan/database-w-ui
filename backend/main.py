@@ -36,7 +36,7 @@ async def lifespan(app: FastAPI):
     # Streams opened before this point must not survive it. Clear the flag on the
     # way in so an app built a second time in one process (the test suite does this
     # per fixture) does not inherit the previous one's shutdown — or its event loop.
-    from src.lists.events.broker import begin_shutdown, reset_shutdown
+    from src.tables.events.broker import begin_shutdown, reset_shutdown
     reset_shutdown()
 
     yield
@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
 
     app = FastAPI(
         title="Database w/ UI",
-        description="This app lets you create lists and add records.",
+        description="This app lets you create tables and add records.",
         version="1.0.0",
         docs_url="/docs" if docs_enabled else None,
         redoc_url="/redoc" if docs_enabled else None,
@@ -127,22 +127,26 @@ def create_app() -> FastAPI:
     # Import and include your routers here
     from src.auth.routers import router as auth_router
     from src.workspaces.routers import router as workspaces_router
-    from src.lists.routers import router as lists_router
+    from src.tables.routers import router as tables_router
     from src.permissions.routers import router as permissions_router
     from src.people.routers import router as people_router
     from src.geocode.routers import router as geocode_router
-    # Live records. Deliberately *not* included into lists_router: that router
+    # Live records. Deliberately *not* included into tables_router: that router
     # applies Depends(get_current_user), which takes Depends(get_db), and a yield
     # dependency is released only once the response completes — which for a stream
-    # is when the browser closes it. See src/lists/events/routers.py.
-    from src.lists.events.routers import router as list_events_router
+    # is when the browser closes it. See src/tables/events/routers.py.
+    from src.tables.events.routers import router as table_events_router
+    # Temporary: `/api/lists/*` -> `/api/tables/*`. Delete after 2026-11-11, along
+    # with src/tables/legacy.py — see that module for why it exists at all.
+    from src.tables.legacy import router as legacy_list_router
     app.include_router(auth_router, prefix=settings.API_PREFIX)
     app.include_router(workspaces_router, prefix=settings.API_PREFIX)
-    app.include_router(lists_router, prefix=settings.API_PREFIX)
-    app.include_router(list_events_router, prefix=settings.API_PREFIX)
+    app.include_router(tables_router, prefix=settings.API_PREFIX)
+    app.include_router(table_events_router, prefix=settings.API_PREFIX)
     app.include_router(permissions_router, prefix=settings.API_PREFIX)
     app.include_router(people_router, prefix=settings.API_PREFIX)
     app.include_router(geocode_router, prefix=settings.API_PREFIX)
+    app.include_router(legacy_list_router, prefix=settings.API_PREFIX)
 
     return app
 

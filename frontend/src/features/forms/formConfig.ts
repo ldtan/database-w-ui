@@ -86,7 +86,7 @@ export function buildFormConfigPatch(
 /**
  * A stored condition with any part of it that no longer resolves dropped.
  *
- * `known` is the uuids of the list's live columns. A condition naming one that has
+ * `known` is the uuids of the table's live columns. A condition naming one that has
  * since been deleted would fail `FormService._validate_config` on the next save, so
  * the form becomes unsaveable — by whoever opens it next, who did not write the
  * condition and has nothing on screen telling them what is wrong. Pruning as the
@@ -124,7 +124,7 @@ export function prunedCondition(
  * is the point rather than a shortcut. `FieldSettingsPanel` disables "editable" for such
  * a row, because a field the form never renders cannot be filled in either way — so its
  * stored `enabled` is not a setting anybody chose. The audit columns arrive excluded and
- * not-editable, which had every list showing four dots against rows whose panel offers
+ * not-editable, which had every table showing four dots against rows whose panel offers
  * nothing to change, and a dot on every row is a dot that says nothing about any of them.
  */
 export function rowIsCustomised(
@@ -143,7 +143,7 @@ export function rowIsCustomised(
  * Which of a form's per-field settings an "apply" carries onto another form.
  *
  * Four parts rather than one switch because they are wanted separately. The add and
- * edit forms exist to differ on `layout` — that is the whole reason a list has two —
+ * edit forms exist to differ on `layout` — that is the whole reason a table has two —
  * while a `conditions` rule or a renamed `label` is usually meant to hold for every
  * form that shows the column. Copying the lot is what somebody means occasionally;
  * copying one part is what they mean most of the time.
@@ -192,7 +192,7 @@ function resolvedOrder(form: Form, columns: Column[]): string[] {
  * `target`'s config with the named `parts` of `source` laid over it.
  *
  * **It writes the target's fields down in full, and it has to.** A form provisioned
- * with a list names only the audit columns, so every real column reaches the dialog
+ * with a table names only the audit columns, so every real column reaches the dialog
  * through `resolveFields`' "a column the config has never heard of is newer than the
  * config, not excluded by it" rule — not through the config at all. A setting
  * therefore has nowhere to live on such a form, and applying by mapping over the

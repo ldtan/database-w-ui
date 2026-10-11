@@ -1,11 +1,11 @@
-# Data Model Design — Lists / Tables App
+# Data Model Design
 
 Status: **Implemented (backend)**
-Last updated: 2026-08-27
+Last updated: 2026-10-11
 
-This document specifies the data model for the app: users create **lists** (tables),
-define **columns** (fields) on them, store records as **list items**, and configure
-**views** and **forms** over each list.
+This document specifies the data model for the app: users create **tables**, define
+**columns** (fields) on them, store **records** in them, and configure **views** and
+**forms** over each table.
 
 It builds on the existing stack and conventions:
 
@@ -23,8 +23,8 @@ It builds on the existing stack and conventions:
 These are the load-bearing choices. Everything else follows from them.
 
 ### D1 — Records are stored as JSONB, one row per record
-`list_items.data` is a single `JSONB` column holding the whole record.
-We are *not* creating a physical table per list, and *not* using EAV.
+`table_records.data` is a single `JSONB` column holding the whole record.
+We are *not* giving each table a physical table of its own, and *not* using EAV.
 
 - **Pro:** fully dynamic schema, no migrations when columns change, simple to reason about.
 - **Con (accepted):** the database will **not** enforce types, requiredness, defaults,
@@ -62,21 +62,21 @@ View sort/filter/group and form field layout are stored as JSONB blobs on the `v
 and `forms` rows rather than normalized child tables. They are presentation metadata,
 rarely queried relationally, and this avoids extra joins.
 
-### D6 — `lists`, `columns`, `views`, `forms` carry two identifiers: `name` + `display_name`
+### D6 — `tables`, `columns`, `views`, `forms` carry two identifiers: `name` + `display_name`
 - **`name`** — the code-facing identifier. A slug matching `^[a-z][a-z0-9_]*$`
   (starts with a lowercase letter; lowercase letters, digits, underscores only,
   ≤ 63 chars). Both are **required and explicit** — the client always sends both; `name`
-  is never auto-derived. `name` is **unique per scope** (list per owner; column/view/form
-  per list) and is **editable** (re-validated + uniqueness-checked on update).
+  is never auto-derived. `name` is **unique per scope** (table per owner; column/view/form
+  per table) and is **editable** (re-validated + uniqueness-checked on update).
 - **`display_name`** — free-text label the UI shows. Not unique.
 
-The shared slug type lives in `src/core/schemas.py` as `NameSlug`. `list_items`
+The shared slug type lives in `src/core/schemas.py` as `NameSlug`. `table_records`
 (records) have **no** name — they are pure data. Nothing in the system references these
 resources by `name` internally (uuids do that job, per D2/D4), so `name` is purely a
 handle for API/code consumers and is safe to rename.
 
-**Every resource is addressed in a URL by uuid alone** — `/lists/{list}/columns/019f…`,
-and likewise for views, forms, metrics and the `?view_uuid=` an item listing takes. A
+**Every resource is addressed in a URL by uuid alone** — `/tables/{table}/columns/019f…`,
+and likewise for views, forms, metrics and the `?view_uuid=` a record listing takes. A
 name was accepted here too until it was withdrawn: a name and a literal path segment
 compete for the same slot, and the two had already collided — `/metrics/values` is
 declared ahead of `/{uuid}`, so a metric called `values` was creatable and permanently
@@ -90,8 +90,8 @@ remain the vocabulary elsewhere: metric formulas reference columns by name, and 
 `lookup`/`user`/`group` cell accepts a name and stores the uuid (§5 below), which is what
 lets an exported CSV import back.
 
-Lists were uuid-only from the start, for a reason that stands on its own: a list's name
-is unique only per *workspace*, which `/lists/{x}` does not carry, and a guessable
+Tables were uuid-only from the start, for a reason that stands on its own: a table's name
+is unique only per *workspace*, which `/tables/{x}` does not carry, and a guessable
 identifier would turn the 403-vs-404 distinction on that route into an enumeration
 oracle.
 
@@ -102,19 +102,19 @@ oracle.
 ```
 User
  └─ owns ─▶ Workspace
-              └─ contains ─▶ List ──┬─▶ Column    (schema: the fields)
-                                    ├─▶ ListItem  (records: JSONB keyed by column uuid)
+              └─ contains ─▶ Table ──┬─▶ Column    (schema: the fields)
+                                    ├─▶ TableRecord  (records: JSONB keyed by column uuid)
                                     ├─▶ View      (saved sort/filter/group/paging)
                                     ├─▶ Form      (field layout for create/update/view)
                                     └─▶ Metric   (a named aggregate over the records)
 ```
 
-`Workspace` is the tenancy boundary: a user owns workspaces, and a list's ownership
+`Workspace` is the tenancy boundary: a user owns workspaces, and a table's ownership
 flows through its workspace (§3). It is also the natural boundary for future sharing.
 
 `User` also carries a `settings` `JSONB` column (default `{}`) holding account-level UI
 preferences — colour theme and light/dark today. Unlike the free-form
-`workspaces.settings` / `lists.settings` blobs below, it is validated against a fixed
+`workspaces.settings` / `tables.settings` blobs below, it is validated against a fixed
 Pydantic schema (`UserSettings`), so it is published in the OpenAPI document and the
 frontend's types are generated rather than hand-mirrored. Writes go through
 `PATCH /auth/users/me/settings` and **merge**: only the keys sent are touched, so a client
@@ -123,11 +123,11 @@ than the browser, which is what lets them follow a user between devices.
 
 ---
 
-## 3. `workspaces` and `lists`
+## 3. `workspaces` and `tables`
 
 ### `workspaces`
 
-The tenancy container. A user owns workspaces; lists live inside them.
+The tenancy container. A user owns workspaces; tables live inside them.
 
 | Field          | Type            | Notes |
 |----------------|-----------------|-------|
@@ -137,11 +137,11 @@ The tenancy container. A user owns workspaces; lists live inside them.
 | `display_name` | `str(255)`      | UI label (D6). Not unique. |
 | `description`  | `Text` nullable | Optional. |
 | `settings`     | `JSONB` default `{}` | Misc workspace-level settings. |
-| `is_system`    | `bool` default `false` | Marks the per-user **"Incoming"** workspace that transferred lists land in (see the lists notes below). Immutable — cannot be renamed or deleted; minted lazily on the first transfer to a user. |
+| `is_system`    | `bool` default `false` | Marks the per-user **"Incoming"** workspace that transferred tables land in (see the tables notes below). Immutable — cannot be renamed or deleted; minted lazily on the first transfer to a user. |
 
-### `lists`
+### `tables`
 
-A table/list definition and its settings, scoped to a workspace.
+A table/table definition and its settings, scoped to a workspace.
 
 | Field              | Type            | Notes |
 |--------------------|-----------------|-------|
@@ -151,42 +151,42 @@ A table/list definition and its settings, scoped to a workspace.
 | `display_name`     | `str(255)`      | UI label (D6). Not unique. |
 | `description`      | `Text` nullable | Optional. |
 | `primary_column_id`| FK → `columns.id` nullable | The "display field" used to label a row when it is referenced by a lookup (Airtable's primary field). Nullable to break the chicken/egg on creation. |
-| `settings`         | `JSONB` default `{}` | Misc list-level settings. Free-form **except for the keys this build reads**, which are validated individually (`qr` today — the fields a printed QR code carries, by column *name*). A `PATCH` **merges**: only the keys sent are touched, so a client that has never heard of one cannot drop it — the same rule `users.settings` follows. Shallow, so a known key is replaced whole. |
+| `settings`         | `JSONB` default `{}` | Misc table-level settings. Free-form **except for the keys this build reads**, which are validated individually (`qr` today — the fields a printed QR code carries, by column *name*). A `PATCH` **merges**: only the keys sent are touched, so a client that has never heard of one cannot drop it — the same rule `users.settings` follows. Shallow, so a known key is replaced whole. |
 
 Notes:
-- Ownership is transitive: list queries join `workspaces` and filter on
-  `workspaces.owner_id`. The `get_list_or_404` dependency enforces this for all child
-  resources, so an unowned (or wrong-workspace) list — and everything under it — is a 404.
+- Ownership is transitive: table queries join `workspaces` and filter on
+  `workspaces.owner_id`. The `get_table_or_404` dependency enforces this for all child
+  resources, so an unowned (or wrong-workspace) table — and everything under it — is a 404.
 - Uniqueness: partial unique indexes on `(owner_id, name)` for workspaces and
-  `(workspace_id, name)` for lists, both `WHERE deleted_at IS NULL`.
-- **Auto-provisioning (implemented):** creating a list seeds a default `grid` view and
+  `(workspace_id, name)` for tables, both `WHERE deleted_at IS NULL`.
+- **Auto-provisioning (implemented):** creating a table seeds a default `grid` view and
   default `create`/`update`/`view` forms (§7, §8).
-- Lists are created with a `workspace_uuid` in the body and can be **moved** between
+- Tables are created with a `workspace_uuid` in the body and can be **moved** between
   workspaces via update (`PATCH` with `workspace_uuid`; requires `configure` on both the
-  list and the target workspace). A list can also be **transferred to another user** via
-  `POST /lists/{uuid}/transfer`: ownership flows through the workspace, so the transfer
-  moves the list into the recipient's immutable `is_system` "Incoming" workspace (minted on
+  table and the target workspace). A table can also be **transferred to another user** via
+  `POST /tables/{uuid}/transfer`: ownership flows through the workspace, so the transfer
+  moves the table into the recipient's immutable `is_system` "Incoming" workspace (minted on
   demand), making them the owner. Owner-only; existing grants survive (they key on the
   unchanged `resource_id`); the giver's implicit access ends. Both must assign the
   `workspace` **relationship**, not the `workspace_id` FK — see
   [known gaps](known-gaps.md). Details in [planned features §3–4](planned-features.md).
 - A **whole workspace** can be transferred the same way, via
   `POST /workspaces/{uuid}/transfer`. Because a workspace *is* the ownership boundary,
-  this reassigns `owner_id` in place rather than moving anything: every list inside
+  this reassigns `owner_id` in place rather than moving anything: every table inside
   follows without being touched, and every uuid in the tree survives. No inbox is
-  involved — the inbox exists to give a *list* somewhere to land, and a workspace needs
+  involved — the inbox exists to give a *table* somewhere to land, and a workspace needs
   nowhere. Owner-only, shares survive, giver's implicit access ends — the same three
-  rules as the list transfer. A clash with a workspace the recipient already owns
+  rules as the table transfer. A clash with a workspace the recipient already owns
   auto-suffixes on the per-owner unique name (`team` → `team_2`), and the `incoming`
   slot is treated as occupied so a transfer can never squat it. The `is_system` inbox
   itself cannot be transferred. See `WorkspaceService.transfer_to_user` and
   `tests/test_workspace_transfer.py`.
-- A list can be **cloned** via `POST /lists/{uuid}/clone` `{ with_records }` — a copy in
+- A table can be **cloned** via `POST /tables/{uuid}/clone` `{ with_records }` — a copy in
   the same workspace, structure always, records optionally. Because records are keyed by
   column **uuid** (D2), the clone's new columns get new uuids and every reference is
   rewritten through an old→new column-uuid map: record `data` keys, `primary_column_id`,
   and the column-uuid refs in view/form configs. Cell *values* copy verbatim (choice labels,
-  lookup/user/group uuids); a self-lookup is left pointing at the original list. Unlike a
+  lookup/user/group uuids); a self-lookup is left pointing at the original table. Unlike a
   create, cloning does **not** run `_provision_defaults` (it copies the source's real
   columns/views/forms) and does **not** copy grants — the clone starts private. Details in
   [planned features §5](planned-features.md).
@@ -195,18 +195,18 @@ Notes:
 
 ## 4. `columns`
 
-Defines one field on a list. This is the schema.
+Defines one field on a table. This is the schema.
 
 | Field         | Type              | Notes |
 |---------------|-------------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel`. **`uuid` is the JSONB key** (D2). |
-| `list_id`     | FK → `lists.id`   | Owner list. |
-| `name`        | `str(120)`        | Code-facing slug (D6). Unique **per list** (ignoring soft-deleted). |
+| `table_id`     | FK → `tables.id`   | Owner table. |
+| `name`        | `str(120)`        | Code-facing slug (D6). Unique **per table** (ignoring soft-deleted). |
 | `display_name`| `str(255)`        | UI label (D6). Not unique. |
 | `type`        | `enum` (`ColumnType`) | See §5. Immutable through `PATCH`; changed only by a **conversion** ([planned features §1](planned-features.md)), which reads, converts, writes and retypes in **one transaction** so the column's `uuid` and every reference to it survive and no write can land in a gap. |
-| `position`    | `int`             | Ordering within the list's schema. |
+| `position`    | `int`             | Ordering within the table's schema. |
 | `config`      | `JSONB` default `{}` | Type-specific settings — see §5. |
-| `hidden`      | `bool` default `false` | Live, but **not part of the list's shape**: the grid, records, export, metrics, forms and the primary column all skip it. **Nothing sets it any more** — it existed for the staged conversion that §5's `type` row describes, and survives so `src/maintenance/drop_conversion_scratch.py` can find the rows that design stranded. Use `Column.in_shape()` rather than testing it by hand, and do not set it casually: a hidden column is one no code path will read, finish, or offer to clean up. |
+| `hidden`      | `bool` default `false` | Live, but **not part of the table's shape**: the grid, records, export, metrics, forms and the primary column all skip it. **Nothing sets it any more** — it existed for the staged conversion that §5's `type` row describes, and survives so `src/maintenance/drop_conversion_scratch.py` can find the rows that design stranded. Use `Column.in_shape()` rather than testing it by hand, and do not set it casually: a hidden column is one no code path will read, finish, or offer to clean up. |
 
 `config` is where every per-type detail lives (options, precision, defaults,
 required flag, lookup target). Keeping it in one JSONB blob means adding a new
@@ -234,7 +234,7 @@ Common `config` keys (all optional unless noted):
 | `number`      | `number`                                   | `min?`, `max?`, `precision?`, `integer_only?`, `number_format?` (`plain`/`currency`/`percent`) |
 | `checkbox`    | `boolean`                                  | — |
 | `choice`      | option label (or `[label, …]` if multi)    | `choices?` (shorthand) **or** `options: [label, …]`; `multiple?`; `allow_other?` |
-| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_list_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
+| `lookup`      | target row `uuid` (or `[uuid, …]` if multi)| `target_table_uuid`, `multiple?`, `display_column_uuid?`, `parent_column_uuid?` + `target_filter_column_uuid?` (nested lookup, set together), `option_filters?` (a `FilterGroup` over the target's columns), `allow_create?` |
 | `link`        | URL `string`                               | `allowed_schemes?` (default `["http", "https"]`), `label?`, `max_length?` |
 | `email`       | address `string`, trimmed and lowercased   | `max_length?` |
 | `phone`       | E.164 `string` (`+639171234567`)           | `default_region?` (ISO-3166 alpha-2), `allowed_regions?`, `display_format?` (`e164`/`national`/`international`) |
@@ -253,7 +253,7 @@ Common keys on **every** type: `required`, `default`, `unique`, `help_text`, plu
 UI-only hints `placeholder` and `read_only` (stored, not enforced by the API).
 
 `min`/`max` are shared keys interpreted per type: numbers for `number`, ISO strings for
-the temporal types. `lookup` references its target list by **uuid** (`target_list_uuid`),
+the temporal types. `lookup` references its target table by **uuid** (`target_table_uuid`),
 not internal id, so the config stays API-portable.
 
 Notes:
@@ -262,11 +262,11 @@ Notes:
   number range and `integer_only`, temporal range, and choice membership. Config is also
   validated when the column is created/updated (e.g. `min` ≤ `max`, well-formed dates and
   regex, a `default` that is itself a valid value).
-- **`unique` is enforced:** on write, no other non-deleted record in the list may hold the
+- **`unique` is enforced:** on write, no other non-deleted record in the table may hold the
   same value for that column (checked with a JSONB `@>` containment query). Violations
-  return `409`. Empty and multi-valued (list) values are skipped. The check and the insert
-  are made atomic by a transaction-scoped Postgres advisory lock keyed on the list (taken
-  only when the list has a unique column), so concurrent writers can't both pass the check.
+  return `409`. Empty and multi-valued (table) values are skipped. The check and the insert
+  are made atomic by a transaction-scoped Postgres advisory lock keyed on the table (taken
+  only when the table has a unique column), so concurrent writers can't both pass the check.
   Note this guards writers going through the service layer, not arbitrary direct DB writes.
 - **Dynamic defaults:** temporal columns accept `default: "today"` (date) or `"now"`
   (time/datetime), resolved to the current value at insert time rather than stored as a
@@ -284,37 +284,37 @@ Notes:
   two values, and turning the flag off later leaves existing answers in place while
   refusing the next write of those cells (the deal in known-gaps #4).
 - `lookup` — stores target-row `uuid`s (D4); the label to display comes from the lookup's
-  `display_column_uuid`, falling back to the target list's `primary_column_id`
+  `display_column_uuid`, falling back to the target table's `primary_column_id`
   (`display_column_key`). A lookup column cannot have a `default`. Its **target may be any
-  list the creator can `view`** — their own, one in another of their workspaces, or one
-  shared with them — not just a list they own; the target that can't be viewed is refused
-  like one that doesn't exist, so the field can't probe for a stranger's lists. Config-time
+  table the creator can `view`** — their own, one in another of their workspaces, or one
+  shared with them — not just a table they own; the target that can't be viewed is refused
+  like one that doesn't exist, so the field can't probe for a stranger's tables. Config-time
   validation checks the *creator's* `view`; resolving labels later re-checks the *reader's*
   `view` on the target (see known-gaps), so a cross-workspace target never leaks. Like `user`/`group`, a cell
   accepts a uuid **or** a label and stores the uuid — which is what lets an exported file,
   where the label is what's written, be imported straight back. A label matching more than one
   row is rejected (row labels are not unique), so ambiguity is an error, never a guess.
   A lookup may also **nest** under a sibling lookup (`parent_column_uuid` +
-  `target_filter_column_uuid`, set together): the target list's filter column points back at
+  `target_filter_column_uuid`, set together): the target table's filter column points back at
   the parent's target, and what the parent cell holds constrains which target rows the child
   may add (options filtering is opt-in per request; writes enforce). See planned-features #6.
-- `lookup` **`allow_create`** — the picker may add a missing row to the target list
+- `lookup` **`allow_create`** — the picker may add a missing row to the target table
   instead of dead-ending, opening the target's own create form prefilled with what was
   typed. The counterpart of `choice`'s `allow_other`, and it strikes the same bargain
   from the other side: the offered set stops being the permitted set, but a lookup's
-  off-list answer has to become a real row somewhere rather than loose text.
+  off-table answer has to become a real row somewhere rather than loose text.
   **It is an affordance and confers nothing.** The gate is `create` on the *target*
-  list, resolved per caller when the row is written — by the target's ordinary
-  `POST /items/`, which this changes nothing about. That is also what makes it safe
+  table, resolved per caller when the row is written — by the target's ordinary
+  `POST /records/`, which this changes nothing about. That is also what makes it safe
   against the disclosure `lookup` exists to prevent: `create` confers `view`
   (`permissions/enums.py`), so anyone who can be offered the button could already open
   the target and read its columns. It is deliberately *not* validated against the
-  configurer's own access, since whoever configures a list is routinely not whoever
+  configurer's own access, since whoever configures a table is routinely not whoever
   fills its forms. Only the pickers honour it: an unknown label is still an error from
   import, from the QR fill and from a direct API write, so a typo in a bulk file cannot
   mint rows. `tests/test_lookup_grants.py` pins both directions.
 - `lookup` **option filters** — `option_filters` is a view's `FilterGroup` asked of the
-  *target list's* columns ("only Active schools"), narrowing what the picker offers. Unlike
+  *target table's* columns ("only Active schools"), narrowing what the picker offers. Unlike
   the nesting pair it compares against literals, so it does not vary per record; unlike the
   nesting pair it is **never taken from the request**. That is a boundary, not a style
   choice: `lookup` grants a row's label without granting the row, so a caller-chosen
@@ -325,7 +325,7 @@ Notes:
   an anchor, so a `javascript:` or `data:` URL would be stored XSS. A value must parse as an
   absolute URL whose scheme is in the column's `allowed_schemes`, and a column may only
   *narrow* that set — `SAFE_LINK_SCHEMES` (`http`, `https`, `mailto`, `tel`) is the ceiling,
-  because whoever configures a column is an ordinary list editor, not a trusted admin.
+  because whoever configures a column is an ordinary table editor, not a trusted admin.
   Enforced in `validate_scalar`, so import and the column's own `default` go through it too;
   the frontend re-checks before it builds an `href` (`lib/links.ts`). `label` is optional
   fixed anchor text shown instead of the raw URL.
@@ -349,7 +349,7 @@ Notes:
   search, an export and a conversion would all have been asking questions of
   `{"address": …, "lat": …}` rather than of the place. Four readers therefore know
   about this type by name, and a fifth that ever needs to must be added deliberately:
-  `items/filtering.py::_field` and `ListItemService._apply_search` (both via
+  `records/filtering.py::_field` and `TableRecordService._apply_search` (both via
   `location_address`, which reaches for `data -> key ->> 'address'`),
   `transfer/services.py::_csv_cell` and `columns/conversion.py::_render_scalar` (both
   via `format_location`). See known-gaps §13.
@@ -395,7 +395,7 @@ Notes:
     than dropped.
 - `rating` / `duration` — **both are `number` in a costume, and `NUMERIC_TYPES` is what
   keeps the costume from changing the behaviour.** A cell in either holds a plain JSON
-  number, so `items/filtering.py` casts it (`_numeric`, `_numeric_comparable`,
+  number, so `records/filtering.py` casts it (`_numeric`, `_numeric_comparable`,
   `_order_terms`), a metric aggregates it (`metrics/services.py::REFERENCEABLE_TYPES`,
   compiled to SQL by `pushdown._PUSHABLE_TYPES`) and a formula reads it. Those three
   readers test the **set** rather than `== ColumnType.number`, and that is load-bearing:
@@ -427,15 +427,15 @@ Notes:
   `include_time` flag.
 - `user` / `group` — **`lookup` with a fixed target**: same soft-reference shape (store a
   uuid, resolve the label on read), but pointing at the `users` / `user_groups` table instead
-  of a list, so there is no `target_list_uuid`. An assignee field is the motivating case.
+  of a table, so there is no `target_table_uuid`. An assignee field is the motivating case.
   Neither can have a `default` (it would name an account that later gets deleted), and both
   live in `REFERENCE_TYPES` — the set the pure validators skip because their values are
   checked against the database. Three things about them are load-bearing:
   - **The label is the `username` / group name, never the connected person's real name.**
     `/auth/users` is readable by any authenticated user precisely so the Share dialog can
-    list principals — but **person records are private** (owner or superuser only, see §12
+    table principals — but **person records are private** (owner or superuser only, see §12
     and `src/people`). A cell rendering "Grace Hopper" would leak personal data to every
-    viewer of the list. `PrincipalControls.tsx` and the export formatter both resolve to the
+    viewer of the table. `PrincipalControls.tsx` and the export formatter both resolve to the
     username. A group has two names since `b3f9d47c1a06`, and the two resolvers pick
     differently on purpose: the screen shows `display_name`, the export writes the slug
     `name`. The file has to round-trip and only the slug is unique, and the export's header
@@ -443,7 +443,7 @@ Notes:
     readable.
   - **Deleting a user or group scrubs the references.** No FK backs them (D4), so
     `UserService.delete` / `UserGroupService.delete` call
-    `ListItemService.scrub_principal_references`, which nulls the cell (or drops the entry
+    `TableRecordService.scrub_principal_references`, which nulls the cell (or drops the entry
     from a multi-valued one) — the same treatment `lookup` gets when a target row goes away.
   - **A cell accepts a uuid *or* a name, and always stores the uuid.** The UI sends uuids;
     accepting a name is what lets an exported CSV (which writes names, because a file of
@@ -457,7 +457,7 @@ Notes:
   design: a stale index misplaces a row in a sorted or filtered view, but no reader — grid,
   record dialog or export — is ever served a stale number. Only a *schema* change can make it
   stale (a formula edited, or a column a formula reads renamed or deleted), and re-indexing is
-  an explicit action: `POST /lists/{uuid}/columns/recompute`, offered by the column dialog
+  an explicit action: `POST /tables/{uuid}/columns/recompute`, offered by the column dialog
   right after a formula edit, with the nightly `recompute_calculated` as the backstop. A
   formula may reference another `calculated` column — `columns/chain.py` topologically sorts
   the chain so it settles in one pass per write, and refuses cycles at save time. It never
@@ -484,8 +484,8 @@ state, seeding, `resetDefaults`, and the config emit, where a key must always be
 because a `PATCH` merges), `features/columns/columnAdvanced.ts` (`ADVANCED_KEYS`, or a
 column that uses the new setting opens with it folded away invisibly),
 `features/records/qrFill.ts` (`shape()`), and the export/import cell handling in
-`src/lists/transfer/services.py`. Both record components were extracted out of
-`ListDetailPage.tsx`/`RecordFormDialog.tsx` precisely so that there is one of each: the grid,
+`src/tables/transfer/services.py`. Both record components were extracted out of
+`TableDetailPage.tsx`/`RecordFormDialog.tsx` precisely so that there is one of each: the grid,
 the phone cards, the bin and the view-form dialog all display through `renderCell`, and the
 add/edit dialog and the QR session both edit through `RecordField`.
 
@@ -516,14 +516,14 @@ The same column can be created with the shorthand instead — the server splits 
 
 ---
 
-## 6. `list_items`
+## 6. `table_records`
 
 One record. All values live in a single JSONB blob keyed by column uuid (D2).
 
 | Field       | Type            | Notes |
 |-------------|-----------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
-| `list_id`   | FK → `lists.id` | Owner list. |
+| `table_id`   | FK → `tables.id` | Owner table. |
 | `data`      | `JSONB` default `{}` | `{"<column.uuid>": <value>, …}` |
 | `archived_at` | `timestamptz` null | Finished with, but kept. See below. |
 
@@ -531,11 +531,11 @@ One record. All values live in a single JSONB blob keyed by column uuid (D2).
 "this was a mistake, and it goes for good in `PURGE_DELETED_AFTER_DAYS`"; an archive says
 "this happened and I have finished with it". So an archive has **no retention window** and
 no purge job — a record stays archived until somebody unarchives or deletes it — and it is
-records only, which is why the field is on `ListItem` rather than on `BaseModel`.
+records only, which is why the field is on `TableRecord` rather than on `BaseModel`.
 
 Archiving takes a record out of every *normal* read at once, because they all funnel through
-`ListItemService._select`: the grid, `items/count`, search, filters, sorts, and the metric
-scan. It changes nothing outside the list — an archived row still resolves as a lookup label
+`TableRecordService._select`: the grid, `records/count`, search, filters, sorts, and the metric
+scan. It changes nothing outside the table — an archived row still resolves as a lookup label
 and still reserves its `unique` values. Where the two axes meet, **delete wins**: archiving
 then deleting puts the record in the bin, not the archive, and restoring returns it to the
 archive it came from. See known-gaps §6 for the full rule and capacity §"When to archive"
@@ -546,7 +546,7 @@ Example, for the schema above plus a text "Title" column `a4f0…`:
 ```jsonc
 {
   "uuid": "row-123…",
-  "list_id": 7,
+  "table_id": 7,
   "data": {
     "a4f0…": "Ship the design doc",
     "9d1c…": "opt_doing"
@@ -557,27 +557,27 @@ Example, for the schema above plus a text "Title" column `a4f0…`:
 Indexing & querying:
 - Add a **GIN index** on `data` to support filtering.
 - Filtering/sorting on JSONB is slower than native columns — acceptable for this tier;
-  do not promise Airtable-scale performance on very large lists.
+  do not promise Airtable-scale performance on very large tables.
 - When a column is deleted its key is **left in `data`**, which is what makes a restore a real
   undo. Readers do not see it: `shape_values` drops keys with no live column, so a payload
   matches the schema. The values are hidden, not gone — `DELETE /columns/{uuid}/permanent` and
   the purge job behind it are the only things that remove them.
 - When a lookup target row is deleted, referring records would otherwise hold a **stale
-  uuid** (there is no FK, per D4). **Implemented:** deleting a `list_item` scrubs its uuid
-  from every lookup column that targets its list — clearing single values and filtering it
+  uuid** (there is no FK, per D4). **Implemented:** deleting a `table_record` scrubs its uuid
+  from every lookup column that targets its table — clearing single values and filtering it
   out of multi-value arrays.
 
 ---
 
 ## 7. `views`
 
-A saved way of looking at a list: sort, filter, group, paging. Config is JSONB (D5).
+A saved way of looking at a table: sort, filter, group, paging. Config is JSONB (D5).
 
 | Field       | Type            | Notes |
 |-------------|-----------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
-| `list_id`   | FK → `lists.id` | Owner list. |
-| `name`      | `str(120)`      | Code-facing slug (D6). Unique **per list**. e.g. `active_tasks`. |
+| `table_id`   | FK → `tables.id` | Owner table. |
+| `name`      | `str(120)`      | Code-facing slug (D6). Unique **per table**. e.g. `active_tasks`. |
 | `display_name` | `str(255)`   | UI label (D6). e.g. "Active tasks". |
 | `position`  | `int`           | Order in the view switcher. |
 | `config`    | `JSONB`         | See shape below. |
@@ -606,23 +606,23 @@ A saved way of looking at a list: sort, filter, group, paging. Config is JSONB (
 
 Operators are per-type (e.g. `is`, `is_not`, `contains`, `is_empty`, `>`, `<`).
 Validate the operator against the referenced column's `type` in the app layer. Every
-`column_uuid` referenced must belong to the list (enforced on write) — including the
+`column_uuid` referenced must belong to the table (enforced on write) — including the
 entries in `hidden_columns` and `column_order`. An empty `hidden_columns` shows every
-column; an empty `column_order` uses the list's default order.
+column; an empty `column_order` uses the table's default order.
 
 **A view is a default, not the only way to ask.** `filters`, `sorts` and `group_by` can
-each be given per request on `GET /lists/{uuid}/items/` (`?filters=` as URL-encoded JSON,
+each be given per request on `GET /tables/{uuid}/records/` (`?filters=` as URL-encoded JSON,
 `?sort_by=`/`?sort_dir=`, `?group_by=`), where they *replace* what the view saved rather
-than narrowing it further. That is what lets someone read a list a particular way without
+than narrowing it further. That is what lets someone read a table a particular way without
 saving that way onto a shared object — filtering used to require `configure` on a view
 and changed it for everyone. Omitting a parameter defers to the view; passing it empty
 overrules the view with nothing, which is how a filtered view is read past. `?q=` is the
 exception and composes: it narrows whatever is left. The UI holds all of these as page
 state seeded from the active view, and "Save view" is what writes them back.
 
-**Column order.** `columns.position` is the list's *default* column order. A view may
+**Column order.** `columns.position` is the table's *default* column order. A view may
 override it with `column_order` (an ordered list of column uuids); columns absent from
-that list fall after it in `position` order, so newly-added columns still appear. Forms
+that table fall after it in `position` order, so newly-added columns still appear. Forms
 carry their own order independently, via `config.fields[].order` (see §8). This keeps
 `columns.position` as the shared default while letting each view and form reorder freely.
 
@@ -636,11 +636,11 @@ and whether each is enabled. Field layout is JSONB (D5).
 | Field        | Type            | Notes |
 |--------------|-----------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
-| `list_id`    | FK → `lists.id` | Owner list. |
-| `name`       | `str(120)`      | Code-facing slug (D6). Unique **per list**. e.g. `quick_add`. |
+| `table_id`    | FK → `tables.id` | Owner table. |
+| `name`       | `str(120)`      | Code-facing slug (D6). Unique **per table**. e.g. `quick_add`. |
 | `display_name` | `str(255)`    | UI label (D6). e.g. "Quick add". |
 | `type`       | `enum` `FormType` (`create`/`update`/`view`/`custom`) | Distinguishes the three defaults. |
-| `is_default` | `bool`          | The default create/update/view form for the list. |
+| `is_default` | `bool`          | The default create/update/view form for the table. |
 | `config`     | `JSONB`         | See shape below. |
 
 `config` shape (fields reference `column_uuid`):
@@ -670,12 +670,12 @@ and whether each is enabled. Field layout is JSONB (D5).
   every column included in `position` order. The auto-provisioned `view` form starts
   this way; `create` and `update` instead start by naming the four audit columns as
   `included: false`, since nobody types "created by".
-- **A column absent from a non-empty `fields` list is appended, not excluded.** It sits
+- **A column absent from a non-empty `fields` table is appended, not excluded.** It sits
   after the configured fields, in `position` order — the same rule a view's
   `column_order` follows (§7). Exclusion is `included: false`, which is what the form
   editor writes: it saves back *every* column, so absence can only mean the column was
   created after the last save. Treating absence as exclusion is exactly what used to
-  leave the Add/Edit dialog on a freshly provisioned list empty ("Add a column first"),
+  leave the Add/Edit dialog on a freshly provisioned table empty ("Add a column first"),
   since its seeded config names the audit columns and nothing else.
 
 **`view` forms are display-only, and two rules follow from it.** A view form lays a
@@ -717,7 +717,7 @@ filled in. Unmet, it is either hidden or shown read-only (`effect`).
   feature must not be mistaken for.
 
 The client-side evaluator is `frontend/src/features/forms/conditions.ts`, and it is a
-second implementation of `items/filtering.py::_condition`'s operator vocabulary. The
+second implementation of `records/filtering.py::_condition`'s operator vocabulary. The
 two are meant to be edited together; a table-driven test over the filter editor's
 `OPERATORS` fails the moment one grows and the other does not.
 
@@ -725,14 +725,14 @@ two are meant to be edited together; a table-driven test over the filter editor'
 
 ## 9. `metrics`
 
-A named aggregate over a list's records — "Total hours" is `SUM(hours)`. A sibling of
-views and forms: list-scoped, named (D6), ordered, behaviour in a JSONB `config` (D5).
+A named aggregate over a table's records — "Total hours" is `SUM(hours)`. A sibling of
+views and forms: table-scoped, named (D6), ordered, behaviour in a JSONB `config` (D5).
 
 | Field       | Type            | Notes |
 |-------------|-----------------|-------|
 | `id`, `uuid`, timestamps, `deleted_at` | — | from `BaseModel` |
-| `list_id`   | FK → `lists.id` | Owner list. |
-| `name`      | `str(120)`      | Code-facing slug (D6). Unique **per list**. e.g. `total_hours`. |
+| `table_id`   | FK → `tables.id` | Owner table. |
+| `name`      | `str(120)`      | Code-facing slug (D6). Unique **per table**. e.g. `total_hours`. |
 | `display_name` | `str(255)`   | The card's label. e.g. "Total hours". |
 | `position`  | `int`           | Order in the metric strip. |
 | `description` | `text`        | Optional; shown as the card's tooltip. |
@@ -775,9 +775,9 @@ Notes:
   the motivating metric and a cell in one is a plain number; what the total *means* is a
   display question, answered by the card's `suffix`/`precision` rather than by this module,
   which has never formatted anything.
-- **`GET /lists/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in
+- **`GET /tables/{uuid}/metrics/values?view_uuid=&q=&filters=`** answers every metric in
   **one pass**, so the cards always agree with each other. That pass is built on
-  `ListItemService.visible_stmt` — the same statement the grid reads — so it honours the
+  `TableRecordService.visible_stmt` — the same statement the grid reads — so it honours the
   caller's permissions, the filters and the search, and the cards agree with what is on
   screen. It takes `filters` for that last reason: a total above a grid narrowed for one
   request has to be a total *of that grid*. Two people with different grants correctly
@@ -796,8 +796,8 @@ Notes:
   and answers over all of them. Compiling is all-or-nothing per request so two cards can
   never describe two different record sets. See known-gaps §9.
 - **No `permissions_inherit`**, unlike views and forms: a metric carries no permissions
-  of its own. List `view` to read, list `configure` to write.
-- Metrics cascade-delete and restore with their list (`_LIST_CHILD_MODELS`), and a
+  of its own. Table `view` to read, table `configure` to write.
+- Metrics cascade-delete and restore with their table (`_TABLE_CHILD_MODELS`), and a
   **clone copies them without remapping** — a formula names its columns by *name*, and a
   clone keeps every name.
 
@@ -805,22 +805,22 @@ Notes:
 
 ## 10. Future / deferred (documented, not built yet)
 
-- **`list_item_links` junction table:** the D4 upgrade path — real FKs, referential
+- **`table_record_links` junction table:** the D4 upgrade path — real FKs, referential
   integrity, cheap reverse lookups, clean many-to-many links. Adopt when soft references
   become a correctness problem. (Orphan cleanup on delete is implemented in the meantime,
   see §6.)
 - **Per-record rollup columns:** derive a value from the rows a *lookup* points at (count,
-  sum of linked rows). List-wide aggregates are now built as `metrics` (§9), but those
-  answer one number for the whole list; a rollup answers a different number per record and
+  sum of linked rows). Table-wide aggregates are now built as `metrics` (§9), but those
+  answer one number for the whole table; a rollup answers a different number per record and
   still needs the reverse lookup that D4's soft references make expensive.
 - **Per-group metric subtotals:** a view's `group_by` is only a sort
-  (`items/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
+  (`records/filtering.py`), not a SQL `GROUP BY`, and the metric strip sits *above* the grid
   with nowhere to put a per-group number. Doing it properly means an aggregate row inside
   the table.
 - **Further column types:** `attachment`.
   (`link`, `user`, `group`, `email`, `phone`, `location`, `color`, `rating` and
   `duration` are built — see §5.)
-- **Client-streamed export downloads:** export streams server-side (§ items), but the
+- **Client-streamed export downloads:** export streams server-side (§ records), but the
   browser still buffers the whole file in memory before saving (an SPA with bearer auth
   can't stream a plain link to disk). For very large exports, stream to a temp file /
   object storage and hand back a short-lived signed URL the browser downloads directly.
@@ -829,15 +829,15 @@ Notes:
   parse the stream incrementally (e.g. chunked CSV, or JSON Lines) so memory stays flat.
 
 See [Planned features](planned-features.md) for the larger asked-for capabilities that build
-on this model. List ownership transfer, cross-workspace moves, list cloning, nested and
-cross-workspace lookups, live records and list metrics are now **built**; column type
+on this model. Table ownership transfer, cross-workspace moves, table cloning, nested and
+cross-workspace lookups, live records and table metrics are now **built**; column type
 conversion and column data migration remain, each with its load-bearing details and open
 decisions.
 
 Implemented since the first draft: the `workspaces` tenancy layer (§3), default
-view/form auto-provisioning on list creation (§3), lookup orphan cleanup on
-single-record delete (§6), cascade soft delete for lists/workspaces with
-cross-list lookup-reference scrubbing (§11), and sharing / permissions (§12).
+view/form auto-provisioning on table creation (§3), lookup orphan cleanup on
+single-record delete (§6), cascade soft delete for tables/workspaces with
+cross-table lookup-reference scrubbing (§11), and sharing / permissions (§12).
 
 ---
 
@@ -849,16 +849,16 @@ Because the DB does not enforce record-level constraints, the service layer MUST
 2. Enforce `required`, `unique`, `min`/`max`, `max_length` where configured.
 3. Validate `choice` values against the current option labels (exact match) — or, on a
    column with `allow_other`, as any non-empty string.
-4. Validate `lookup` uuids exist in the target list; clean up stale refs on delete.
+4. Validate `lookup` uuids exist in the target table; clean up stale refs on delete.
 5. Validate `name` against the `NameSlug` pattern and scope all uniqueness checks —
-   list `name` per owner; column/view/form/metric `name` per list — excluding
+   table `name` per owner; column/view/form/metric `name` per table — excluding
    soft-deleted rows.
 6. Filter `deleted_at IS NULL` on every read path.
-7. Cascade soft delete: deleting a list stamps `deleted_at` on its columns,
-   records, views, forms and metrics; deleting a workspace cascades to its lists and all
+7. Cascade soft delete: deleting a table stamps `deleted_at` on its columns,
+   records, views, forms and metrics; deleting a workspace cascades to its tables and all
    their descendants — all in one transaction (bulk `UPDATE`s, no per-row loop).
-   Lookup columns on *surviving* lists that referenced the deleted rows have that
-   key dropped from their records (a lookup targets one list, so deleting it makes
+   Lookup columns on *surviving* tables that referenced the deleted rows have that
+   key dropped from their records (a lookup targets one table, so deleting it makes
    every value in the column stale).
 8. Enforce permissions on every access path: reads are filtered to visible
    resources and writes require the matching action (see §12). The workspace owner
@@ -880,7 +880,7 @@ resolver only ever walks live resources.
 
 | Column | Notes |
 | --- | --- |
-| `resource_type` | `workspace` \| `list` \| `view` \| `form` \| `item` |
+| `resource_type` | `workspace` \| `table` \| `view` \| `form` \| `record` |
 | `resource_id` | integer id within that type's table |
 | `user_id` / `group_id` | exactly one is set (DB `CHECK`); FKs to `users`/`user_groups` |
 | `actions` | JSONB list of action strings |
@@ -891,18 +891,18 @@ Partial unique indexes keep one grant per `(resource, user)` and per `(resource,
 
 `view, create, edit, delete, configure, share, manage, lookup`.
 `view/create/edit/delete` act on records and on reading/deleting the resource;
-`configure` covers list settings, columns, forms, and views; `share` manages a
+`configure` covers table settings, columns, forms, and views; `share` manages a
 resource's own grants; `manage` is full control. A granted action expands to what it
 implies — `manage → all`; `configure/share/edit/create/delete → {self, view, lookup}`;
 `view → {view, lookup}` — and a principal's effective set is the union over all
 applicable grants.
 
 `lookup` is the one action that does **not** open the resource. It lets other
-people's lookup columns resolve the list's row labels while the list itself stays
-invisible: absent from `GET /lists/`, absent from "Shared with me", and refused by
-`GET /lists/{it}` and everything beneath it. It is what a shared reference list
+people's lookup columns resolve the table's row labels while the table itself stays
+invisible: absent from `GET /tables/`, absent from "Shared with me", and refused by
+`GET /tables/{it}` and everything beneath it. It is what a shared reference table
 ("Schools", "Departments") wants, and it is why the collection filters
-(`workspace_view_filter`, `list_query_filter`) test the stored actions against
+(`workspace_view_filter`, `table_query_filter`) test the stored actions against
 `CONFERRED_BY[view]` rather than matching on the existence of a grant row. Because
 `view` confers `lookup`, every grant written before the action existed keeps
 resolving labels unchanged.
@@ -912,17 +912,17 @@ Two consequences worth stating plainly:
 - **What `lookup` discloses** is the display column's value for every row the
   per-record filter still allows — enumerable and searchable through the options
   endpoint (`?q=`). It is "read one or two columns of every row", not a peephole.
-  It deliberately does *not* expose the target's schema: `GET /lists/{it}/columns/`
+  It deliberately does *not* expose the target's schema: `GET /tables/{it}/columns/`
   stays refused, so the label column falls back to the target's own default.
-- **The target picker needs an exception.** A list you cannot name is a list you
-  cannot point a column at, so `GET /lists/?lookup_targets=true` widens the query
+- **The target picker needs an exception.** A table you cannot name is a table you
+  cannot point a column at, so `GET /tables/?lookup_targets=true` widens the query
   from `view` to `lookup`. It is off by default and the column dialog is its only
   caller.
 
 ### Inheritance and the "unique" break
 
-`item`, `view`, and `form` inherit their `list`'s grants; a `list` inherits its
-`workspace`'s. Each of `lists`, `list_items`, `views`, `forms` carries a
+`record`, `view`, and `form` inherit their `table`'s grants; a `table` inherits its
+`workspace`'s. Each of `tables`, `table_records`, `views`, `forms` carries a
 `permissions_inherit` boolean (default `true`). When `false`, the resource is
 **unique**: the resolver stops walking up and it stands on its own grants only —
 this is how a single form/view is targeted at one group. The flag is reversible.
@@ -935,14 +935,14 @@ owner short-circuits to all actions.
 ### Enforcement
 
 - Reads are filtered to visible resources: `WorkspaceService.list_visible`,
-  `ListService.list`, `ListItemService.list`/`query` (SQL conditions from
+  `TableService.list`, `TableRecordService.list`/`query` (SQL conditions from
   `PermissionService`), and `ViewService.list`/`FormService.list` (per-row).
-- Writes call `PermissionService.require(...)`: item CRUD → `create/edit/delete`;
-  list/workspace settings, columns, forms, views → `configure`; deleting a
-  list/workspace → `delete`; import → `create`+`edit`, export → `view`; changing
+- Writes call `PermissionService.require(...)`: record CRUD → `create/edit/delete`;
+  table/workspace settings, columns, forms, views → `configure`; deleting a
+  table/workspace → `delete`; import → `create`+`edit`, export → `view`; changing
   any `permissions_inherit` flag → `share`.
-- Item routes resolve the list without a list-level `view` check (an item can be
-  shared directly), then enforce per item.
+- Record routes resolve the table without a table-level `view` check (a record can be
+  shared directly), then enforce per record.
 - `PermissionDeniedError` is mapped to HTTP 403 by an app-level handler.
 
 Grant management lives under `/api/permissions`, alongside two endpoints the UI uses
@@ -957,7 +957,7 @@ to decide which controls to render:
 
 User and group CRUD already exist under `/api/auth/users` and `/api/auth/groups`.
 
-Exports stream through `item_view_filter` too, so they hide exactly the records the grid
+Exports stream through `record_view_filter` too, so they hide exactly the records the grid
 hides.
 
 Not yet done: admin-gating of user/group management and grant scrubbing on hard delete.

@@ -19,11 +19,11 @@ interface Props {
 }
 
 /**
- * Hand a workspace, and every list in it, to another user.
+ * Hand a workspace, and every table in it, to another user.
  *
- * There is no "move" counterpart here the way there is for a list: a workspace is
+ * There is no "move" counterpart here the way there is for a table: a workspace is
  * itself the ownership boundary, so the only thing to change is who owns it. That
- * also makes this a heavier act than a list transfer — the whole tree goes at once
+ * also makes this a heavier act than a table transfer — the whole tree goes at once
  * and the giver keeps nothing — so the dialog states the cost rather than relying
  * on the button's colour to imply it.
  *
@@ -48,7 +48,7 @@ export function TransferWorkspaceDialog({ workspace, onHide, onDone }: Props) {
     onSuccess: () => {
       toast.success(
         "Workspace transferred",
-        "It and its lists now belong to the new owner.",
+        "It and its tables now belong to the new owner.",
       );
       setTargetUser(null);
       onDone();
@@ -81,11 +81,11 @@ export function TransferWorkspaceDialog({ workspace, onHide, onDone }: Props) {
       }
     >
       <div className="flex flex-col gap-4">
-        {/* Named before the picker, not after: which lists go with it is what
+        {/* Named before the picker, not after: which tables go with it is what
             decides whether to do this at all. */}
         <Message
           severity="warn"
-          text="Every list in this workspace goes with it. You will lose access to all of them."
+          text="Every table in this workspace goes with it. You will lose access to all of them."
         />
         <Field
           label="New owner"

@@ -2,12 +2,12 @@
  * Editing values from the grid itself — the toolbar's "Edit cells" mode.
  *
  * The dialog remains the way to fill in a *record*: it lays the fields out the way
- * the list's form says, and it saves them together. This is the way to edit a
+ * the table's form says, and it saves them together. This is the way to edit a
  * *value* — one cell, committed on its own, for the correction you make while
  * reading rows rather than the record you sit down to fill in.
  *
  * The mode also *adds* records now, through the draft row at the foot of the grid
- * (`newRow.ts`). That row reuses this editor unchanged: it is a `ListItem` like any
+ * (`newRow.ts`). That row reuses this editor unchanged: it is a `TableRecord` like any
  * other, holding its values in stored form, and the only thing that differs is
  * where a committed cell goes — into the record being built rather than into a
  * `PATCH`. Which columns it opens is the *create* form's answer rather than the
@@ -15,8 +15,8 @@
  *
  * Three things make that a small feature rather than a second editor:
  *
- * - `PATCH /items/{uuid}` is a **partial merge** of `data` (see
- *   `ListItemService._validate_data`, which starts from the stored dict), so one
+ * - `PATCH /records/{uuid}` is a **partial merge** of `data` (see
+ *   `TableRecordService._validate_data`, which starts from the stored dict), so one
  *   cell is one request carrying one key. There is no read-modify-write here and
  *   no endpoint of its own.
  * - The inputs are `RecordField`, the same ones the dialog uses. A column type
@@ -36,7 +36,7 @@
  */
 import { useEffect, useRef, useState } from "react";
 
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, TableRecord } from "../../lib/types";
 import type { CellDraft } from "./cellEdit";
 import { RecordField } from "./RecordFields";
 import { deserialize } from "./recordValues";
@@ -60,13 +60,13 @@ import { deserialize } from "./recordValues";
  * tell an edited cell from one merely opened.
  */
 export function InlineCellEditor({
-  listUuid,
+  tableUuid,
   column,
   columns,
   row,
   onDraft,
 }: {
-  listUuid: string;
+  tableUuid: string;
   column: Column;
   /** Every column, for an editor that reads a sibling cell — a nested lookup. */
   columns: Column[];
@@ -77,7 +77,7 @@ export function InlineCellEditor({
    * grid stopped displaying, and filters a nested lookup's options by a parent
    * cell that has moved on.
    */
-  row: ListItem;
+  row: TableRecord;
   onDraft: (draft: CellDraft) => void;
 }) {
   const [value, setValue] = useState<unknown>(() =>
@@ -134,7 +134,7 @@ export function InlineCellEditor({
       }}
     >
       <RecordField
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         column={column}
         value={value}
         disabled={false}
@@ -152,7 +152,7 @@ export function InlineCellEditor({
         // cell's value, and in the grid that parent is another cell of this row
         // rather than another field of a draft.
         values={row.data ?? {}}
-        // A lookup's "add a row to the target list" opens a Dialog, and a Dialog
+        // A lookup's "add a row to the target table" opens a Dialog, and a Dialog
         // cannot live inside a cell editor: it portals to the body without the
         // `data-pr-is-overlay` marker DataTable looks for
         // (datatable.cjs.js:1232-1238), so the first click inside it reads as an

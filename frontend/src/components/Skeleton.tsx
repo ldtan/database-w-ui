@@ -28,7 +28,7 @@ export function SkeletonBar({
   );
 }
 
-/** A run of card-shaped placeholders, for the grids on the workspace and list
+/** A run of card-shaped placeholders, for the grids on the workspace and table
  *  pages. */
 export function SkeletonCards({ count = 6 }: { count?: number }) {
   return (
@@ -43,7 +43,7 @@ export function SkeletonCards({ count = 6 }: { count?: number }) {
   );
 }
 
-/** A run of row-shaped placeholders, for the stacked lists (people, groups). */
+/** A run of row-shaped placeholders, for the stacked tables (people, groups). */
 export function SkeletonRows({ count = 4 }: { count?: number }) {
   return (
     <div className="flex flex-col gap-2" aria-hidden>

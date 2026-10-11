@@ -78,29 +78,29 @@ async def test_an_unhandled_exception_is_a_500_that_says_nothing(
 async def test_an_http_exception_still_answers_normally(client):
     """The catch-all must sit *under* the deliberate ones — a 404 is an answer, and
     turning it into a 500 would be the handler eating the app's own vocabulary."""
-    resp = await client.get("/api/lists/00000000-0000-0000-0000-000000000000")
+    resp = await client.get("/api/tables/00000000-0000-0000-0000-000000000000")
     assert resp.status_code in (403, 404), resp.text
     assert resp.json()["detail"] != "Internal server error"
 
 
-async def test_a_body_over_the_ceiling_is_refused(client, list_uuid, add_column):
-    """A JSON body had no limit at all: `ListItemCreate.data` is a dict to Pydantic,
+async def test_a_body_over_the_ceiling_is_refused(client, table_uuid, add_column):
+    """A JSON body had no limit at all: `TableRecordCreate.data` is a dict to Pydantic,
     and a `text` column's `max_length` is unset by default — so one request could
     buffer, parse, sanitise and store fifty megabytes on a 512 MB instance."""
-    col = await add_column(list_uuid, name="notes", display_name="Notes", type="text")
+    col = await add_column(table_uuid, name="notes", display_name="Notes", type="text")
     # Against MAX_REQUEST_BYTES, not MAX_UPLOAD_BYTES: the two answer different
     # questions and the backstop deliberately sits above the upload limit, so that
     # the import routes keep producing their own message naming their own limit.
     oversized = "A" * (settings.MAX_REQUEST_BYTES + 1024)
 
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: oversized}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: oversized}}
     )
     assert resp.status_code == 413, resp.status_code
     assert "too large" in resp.json()["detail"].lower()
 
     # And an ordinary body is untouched — the ceiling is a ceiling, not a squeeze.
     ok = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "a normal note"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "a normal note"}}
     )
     assert ok.status_code == 201, ok.text

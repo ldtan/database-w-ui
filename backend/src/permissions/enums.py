@@ -4,28 +4,28 @@ from enum import Enum
 class ResourceType(str, Enum):
     """Kinds of resource a permission grant can target.
 
-    ``item``/``view``/``form`` inherit from their ``list``; ``list`` inherits from
-    its ``workspace``; ``workspace`` is the root.
+    ``record``/``view``/``form`` inherit from their ``table``; ``table`` inherits
+    from its ``workspace``; ``workspace`` is the root.
     """
 
     workspace = "workspace"
-    list = "list"
+    table = "table"
     view = "view"
     form = "form"
-    item = "item"
+    record = "record"
 
 
 class Action(str, Enum):
     """What a principal may do on a resource.
 
     ``view/create/edit/delete`` act on records and on reading/deleting the resource
-    itself; ``configure`` covers list settings, columns, forms, and views;
+    itself; ``configure`` covers table settings, columns, forms, and views;
     ``share`` manages a resource's own grants; ``manage`` is full control.
 
     ``lookup`` is the one action that does *not* open the resource: it lets a
-    principal resolve the list's row labels from a lookup column pointed at it,
-    while the list itself stays out of their "Shared with me" and cannot be
-    opened. It is what a shared reference list ("Countries", "Departments")
+    principal resolve the table's row labels from a lookup column pointed at it,
+    while the table itself stays out of their "Shared with me" and cannot be
+    opened. It is what a shared reference table ("Countries", "Departments")
     wants — see ``ROLE_PRESETS['lookup only']`` and the collection filters in
     ``PermissionService``, which deliberately ignore a grant that confers only
     this.
@@ -64,10 +64,10 @@ _IMPLIES: dict[Action, frozenset[Action]] = {
 
 # ``_IMPLIES`` inverted: which granted actions would confer a given one. The
 # collection filters are SQL and cannot call ``expand_actions``, so they test the
-# stored action list against this set instead. Filtering on ``CONFERRED_BY[view]``
-# rather than on the existence of a grant row is what keeps a lookup-only list out
+# stored action table against this set instead. Filtering on ``CONFERRED_BY[view]``
+# rather than on the existence of a grant row is what keeps a lookup-only table out
 # of its grantee's collections — and settles the degenerate case that predates
-# ``lookup``: a grant with no actions at all used to list the resource while
+# ``lookup``: a grant with no actions at all used to table the resource while
 # permitting nothing on it.
 CONFERRED_BY: dict[Action, frozenset[Action]] = {
     action: frozenset(

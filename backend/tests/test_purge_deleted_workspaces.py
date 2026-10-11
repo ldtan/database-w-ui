@@ -1,4 +1,4 @@
-"""Purging soft-deleted workspaces and all their lists/descendants/grants after the retention window."""
+"""Purging soft-deleted workspaces and all their tables/descendants/grants after the retention window."""
 from datetime import datetime, timedelta, timezone
 
 import pytest_asyncio
@@ -7,12 +7,12 @@ from sqlalchemy import func, select, update
 from src.auth.users.schemas import UserCreate
 from src.auth.users.services import UserService
 from src.workspaces.models import Workspace
-from src.lists.models import List
-from src.lists.columns.models import Column
-from src.lists.items.models import ListItem
-from src.lists.views.models import View
-from src.lists.forms.models import Form
-from src.lists.metrics.models import Metric
+from src.tables.models import Table
+from src.tables.columns.models import Column
+from src.tables.records.models import TableRecord
+from src.tables.views.models import View
+from src.tables.forms.models import Form
+from src.tables.metrics.models import Metric
 from src.maintenance.purge_deleted_workspaces import purge
 from src.permissions.models import PermissionGrant
 
@@ -28,7 +28,7 @@ async def alice(session_factory):
 
 
 async def _age_workspace(session_factory, uuid: str, days: int) -> None:
-    """Backdate a workspace's deletion, and its lists and descendants' deletion,
+    """Backdate a workspace's deletion, and its tables and descendants' deletion,
     so the retention window can be tested without waiting a month."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     async with session_factory() as db:
@@ -36,14 +36,14 @@ async def _age_workspace(session_factory, uuid: str, days: int) -> None:
         assert ws is not None
         ws.deleted_at = cutoff
 
-        # Find lists in this workspace
-        lists = (await db.execute(select(List).where(List.workspace_id == ws.id))).scalars().all()
-        for lst in lists:
-            lst.deleted_at = cutoff
-            for model in (Column, ListItem, View, Form, Metric):
+        # Find tables in this workspace
+        tables = (await db.execute(select(Table).where(Table.workspace_id == ws.id))).scalars().all()
+        for table in tables:
+            table.deleted_at = cutoff
+            for model in (Column, TableRecord, View, Form, Metric):
                 await db.execute(
                     update(model)
-                    .where(model.list_id == lst.id)
+                    .where(model.table_id == table.id)
                     .values(deleted_at=cutoff)
                 )
         await db.commit()
@@ -57,13 +57,13 @@ async def _count_table(session_factory, model) -> int:
 async def test_only_workspaces_past_the_window_are_destroyed(
     client, session_factory
 ):
-    temp_lists = {
+    temp_tables = {
         "live": "Live",
         "fresh_delete": "Fresh Delete",
         "old_delete": "Old Delete",
     }
     made = []
-    for name, display_name in temp_lists.items():
+    for name, display_name in temp_tables.items():
         r = await client.post(
             "/api/workspaces/",
             json={"name": name, "display_name": display_name},
@@ -104,27 +104,27 @@ async def test_workspace_descendants_and_grants_go_with_it(
     assert r.status_code == 201
     workspace_uuid = r.json()["uuid"]
 
-    # Create list in that workspace
+    # Create table in that workspace
     r = await client.post(
-        "/api/lists/",
-        json={"name": "test_list", "display_name": "Test List", "workspace_uuid": workspace_uuid},
+        "/api/tables/",
+        json={"name": "test_table", "display_name": "Test Table", "workspace_uuid": workspace_uuid},
     )
     assert r.status_code == 201
-    list_uuid = r.json()["uuid"]
+    table_uuid = r.json()["uuid"]
 
-    # Create descendants of list
-    resp = await client.post(f"/api/lists/{list_uuid}/columns/", json={"name": "col1", "display_name": "Col 1", "type": "text"})
+    # Create descendants of table
+    resp = await client.post(f"/api/tables/{table_uuid}/columns/", json={"name": "col1", "display_name": "Col 1", "type": "text"})
     assert resp.status_code == 201
     col_uuid = resp.json()["uuid"]
 
-    resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {col_uuid: "hello"}})
+    resp = await client.post(f"/api/tables/{table_uuid}/records/", json={"data": {col_uuid: "hello"}})
     assert resp.status_code == 201
-    item_uuid = resp.json()["uuid"]
+    record_uuid = resp.json()["uuid"]
 
-    # A metric on that list: it has no grants of its own, but its row still has to
-    # go before the list it points at can.
+    # A metric on that table: it has no grants of its own, but its row still has to
+    # go before the table it points at can.
     resp = await client.post(
-        f"/api/lists/{list_uuid}/metrics/",
+        f"/api/tables/{table_uuid}/metrics/",
         json={
             "name": "row_count",
             "display_name": "Row count",
@@ -145,12 +145,12 @@ async def test_workspace_descendants_and_grants_go_with_it(
     )
     assert granted_ws.status_code == 201
 
-    # Create permission grant on the item
+    # Create permission grant on the record
     granted_item = await client.post(
         "/api/permissions/grants",
         json={
-            "resource_type": "item",
-            "resource_uuid": item_uuid,
+            "resource_type": "record",
+            "resource_uuid": record_uuid,
             "user_uuid": alice,
             "actions": ["view"],
         },
@@ -162,8 +162,8 @@ async def test_workspace_descendants_and_grants_go_with_it(
 
     # Verify things are still in database
     assert await _count_table(session_factory, Workspace) == 3  # default personal + Alice default Workspace + our workspace
-    assert await _count_table(session_factory, List) == 1
-    assert await _count_table(session_factory, ListItem) == 1
+    assert await _count_table(session_factory, Table) == 1
+    assert await _count_table(session_factory, TableRecord) == 1
     assert await _count_table(session_factory, Metric) == 1
     assert await _count_table(session_factory, PermissionGrant) == 2
 
@@ -173,8 +173,8 @@ async def test_workspace_descendants_and_grants_go_with_it(
 
     # Verify everything is gone
     assert await _count_table(session_factory, Workspace) == 2  # only default personal + Alice default Workspace 1 remains
-    assert await _count_table(session_factory, List) == 0
-    assert await _count_table(session_factory, ListItem) == 0
+    assert await _count_table(session_factory, Table) == 0
+    assert await _count_table(session_factory, TableRecord) == 0
     assert await _count_table(session_factory, View) == 0
     assert await _count_table(session_factory, Form) == 0
     assert await _count_table(session_factory, Metric) == 0

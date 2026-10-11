@@ -1,10 +1,10 @@
 /**
- * The guide's contents list: every section, in the order the page renders them.
+ * The guide's contents table: every section, in the order the page renders them.
  *
  * Here rather than inside `GuidePage.tsx` so a test can read it. `guide.test.ts`
  * runs in vitest's node environment with no jsdom, so it cannot mount the page —
- * it imports this list and matches it against the `<Section>` tags in the page's
- * source text. Keeping the list as plain data is what makes that possible, and
+ * it imports this table and matches it against the `<Section>` tags in the page's
+ * source text. Keeping the table as plain data is what makes that possible, and
  * mirrors `figures.ts`, which is a plain module for the same reason.
  *
  * An id here with no matching `<Section id>` is a dead link in the contents, and
@@ -17,7 +17,7 @@ export const SECTIONS: { id: string; title: string }[] = [
   { id: "signing-in", title: "Signing in" },
   { id: "getting-around", title: "Getting around" },
   { id: "workspace", title: "Step 1 · Make a workspace" },
-  { id: "list", title: "Step 2 · Make a list" },
+  { id: "table", title: "Step 2 · Make a table" },
   { id: "columns", title: "Step 3 · Add columns" },
   { id: "column-types", title: "The column types, explained" },
   { id: "change-type", title: "Changing a column’s type, and copying a column" },
@@ -31,7 +31,7 @@ export const SECTIONS: { id: string; title: string }[] = [
   { id: "metrics", title: "Metrics: totals, averages and counts" },
   { id: "sharing", title: "Sharing and permissions" },
   { id: "transfer", title: "Moving and giving things away" },
-  { id: "duplicate", title: "Duplicating a list" },
+  { id: "duplicate", title: "Duplicating a table" },
   { id: "people", title: "People, groups, and your profile" },
   { id: "import-export", title: "Import and export" },
   { id: "archive", title: "Archiving records you’re done with" },

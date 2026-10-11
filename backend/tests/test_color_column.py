@@ -8,9 +8,9 @@ look like two everywhere they are used.
 import pytest
 
 
-async def _add_color_column(client, list_uuid: str, name="tag", **config) -> str:
+async def _add_color_column(client, table_uuid: str, name="tag", **config) -> str:
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": name,
             "display_name": name.title(),
@@ -22,10 +22,10 @@ async def _add_color_column(client, list_uuid: str, name="tag", **config) -> str
     return resp.json()["uuid"]
 
 
-async def test_accepts_a_hex_colour(client, list_uuid):
-    col = await _add_color_column(client, list_uuid)
+async def test_accepts_a_hex_colour(client, table_uuid):
+    col = await _add_color_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "#1d4ed8"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "#1d4ed8"}}
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"][col] == "#1d4ed8"
@@ -39,10 +39,10 @@ async def test_accepts_a_hex_colour(client, list_uuid):
         ("  #1D4ED8  ", "#1d4ed8"),  # padding is trimmed
     ],
 )
-async def test_a_colour_is_stored_canonically(client, list_uuid, raw, stored):
-    col = await _add_color_column(client, list_uuid)
+async def test_a_colour_is_stored_canonically(client, table_uuid, raw, stored):
+    col = await _add_color_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: raw}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: raw}}
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"][col] == stored
@@ -59,30 +59,30 @@ async def test_a_colour_is_stored_canonically(client, list_uuid, raw, stored):
         "rgb(29, 78, 216)",
     ],
 )
-async def test_rejects_anything_that_is_not_rrggbb(client, list_uuid, value):
-    col = await _add_color_column(client, list_uuid)
+async def test_rejects_anything_that_is_not_rrggbb(client, table_uuid, value):
+    col = await _add_color_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert resp.status_code == 400, f"{value!r} was accepted: {resp.text}"
 
 
-async def test_unique_sees_the_two_spellings_as_one_colour(client, list_uuid):
-    col = await _add_color_column(client, list_uuid, unique=True)
+async def test_unique_sees_the_two_spellings_as_one_colour(client, table_uuid):
+    col = await _add_color_column(client, table_uuid, unique=True)
     first = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "#aabbcc"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "#aabbcc"}}
     )
     assert first.status_code == 201, first.text
 
     second = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "#ABC"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "#ABC"}}
     )
     assert second.status_code == 409, second.text
 
 
-async def test_swatches_are_validated_and_stored_canonically(client, list_uuid):
+async def test_swatches_are_validated_and_stored_canonically(client, table_uuid):
     bad = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "tag",
             "display_name": "Tag",
@@ -93,7 +93,7 @@ async def test_swatches_are_validated_and_stored_canonically(client, list_uuid):
     assert bad.status_code == 400, bad.text
 
     good = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "tag",
             "display_name": "Tag",
@@ -105,19 +105,19 @@ async def test_swatches_are_validated_and_stored_canonically(client, list_uuid):
     assert good.json()["config"]["swatches"] == ["#aabbcc", "#1d4ed8"]
 
 
-async def test_swatches_offer_rather_than_restrict(client, list_uuid):
+async def test_swatches_offer_rather_than_restrict(client, table_uuid):
     """A palette is a shortcut, not an option set — the point of a colour field
     is picking one, so a colour outside the swatches is still a valid answer."""
-    col = await _add_color_column(client, list_uuid, swatches=["#1d4ed8"])
+    col = await _add_color_column(client, table_uuid, swatches=["#1d4ed8"])
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "#dc2626"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "#dc2626"}}
     )
     assert resp.status_code == 201, resp.text
 
 
-async def test_a_columns_default_is_validated_and_normalized(client, list_uuid):
+async def test_a_columns_default_is_validated_and_normalized(client, table_uuid):
     bad = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "tag",
             "display_name": "Tag",
@@ -128,7 +128,7 @@ async def test_a_columns_default_is_validated_and_normalized(client, list_uuid):
     assert bad.status_code == 400, bad.text
 
     good = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "tag",
             "display_name": "Tag",

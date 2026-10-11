@@ -51,7 +51,7 @@ class UserSettings(BaseModel):
     mode: ThemeMode = "light"
     # Where this account's "today" falls, for resolving a `today`/`now` column
     # default on the user's calendar instead of the server's (see
-    # lists.columns.validation.resolve_dynamic_default). TimezoneSync reports the
+    # tables.columns.validation.resolve_dynamic_default). TimezoneSync reports the
     # browser's on load, so this is the value only until the user first appears.
     #
     # Defaulted rather than Optional, for the same reason theme and mode are: a null

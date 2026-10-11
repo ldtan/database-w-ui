@@ -75,7 +75,7 @@ async def test_user_search_matches_username_and_email(make_client, session_facto
         assert [u["username"] for u in found] == ["bob"]
 
         assert (await client.get("/api/auth/users/?q=nobody")).json() == []
-        # No q at all still lists everyone.
+        # No q at all still tables everyone.
         assert len((await client.get("/api/auth/users/")).json()) == 3
 
 

@@ -6,7 +6,7 @@
 `frontend/scripts/capture-guide.mjs` photographs this tenant, and the pictures land
 in the guide beside the paragraphs describing it. That is the whole reason it
 exists as a scenario of its own rather than a corner of `school`: a reader who is
-told to make a *Sales* workspace and a *Contacts* list should not be shown a
+told to make a *Sales* workspace and a *Contacts* table should not be shown a
 screenshot of Westbrook Academy's enrollments. Every name here is one the guide's
 prose already puts in the reader's head.
 
@@ -36,7 +36,7 @@ from ._builders import (
     bin_records,
     ensure_column,
     ensure_group,
-    ensure_list,
+    ensure_table,
     ensure_metric,
     ensure_person,
     ensure_user,
@@ -61,7 +61,7 @@ EDITOR = [Action.view, Action.create, Action.edit, Action.delete]
 VIEWER = [Action.view]
 
 
-# -- the reference lists ---------------------------------------------------
+# -- the reference tables ---------------------------------------------------
 
 COUNTRIES = ["France", "Japan", "Philippines", "United Kingdom"]
 
@@ -172,13 +172,13 @@ async def build(password: str) -> Report:
             description="Campaigns, and what came of them.",
         )
 
-        # -- reference lists, innermost first ---------------------------
+        # -- reference tables, innermost first ---------------------------
         # Cities points at Countries, and Contacts points at both; each has to
         # exist before the column that names it.
-        countries = await ensure_list(
+        countries = await ensure_table(
             db, report, sales,
             name="countries", display_name="Countries",
-            description="Reference list. Shared for lookup only.",
+            description="Reference table. Shared for lookup only.",
         )
         country_name = await ensure_column(
             db, report, countries, owner,
@@ -191,10 +191,10 @@ async def build(password: str) -> Report:
             [{"country_name": name} for name in COUNTRIES],
         )
 
-        cities = await ensure_list(
+        cities = await ensure_table(
             db, report, sales,
             name="cities", display_name="Cities",
-            description="Reference list. Each city says which country it is in.",
+            description="Reference table. Each city says which country it is in.",
         )
         city_name = await ensure_column(
             db, report, cities, owner,
@@ -206,7 +206,7 @@ async def build(password: str) -> Report:
         city_country = await ensure_column(
             db, report, cities, owner,
             name="country", display_name="Country", type="lookup", position=1,
-            config={"target_list_uuid": countries.uuid},
+            config={"target_table_uuid": countries.uuid},
         )
         await set_primary_column(db, cities, city_name)
         await seed_records(
@@ -215,8 +215,8 @@ async def build(password: str) -> Report:
             [{"city_name": city, "country": country} for city, country in CITIES],
         )
 
-        # -- Contacts, the list the guide walks you through -------------
-        contacts = await ensure_list(
+        # -- Contacts, the table the guide walks you through -------------
+        contacts = await ensure_table(
             db, report, sales,
             name="contacts", display_name="Contacts",
             description="People we have talked to, and where each one got to.",
@@ -245,7 +245,7 @@ async def build(password: str) -> Report:
         cols["country"] = await ensure_column(
             db, report, contacts, owner,
             name="country", display_name="Country", type="lookup", position=4,
-            config={"target_list_uuid": countries.uuid},
+            config={"target_table_uuid": countries.uuid},
         )
         # The nested one. `parent_column_uuid` is the sibling whose choice narrows
         # this; `target_filter_column_uuid` is the column on *Cities* that says
@@ -255,7 +255,7 @@ async def build(password: str) -> Report:
             db, report, contacts, owner,
             name="city", display_name="City", type="lookup", position=5,
             config={
-                "target_list_uuid": cities.uuid,
+                "target_table_uuid": cities.uuid,
                 "parent_column_uuid": cols["country"].uuid,
                 "target_filter_column_uuid": city_country.uuid,
             },
@@ -331,7 +331,7 @@ async def build(password: str) -> Report:
             )
 
         # -- a second workspace with something in it --------------------
-        campaigns = await ensure_list(
+        campaigns = await ensure_table(
             db, report, marketing,
             name="campaigns", display_name="Campaigns",
             description="What we sent, and what it cost.",
@@ -363,15 +363,15 @@ async def build(password: str) -> Report:
 
         # -- something in "Shared with me" ------------------------------
         # Owned by the colleague and handed back, because the rail's "Shared with
-        # me" branch and the dashboard's shared-lists card are both in shot and
+        # me" branch and the dashboard's shared-tables card are both in shot and
         # both read as broken when empty. It has to come from the *other* account:
-        # a list you own is never shared with you.
+        # a table you own is never shared with you.
         partners = await ensure_workspace(
             db, report, colleague,
             name="partners", display_name="Partners",
-            description="Sam's workspace. Only the one list is shared out of it.",
+            description="Sam's workspace. Only the one table is shared out of it.",
         )
-        resellers = await ensure_list(
+        resellers = await ensure_table(
             db, report, partners,
             name="resellers", display_name="Resellers",
             description="Who sells for us, and where.",
@@ -398,14 +398,14 @@ async def build(password: str) -> Report:
         )
         await grant(
             db, report, colleague,
-            resource_type=ResourceType.list, resource_uuid=resellers.uuid,
+            resource_type=ResourceType.table, resource_uuid=resellers.uuid,
             actions=VIEWER, user=owner,
         )
 
         # -- sharing, so the permissions screenshot has rows ------------
         await grant(
             db, report, owner,
-            resource_type=ResourceType.list, resource_uuid=contacts.uuid,
+            resource_type=ResourceType.table, resource_uuid=contacts.uuid,
             actions=EDITOR, user=colleague,
         )
         await grant(
@@ -413,12 +413,12 @@ async def build(password: str) -> Report:
             resource_type=ResourceType.workspace, resource_uuid=marketing.uuid,
             actions=VIEWER, group=sales_team,
         )
-        # The reference lists are the case the guide makes for `lookup` on its own:
-        # pickable in someone else's column, not browsable as a list.
+        # The reference tables are the case the guide makes for `lookup` on its own:
+        # pickable in someone else's column, not browsable as a table.
         for reference in (countries, cities):
             await grant(
                 db, report, owner,
-                resource_type=ResourceType.list, resource_uuid=reference.uuid,
+                resource_type=ResourceType.table, resource_uuid=reference.uuid,
                 actions=[Action.lookup], group=sales_team,
             )
 

@@ -11,7 +11,7 @@ are involved. The obvious alternative — scrub per purged row — is one UPDATE
 *per row*, which turns purging a million records into millions of statements.
 
 Set-based is not the same as unbounded, though, and it used to be both: one statement
-per column rewriting every record of the list that held a stale reference. Each column
+per column rewriting every record of the table that held a stale reference. Each column
 now works through its records in batches, committed as it goes. Only the purge jobs
 call this, and they work on targets already past the retention window — so there is
 nothing here that a half-finished pass makes wrong, and re-running simply finds fewer
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.lists.columns.enums import PRINCIPAL_TYPES, ColumnType
-from src.lists.columns.models import Column
+from src.tables.columns.enums import PRINCIPAL_TYPES, ColumnType
+from src.tables.columns.models import Column
 
 # Records rewritten per transaction, matching the purge jobs that call this.
 CHUNK = 5_000
@@ -35,7 +35,7 @@ CHUNK = 5_000
 # row according to the shape it actually has, never according to what the column's
 # `multiple` currently claims.
 _CLEAR = """
-UPDATE list_items
+UPDATE table_records
    SET data = jsonb_set(
            data,
            ARRAY[:key],
@@ -69,7 +69,7 @@ _STALE = """
 # Concatenated rather than formatted: the predicate contains `'{}'` (jsonb's "whole
 # document" path), which str.format would read as a placeholder.
 _BATCH = (
-    "SELECT id FROM list_items WHERE list_id = :list_id AND "
+    "SELECT id FROM table_records WHERE table_id = :table_id AND "
     + _STALE
     + " ORDER BY id LIMIT :chunk"
 )
@@ -91,8 +91,8 @@ WITH live AS (
 _LIVE_ROWS = """
 WITH live AS (
     SELECT i.uuid::text AS uuid
-      FROM list_items i
-      JOIN lists l ON l.id = i.list_id
+      FROM table_records i
+      JOIN tables l ON l.id = i.table_id
      WHERE l.uuid = CAST(:target AS uuid)
        AND (i.deleted_at IS NULL OR i.deleted_at >= :cutoff)
 )
@@ -114,7 +114,7 @@ async def clear_expired(db: AsyncSession, cutoff: datetime) -> int:
     touched = 0
     for column in columns:
         config = column.config or {}
-        target = config.get("target_list_uuid")
+        target = config.get("target_table_uuid")
 
         if column.type == ColumnType.user:
             live = _LIVE_USERS
@@ -126,7 +126,7 @@ async def clear_expired(db: AsyncSession, cutoff: datetime) -> int:
             continue  # a lookup with no target: nothing to resolve against
 
         params = {
-            "list_id": column.list_id,
+            "table_id": column.table_id,
             "key": str(column.uuid),
             "cutoff": cutoff,
             "target": str(target) if target else None,

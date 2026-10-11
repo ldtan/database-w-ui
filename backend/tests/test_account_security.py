@@ -323,7 +323,7 @@ def test_auth_cannot_be_disabled_outside_debug():
 
 
 async def test_reads_stay_open_so_sharing_still_works(make_client, session_factory):
-    """The Share dialog lists users and groups to grant to, so reads must not be gated."""
+    """The Share dialog tables users and groups to grant to, so reads must not be gated."""
     async with session_factory() as db:
         user = await _make_user(db, "sharer")
         await UserGroupService.create(db, UserGroupCreate(name="team", display_name="Team"))

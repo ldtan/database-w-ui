@@ -136,12 +136,12 @@ async def transfer_workspace(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Hand a workspace, and every list in it, to another user.
+    """Hand a workspace, and every table in it, to another user.
 
-    Owner-only, on the same reasoning as the list transfer: ownership is what is being
+    Owner-only, on the same reasoning as the table transfer: ownership is what is being
     given away, so the only thing that can authorize it is holding it — a `manage`
-    grant does not qualify. Unlike a list there is no inbox involved; a workspace *is*
-    the ownership boundary, so the row simply changes hands and its lists follow.
+    grant does not qualify. Unlike a table there is no inbox involved; a workspace *is*
+    the ownership boundary, so the row simply changes hands and its tables follow.
     Existing shares survive; the giver's implicit owner access ends with the transfer
     (see WorkspaceService.transfer_to_user).
     """
@@ -201,7 +201,7 @@ async def restore_workspace(
 ):
     # Owner-only: a deleted workspace has no resolvable permission context, so the
     # owner is the only principal it can be acted on by. Restore also revives the
-    # lists that went down with it (see WorkspaceService.restore).
+    # tables that went down with it (see WorkspaceService.restore).
     workspace = await WorkspaceService.get_deleted_by_uuid(db, workspace_uuid)
     if workspace is None or workspace.owner_id != current_user.id:
         raise HTTPException(

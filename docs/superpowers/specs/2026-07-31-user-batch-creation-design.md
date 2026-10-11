@@ -11,8 +11,8 @@ user dialog once per person.
 
 Onboarding a roster today means opening `UserDialog` once per person and typing
 username, email, password and six profile fields by hand. The app already knows how
-to take a file and turn it into many rows — that is what `POST /lists/{uuid}/import`
-does for list records — so the shape of the answer is settled. What is new is that
+to take a file and turn it into many rows — that is what `POST /tables/{uuid}/import`
+does for table records — so the shape of the answer is settled. What is new is that
 the rows being created are *accounts*, which are heavier than records: they carry
 credentials, they can be administrators, and they sit underneath the permission
 model rather than inside it.
@@ -32,7 +32,7 @@ Five choices shaped everything below.
    real workflow; storing them server-side to re-issue later would be worse than
    either.
 
-3. **Bad rows are skipped and reported, matching list import.** The app already
+3. **Bad rows are skipped and reported, matching table import.** The app already
    teaches `{row, message}` per-row errors, and the mistake is recoverable — the
    users bin restores a deleted account whole.
 
@@ -48,10 +48,10 @@ Five choices shaped everything below.
 
 ## Approaches considered
 
-**Generalize the list-import engine and share it.** Rejected. The honest shared
+**Generalize the table-import engine and share it.** Rejected. The honest shared
 surface between the two importers is about thirty lines of loop-with-error-
-collection; everything substantial in `lists/transfer/services.py` is bound to
-`Column`/`ListItem` semantics — `_parse_cell` branches on `ColumnType`, then
+collection; everything substantial in `tables/transfer/services.py` is bound to
+`Column`/`TableRecord` semantics — `_parse_cell` branches on `ColumnType`, then
 `_validate_data` and `_enforce_unique` run. It is a risky refactor of working code
 for a modest gain, and the two importers do not even want the same transaction
 shape.
@@ -70,7 +70,7 @@ semantics instead of copying them.
 ## The CSV contract
 
 Twelve columns. Headers are spelled exactly as the API fields, the same convention
-list import uses (headers are column `name`s, not display names).
+table import uses (headers are column `name`s, not display names).
 
 | Column | Required | Notes |
 |---|---|---|
@@ -88,7 +88,7 @@ list import uses (headers are column `name`s, not display names).
 | `birth_date` | no | `YYYY-MM-DD`, not in the future |
 
 The `;` separator and the boolean spellings are taken from
-`lists/transfer/services.py::_parse_cell`, so a person who has used the list
+`tables/transfer/services.py::_parse_cell`, so a person who has used the table
 importer already knows them.
 
 **The profile rule.** A row with every person field blank creates an account with no
@@ -97,9 +97,9 @@ person record — the same outcome as leaving "Connect a person record" unchecke
 `last_name` is a row error. Creating the account and silently dropping the profile
 would be the worst of the three options, because nothing would report it.
 
-**Unknown headers are rejected, not ignored.** This diverges from list import
-deliberately. There, ignoring unknown headers is correct: a list's columns are
-user-defined and arbitrary, so a header this list does not have may well be a header
+**Unknown headers are rejected, not ignored.** This diverges from table import
+deliberately. There, ignoring unknown headers is correct: a table's columns are
+user-defined and arbitrary, so a header this table does not have may well be a header
 another one does. Here the column set is closed and known, so an unrecognized header
 is a mistake — `frist_name` would silently drop every name in the file, and
 `is_superadmin` would silently create no administrators. The request fails with a
@@ -122,13 +122,13 @@ returns.
 `{created: [], errors: [], superusers_created: 0}`. Nothing was asked for and
 nothing went wrong.
 
-**CSV only.** List import also accepts JSON because export emits it; there is no
+**CSV only.** Table import also accepts JSON because export emits it; there is no
 user export here, so there is nothing for JSON to round-trip with.
 
 ## The template
 
 Built client-side from `toCsv` + `downloadFile`, exactly as `ImportExportDialog`
-builds the list template. One header row plus one example data row — a bare header
+builds the table template. One header row plus one example data row — a bare header
 line does not convey that `groups` is `;`-separated or that `birth_date` wants
 `YYYY-MM-DD`.
 
@@ -137,7 +137,7 @@ line does not convey that `groups` is `;`-separated or that `birth_date` wants
 ## Backend
 
 A new package `backend/src/auth/users/batch/` — `schemas.py`, `services.py`,
-`routers.py` — mirroring the layout of `lists/transfer/`. Its router carries no
+`routers.py` — mirroring the layout of `tables/transfer/`. Its router carries no
 prefix of its own and is included into `users_router` in `auth/users/routers.py`,
 which supplies `/users`; the app factory's `API_PREFIX` and the `/auth` prefix in
 `auth/routers.py` supply the rest.
@@ -194,7 +194,7 @@ things a row-at-a-time loop cannot have:
 
 Because `UserService.create` and `WorkspaceService.create` each commit internally,
 every row is already its own transaction. That is precisely the isolation
-skip-and-report wants, so no savepoint machinery is needed here — unlike list
+skip-and-report wants, so no savepoint machinery is needed here — unlike table
 import, which inserts into one session and commits in batches for speed.
 
 ### Response
@@ -217,7 +217,7 @@ class BatchUserSummary(BaseModel):
     superusers_created: int
 ```
 
-`created` is a list where `ImportSummary` has a bare count, because the credentials
+`created` is a table where `ImportSummary` has a bare count, because the credentials
 have to come back somehow and the row number is what ties one to its line in the
 file. `superusers_created` exists so a typo'd column is visible in the result rather
 than silent.

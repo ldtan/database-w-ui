@@ -1,7 +1,7 @@
 """Demo scenarios: a whole plausible tenant, built through the real services.
 
 Not fixtures and not migrations — these scripts exist so that a fresh database can
-be turned into something worth looking at: users, groups, workspaces, lists,
+be turned into something worth looking at: users, groups, workspaces, tables,
 columns, records, views, forms, metrics and permission grants that hang together
 the way a real deployment's would.
 

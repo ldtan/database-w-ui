@@ -9,7 +9,7 @@
  * from two copies kept in step by hand.
  *
  * Nothing here decides *which* fields to show. That is `resolveFields`' job, from
- * the list's form; a caller passes the result in.
+ * the table's form; a caller passes the result in.
  */
 import { useState } from "react";
 
@@ -67,8 +67,8 @@ const RICH_TOOLBAR = (
       <button aria-label="Strikethrough" className="ql-strike" />
     </span>
     <span className="ql-formats">
-      <button aria-label="Bulleted list" className="ql-list" value="bullet" />
-      <button aria-label="Numbered list" className="ql-list" value="ordered" />
+      <button aria-label="Bulleted table" className="ql-list" value="bullet" />
+      <button aria-label="Numbered table" className="ql-list" value="ordered" />
       <button aria-label="Quote" className="ql-blockquote" />
       {/* ql-code (inline `<code>`), not ql-code-block: a Quill code block is a
           pair of nested divs carrying their meaning in class names, and the
@@ -198,7 +198,7 @@ function SingleChoiceField({
 }: ChoiceFieldProps) {
   const options = column.config.options ?? [];
   const allowOther = !!column.config.allow_other;
-  const offList =
+  const offTable =
     allowOther &&
     typeof value === "string" &&
     value !== "" &&
@@ -208,8 +208,8 @@ function SingleChoiceField({
   // *are* options ("Done" on the way to "Done, late"), and a purely derived mode
   // would snatch the box away mid-word and put the half-typed answer in the
   // dropdown instead.
-  const [othering, setOthering] = useState(offList);
-  const other = othering || offList;
+  const [othering, setOthering] = useState(offTable);
+  const other = othering || offTable;
 
   return (
     <div className="flex flex-col gap-2">
@@ -364,7 +364,7 @@ function DurationField({
 }
 
 export function RecordField({
-  listUuid,
+  tableUuid,
   column,
   value,
   disabled,
@@ -374,7 +374,7 @@ export function RecordField({
   allowCreate = true,
   compact = false,
 }: {
-  listUuid: string;
+  tableUuid: string;
   column: Column;
   value: unknown;
   disabled: boolean;
@@ -384,7 +384,7 @@ export function RecordField({
   columns?: Column[];
   values?: Record<string, unknown>;
   /** Whether an editor may open a dialog of its own — a lookup adding a row to
-   *  its target list. False where this renders inside the grid's cell editor,
+   *  its target table. False where this renders inside the grid's cell editor,
    *  which cannot host one (see `inlineEdit`). */
   allowCreate?: boolean;
   /** This editor sits in a grid cell rather than in a dialog, so it may not grow
@@ -592,7 +592,7 @@ export function RecordField({
       }
       return (
         <LookupField
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           column={column}
           value={value}
           disabled={disabled}
@@ -650,13 +650,13 @@ export function RecordField({
  * fields owes a record that, which is precisely why it is not left to callers.
  */
 export function RecordFields({
-  listUuid,
+  tableUuid,
   fields,
   columns,
   values,
   onChange,
 }: {
-  listUuid: string;
+  tableUuid: string;
   fields: ResolvedField[];
   columns: Column[];
   values: Record<string, unknown>;
@@ -673,7 +673,7 @@ export function RecordFields({
             {column.config.required ? " *" : ""}
           </label>
           <RecordField
-            listUuid={listUuid}
+            tableUuid={tableUuid}
             column={column}
             value={values[column.uuid]}
             disabled={!enabled}

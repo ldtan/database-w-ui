@@ -1,7 +1,7 @@
-"""Clear the config of lookup columns whose target list is already gone.
+"""Clear the config of lookup columns whose target table is already gone.
 
-A one-off, not a recurring job. Deleting a list scrubs the lookup *values* pointing
-into it and — since `ListService._scrub_references_to_lists` was fixed — the
+A one-off, not a recurring job. Deleting a table scrubs the lookup *values* pointing
+into it and — since `TableService._scrub_references_to_tables` was fixed — the
 referencing column's *config* as well. Columns that lost their target before that fix
 still hold the dead uuid, and by design that is the case the read path still refuses:
 a target that is **named and missing** raises rather than answering "no options",
@@ -15,14 +15,14 @@ Until it runs, such a column is stuck exactly as the delete-path fix describes i
 past tense: the options endpoint 404s, so the picker, the record dialog and every
 label resolution fail; a config PATCH is refused because the target cannot be
 resolved, which is the one repair the dialog offers; and a ticked `required` refuses
-every write to the list that holds the column. Nothing in the UI gets out of it.
+every write to the table that holds the column. Nothing in the UI gets out of it.
 
 Idempotent — a second run finds nothing and writes nothing.
 
 **It writes config and nothing else**, so it cannot destroy anything a person can see.
-For the population it is aimed at — columns whose list was deleted — the values went
-with the list and that half was never broken. It also catches a column whose target
-was never a live list at all (see the cast note below), and *those* cells were never
+For the population it is aimed at — columns whose table was deleted — the values went
+with the table and that half was never broken. It also catches a column whose target
+was never a live table at all (see the cast note below), and *those* cells were never
 scrubbed; after the sweep they render as row stubs rather than resolving, which is
 what they already did. Either way nothing readable is lost here.
 
@@ -30,7 +30,7 @@ what they already did. Either way nothing readable is lost here.
 outward `_clear_dependent_nesting`. Keeping the two in step is what stops a column
 repaired by this sweep from behaving differently to one scrubbed at delete time —
 `required` included, whose whole point is that a constraint nothing can satisfy
-freezes writes to an entire list. A second, divergent copy of the rule is the thing
+freezes writes to an entire table. A second, divergent copy of the rule is the thing
 most worth avoiding here.
 
 `--dry-run` names every column it would clear, not just a count. This discards the
@@ -46,25 +46,25 @@ import sqlalchemy as sa
 # Registers every model; without it the mappers half-configure (see model_registry).
 import src.infrastructure.model_registry  # noqa: F401
 from src.infrastructure import database as db_module
-from src.lists.columns.enums import ColumnType
-from src.lists.columns.models import Column
-from src.lists.columns.services import ColumnService
-from src.lists.models import List
+from src.tables.columns.enums import ColumnType
+from src.tables.columns.models import Column
+from src.tables.columns.services import ColumnService
+from src.tables.models import Table
 
-# Cleared to `None`, matching `_scrub_references_to_lists`.
+# Cleared to `None`, matching `_scrub_references_to_tables`.
 _BLANKED = (
-    "target_list_uuid",
+    "target_table_uuid",
     "display_column_uuid",
     "parent_column_uuid",
     "target_filter_column_uuid",
     "option_filters",
 )
 
-# Live lookup columns naming a target that is not a live list. The `IS NOT NULL`
+# Live lookup columns naming a target that is not a live table. The `IS NOT NULL`
 # guard is what keeps the columns the delete path already cleared out of scope —
 # they are correct as they stand and must not be blanked a second time.
 #
-# The correlation compares `List.uuid` cast to text rather than casting the config
+# The correlation compares `Table.uuid` cast to text rather than casting the config
 # value to uuid, so a field holding something that is not a uuid at all — a
 # hand-edited config, an import that guessed — matches nothing and is treated as
 # dangling, which is what it is. Casting the other way would raise and take the whole
@@ -78,33 +78,33 @@ _BLANKED = (
 # delete path's equivalent can only fail to match. The API cannot produce that form,
 # but hand-edited configs are explicitly in this job's scope; they are the only way
 # its target state arises at all.
-_TARGET = sa.func.lower(Column.config["target_list_uuid"].astext)
+_TARGET = sa.func.lower(Column.config["target_table_uuid"].astext)
 _DUE = sa.select(Column.id).where(
     Column.deleted_at.is_(None),
     Column.type == ColumnType.lookup,
-    Column.config["target_list_uuid"].astext.is_not(None),
+    Column.config["target_table_uuid"].astext.is_not(None),
     ~sa.exists(
         sa.select(sa.literal(1)).where(
-            sa.func.lower(sa.cast(List.uuid, sa.Text)) == _TARGET,
-            List.deleted_at.is_(None),
+            sa.func.lower(sa.cast(Table.uuid, sa.Text)) == _TARGET,
+            Table.deleted_at.is_(None),
         )
     ),
 )
 
 # What `--dry-run` reports, so the mapping can be written down before it is discarded.
 _DUE_ROWS = sa.select(
-    Column.list_id,
+    Column.table_id,
     Column.uuid,
     Column.name,
-    Column.config["target_list_uuid"].astext,
+    Column.config["target_table_uuid"].astext,
 ).where(Column.id.in_(_DUE))
 
 
 async def due() -> list[tuple]:
-    """Every column the sweep would clear, as (list_id, uuid, name, dead target).
+    """Every column the sweep would clear, as (table_id, uuid, name, dead target).
 
     Read-only. This is what `--dry-run` prints, and it is the last chance anyone has
-    to record which list each column pointed at — clearing is what destroys that.
+    to record which table each column pointed at — clearing is what destroys that.
     """
     async with db_module.SessionLocal() as db:
         return [tuple(row) for row in await db.execute(_DUE_ROWS)]
@@ -141,11 +141,11 @@ async def _main() -> None:
     )
     args = parser.parse_args()
 
-    what = "lookup column(s) pointing at a list that no longer exists"
+    what = "lookup column(s) pointing at a table that no longer exists"
     if args.dry_run:
         rows = await due()
-        for list_id, uuid, name, target in rows:
-            print(f"  list {list_id}  column {uuid} ({name})  -> {target}")
+        for table_id, uuid, name, target in rows:
+            print(f"  table {table_id}  column {uuid} ({name})  -> {target}")
         print(f"Would clear {len(rows):,} {what}.")
         print("Record the targets above: clearing is what destroys them.")
     else:

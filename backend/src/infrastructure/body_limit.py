@@ -1,11 +1,11 @@
 """A ceiling on the request body, for every route rather than the upload ones.
 
 `core/uploads.py` caps a *file* at `MAX_UPLOAD_BYTES` while reading it, which covers
-import and the batch user CSV. Nothing capped a JSON body: `ListItemCreate.data` is a
+import and the batch user CSV. Nothing capped a JSON body: `TableRecordCreate.data` is a
 `dict` to Pydantic, `ColumnConfig` forbids unknown keys but bounds none of the values
 it does take, and Starlette imposes no limit of its own. So
 
-    POST /lists/{u}/items/  {"data": {"<text column uuid>": "A" * 50_000_000}}
+    POST /tables/{u}/records/  {"data": {"<text column uuid>": "A" * 50_000_000}}
 
 was buffered, parsed, sanitised and stored — on a 512 MB instance, into a column whose
 `max_length` is unset by default. The cell limit is a separate and narrower question

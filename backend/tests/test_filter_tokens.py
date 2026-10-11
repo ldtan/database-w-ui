@@ -7,8 +7,8 @@ they can prove that "today" is not the literal string but not *which* today it i
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
-from src.lists.columns.enums import ColumnType
-from src.lists.columns.validation import filter_tokens, resolve_filter_token
+from src.tables.columns.enums import ColumnType
+from src.tables.columns.validation import filter_tokens, resolve_filter_token
 
 
 def _user(tz):

@@ -24,21 +24,21 @@ import { GroupDialog } from "./GroupDialog";
 import { UserDialog } from "./UserDialog";
 
 // Searching and paging both happen server-side, so a term finds a match no matter
-// how far down the list it sits. Filtering one fetched page in the browser would
+// how far down the table it sits. Filtering one fetched page in the browser would
 // report "no match" for anything past the limit, which is worse than no search.
 const ROWS = 10;
 
 /**
  * Accounts and groups — identity administration, not access.
  *
- * Nothing here grants anyone access to a workspace, list or record; that is the
+ * Nothing here grants anyone access to a workspace, table or record; that is the
  * grant system's business (see the Share dialog). What it administers sits
  * *underneath* permissions, which is why writing is superuser-only: groups are
  * principals in the grant table, so whoever edits membership can hand themselves
  * any grant a group holds, and whoever resets a password can simply become the
  * workspace owner. Reading stays open, so everyone can see who is in what.
  *
- * Both lists are searched and paged **server-side** — a client-side filter over one
+ * Both tables are searched and paged **server-side** — a client-side filter over one
  * fetched page silently fails to find anyone past the page limit, which in the
  * Share dialog would mean being unable to grant to them at all.
  */
@@ -82,7 +82,7 @@ export function PeoplePage() {
         `/auth/users/?skip=${userFirst}&limit=${userRows}` +
           `&q=${encodeURIComponent(userQ.trim())}`,
       ),
-    placeholderData: (prev) => prev, // don't blank the list while paging
+    placeholderData: (prev) => prev, // don't blank the table while paging
   });
   const groups = useQuery({
     queryKey: ["groups", "search", groupQ, groupFirst, groupRows],
@@ -93,7 +93,7 @@ export function PeoplePage() {
       ),
     placeholderData: (prev) => prev,
   });
-  // Person records are personal data: only a superuser may list them. Used to
+  // Person records are personal data: only a superuser may table them. Used to
   // annotate each user with their connected person and to seed the edit dialog.
   const people = useQuery({
     queryKey: ["people", "map"],
@@ -160,7 +160,7 @@ export function PeoplePage() {
       <PageHeader
         crumbs={[{ label: "People & Groups" }]}
         title="People & Groups"
-        subtitle="Who exists, and which groups they are in. Access itself is granted per workspace, list or record."
+        subtitle="Who exists, and which groups they are in. Access itself is granted per workspace, table or record."
       />
 
       {!canAdminister && (

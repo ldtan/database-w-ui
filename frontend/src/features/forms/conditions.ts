@@ -3,7 +3,7 @@
  *
  * A field's condition is stored as a view's `FilterGroup` and means the same thing —
  * "does this record match?" — asked of one draft rather than of a table. Which makes
- * this file the client-side twin of `backend/src/lists/items/filtering.py`, and that
+ * this file the client-side twin of `backend/src/tables/records/filtering.py`, and that
  * is the whole risk in it: **one operator vocabulary, two implementations**, one in
  * SQL over stored JSONB and one here over a half-typed draft.
  *
@@ -231,7 +231,7 @@ export function conditionMet(
  * The return type is unchanged, which is what keeps the rest of the form ignorant of
  * conditions: `hide` drops the entry and `disable` clears `enabled`, and
  * `buildRecordData` already skips both. So a field that does not apply is never sent,
- * and because `PATCH /items/{uuid}` merges rather than replaces, whatever the record
+ * and because `PATCH /records/{uuid}` merges rather than replaces, whatever the record
  * already held in that cell survives untouched.
  */
 export function applyFieldConditions(

@@ -7,12 +7,12 @@ back. There was no way to see what had been deleted, no way to undo it, and
 ``purge_deleted_principals`` deliberately never removed the row, so a mistake was
 permanent and invisible at the same time.
 
-**A separate surface with a different authority.** The records, lists and workspaces
+**A separate surface with a different authority.** The records, tables and workspaces
 bins are gated on ownership of the data; this one is ``require_superuser``. Accounts
 and groups are identity administration and sit *under* the permission model -- groups
 are principals in the grant table, so whoever can restore one can hand it back every
 grant it held. That is the same reasoning the live write routes already use, and the
-reason this is not folded into any per-list trash.
+reason this is not folded into any per-table trash.
 
 **Restore is a real undo, memberships included.** The deletes used to clear them so
 the row stopped appearing in the other side's read schema, which made the delete lossy

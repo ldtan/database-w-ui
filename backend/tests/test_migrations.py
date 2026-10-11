@@ -120,7 +120,7 @@ async def test_no_pending_autogenerate_diff(migrated_url):
 
 
 async def test_the_circular_foreign_key_is_created(migrated_url):
-    """lists.primary_column_id -> columns.id is use_alter (the two tables reference
+    """tables.primary_column_id -> columns.id is use_alter (the two tables reference
     each other). SQLAlchemy omits such keys from CREATE TABLE and autogenerate does
     not emit the follow-up ALTER, so the baseline adds it by hand — and it silently
     would not exist otherwise."""
@@ -132,13 +132,13 @@ async def test_the_circular_foreign_key_is_created(migrated_url):
             await conn.execute(
                 sa.text(
                     "SELECT conname FROM pg_constraint "
-                    "WHERE conrelid = 'lists'::regclass AND contype = 'f'"
+                    "WHERE conrelid = 'tables'::regclass AND contype = 'f'"
                 )
             )
         ).scalars().all()
     await engine.dispose()
 
-    assert "fk_lists_primary_column_id" in names
+    assert "fk_tables_primary_column_id" in names
 
 
 async def test_long_text_columns_become_multiline_text(migrated_url):
@@ -154,6 +154,13 @@ async def test_long_text_columns_become_multiline_text(migrated_url):
     The soft-deleted column matters as much as the live one: leaving it behind
     would let a restore resurrect a type ColumnType no longer has, which raises
     on the next read rather than failing here.
+
+    **This test straddles the List -> Table rename.** The inserts below run at
+    `d2f6a8c41b93`, which predates it, so they must keep the old identifiers
+    (`lists`, `list_id`, `list_items`); the assertions after `_upgrade_head()` run
+    on the renamed schema and must use the new ones (`tables`, `table_id`,
+    `table_records`). Making both halves agree is always wrong — one of them
+    will be talking to a schema that does not exist yet, or any more.
     """
     await _upgrade_to("d2f6a8c41b93")  # the revision before the merge
 
@@ -233,8 +240,8 @@ async def test_long_text_columns_become_multiline_text(migrated_url):
         cell = (
             await conn.execute(
                 sa.text(
-                    "SELECT i.data ->> c.uuid::text FROM list_items i"
-                    "  JOIN columns c ON c.list_id = i.list_id AND c.name = 'notes'"
+                    "SELECT i.data ->> c.uuid::text FROM table_records i"
+                    "  JOIN columns c ON c.table_id = i.table_id AND c.name = 'notes'"
                 )
             )
         ).scalar()

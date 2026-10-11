@@ -4,7 +4,7 @@ import { frameEvent, parseFrames } from "./liveStream";
 
 // What is testable here and what is not, stated once. vitest runs in a **node**
 // environment with no jsdom (vite.config.ts), deliberately — what it pins is rules a
-// value goes through, not components that mount. So `subscribeToList` is out of reach:
+// value goes through, not components that mount. So `subscribeToTable` is out of reach:
 // it reads `document`, `window` and `fetch`, and holds a connection. These two
 // functions are the parts with no environment in them, and they are also where the
 // quiet bugs live — a frame split across two network reads is lost silently, and a
@@ -57,9 +57,9 @@ describe("frameEvent", () => {
   });
 
   // The bug this pins: the heartbeat is a comment, and an idle stream is mostly
-  // heartbeats. Reading one as an event would make a list nobody is touching refetch
+  // heartbeats. Reading one as an event would make a table nobody is touching refetch
   // every SSE_HEARTBEAT_SECONDS — worse than the polling this replaced, and only on
-  // quiet lists, which is where nobody would look for it.
+  // quiet tables, which is where nobody would look for it.
   it("is silent about a comment", () => {
     expect(frameEvent(": ping")).toBeNull();
   });

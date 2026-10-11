@@ -123,6 +123,6 @@ def test_a_bad_email_is_a_row_error_not_a_file_error():
 
 
 def test_row_numbers_are_real_line_numbers():
-    """Blank lines must not shift the number a person reads in the error list."""
+    """Blank lines must not shift the number a person reads in the error table."""
     parsed = parse_file("username,email\n\nada,ada@example.com\n")
     assert parsed.rows[0][0] == 3

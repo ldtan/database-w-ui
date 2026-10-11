@@ -16,12 +16,12 @@ const WORDS: { icon: string; word: string; text: string }[] = [
   {
     icon: "pi pi-th-large",
     word: "Workspace",
-    text: "A folder that holds related lists.",
+    text: "A folder that holds related tables.",
   },
   {
     icon: "pi pi-table",
-    word: "List",
-    text: "A single table — the heart of it all.",
+    word: "Table",
+    text: "One set of records sharing the same columns — the heart of it all.",
   },
   {
     icon: "pi pi-bars",

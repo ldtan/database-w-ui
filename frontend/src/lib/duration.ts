@@ -6,7 +6,7 @@
  *  carries the raw seconds so it round-trips exactly.
  *
  *  `parseDuration` is the mirror of `parse_duration` in
- *  backend/src/lists/columns/validation.py, which the CSV import runs. The two are
+ *  backend/src/tables/columns/validation.py, which the CSV import runs. The two are
  *  meant to be edited together: a form this one accepts and that one refuses is a
  *  value somebody can type into the grid but not into a file.
  */

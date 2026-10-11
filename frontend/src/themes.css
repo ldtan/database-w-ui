@@ -774,7 +774,7 @@ a {
 /* "Create <what you typed>" in the footer of a reference picker
    (features/references/ReferencePicker). Full width and separated by a rule,
    because it is not one more row of the list — picking a suggestion links an
-   existing row, this one writes to another list. */
+   existing row, this one writes to another table. */
 .ref-create {
   display: block;
   width: 100%;
@@ -954,7 +954,7 @@ a {
 /* PrimeReact ships *no* overflow rule for this element, so a table wider than
    its container simply overflowed the page — and `body { overflow-x: hidden }`
    then clipped it, which on a tablet meant the last columns were unreachable
-   rather than merely off-screen. The minimum width ListDetailPage sets per
+   rather than merely off-screen. The minimum width TableDetailPage sets per
    column only "scrolls rather than crushes" if something here actually scrolls. */
 .p-datatable > .p-datatable-wrapper {
   overflow-x: auto;
@@ -969,7 +969,7 @@ a {
   background: var(--surface-2);
   border-color: var(--border);
   /* The header stays put while the rows scroll under it: past the first screen
-     of a long list, a column's name is the only thing that says what a cell is.
+     of a long table, a column's name is the only thing that says what a cell is.
      It sticks against `.p-datatable-wrapper`, which is why only `.data-grid`
      below — the one that bounds that wrapper's height — actually scrolls under
      it. Elsewhere the rule is harmless and the header simply sits at the top. */
@@ -996,7 +996,7 @@ a {
   max-height: max(22rem, calc(100vh - 19rem));
   overflow: auto;
 }
-/* The grid's two non-data columns are pinned to its edges, so a list with enough
+/* The grid's two non-data columns are pinned to its edges, so a table with enough
    columns to scroll sideways stops carrying its checkbox off one end and its
    actions off the other. Scoped to `.data-grid` because it is the only table that
    scrolls horizontally — everywhere else the columns are fixed and always fit.
@@ -1325,7 +1325,7 @@ td:hover > .phone-cell .phone-actions,
   padding: 0.4rem 0.6rem;
   gap: 0.15rem;
 }
-/* Standing on its own (the workspaces/lists pages, the card layout) it is a
+/* Standing on its own (the workspaces/tables pages, the card layout) it is a
    surface in its own right; inside the grid it is that grid's footer. */
 .p-paginator:not(.p-paginator-bottom) {
   border: var(--border-width) solid var(--border);
@@ -1381,7 +1381,7 @@ td:hover > .phone-cell .phone-actions,
   padding: 0;
 }
 
-/* A card that *is* a link — the workspace and list rows. Only the title used to be
+/* A card that *is* a link — the workspace and table rows. Only the title used to be
    clickable, which left most of the card as dead space. The anchor inside stretches
    an invisible overlay across the whole card, so a click anywhere navigates while
    the element stays a real <a>: keyboard focus, middle-click and "open in new tab"
@@ -1586,7 +1586,7 @@ td:hover > .phone-cell .phone-actions,
 /* ============================================================
    Tabs
 
-   The list settings dialog is the only TabView in the app, and without these it
+   The table settings dialog is the only TabView in the app, and without these it
    was a themed dark frame wrapping a solid white tab strip: the base theme paints
    the nav, every link and the panels #ffffff and highlights the active tab in its
    own cyan, none of which move with the palette.
@@ -1601,7 +1601,7 @@ td:hover > .phone-cell .phone-actions,
 }
 /* Inside a dialog the tabs *are* that dialog's navigation, so the strip runs the
    full width under the header rule and the panel supplies the body padding. The
-   dialog's own content padding is turned off for this (see ListSettingsDialog).
+   dialog's own content padding is turned off for this (see TableSettingsDialog).
    Floating in the middle of the body, they read as a widget someone dropped in. */
 .p-dialog .p-tabview .p-tabview-nav {
   padding: 0 1.35rem;
@@ -2000,7 +2000,7 @@ td:hover > .phone-cell .phone-actions,
   box-shadow: 0 0 0 0.2rem var(--focus-ring);
 }
 
-/* The metric strip: a list's totals, above its records.
+/* The metric strip: a table's totals, above its records.
 
    It wraps rather than scrolls, and each card is sized to its content with a
    floor — a "Records: 3" card has no business being as wide as one holding a
@@ -2544,7 +2544,7 @@ td:hover > .phone-cell .phone-actions,
 }
 
 /* The tinted square that stands in for a thing that has no picture — a
-   workspace, a list, a group. It is what makes a run of cards scannable by
+   workspace, a table, a group. It is what makes a run of cards scannable by
    shape before it is read. */
 .entity-icon {
   display: grid;

@@ -12,8 +12,8 @@ These share two roots in the existing model, so read them once here rather than 
   key never changes; a **type change, a data copy, or a clone is not free**, because it touches
   the values or the keys themselves. This is the difference that makes four of these five
   features harder than they look.
-- **There is no per-list owner.** Ownership flows through `workspace.owner_id`
-  (data-model §3), so anything about "who owns a list" is really about which workspace it
+- **There is no per-table owner.** Ownership flows through `workspace.owner_id`
+  (data-model §3), so anything about "who owns a table" is really about which workspace it
   sits in.
 
 Cross-references: [data model](data-model-design.md) · [known gaps](known-gaps.md).
@@ -69,7 +69,7 @@ not:
 
 **`config` has to be rebuilt, not merged.** Config PATCHes merge (data-model §5), but a type
 change invalidates the old type's keys wholesale — a `choice`'s `options`, a `lookup`'s
-`target_list_uuid` — and requires the new type's. Validate the *new* config from scratch.
+`target_table_uuid` — and requires the new type's. Validate the *new* config from scratch.
 
 **Decided — the conversion runs into a *new* column, never in place.** Add a column of the target
 type, convert into it, let the user read the report, then swap it in. The reason is not
@@ -88,7 +88,7 @@ reversible until the user commits, and it is why #1 is delivered *through* #2 �
 engine.
 
 **Decided — convert in Python, not SQL.** Postgres can rewrite the structural pairs far faster,
-but it cannot resolve a reference label (that needs `PermissionService.item_view_filter`, a
+but it cannot resolve a reference label (that needs `PermissionService.record_view_filter`, a
 Python-composed expression over the permission tables), cannot validate against the target
 column's config, cannot name the cells that failed, and cannot mint `choice` options. Two
 engines would also mean the same logical conversion behaving differently depending on which path
@@ -97,20 +97,20 @@ type-level invariants the SQL layer depends on *and* the config-level ones (`max
 `required`, `unique`) that it does not.
 
 **Decided — inline, with a row-count ceiling; no job queue.** Free Postgres is 1GB, so the
-million-row list the ~25s figure describes is not reachable on this deployment;
+million-row table the ~25s figure describes is not reachable on this deployment;
 `METRIC_ROW_LIMIT` is already 50k and a Python backfill at that size is seconds. Convert in the
 request, and above the ceiling refuse with "too large to convert interactively" and route the
 caller to the maintenance workflow, which already runs against the same database on someone
 else's compute. Keep the backfill chunked and committed per batch anyway (copy
 `reconcile_shapes`) so the same function serves both callers unmodified. A queue would be
-infrastructure the 512MB instance pays for and no reachable list needs.
+infrastructure the 512MB instance pays for and no reachable table needs.
 
 **Note the storage cost:** mid-conversion every record holds both the old and the new value, so
-the list's JSONB roughly doubles. Worth a size check before starting on a 1GB database.
+the table's JSONB roughly doubles. Worth a size check before starting on a 1GB database.
 
 ### What shipped
 
-`src/lists/columns/conversion.py` (the cell engine) and `conversion_service.py` (build,
+`src/tables/columns/conversion.py` (the cell engine) and `conversion_service.py` (build,
 backfill, cut over), behind three routes: `POST /columns/{uuid}/convert` returns a report,
 `POST /columns/{uuid}/convert/{target_uuid}` commits it, `DELETE` on the same path abandons
 it. Tests in `tests/test_column_conversion.py`.
@@ -156,11 +156,11 @@ the column is real — so a backfill that leaves holes still reports cleanly, an
 is what refuses. A failed gate leaves the conversion in progress to be fixed and retried.
 
 **Archived and binned records convert too.** The backfill walks every row of
-`list_items` for the list, not the rows a reader can see — no `deleted_at` filter, for the
+`table_records` for the table, not the rows a reader can see — no `deleted_at` filter, for the
 reason `reconcile_shapes` has none (a restore must not hand back a value in the old type),
 and no `archived_at` filter for the same reason one step earlier: an unarchive that
 returned an old-type value would be a hole in the very invariant the cutover exists to
-establish. The row ceiling is measured against that same unfiltered count, so a list whose
+establish. The row ceiling is measured against that same unfiltered count, so a table whose
 bulk is archived does not get a cheaper conversion — archiving buys back read cost
 (known-gaps, capacity-and-performance), never rewrite cost.
 
@@ -171,7 +171,7 @@ for everyone, so baking uuid strings into a text column is not an acceptable fal
 
 **`Column.hidden` was added** (migration `a1c4e97b2f38`) rather than reusing `deleted_at`,
 which would have let the purge job collect a stalled conversion's work. Its counterpart is
-`Column.in_shape()` — the predicate for "part of the list's shape", which every reader that
+`Column.in_shape()` — the predicate for "part of the table's shape", which every reader that
 answers *what fields does a record have* now filters on. Two readers deliberately do not:
 the reference scrub and the shape reconcile, because being invisible does not exempt a
 column's stored uuids from cleanup.
@@ -192,19 +192,19 @@ become and says those need two steps through Text; `canConvert` in `lib/columnTy
 mirrors `is_supported` and has to stay in step with it, since a drift shows up as a 400
 rather than a disabled option. Step two is `ConversionReportDialog`: the backfill has
 already run at that point, into a column no view or formula can see, so the counts and the
-individual failures are read while the list is still exactly as it was. Applying asks once
+individual failures are read while the table is still exactly as it was. Applying asks once
 more and names where the originals go; discarding costs nothing, and **closing the dialog
 any other way discards too** — a conversion left in progress would block the next attempt
 with a 409 naming a scratch column the person never knew existed. Duplicating (§2) is the
 same pair in `mode="duplicate"`: it keeps the source's settings, because that is what
 makes it a copy, and prefills the one thing it cannot keep, the name (`<name>_copy`, the
-suffix cloning a list already uses).
+suffix cloning a table already uses).
 
 ---
 
 ## 2. Column data migration (copy one column's data into another) — **duplicate shipped; copy-into-existing not**
 
-Bulk-populate a target column from a source column across every record in a list — the
+Bulk-populate a target column from a source column across every record in a table — the
 "add a column, move the data over, delete the old one" workflow, and the safe delivery
 vehicle for feature 1.
 
@@ -223,7 +223,7 @@ reasoning `reconcile_shapes` uses (it does, so a restore doesn't resurrect a sta
 - **`unique` on the target.** Copying a source with repeats into a `unique` target creates
   duplicates. `_enforce_unique` will 409 — decide whether that aborts the whole migration or
   skips-and-reports, same question as feature 1's unconvertible cells.
-- **`multiple` shape mismatch.** A single→multiple copy wraps each value in a one-element list; the
+- **`multiple` shape mismatch.** A single→multiple copy wraps each value in a one-element table; the
   reverse takes the first element. `coerce_shape` already expresses exactly this — call it, don't
   re-derive it.
 
@@ -241,7 +241,7 @@ report, and writes landing in it were lost: the hidden column is excluded by `in
 every write path wrote under the source key only, and the swap then blanked it or replaced it
 with the backfill's stale copy. It is now `preview` — which writes **nothing**, creates no
 column and reserves no name — and `apply`, which does the whole job in one transaction and
-refuses with a 409 if any record on the list moved while it ran. The duplicate ending had the
+refuses with a 409 if any record on the table moved while it ran. The duplicate ending had the
 same hole (it published a copy missing the window's edits) and is closed by the same change
 rather than by a second mechanism. A consequence to know: the duplicate's name is no longer
 held from the moment the report is built, so the preview reports a clash as a courtesy while
@@ -256,7 +256,7 @@ That is now less of a problem than it reads, because the surfaces where a person
 looking have each grown an order of their own. The Columns tab sorts by `display_name`
 through `compareValues`, so `orders_copy` lands beside `orders` there whatever `position`
 says; a view's `column_order` and a form's `fields` are drag-reorderable, so where the
-copy shows up in either is the user's to say. What is still unordered is the list's
+copy shows up in either is the user's to say. What is still unordered is the table's
 *default* column order — the one `position` alone decides, which the grid falls back to
 and which nothing in the UI writes.
 
@@ -276,49 +276,49 @@ gets:
 
 ---
 
-## 3. List ownership transfer (hand a list to another user) — **implemented**
+## 3. Table ownership transfer (hand a table to another user) — **implemented**
 
-**Shipped** via the "Incoming workspace" model. `POST /lists/{uuid}/transfer` `{ user_uuid }`
-moves a list into the recipient's immutable, lazily-created `incoming` workspace, making them
+**Shipped** via the "Incoming workspace" model. `POST /tables/{uuid}/transfer` `{ user_uuid }`
+moves a table into the recipient's immutable, lazily-created `incoming` workspace, making them
 its owner. Owner-only; the giver's implicit access ends with the move; existing shares survive
-(grants point at the list by `resource_id`, unchanged). A name clash on landing auto-suffixes
+(grants point at the table by `resource_id`, unchanged). A name clash on landing auto-suffixes
 (`tasks` → `tasks_2`). The recipient files it by moving it out (feature 4) or rejects it by
-deleting it. See `ListService.transfer_to_user`, `WorkspaceService.get_or_create_inbox`, and
-`tests/test_list_transfer.py`; UI is the "Transfer to user" mode of `MoveOrTransferDialog`.
+deleting it. See `TableService.transfer_to_user`, `WorkspaceService.get_or_create_inbox`, and
+`tests/test_table_transfer.py`; UI is the "Transfer to user" mode of `MoveOrTransferDialog`.
 
 **Whole workspaces transfer too**, via `POST /workspaces/{uuid}/transfer` `{ user_uuid }`. This
 is the simpler half of the same feature: a workspace is the ownership boundary itself, so the
-transfer reassigns `owner_id` in place and its lists follow untouched — nothing moves, no inbox
+transfer reassigns `owner_id` in place and its tables follow untouched — nothing moves, no inbox
 is needed, and no uuid changes. Same three rules (owner-only, shares survive, giver's implicit
 access ends), same auto-suffix on a landing name clash (`team` → `team_2`, and `incoming` counts
 as taken). The inbox itself is refused: it is the recipient's own fixture. See
 `WorkspaceService.transfer_to_user`, `tests/test_workspace_transfer.py`, and
 `TransferWorkspaceDialog` on the Workspaces page. One caveat worth knowing: a lookup pointing
-from a transferred list into a list the giver **kept** becomes cross-owner, which builds but
+from a transferred table into a table the giver **kept** becomes cross-owner, which builds but
 cannot be written (see [known gaps](known-gaps.md)) — transferring a workspace only keeps a
 lookup graph intact if the whole graph lived inside it.
 
-The decisions taken (from the three the design flagged): **email model** (anyone who owns a list
+The decisions taken (from the three the design flagged): **email model** (anyone who owns a table
 can send it; no accept flow), **owner-only** to give, **shares preserved** / giver loses access.
 The consent tradeoff is documented in [known gaps](known-gaps.md). The design rationale below is
 kept for context.
 
 ---
 
-Give a single list to a different user, so it becomes theirs — they own it, it counts against
-their storage, it shows up as their list, and the original owner keeps or loses access per the
+Give a single table to a different user, so it becomes theirs — they own it, it counts against
+their storage, it shows up as their table, and the original owner keeps or loses access per the
 decision below.
 
-**Under the current model, "ownership" is workspace membership.** There is no list owner to
-reassign; a list belongs to whoever owns its workspace. So handing list L to user B means
+**Under the current model, "ownership" is workspace membership.** There is no table owner to
+reassign; a table belongs to whoever owns its workspace. So handing table L to user B means
 **moving L into a workspace B owns** — which is mechanically feature 4 (already built) pointed at
 someone else's workspace. The whole feature is therefore about the *consent and access* layer on
 top of a move, not the move itself.
 
-**The consent problem is the crux.** `update_list` requires `configure` on the **target**
-workspace (`routers.py:139-147`). So today you can only move a list into a workspace you can
-already configure — you cannot *push* a list onto a stranger. That guard is correct (nobody
-should be able to dump lists into your workspace), which means an ownership transfer needs one of:
+**The consent problem is the crux.** `update_table` requires `configure` on the **target**
+workspace (`routers.py:139-147`). So today you can only move a table into a workspace you can
+already configure — you cannot *push* a table onto a stranger. That guard is correct (nobody
+should be able to dump tables into your workspace), which means an ownership transfer needs one of:
 
 - **A pull/accept flow** — the giver offers L; the recipient accepts it into a workspace of their
   choice. The accept is the recipient acting on *their* workspace, so the existing `configure`
@@ -327,18 +327,18 @@ should be able to dump lists into your workspace), which means an ownership tran
   the giver holding `configure` on the target. More surface, but no two-step handshake.
 
 **What moves for free, and what doesn't:**
-- **Children ride along.** Columns, records, views, and forms are keyed by `list_id`, so they
-  follow the list with no work — same as feature 4.
-- **Grants persist, and that's the subtle part.** A grant points at `(resource_type='list',
+- **Children ride along.** Columns, records, views, and forms are keyed by `table_id`, so they
+  follow the table with no work — same as feature 4.
+- **Grants persist, and that's the subtle part.** A grant points at `(resource_type='table',
   resource_id)` with `resource_id` unchanged by a move — so **every existing share on L survives
   the transfer**, including any the *old* owner handed out. The old owner's own access, though, is
   not a grant: it was the implicit workspace-owner short-circuit, and it evaporates the instant L
   leaves their workspace (known-gaps: "The workspace owner is an implicit superuser"). New owner
   short-circuits to everything; old owner drops to whatever explicit grant they hold, if any.
 - **Inheritance re-parents.** L's `permissions_inherit` now resolves against the **new**
-  workspace's grants. A list that inherited broad workspace access in the old home may inherit
+  workspace's grants. A table that inherited broad workspace access in the old home may inherit
   nothing in the new one (or vice-versa) — flag this to the giver.
-- **Name collision.** List `name` is unique per workspace; transferring into B's workspace can
+- **Name collision.** Table `name` is unique per workspace; transferring into B's workspace can
   409 if B already has that name (same as a cross-workspace move today).
 
 **Needs a decision:**
@@ -350,33 +350,33 @@ should be able to dump lists into your workspace), which means an ownership tran
 
 ---
 
-## 4. Move lists across workspaces — **implemented**
+## 4. Move tables across workspaces — **implemented**
 
-**Backend.** `PATCH /lists/{uuid}` with `workspace_uuid` moves a list to another workspace. The
-router requires `configure` on **both** the source list and the target workspace
+**Backend.** `PATCH /tables/{uuid}` with `workspace_uuid` moves a table to another workspace. The
+router requires `configure` on **both** the source table and the target workspace
 (`routers.py`), so you can only move between workspaces you're entitled to configure. Children
-(columns, records, views, forms) follow by `list_id`; list-level grants survive because
+(columns, records, views, forms) follow by `table_id`; table-level grants survive because
 `resource_id` is unchanged. A name already taken in the target workspace 409s.
 
 > **Load-bearing fix.** This path was latently broken: `get_any_by_uuid` eager-loads
-> `List.workspace`, and a loaded many-to-one **overwrites a bare `workspace_id` change on
-> flush** — so setting the scalar FK silently left the list where it was. `ListService.update`
+> `Table.workspace`, and a loaded many-to-one **overwrites a bare `workspace_id` change on
+> flush** — so setting the scalar FK silently left the table where it was. `TableService.update`
 > (and the new transfer) now assign the **relationship** (`lst.workspace = target`), not the FK.
-> Any future move must do the same. `tests/test_list_transfer.py` covers it end-to-end.
+> Any future move must do the same. `tests/test_table_transfer.py` covers it end-to-end.
 
-**Frontend.** The "Move to workspace" mode of `MoveOrTransferDialog`, reachable from each list's
-controls on `ListsPage`, lists the workspaces the caller can `configure` (own + granted), minus
+**Frontend.** The "Move to workspace" mode of `MoveOrTransferDialog`, reachable from each table's
+controls on `TablesPage`, tables the workspaces the caller can `configure` (own + granted), minus
 the current one and every immutable inbox, and PATCHes `workspace_uuid`.
 
 **Same-owner is the common case** (reorganizing your own workspaces). **Cross-owner** is feature
-3's job — pushing a list onto a stranger goes through `/transfer` (their inbox), because nobody
+3's job — pushing a table onto a stranger goes through `/transfer` (their inbox), because nobody
 holds `configure` on someone else's workspace.
 
 ---
 
-## 5. Clone a list (with or without its records) — **implemented**
+## 5. Clone a table (with or without its records) — **implemented**
 
-**Shipped.** `POST /lists/{uuid}/clone` `{ with_records }` duplicates a list into its
+**Shipped.** `POST /tables/{uuid}/clone` `{ with_records }` duplicates a table into its
 own workspace. Structure (columns, views, forms) is always copied; records only when
 `with_records` is true. The clone's columns are new rows with new uuids, and every
 reference is rewritten through an old→new column-uuid map: the record `data` keys,
@@ -385,28 +385,28 @@ reference is rewritten through an old→new column-uuid map: the record `data` k
 (`fields[].column_uuid`). `choice` cell values and `calculated` formulas (which name
 columns by *name*) copy verbatim. Grants are **not** copied and `_provision_defaults`
 is **not** called — the clone copies the source's real columns/views/forms and starts
-private, like any newly created list. The name auto-suffixes to a free slug
+private, like any newly created table. The name auto-suffixes to a free slug
 (`tasks` → `tasks_copy`, then `tasks_copy_2`). Reading the source needs `view`;
 writing the copy needs `configure` on the workspace (the same gate as create). See
-`ListService.clone` and `tests/test_list_clone.py`; UI is the "Duplicate" action on
-`ListsPage` (a checkbox opts records in).
+`TableService.clone` and `tests/test_table_clone.py`; UI is the "Duplicate" action on
+`TablesPage` (a checkbox opts records in).
 
 The decisions taken (from the three the design flagged): **structure-only by default**
 (records opt-in), **same workspace** with an auto-suggested name (move it elsewhere
 afterward with feature 4), and a self-referencing lookup **left pointing at the
-original list** — so its config `target_list_uuid` and its cells copy verbatim, no
+original table** — so its config `target_table_uuid` and its cells copy verbatim, no
 row-uuid remap. The design rationale below is kept for context.
 
 ---
 
-Duplicate a list's structure — and optionally its data — into a new list.
+Duplicate a table's structure — and optionally its data — into a new table.
 
 **The central integrity rule: uuids must be remapped.** Records are keyed by column **uuid**
 (data-model D2). A clone's columns are new rows with **new** uuids, so a straight copy of a
 record's `data` dict would key every value under a column that doesn't exist in the clone. The
 clone therefore has to build an **old-uuid → new-uuid map** for its columns and rewrite every
 copied record's keys through it. This is the one thing that, done wrong, silently produces a
-list whose records render blank. Everything else follows from it:
+table whose records render blank. Everything else follows from it:
 
 - **`primary_column_id`** is an FK to `columns.id` — repoint it at the *cloned* column via the map.
 - **View and form config reference `column_uuid`** (data-model §7, §8): a view's `filters`,
@@ -417,31 +417,31 @@ list whose records render blank. Everything else follows from it:
   and the clone's records hold the same labels against the same (copied) options. No remap
   needed there.
 
-**Lookups and self-references.** A `lookup` column stores `target_list_uuid` in config and
+**Lookups and self-references.** A `lookup` column stores `target_table_uuid` in config and
 target-row uuids in cells.
-- A lookup pointing at a **different** list: copy it unchanged — it still validly points at that
-  list, records and all.
-- A lookup pointing at **the list being cloned** (a self-reference): decide whether the clone's
+- A lookup pointing at a **different** table: copy it unchanged — it still validly points at that
+  table, records and all.
+- A lookup pointing at **the table being cloned** (a self-reference): decide whether the clone's
   copy points back at the *original* (simple, but the clone "reaches into" its source) or at the
   *clone itself* (needs the row uuids remapped too, and only meaningful when records are cloned).
 
 **Records on/off changes the hard cases:**
 - **Without records** — copy structure only; self-lookup cells are moot (there are no cells).
 - **With records** — copy `data` through the uuid map. `unique` columns are safe *because the
-  clone is a fresh, empty list* (uniqueness is per-list), so a source that satisfied its unique
+  clone is a fresh, empty table* (uniqueness is per-table), so a source that satisfied its unique
   constraints produces a clone that does too — no self-collision. Self-lookup cells need the
   row-uuid remap if you chose "point at the clone."
 
-**Don't double-provision, don't copy grants.** `_provision_defaults` seeds a brand-new list with
+**Don't double-provision, don't copy grants.** `_provision_defaults` seeds a brand-new table with
 default audit columns, a grid view, and forms — a **clone must not call it**, or it'll graft
 default views/forms on top of the source's real ones. The clone copies the source's actual
 columns/views/forms instead. And grants should **not** be copied: the clone is a new resource the
-cloner owns (via its workspace), so it starts private, like any freshly created list.
+cloner owns (via its workspace), so it starts private, like any freshly created table.
 
 **Needs a decision:**
 - **Records default** — clone with or without records by default? (The request implies both are
   offered; pick the default.)
-- **Destination** — same workspace (needs a new `name`, since list name is unique per workspace)
+- **Destination** — same workspace (needs a new `name`, since table name is unique per workspace)
   or a chosen workspace. A "Duplicate" action in the same workspace is the common case and should
   auto-suggest a free name (`tasks` → `tasks_copy`).
 - **Self-lookup target** — original vs clone, per above.
@@ -450,12 +450,12 @@ cloner owns (via its workspace), so it starts private, like any freshly created 
 
 ## 6. Nested lookup columns — **implemented**
 
-**Shipped.** A lookup column B can nest under a sibling lookup A when B's target list
-has a lookup column pointing back at A's target list (Cities have a Country; picking a
+**Shipped.** A lookup column B can nest under a sibling lookup A when B's target table
+has a lookup column pointing back at A's target table (Cities have a Country; picking a
 Country narrows the Cities — and chains compose, so Continent → Country → City works
 pairwise with no extra machinery). The pairing lives in B's config as
 `parent_column_uuid` (the sibling A) + `target_filter_column_uuid` (the lookup on B's
-target list), validated in `ColumnService._validate_nesting`: both keys set together or
+target table), validated in `ColumnService._validate_nesting`: both keys set together or
 not at all, both live lookups in the right places, the filter column's target equal to
 the parent's target, and no cycles. Matching is **any-overlap** throughout — a
 `multiple` parent, child, or filter cell all work, using the same `?|` idiom the search
@@ -469,19 +469,19 @@ The decisions taken:
   column. Resolve mode (`uuid=`) is deliberately unfiltered — a held value must always
   get its label — and so are the view-filter value picker and QR label resolution,
   which have no parent context.
-- **Writes are the enforcement point.** `ListItemService._enforce_nested_lookups`
+- **Writes are the enforcement point.** `TableRecordService._enforce_nested_lookups`
   (end of `_validate_data`, so import and QR fills inherit it) rejects values being
   **added** whose target row doesn't match the merged record's parent cell, and rejects
   an add while the parent is empty. Kept and untouched values pass — enabling nesting
   over existing data never locks a record (the choice-options precedent; see
   known-gaps).
 - **Deleting or retargeting a referenced column cascade-clears the pairing**
-  (`_clear_dependent_nesting`, global scan since filter references are cross-list),
+  (`_clear_dependent_nesting`, global scan since filter references are cross-table),
   the same shape as `delete` nulling `primary_column_id`. Read/write paths tolerate a
   dangling pairing by degrading to a plain lookup.
 - **Clone remaps `parent_column_uuid` through `col_map`** (the parent is a sibling,
   which was cloned) and leaves `target_filter_column_uuid` verbatim (it names a column
-  of the target list, whose uuids don't change).
+  of the target table, whose uuids don't change).
 
 UI: ColumnDialog offers "Nest under" only for siblings with a qualifying filter column
 and auto-picks the "Match on" column when only one qualifies; the record editor
@@ -493,38 +493,38 @@ parent changes. See `tests/test_nested_lookup.py`.
 
 ## 7. Cross-workspace lookup targets — **implemented**
 
-**Shipped.** A `lookup` column may point at **any list the creator can `view`** — one in
-another of their own workspaces, or one shared with them — not just a list they own. The
+**Shipped.** A `lookup` column may point at **any table the creator can `view`** — one in
+another of their own workspaces, or one shared with them — not just a table they own. The
 config-time gate in `ColumnService._validate_config` was relaxed from a same-owner
 workspace join to `PermissionService.has(view)` on the target, with the acting user threaded
 through `ColumnService.create`/`update`. A target the caller cannot view is refused
-indistinguishably from one that doesn't exist, so `target_list_uuid` can't be used to probe
-for a stranger's lists.
+indistinguishably from one that doesn't exist, so `target_table_uuid` can't be used to probe
+for a stranger's tables.
 
 **Resolution was already permission-correct, so nothing there changed.** `lookup_options`,
 export and search each re-check the **reader's** `view` on the target per-caller (data-model
-D4; [known gaps](known-gaps.md): "Resolving a label means reading the target list"), so a
+D4; [known gaps](known-gaps.md): "Resolving a label means reading the target table"), so a
 cross-owner target never leaks a label — a viewer who lacks target access sees uuid stubs,
 exactly as before. Relaxing the *create-time* check simply lets a lookup point where
 resolution could already safely follow. The one behavioral shift, documented in known gaps:
 a target you don't own can have your access revoked or be deleted independently of the
-referencing list, so "degrade to uuid stubs" becomes routine rather than exceptional.
+referencing table, so "degrade to uuid stubs" becomes routine rather than exceptional.
 
-UI: ColumnDialog gains a **Workspace** selector above **Target list** (defaults to the
-current workspace, plus a "Shared with me" bucket), so lists sharing a name across
+UI: ColumnDialog gains a **Workspace** selector above **Target table** (defaults to the
+current workspace, plus a "Shared with me" bucket), so tables sharing a name across
 workspaces are unambiguous; on edit it resolves the stored target's workspace to open on the
 right bucket. See `tests/test_lookup_options.py` (own-other-workspace, shared-in, and
 refused-when-unviewable).
 
 ---
 
-## 8. Live records (an open list reflects other people's changes) — **shipped: push, falling back to polling**
+## 8. Live records (an open table reflects other people's changes) — **shipped: push, falling back to polling**
 
-**Shipped.** An open list holds a Server-Sent Events stream and refetches when the
-server says that list's records moved, so a row someone else creates, edits or deletes
+**Shipped.** An open table holds a Server-Sent Events stream and refetches when the
+server says that table's records moved, so a row someone else creates, edits or deletes
 shows up in well under a second. It is still one hook,
-`useLiveList(listUuid, { queryKey, minSeconds })` (`frontend/src/lib/useLiveList.ts`),
-spread into the list's items `useQuery` in `ListDetailPage`. While the stream is open
+`useLiveTable(tableUuid, { queryKey, minSeconds })` (`frontend/src/lib/useLiveTable.ts`),
+spread into the table's records `useQuery` in `TableDetailPage`. While the stream is open
 the hook returns `{}` and react-query is left alone.
 
 **Polling is still here, as the fallback.** If the stream will not stay open — a proxy
@@ -543,7 +543,7 @@ was missed. Governing the stream and the timer from one answer is the reason tha
 left this hook.
 
 **The load-bearing principle: a live update carries no record data.** Each refresh is a
-normal, permissioned `GET /items/`, which re-applies `item_view_filter` — so a poll can
+normal, permissioned `GET /records/`, which re-applies `record_view_filter` — so a poll can
 never surface a row the viewer can't see. This is not just a property of polling; it is the
 *constraint the push design must also honour* (below). Per-record permissions are subtle
 enough that the safe move is to never ship record data down a fan-out channel at all — you
@@ -552,7 +552,7 @@ what it may see.
 
 **Why polling shipped first, and what it now costs.** The numbers below described the
 steady state when polling was the only path. They now describe the **fallback**, and
-they are the reason push was worth building: on push an idle or quiet list costs one
+they are the reason push was worth building: on push an idle or quiet table costs one
 held connection and nothing else, and the per-tab CPU below goes to roughly zero.
 Keep them — they are what a deployment pays if the stream cannot be held open, which
 is exactly the case the fallback exists for and the one worth being able to price.
@@ -572,7 +572,7 @@ actively-used tabs is ~193 ms of CPU per second, ~19% of the 0.5-CPU instance (i
 and under 8% at 60s). The two floors are why that is not a straight 4×: the count follows
 only to 30s and the metric strip does not move off 60 at all. The number to watch is not
 that average but the dearest tab — a page under search costs ~500 ms rather than ~23, so a
-single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
+single viewer sitting on a searched 100k table is ~33 ms/sec by themselves.
 
 **How push is built.**
 
@@ -582,23 +582,23 @@ single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
   bearer-attach and, critically, the `inFlightRefresh` collapse, so a token expiring
   mid-stream reconnects through the existing refresh path instead of racing every ordinary
   request for the single-use refresh token.
-- **A content-free endpoint**, `GET /lists/{uuid}/events` (`src/lists/events/routers.py`),
-  **gated on list `view`** at connect, emitting `event: records` and `: ping` and nothing
+- **A content-free endpoint**, `GET /tables/{uuid}/events` (`src/tables/events/routers.py`),
+  **gated on table `view`** at connect, emitting `event: records` and `: ping` and nothing
   else. It **holds no pooled DB connection while streaming**: auth and the permission check
   run inside a session opened and closed before the first byte, and the stream then waits on
-  an in-memory event. **This is why the route is not on the lists router** — that router
+  an in-memory event. **This is why the route is not on the tables router** — that router
   applies `Depends(get_current_user)`, which takes `Depends(get_db)`, and a `yield`
   dependency is released only when the response completes, which for a stream is when the
   tab closes. It is mounted straight onto the app in `main.py` instead, and
   `test_an_open_stream_does_not_hold_a_pooled_connection` is the regression test, because
   nothing else would notice this breaking until production.
-- **Fan-out behind a two-method broker** (`subscribe(list_id)` / `notify(list_id)`,
-  `src/lists/events/broker.py`), called after commit from every record write:
-  `ListItemService.create`/`update`/`delete`/`bulk_delete`/`restore`/`bulk_restore`/
+- **Fan-out behind a two-method broker** (`subscribe(table_id)` / `notify(table_id)`,
+  `src/tables/events/broker.py`), called after commit from every record write:
+  `TableRecordService.create`/`update`/`delete`/`bulk_delete`/`restore`/`bulk_restore`/
   `archive`/`bulk_archive`/`unarchive`/`bulk_unarchive`, the CSV/JSON import (once per
   import), a calculated re-index,
-  a column conversion, and the lookup scrub a list or workspace delete runs across *other*
-  lists. The in-process asyncio broker is correct on today's single instance
+  a column conversion, and the lookup scrub a table or workspace delete runs across *other*
+  tables. The in-process asyncio broker is correct on today's single instance
   (`numInstances` unset); **Postgres `LISTEN/NOTIFY`** is the swap behind the same interface
   for a multi-worker deploy, or to make the out-of-process maintenance crons
   (`reconcile_shapes`, purge) signal — writers `NOTIFY` inside the write transaction, and
@@ -625,8 +625,8 @@ single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
   refetch, and the alternative was plumbing a client id through every write path to save it.
 - **The dear queries keep their floors, as throttles.** The grid invalidates on the event;
   the paginator's count and the metric strip invalidate on the same event but at most once
-  per their floor. Without that, every write would trigger a full-list metric scan per
-  viewer (~2 s of app CPU on a 100k list), which is worse than the polling it replaces.
+  per their floor. Without that, every write would trigger a full-table metric scan per
+  viewer (~2 s of app CPU on a 100k table), which is worse than the polling it replaces.
   This is what cost the seam its "no call site changes" promise: an invalidation has to be
   aimed, so each caller now names the key it wants refreshed
   (`recordPagesKey` / `recordCountsKey` / `metricValuesPrefix`). Three call sites, and the
@@ -634,10 +634,10 @@ single viewer sitting on a searched 100k list is ~33 ms/sec by themselves.
 
 ---
 
-## 9. List metrics (totals, averages and counts over the records) — **implemented**
+## 9. Table metrics (totals, averages and counts over the records) — **implemented**
 
-**Shipped.** A list can now say something *about* its records rather than only showing
-them. A **metric** is a first-class per-list resource — a sibling of views and forms, in
+**Shipped.** A table can now say something *about* its records rather than only showing
+them. A **metric** is a first-class per-table resource — a sibling of views and forms, in
 its own `metrics` table (data-model §9) — holding a name and a formula, rendered as a
 strip of cards above the grid. `SUM(hours)`, `COUNT()`, `AVG(cost)`,
 `SUM(revenue) - SUM(cost)`.
@@ -659,9 +659,9 @@ are told apart by arity: one argument is the aggregate, several is the row funct
 between the values written there. Nothing is lost, because a one-argument row `MIN` is its
 own argument.
 
-**Evaluation is a Python scan, deliberately.** `GET /lists/{uuid}/metrics/values` answers
+**Evaluation is a Python scan, deliberately.** `GET /tables/{uuid}/metrics/values` answers
 every card in **one pass** — so the cards always agree with each other — over
-`ListItemService.visible_stmt`, which was extracted out of `ListItemService.list` so the
+`TableRecordService.visible_stmt`, which was extracted out of `TableRecordService.list` so the
 cards and the grid cannot disagree about which records are on screen. It cannot be SQL
 `SUM`: formulas take arbitrary row expressions, and a `calculated` column's stored value is
 an index that may lag a formula edit — a total taken off a stale one is exactly the quietly
@@ -672,11 +672,11 @@ chain is topologically sorted and its cycles refused at save time, while a metri
 
 **Load-bearing details.**
 
-- **Permissions.** The scan runs through `item_view_filter`, so two readers with different
+- **Permissions.** The scan runs through `record_view_filter`, so two readers with different
   grants correctly get different numbers. Pinned by
   `tests/test_metrics.py::test_two_readers_get_the_totals_of_what_each_can_see`.
 - **Archived records leave the total, and nothing here had to be told about them.**
-  `ListItemService._select` gained `archived_at IS NULL` beside `deleted_at IS NULL`, and
+  `TableRecordService._select` gained `archived_at IS NULL` beside `deleted_at IS NULL`, and
   since the scan runs over `visible_stmt` — as does the compiled SQL, which builds on the
   statement it returns — the cards and the grid agreed about the new lifecycle axis for
   free, which is the payoff of having extracted that statement in the first place.
@@ -700,21 +700,21 @@ chain is topologically sorted and its cycles refused at save time, while a metri
   `set_committed_value` call stays where it was — see its docstring for why that matters.
 - **A renamed column reports an error on its card, not `0`.** Refs are checked against the
   live columns before scanning; the break costs its own card, never the request.
-- **Cascade/restore/clone.** `Metric` joined `_LIST_CHILD_MODELS`, which covers delete and
+- **Cascade/restore/clone.** `Metric` joined `_TABLE_CHILD_MODELS`, which covers delete and
   restore in one line. Clone copies the rows **without remapping**: a formula names columns
   by *name* and a clone keeps every name — the opposite of the view/form config problem in
   §5.
 - **Frontend.** `features/metrics/` — `MetricBar` (the strip), `MetricsPanel` (a new
-  tab in list settings), `MetricDialog` (built on the `ColumnDialog` pattern). The values
-  query key is nested **under the items key**, so every existing
-  `invalidateQueries(["items", listUuid])` refreshes the cards for free.
-- **The strip is hidden by default**, behind a `Metrics` toggle on the list toolbar
-  (badged with how many the list has, so a hidden strip is distinguishable from a list with
+  tab in table settings), `MetricDialog` (built on the `ColumnDialog` pattern). The values
+  query key is nested **under the records key**, so every existing
+  `invalidateQueries(["records", tableUuid])` refreshes the cards for free.
+- **The strip is hidden by default**, behind a `Metrics` toggle on the table toolbar
+  (badged with how many the table has, so a hidden strip is distinguishable from a table with
   none). `visible` gates the *query*, not just the markup, which is what stops every open
-  list from running a repeating full scan on the live interval. Page state, like the rest of
+  table from running a repeating full scan on the live interval. Page state, like the rest of
   that bar: whether the strip is showing is how somebody is working right now, not a
-  property of the list. (This used to read "the app has no per-list UI preferences to
-  persist it in", which stopped being true when `lists.settings.qr` arrived with §10 — but
+  property of the table. (This used to read "the app has no per-table UI preferences to
+  persist it in", which stopped being true when `tables.settings.qr` arrived with §10 — but
   the distinction it was reaching for stands. That key describes a *printed artifact*, the
   same kind of thing a view or a form is; a toggle's position is not one.)
 
@@ -737,7 +737,7 @@ those badges, so producing them meant hand-authoring JSON per person. This close
 and the format was therefore *already specified* by the code that reads it: a generator had
 a target to hit rather than a convention to invent.
 
-**The payload is built server-side, and that is the design.** `POST /lists/{uuid}/items/qr`
+**The payload is built server-side, and that is the design.** `POST /tables/{uuid}/records/qr`
 returns the JSON each code should hold. It would have been less work to build it in the
 browser — the grid already resolves lookup and principal labels for display — and it would
 have been wrong: a code's values have to be the ones `_parse_cell` reads back, and the
@@ -750,7 +750,7 @@ reimplementation.
 
 **One reserved key, `_uuid`.** The record's own id, so a code identifies the record it came
 from rather than only describing it. Not `uuid`: a column `name` is a `NameSlug`, so `uuid`
-is a *legal column name* — a list may already have one, and the record id landing on that
+is a *legal column name* — a table may already have one, and the record id landing on that
 key would overwrite the column's value undetectably. A leading underscore cannot be a column
 name, which makes `_` the metadata namespace and the collision impossible rather than
 unlikely. `qrFill.ts` skips `_`-prefixed keys **silently**, because reporting them would put
@@ -761,7 +761,7 @@ to an export and *no* columns to a QR payload. Asking for a file with nothing na
 asking for the data; asking for a badge with nothing named is asking for a code that
 identifies the record and says nothing else — which is a sensible badge, and the only safe
 default. Inheriting "all" would put the four audit columns on every badge and blow the size
-budget a code actually has. `qr_payloads` short-circuits rather than passing an empty list
+budget a code actually has. `qr_payloads` short-circuits rather than passing an empty table
 to `_ordered_columns`.
 
 **Size is a real constraint, not a footnote.** A code's capacity is ~2,331 bytes at the
@@ -772,12 +772,12 @@ chose, the dialog warns from version 16 (81x81) and turns an overflow into "remo
 column — a long text column is usually the cause". The column picker sits in the same
 dialog because it is the fix.
 
-**The field choice is saved on the list**, in `lists.settings.qr`. It describes a printed
-artifact, so every badge for a list should carry the same fields; re-picking per print is
+**The field choice is saved on the table**, in `tables.settings.qr`. It describes a printed
+artifact, so every badge for a table should carry the same fields; re-picking per print is
 how two batches come out disagreeing. Two things had to change for that blob to be safe to
 write, and both were latent bugs rather than new work:
 
-- **`settings` now merges instead of replacing.** `ListService.update` did a plain
+- **`settings` now merges instead of replacing.** `TableService.update` did a plain
   `setattr`, so the first writer of any one key would have wiped every other. Nothing wrote
   it at all before this, which made now the moment to fix it rather than the moment after
   something was lost.
@@ -807,7 +807,7 @@ which would want Pillow on a 512 MB instance to draw something the browser alrea
   (a move keeps uuids; a clone must not).
 - **8** stands alone and touches none of the data-shape work; its one shared idea is the
   permission boundary — a live signal never carries record data, so every client re-reads
-  through the endpoint that already enforces `item_view_filter`.
+  through the endpoint that already enforces `record_view_filter`.
 - **10** is the only one that composes with the *import*, and it is the one place in the app
   where two features are wired together by a shared function rather than by a convention: a
   generated code and a JSON export are the same bytes because they are the same `json_row`,

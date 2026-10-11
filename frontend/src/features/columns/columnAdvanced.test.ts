@@ -10,7 +10,7 @@ describe("hasAdvancedConfig", () => {
    * over a setting somebody made.
    */
   it.each(ADVANCED_CONFIG_KEYS)("opens the section for %s", (key) => {
-    // A value that is "set" for every key in the list: truthy, non-empty, not false.
+    // A value that is "set" for every key in the table: truthy, non-empty, not false.
     expect(hasAdvancedConfig({ [key]: "x" } as ColumnConfig)).toBe(true);
   });
 
@@ -22,13 +22,13 @@ describe("hasAdvancedConfig", () => {
 
   /**
    * `required` and the type-specific identity controls stay on screen, so neither may
-   * open a section they are not in. `options` and `target_list_uuid` are the two that
+   * open a section they are not in. `options` and `target_table_uuid` are the two that
    * would be easiest to add here by mistake.
    */
   it("ignores the settings that are never folded away", () => {
     expect(hasAdvancedConfig({ required: true })).toBe(false);
     expect(hasAdvancedConfig({ options: ["a", "b"] })).toBe(false);
-    expect(hasAdvancedConfig({ target_list_uuid: "l1" })).toBe(false);
+    expect(hasAdvancedConfig({ target_table_uuid: "l1" })).toBe(false);
     expect(hasAdvancedConfig({ display_column_uuid: "c1" })).toBe(false);
     expect(hasAdvancedConfig({ formula: "qty * price" })).toBe(false);
     expect(hasAdvancedConfig({ text_mode: "rich" })).toBe(false);

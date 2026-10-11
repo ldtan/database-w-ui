@@ -20,7 +20,7 @@ export interface ResolvedField {
 /**
  * A column the server writes for you cannot be an input, whatever a form config
  * says: `config.onupdate` is stamped over anything sent on every accepted write
- * (`ListItemService._validate_data`). Read-only rather than absent, because a
+ * (`TableRecordService._validate_data`). Read-only rather than absent, because a
  * "last modified" is exactly the sort of thing you want to *see* on a record —
  * which is what `enabled: false` already means everywhere it is read.
  *
@@ -46,7 +46,7 @@ function writable(column: Column): boolean {
  * is safe to draw because `FormsEditor` always writes back *every* column: one you
  * deliberately hid is in the config as `included: false`, and only a column added
  * since the last save is absent altogether. Reading absence as exclusion is what
- * made the Add/Edit dialog on a freshly provisioned list say "Add a column first"
+ * made the Add/Edit dialog on a freshly provisioned table say "Add a column first"
  * no matter how many columns you added — its seeded config names the audit columns
  * and nothing else, so every real column fell through the gap until someone opened
  * the form editor and saved. This is the same rule a view's `column_order` follows
@@ -132,7 +132,7 @@ export function nestedDescendants(
   return found;
 }
 
-/** What the backend treats as "no value": null, "", and the empty list. */
+/** What the backend treats as "no value": null, "", and the empty table. */
 export function isEmptyValue(value: unknown): boolean {
   return (
     value === undefined ||

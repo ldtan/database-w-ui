@@ -1,5 +1,5 @@
 /**
- * Moving one entry of an ordered list to another position.
+ * Moving one entry of an ordered table to another position.
  *
  * Extracted from the two components that reorder things — a view's columns and a
  * form's fields — because it was written inline in both, and because a closure
@@ -14,7 +14,7 @@
  */
 export function moveTo<T>(items: readonly T[], from: number, to: number): T[] {
   // Out of range is a no-op rather than an error: the callers are a drag that can
-  // end outside the list and a button at the end of one, and neither has anything
+  // end outside the table and a button at the end of one, and neither has anything
   // useful to do with a throw.
   if (
     from === to ||

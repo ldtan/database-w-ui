@@ -1,6 +1,6 @@
 """Reading an uploaded file without letting it decide how much memory to use.
 
-Shared by the two upload endpoints — list records and user accounts — because the
+Shared by the two upload endpoints — table records and user accounts — because the
 hazard is the same in both and only one of them had noticed it.
 """
 from typing import Optional, Protocol
@@ -25,7 +25,7 @@ class Upload(Protocol):
     """The only part of an uploaded file this needs: bytes, on request.
 
     Typed structurally so nothing below the routers imports the web framework for one
-    signature — the same reason `lists/columns/backfill.py` describes its `Deferrer`
+    signature — the same reason `tables/columns/backfill.py` describes its `Deferrer`
     this way rather than naming Starlette's.
     """
 

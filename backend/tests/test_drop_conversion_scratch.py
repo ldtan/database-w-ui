@@ -16,8 +16,8 @@ import pytest
 import pytest_asyncio
 from sqlalchemy import select
 
-from src.lists.columns.models import Column
-from src.lists.items.models import ListItem
+from src.tables.columns.models import Column
+from src.tables.records.models import TableRecord
 from src.maintenance import drop_conversion_scratch
 from src.maintenance.drop_conversion_scratch import drop_scratch
 
@@ -33,28 +33,28 @@ def tiny_chunks(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def stranded(client, session_factory, list_uuid, add_column):
+async def stranded(client, session_factory, table_uuid, add_column):
     """A live column with a value, plus five hidden columns with values of their own.
 
     Written directly, because the API can no longer produce this state — which is the
     whole reason the cleanup is a one-off rather than a recurring job.
     """
-    live = await add_column(list_uuid, name="qty", display_name="Qty", type="text")
+    live = await add_column(table_uuid, name="qty", display_name="Qty", type="text")
     created = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {live: "5"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {live: "5"}}
     )
     assert created.status_code == 201, created.text
 
     async with session_factory() as db:
-        list_id = (
-            await db.execute(select(Column.list_id).where(Column.uuid == live))
+        table_id = (
+            await db.execute(select(Column.table_id).where(Column.uuid == live))
         ).scalars().one()
-        item = (await db.execute(select(ListItem))).scalars().one()
-        data = dict(item.data)
+        record = (await db.execute(select(TableRecord))).scalars().one()
+        data = dict(record.data)
         hidden_keys = []
         for i in range(ROWS):
             scratch = Column(
-                list_id=list_id,
+                table_id=table_id,
                 name=f"qty__converting_{i}",
                 display_name=f"Qty (converting {i})",
                 type="number",
@@ -65,7 +65,7 @@ async def stranded(client, session_factory, list_uuid, add_column):
             await db.flush()
             hidden_keys.append(str(scratch.uuid))
             data[str(scratch.uuid)] = i
-        item.data = data
+        record.data = data
         await db.commit()
     return {"live": live, "hidden": hidden_keys}
 
@@ -80,7 +80,7 @@ async def test_it_destroys_every_hidden_column_and_its_values(
         assert (
             await db.execute(select(Column).where(Column.hidden.is_(True)))
         ).scalars().first() is None
-        data = (await db.execute(select(ListItem.data))).scalars().one()
+        data = (await db.execute(select(TableRecord.data))).scalars().one()
 
     # The values went with the columns. Leaving them would strand bytes in every
     # record with nothing left to name them — the reason this cannot be a plain
@@ -91,18 +91,18 @@ async def test_it_destroys_every_hidden_column_and_its_values(
     assert data[stranded["live"]] == "5"
 
 
-async def test_the_live_column_survives_and_still_reads(client, list_uuid, stranded):
-    before = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+async def test_the_live_column_survives_and_still_reads(client, table_uuid, stranded):
+    before = (await client.get(f"/api/tables/{table_uuid}/columns/")).json()
     await drop_scratch()
 
-    # The list's shape is exactly what it was. The hidden columns were never in this
+    # The table's shape is exactly what it was. The hidden columns were never in this
     # listing to begin with — that is what made them invisible — so what this pins is
     # that removing them took nothing else with them.
-    after = (await client.get(f"/api/lists/{list_uuid}/columns/")).json()
+    after = (await client.get(f"/api/tables/{table_uuid}/columns/")).json()
     assert [c["uuid"] for c in after] == [c["uuid"] for c in before]
     assert stranded["live"] in [c["uuid"] for c in after]
 
-    rows = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
+    rows = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
     assert rows[0]["data"][stranded["live"]] == "5"
 
 

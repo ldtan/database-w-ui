@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from "react-router-dom";
+import { Navigate, Route, Routes, useParams } from "react-router-dom";
 import { Suspense, lazy, type ReactNode } from "react";
 
 import { useAuth } from "./lib/auth";
@@ -10,15 +10,15 @@ import { PublicDocument, PublicLayout } from "./components/PublicLayout";
 import { LoginPage } from "./features/auth/LoginPage";
 import { DashboardPage } from "./features/dashboard/DashboardPage";
 import { WorkspacesPage } from "./features/workspaces/WorkspacesPage";
-import { ListsPage } from "./features/lists/ListsPage";
-import { ListDetailPage } from "./features/lists/ListDetailPage";
+import { TablesPage } from "./features/tables/TablesPage";
+import { TableDetailPage } from "./features/tables/TableDetailPage";
 import { PeoplePage } from "./features/people/PeoplePage";
 import { ProfilePage } from "./features/profile/ProfilePage";
 import { GuidePage } from "./features/guide/GuidePage";
 
 /** The public home page, in its own chunk.
  *
- *  Split for a different reason from the QR dialogs in `ListDetailPage` (there, a
+ *  Split for a different reason from the QR dialogs in `TableDetailPage` (there, a
  *  heavy decoder most sessions never need): this page is small, but a deployment with
  *  `HOME_ENABLED` off never shows it at all, and on one that does, the people using
  *  the app every day are not the ones it is for. Either way nobody who will not read
@@ -35,6 +35,20 @@ const HomePage = lazy(() =>
 function RequireAuth({ children }: { children: ReactNode }) {
   const { isAuthenticated } = useAuth();
   return isAuthenticated ? <>{children}</> : <Navigate to="/login" replace />;
+}
+
+/** `/lists/<uuid>` was the only deep link this app ever had, so it is the one URL
+ *  people have bookmarked and pasted to each other. The rename moved it to
+ *  `/tables/<uuid>`; this keeps the old spelling working forever rather than
+ *  answering a saved link with the catch-all redirect to `/`, which would look like
+ *  the table had been deleted.
+ *
+ *  A component rather than a bare `<Navigate>` because the uuid has to be carried
+ *  across, and `to` takes no route params. `replace` so the dead URL does not sit in
+ *  history waiting for the back button. */
+function LegacyTableRedirect() {
+  const { tableUuid } = useParams();
+  return <Navigate to={`/tables/${tableUuid}`} replace />;
 }
 
 export function App() {
@@ -101,8 +115,9 @@ export function App() {
           <Route path="people" element={<PeoplePage />} />
           <Route path="profile" element={<ProfilePage />} />
           <Route path="workspaces" element={<WorkspacesPage />} />
-          <Route path="workspaces/:workspaceUuid" element={<ListsPage />} />
-          <Route path="lists/:listUuid" element={<ListDetailPage />} />
+          <Route path="workspaces/:workspaceUuid" element={<TablesPage />} />
+          <Route path="tables/:tableUuid" element={<TableDetailPage />} />
+          <Route path="lists/:tableUuid" element={<LegacyTableRedirect />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

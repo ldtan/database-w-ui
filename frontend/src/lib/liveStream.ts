@@ -1,8 +1,8 @@
-// The client half of "live records": one event stream per list, shared by everyone
-// on the page who cares about that list, telling them when to look again.
+// The client half of "live records": one event stream per table, shared by everyone
+// on the page who cares about that table, telling them when to look again.
 //
-// Consumed by `useLiveList`, which is the only thing that should import
-// `subscribeToList` — the components spread that hook's result into a `useQuery` and
+// Consumed by `useLiveTable`, which is the only thing that should import
+// `subscribeToTable` — the components spread that hook's result into a `useQuery` and
 // never see this file. `parseFrames` is exported separately because it is the one
 // piece here that is pure, and therefore the one piece the test runner can reach
 // (vitest runs in a node environment with no DOM — see vite.config.ts).
@@ -22,7 +22,7 @@ export type LiveStatus =
   | "paused"; // tab hidden or user idle; do neither
 
 export interface LiveSubscriber {
-  /** This list changed — invalidate and refetch. */
+  /** This table changed — invalidate and refetch. */
   onChange: () => void;
   /** The transport's state changed. Decides push vs. poll at the call site. */
   onStatus: (status: LiveStatus) => void;
@@ -58,7 +58,7 @@ const COALESCE_MS = 300;
 // Reconnect backoff. The server closes every stream at its own deadline, so the
 // common "disconnect" is entirely routine and must reconnect immediately; the delays
 // below are for a stream that failed. After DEGRADE_AFTER consecutive failures the
-// list is declared degraded and polling takes over — the stream keeps trying in the
+// table is declared degraded and polling takes over — the stream keeps trying in the
 // background, so a proxy or network that starts cooperating is picked up without a
 // reload.
 const RETRY_MS = [1000, 2000, 5000, 15000, 30000];
@@ -112,8 +112,8 @@ interface Channel {
   missed: boolean;
 }
 
-// One channel per list uuid, for the whole tab. Three components ask for the same
-// list — the grid, the paginator's total and the metric strip — and without this each
+// One channel per table uuid, for the whole tab. Three components ask for the same
+// table — the grid, the paginator's total and the metric strip — and without this each
 // would open its own connection to say the same thing three times.
 const channels = new Map<string, Channel>();
 
@@ -126,8 +126,8 @@ let activityBound = false;
 function setActive(next: boolean): void {
   if (active === next) return;
   active = next;
-  for (const [listUuid, channel] of channels) {
-    if (active) openChannel(listUuid, channel);
+  for (const [tableUuid, channel] of channels) {
+    if (active) openChannel(tableUuid, channel);
     else pauseChannel(channel);
   }
 }
@@ -182,7 +182,7 @@ function pauseChannel(channel: Channel): void {
   channel.missed = true;
 }
 
-function scheduleRetry(listUuid: string, channel: Channel): void {
+function scheduleRetry(tableUuid: string, channel: Channel): void {
   if (channel.paused || channel.subscribers.size === 0) return;
   const delay = RETRY_MS[Math.min(channel.failures, RETRY_MS.length - 1)];
   // Jitter, so a deploy that drops every stream at once does not bring them all
@@ -190,11 +190,11 @@ function scheduleRetry(listUuid: string, channel: Channel): void {
   const wait = delay * (0.5 + Math.random());
   channel.retry = setTimeout(() => {
     channel.retry = null;
-    openChannel(listUuid, channel);
+    openChannel(tableUuid, channel);
   }, wait);
 }
 
-function openChannel(listUuid: string, channel: Channel): void {
+function openChannel(tableUuid: string, channel: Channel): void {
   channel.paused = false;
   // Resuming reports whatever the transport was doing before — `degraded` if it had
   // been failing, so the caller starts polling again immediately rather than sitting
@@ -207,9 +207,9 @@ function openChannel(listUuid: string, channel: Channel): void {
 
   void (async () => {
     try {
-      const res = await api.stream(`/lists/${listUuid}/events`, controller.signal);
+      const res = await api.stream(`/tables/${tableUuid}/events`, controller.signal);
       if (!res.ok || !res.body) {
-        // 503 is the deployment's kill switch and 403/404 mean this list is not
+        // 503 is the deployment's kill switch and 403/404 mean this table is not
         // ours to watch — none of them will improve by retrying sooner, and all of
         // them are correctly served by polling instead.
         throw new Error(`event stream refused: ${res.status}`);
@@ -244,7 +244,7 @@ function openChannel(listUuid: string, channel: Channel): void {
       // landed between the close and the next open.
       channel.abort = null;
       channel.missed = true;
-      if (!channel.paused) openChannel(listUuid, channel);
+      if (!channel.paused) openChannel(tableUuid, channel);
     } catch (err) {
       channel.abort = null;
       // An abort is us, not a failure: pausing and unsubscribing both go through it.
@@ -254,26 +254,26 @@ function openChannel(listUuid: string, channel: Channel): void {
         channel.transport = "degraded";
         publishStatus(channel);
       }
-      scheduleRetry(listUuid, channel);
+      scheduleRetry(tableUuid, channel);
     }
   })();
 }
 
 /**
- * Watch one list's records. Returns an unsubscribe function.
+ * Watch one table's records. Returns an unsubscribe function.
  *
- * The subscriber is told two things: `onChange` when the list's records have moved
+ * The subscriber is told two things: `onChange` when the table's records have moved
  * (debounced, and carrying nothing — re-read through the ordinary permissioned
  * endpoint), and `onStatus` when push stops or starts being available, which is what
  * lets the caller fall back to polling instead of silently going stale.
  */
-export function subscribeToList(
-  listUuid: string,
+export function subscribeToTable(
+  tableUuid: string,
   subscriber: LiveSubscriber,
 ): () => void {
   bindActivity();
 
-  let channel = channels.get(listUuid);
+  let channel = channels.get(tableUuid);
   if (!channel) {
     channel = {
       subscribers: new Set(),
@@ -282,10 +282,10 @@ export function subscribeToList(
       coalesce: null,
       failures: 0,
       // Starts degraded so a caller polls until the stream is actually open. The
-      // other way round — assuming push works and correcting later — leaves a list
+      // other way round — assuming push works and correcting later — leaves a table
       // with no refresh at all for as long as it takes to find out otherwise.
       transport: "degraded",
-      // A list opened while the tab is hidden, or by someone who has already been
+      // A table opened while the tab is hidden, or by someone who has already been
       // idle five minutes, starts paused. Starting unpaused would report `degraded`
       // — the initial transport — and set the caller polling on a tab nobody is
       // looking at, which is the one thing the idle guard exists to prevent.
@@ -296,21 +296,21 @@ export function subscribeToList(
       // opened in the background and looked at ten minutes later is the case.)
       missed: !active,
     };
-    channels.set(listUuid, channel);
+    channels.set(tableUuid, channel);
   }
   channel.subscribers.add(subscriber);
   // Told directly rather than through `publishStatus`, which only announces
   // *changes* and would say nothing to a subscriber joining a channel already open.
   subscriber.onStatus(statusOf(channel));
-  if (active) openChannel(listUuid, channel);
+  if (active) openChannel(tableUuid, channel);
 
   return () => {
     channel.subscribers.delete(subscriber);
     if (channel.subscribers.size > 0) return;
-    // The last watcher of this list has gone: close the connection and forget the
-    // list, rather than hold a socket for a page nobody is on.
+    // The last watcher of this table has gone: close the connection and forget the
+    // table, rather than hold a socket for a page nobody is on.
     if (channel.coalesce) clearTimeout(channel.coalesce);
     pauseChannel(channel);
-    channels.delete(listUuid);
+    channels.delete(tableUuid);
   };
 }

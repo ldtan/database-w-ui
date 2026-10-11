@@ -15,7 +15,7 @@ import { PageHeader } from "../../components/PageHeader";
 import { RowActions } from "../../components/RowActions";
 import { SearchInput } from "../../components/SearchInput";
 import { SkeletonCards } from "../../components/Skeleton";
-import type { ListRead, Workspace } from "../../lib/types";
+import type { TableRead, Workspace } from "../../lib/types";
 import { isValidName, slugify } from "../../lib/slug";
 import { useDebounced } from "../../lib/useDebounced";
 import { useToast } from "../../lib/toast";
@@ -26,7 +26,7 @@ import { TransferWorkspaceDialog } from "./TransferWorkspaceDialog";
 import { ErrorMessage, errorText } from "../../components/ErrorMessage";
 
 // Search and paging both happen server-side, so a term finds a match no matter how
-// far down the list it sits — a client-side filter over one fetched page would
+// far down the table it sits — a client-side filter over one fetched page would
 // report "no match" for anything past the limit.
 const ROWS = 12;
 
@@ -75,12 +75,12 @@ function WorkspaceCard({
         <span className="flex flex-col min-w-0">
           <span className="font-medium truncate">{ws.display_name}</span>
           <span className="text-sm text-muted truncate">
-            {ws.is_system ? "Lists transferred to you" : ws.name}
+            {ws.is_system ? "Tables transferred to you" : ws.name}
           </span>
         </span>
       </Link>
       {/* The Incoming inbox is immutable — no rename/delete/share; the recipient
-          acts on the lists inside it, not on the box. */}
+          acts on the tables inside it, not on the box. */}
       <div className="link-card-above">
         <RowActions
           maxVisible={1}
@@ -125,15 +125,15 @@ function WorkspaceCard({
  * The Workspaces page: your workspaces, plus everything shared with you.
  *
  * "Shared with me" holds two kinds of thing, fetched by two different questions.
- * A workspace shared whole appears as a workspace, and its lists are reached by
- * opening it. A list shared *without* its workspace has no workspace you can open
+ * A workspace shared whole appears as a workspace, and its tables are reached by
+ * opening it. A table shared *without* its workspace has no workspace you can open
  * — it hangs off nothing — so it is listed here directly; without this section it
- * would exist and be unreachable. Those loose lists show the list's own slug
+ * would exist and be unreachable. Those loose tables show the table's own slug
  * rather than "in «Workspace»", because naming a workspace you were deliberately
  * not given would leak it.
  *
- * Asking only "which lists do I not own?" conflates the two, which is what put
- * every list of a shared workspace on this page twice — once inside the workspace
+ * Asking only "which tables do I not own?" conflates the two, which is what put
+ * every table of a shared workspace on this page twice — once inside the workspace
  * and once loose down here.
  *
  * A shared workspace may be view-only, so each row's controls are gated by that
@@ -165,7 +165,7 @@ export function WorkspacesPage() {
         `/workspaces/?shared=false&skip=${wsFirst}&limit=${wsRows}` +
           `&q=${encodeURIComponent(wsQ.trim())}`,
       ),
-    placeholderData: (prev) => prev, // don't blank the list while paging
+    placeholderData: (prev) => prev, // don't blank the table while paging
   });
 
   // Workspaces shared with you whole. Unpaginated: people are given a handful of
@@ -181,16 +181,16 @@ export function WorkspacesPage() {
     placeholderData: (prev) => prev,
   });
 
-  // A list can be shared *without* its workspace, which then stays invisible — so
+  // A table can be shared *without* its workspace, which then stays invisible — so
   // it has no workspace to browse into and would be unreachable without this
-  // section. Lists that came in via a shared workspace are deliberately absent:
+  // section. Tables that came in via a shared workspace are deliberately absent:
   // they are reachable through that workspace's own card above, and listing them
   // here as well showed every one of them twice.
   const shared = useQuery({
-    queryKey: ["lists", "shared", "unreachable", sharedQ, sharedFirst, sharedRows],
+    queryKey: ["tables", "shared", "unreachable", sharedQ, sharedFirst, sharedRows],
     queryFn: () =>
-      api.getPage<ListRead>(
-        `/lists/?shared=true&workspace_hidden=true` +
+      api.getPage<TableRead>(
+        `/tables/?shared=true&workspace_hidden=true` +
           `&skip=${sharedFirst}&limit=${sharedRows}` +
           `&q=${encodeURIComponent(sharedQ.trim())}`,
       ),
@@ -202,9 +202,9 @@ export function WorkspacesPage() {
   const shownSharedWorkspaces = sharedWorkspaces.data?.items ?? [];
   const sharedWsTotal = sharedWorkspaces.data?.total ?? 0;
   const shownShared = shared.data?.items ?? [];
-  const sharedListTotal = shared.data?.total ?? 0;
-  // The badge counts everything in the section, workspaces and loose lists alike.
-  const sharedTotal = sharedWsTotal + sharedListTotal;
+  const sharedTableTotal = shared.data?.total ?? 0;
+  // The badge counts everything in the section, workspaces and loose tables alike.
+  const sharedTotal = sharedWsTotal + sharedTableTotal;
 
   // A shared workspace may be view-only, so gate its controls per row — for both
   // grids at once, so the two cards render from one batched permission read.
@@ -265,7 +265,7 @@ export function WorkspacesPage() {
 
   function confirmDelete(ws: Workspace) {
     confirmDialog({
-      message: `Delete workspace "${ws.display_name}" and all its lists?`,
+      message: `Delete workspace "${ws.display_name}" and all its tables?`,
       header: "Confirm",
       icon: "pi pi-exclamation-triangle",
       accept: () => remove.mutate(ws.uuid),
@@ -278,7 +278,7 @@ export function WorkspacesPage() {
       <PageHeader
         crumbs={[{ label: "Workspaces" }]}
         title="Workspaces"
-        subtitle="A workspace holds a set of lists — and decides who can reach them."
+        subtitle="A workspace holds a set of tables — and decides who can reach them."
         actions={
           <>
             <Button
@@ -312,7 +312,7 @@ export function WorkspacesPage() {
           text={
             wsSearch
               ? `Nothing here is called “${wsSearch}”.`
-              : "A workspace is a folder for your lists. Create one to start putting records somewhere."
+              : "A workspace is a folder for your tables. Create one to start putting records somewhere."
           }
           action={
             wsSearch ? (
@@ -376,14 +376,14 @@ export function WorkspacesPage() {
               <span className="badge">{sharedTotal}</span>
             </div>
             <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-              Workspaces other people shared with you, and lists they gave you on
+              Workspaces other people shared with you, and tables they gave you on
               their own — without the workspace around them.
             </p>
           </div>
           <SearchInput
             value={sharedSearch}
             onChange={setSharedSearch}
-            placeholder="Search shared workspaces and lists…"
+            placeholder="Search shared workspaces and tables…"
           />
           {!shared.isLoading &&
             !sharedWorkspaces.isLoading &&
@@ -412,10 +412,10 @@ export function WorkspacesPage() {
             </div>
           )}
           <div className="card-grid">
-            {shownShared.map((list) => (
-              <div key={list.uuid} className="surface-card link-card p-3">
+            {shownShared.map((table) => (
+              <div key={table.uuid} className="surface-card link-card p-3">
                 <Link
-                  to={`/lists/${list.uuid}`}
+                  to={`/tables/${table.uuid}`}
                   className="no-underline link-card-target flex items-start gap-3 min-w-0"
                 >
                   <span className="entity-icon" aria-hidden>
@@ -423,30 +423,30 @@ export function WorkspacesPage() {
                   </span>
                   <span className="flex flex-col min-w-0">
                     <span className="font-medium truncate">
-                      {list.display_name}
+                      {table.display_name}
                     </span>
-                    {/* Same-named lists are common here, so disambiguate by owner.
-                        Never by workspace: these are exactly the lists whose
+                    {/* Same-named tables are common here, so disambiguate by owner.
+                        Never by workspace: these are exactly the tables whose
                         workspace the caller cannot view, so the backend withholds
                         its name — printing it would leak a workspace they were
-                        deliberately not given. The list's own slug stands in. */}
+                        deliberately not given. The table's own slug stands in. */}
                     <span className="text-sm text-muted truncate">
-                      {list.owner_username
-                        ? `owned by ${list.owner_username}`
-                        : list.name}
+                      {table.owner_username
+                        ? `owned by ${table.owner_username}`
+                        : table.name}
                     </span>
                   </span>
                 </Link>
               </div>
             ))}
           </div>
-          {/* Pages the loose lists only — the shared workspaces above are
+          {/* Pages the loose tables only — the shared workspaces above are
               unpaginated, so counting them here would page past the end. */}
-          {sharedListTotal > sharedRows && (
+          {sharedTableTotal > sharedRows && (
             <Paginator
               first={sharedFirst}
               rows={sharedRows}
-              totalRecords={sharedListTotal}
+              totalRecords={sharedTableTotal}
               rowsPerPageOptions={[12, 24, 48, 96]}
               onPageChange={(e) => {
                 setSharedFirst(e.first);

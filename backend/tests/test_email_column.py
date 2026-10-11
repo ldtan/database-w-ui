@@ -9,9 +9,9 @@ every write path that reaches a cell: a record, a column default, and an import.
 import pytest
 
 
-async def _add_email_column(client, list_uuid: str, name="contact", **config) -> str:
+async def _add_email_column(client, table_uuid: str, name="contact", **config) -> str:
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": name,
             "display_name": name.title(),
@@ -23,10 +23,10 @@ async def _add_email_column(client, list_uuid: str, name="contact", **config) ->
     return resp.json()["uuid"]
 
 
-async def test_accepts_an_address(client, list_uuid):
-    col = await _add_email_column(client, list_uuid)
+async def test_accepts_an_address(client, table_uuid):
+    col = await _add_email_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "ada@example.com"}},
     )
     assert resp.status_code == 201, resp.text
@@ -45,55 +45,55 @@ async def test_accepts_an_address(client, list_uuid):
         "ada@exa mple.com",
     ],
 )
-async def test_rejects_malformed_addresses(client, list_uuid, value):
-    col = await _add_email_column(client, list_uuid)
+async def test_rejects_malformed_addresses(client, table_uuid, value):
+    col = await _add_email_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert resp.status_code == 400, f"{value!r} was accepted: {resp.text}"
 
 
-async def test_an_address_is_stored_trimmed_and_lowercased(client, list_uuid):
-    col = await _add_email_column(client, list_uuid)
+async def test_an_address_is_stored_trimmed_and_lowercased(client, table_uuid):
+    col = await _add_email_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "  Ada.Lovelace@Example.COM  "}},
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"][col] == "ada.lovelace@example.com"
 
 
-async def test_unique_catches_the_same_mailbox_typed_differently(client, list_uuid):
+async def test_unique_catches_the_same_mailbox_typed_differently(client, table_uuid):
     """The whole point of normalizing: without it these are two values."""
-    col = await _add_email_column(client, list_uuid, unique=True)
+    col = await _add_email_column(client, table_uuid, unique=True)
     first = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "ada@example.com"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "ada@example.com"}}
     )
     assert first.status_code == 201, first.text
 
     second = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "ADA@Example.com"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "ADA@Example.com"}}
     )
     assert second.status_code == 409, second.text
 
 
-async def test_max_length_is_measured_on_the_stored_form(client, list_uuid):
-    col = await _add_email_column(client, list_uuid, max_length=16)
+async def test_max_length_is_measured_on_the_stored_form(client, table_uuid):
+    col = await _add_email_column(client, table_uuid, max_length=16)
     ok = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "  ada@example.com  "}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "  ada@example.com  "}}
     )
     assert ok.status_code == 201, ok.text  # 15 characters once trimmed
 
     nope = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "ada.lovelace@example.com"}},
     )
     assert nope.status_code == 400
 
 
-async def test_a_columns_default_is_validated_and_normalized(client, list_uuid):
+async def test_a_columns_default_is_validated_and_normalized(client, table_uuid):
     bad = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "contact",
             "display_name": "Contact",
@@ -104,7 +104,7 @@ async def test_a_columns_default_is_validated_and_normalized(client, list_uuid):
     assert bad.status_code == 400, bad.text
 
     good = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "contact",
             "display_name": "Contact",
@@ -117,11 +117,11 @@ async def test_a_columns_default_is_validated_and_normalized(client, list_uuid):
     assert good.json()["config"]["default"] == "ada@example.com"
 
 
-async def test_import_normalizes_and_rejects_row_by_row(client, list_uuid):
-    col = await _add_email_column(client, list_uuid)
+async def test_import_normalizes_and_rejects_row_by_row(client, table_uuid):
+    col = await _add_email_column(client, table_uuid)
     csv = "contact\nnot-an-address\nAda@Example.COM\n"
     resp = await client.post(
-        f"/api/lists/{list_uuid}/import",
+        f"/api/tables/{table_uuid}/import",
         files={"file": ("rows.csv", csv, "text/csv")},
     )
     assert resp.status_code == 200, resp.text
@@ -129,5 +129,5 @@ async def test_import_normalizes_and_rejects_row_by_row(client, list_uuid):
     assert body["created"] == 1
     assert len(body["errors"]) == 1
 
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert [i["data"][col] for i in items] == ["ada@example.com"]
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert [i["data"][col] for i in records] == ["ada@example.com"]

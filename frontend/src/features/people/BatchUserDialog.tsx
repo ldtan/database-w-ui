@@ -60,7 +60,7 @@ const EXAMPLE = [
  * behind it — a `User` and an optional `Person` — and the same seam hidden: fill the
  * name columns and the row gets a profile, leave them blank and it does not.
  *
- * Bad rows are skipped and reported rather than sinking the file, matching what list
+ * Bad rows are skipped and reported rather than sinking the file, matching what table
  * import already does. A bad *file* — wrong columns, too many rows — is refused
  * whole, because nothing in it can be trusted.
  *

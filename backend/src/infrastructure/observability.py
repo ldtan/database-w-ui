@@ -120,7 +120,7 @@ class RequestContextMiddleware:
     body through a memory object stream. For an ordinary response that is invisible.
     For a **long-lived streaming** one it puts a task and a queue between the
     generator and the client for the life of the connection — and this app holds one
-    of those open per viewer per list, for up to `SSE_MAX_STREAM_SECONDS`.
+    of those open per viewer per table, for up to `SSE_MAX_STREAM_SECONDS`.
 
     To be accurate about what this is and is not: the version of this middleware
     built on `BaseHTTPMiddleware` was *suspected* of breaking

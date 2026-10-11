@@ -13,7 +13,7 @@ import { ErrorMessage } from "../../components/ErrorMessage";
 const TYPE_LABELS = new Map(COLUMN_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   column: Column;
   newType: ColumnType;
   report: ConversionReport;
@@ -43,7 +43,7 @@ interface Props {
  *  from the records as they are, and refuses with a 409 if they moved underneath it,
  *  which surfaces here as an ordinary error message. */
 export function ConversionReportDialog({
-  listUuid,
+  tableUuid,
   column,
   newType,
   report,
@@ -63,7 +63,7 @@ export function ConversionReportDialog({
     // them here would answer a slightly different question than the one on screen.
     mutationFn: () =>
       api.post<Column>(
-        `/lists/${listUuid}/columns/${column.uuid}/convert/apply`,
+        `/tables/${tableUuid}/columns/${column.uuid}/convert/apply`,
         {
           type: report.new_type,
           config: report.config,
@@ -72,8 +72,8 @@ export function ConversionReportDialog({
         },
       ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["columns", tableUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       // The cutover rewrites every record's value for this column, and the labels
       // a lookup/user cell renders are keyed on the values it holds.
       queryClient.invalidateQueries({ queryKey: ["lookup-labels"] });

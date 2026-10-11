@@ -13,7 +13,7 @@ Cross-references: [data model](data-model-design.md) · [capacity](capacity-and-
 
 ## The measurement
 
-Against a seeded 100,000-record list (`paging_bench`, 20 columns), app CPU per request:
+Against a seeded 100,000-record table (`paging_bench`, 20 columns), app CPU per request:
 
 | request | count | page | total |
 |---|---|---|---|
@@ -29,7 +29,7 @@ the fix has to land.
 every record whatever the term is. That half is unconditional.
 
 **The page is expensive precisely when the term is rare.** A `LIMIT 25` seq scan stops as soon
-as it has 25 rows, so a term matching half the list fills a page in the first fifty records and
+as it has 25 rows, so a term matching half the table fills a page in the first fifty records and
 is already fast. A term matching *nothing* reads all 100,000 to prove it — which is the 501 ms
 above. Searching is therefore slowest exactly where a person is most likely to be doing it: a
 specific name, a specific invoice number, or a typo.
@@ -39,7 +39,7 @@ here. It is the shape of the problem.
 
 ## What runs today
 
-`ListItemService._apply_search` (`items/services.py:329-375`) builds one condition per column
+`TableRecordService._apply_search` (`records/services.py:329-375`) builds one condition per column
 and ORs them:
 
 ```sql
@@ -67,8 +67,8 @@ Any replacement has to keep these, or it is a different feature wearing the same
    per column rather than per record; the docstring says so outright.
 
 2. **A reference is found by its label, and only if you may read the target.**
-   `_reference_matches` requires `lookup` on the target list and then applies
-   `item_view_filter` to its records. Search must not become a way to learn what is in a list
+   `_reference_matches` requires `lookup` on the target table and then applies
+   `record_view_filter` to its records. Search must not become a way to learn what is in a table
    you cannot read.
 
 3. **Search runs in Postgres, over every record.** Filtering a fetched page in the browser
@@ -78,11 +78,11 @@ Any replacement has to keep these, or it is a different feature wearing the same
 ## Why the obvious fixes do not fit
 
 **"Index the expression."** A functional index is built on a *specific* expression. The
-expression here is `data ->> '<column-uuid>'`, and those uuids are per-list and unbounded — a
+expression here is `data ->> '<column-uuid>'`, and those uuids are per-table and unbounded — a
 new column mints a new one at any time. There is no finite set of indexes to create. This is
 the whole reason the problem is structural rather than a missing `CREATE INDEX`.
 
-**"There is already a GIN index on `data`."** There is (`items/models.py:24`), and it is
+**"There is already a GIN index on `data`."** There is (`records/models.py:24`), and it is
 `jsonb_ops` — containment and key existence. It serves `data @> {...}` in `_enforce_unique` and
 `data ? 'key'` in two other places, so it stays. It does nothing for `%substring%`, which is not
 a containment question.
@@ -96,7 +96,7 @@ words with prefix support, so `lph` would not find `alpha` and `2345` would not 
 word box is a bigger behaviour change than anything proposed here — worth revisiting only if
 `pg_trgm` turns out to be unavailable (see the risks).
 
-## The design: two derived columns on `list_items`
+## The design: two derived columns on `table_records`
 
 Add two columns maintained beside `data`, each derived **only from the record's own row**:
 
@@ -110,9 +110,9 @@ search_refs: Mapped[Optional[list[str]]] = mapped_column(ARRAY(sa.Text))
 with
 
 ```python
-sa.Index("ix_list_items_search_text", "search_text",
+sa.Index("ix_table_records_search_text", "search_text",
          postgresql_using="gin", postgresql_ops={"search_text": "gin_trgm_ops"}),
-sa.Index("ix_list_items_search_refs", "search_refs", postgresql_using="gin"),
+sa.Index("ix_table_records_search_refs", "search_refs", postgresql_using="gin"),
 ```
 
 and the predicate becomes, for the whole record rather than per column:
@@ -122,7 +122,7 @@ WHERE (search_text ILIKE '%alpha%' OR search_refs && ARRAY['e1d2…', 'f4a9…']
 ```
 
 Both halves are index-served. `_reference_matches` is unchanged — it still resolves the label
-under the target list's permissions, so guarantee 2 holds untouched; only the final cell test
+under the target table's permissions, so guarantee 2 holds untouched; only the final cell test
 moves from `data -> 'key' ?|` to `search_refs &&`.
 
 ### What goes into `search_text`
@@ -134,7 +134,7 @@ Specifically, for every column `in_shape()`:
 - **number, date, time, datetime, link, choice** — the stored value as it is stored, so the
   ISO date a search currently matches keeps matching.
 - **calculated** — the *stored* value, which is already an index maintained for exactly this
-  kind of use (`items/services.py:1009-1013`). Search inherits its staleness rule and adds none.
+  kind of use (`records/services.py:1009-1013`). Search inherits its staleness rule and adds none.
 - **checkbox** — nothing. Today `data ->> 'k'` yields `true`, so searching `true` returns every
   ticked record; that is an accident of JSONB rendering, not a feature.
 - **lookup, user, group** — nothing. They go to `search_refs`.
@@ -148,7 +148,7 @@ supports it, so normalising would only create a second spelling to keep in step.
 The tempting version of this stores the reference **label** in `search_text` — then one column
 serves everything and the query is a single `ILIKE`. It is also the version that fails.
 
-A label lives in another row, often in another list. Renaming one target row would make every
+A label lives in another row, often in another table. Renaming one target row would make every
 record pointing at it stale, so the design would owe a cascade: find the pointers, rewrite them,
 and get it right across a lookup chain, a user rename, a group rename, and a display-column
 change. And a stale *search* index is not the benign thing a stale calculated index is. The
@@ -169,10 +169,10 @@ part is `_reference_matches`, which already runs per query and stays that way.
 Four behaviour changes, three of which are fixes.
 
 - **Multi-valued cells stop matching their punctuation.** Today `data ->> 'k'` on `["a","b"]`
-  renders `["a", "b"]`, so searching `", "` matches every multi-valued cell in the list. Joining
+  renders `["a", "b"]`, so searching `", "` matches every multi-valued cell in the table. Joining
   the elements ends that.
 - **Rich text stops matching its own markup.** Rich cells store sanitised HTML
-  (`items/services.py:958`), so today searching `href` or `strong` matches every record with a
+  (`records/services.py:958`), so today searching `href` or `strong` matches every record with a
   link or a bold word. Indexing `richtext.to_text(value)` instead fixes it, and that helper
   already exists — it is what the length limits count, on the same reasoning that a limit is
   about how much someone wrote rather than how much markup their formatting generated.
@@ -186,14 +186,14 @@ Four behaviour changes, three of which are fixes.
 The reference half is equivalent rather than changed, which is worth spelling out because it
 looks like a widening. Today each reference column is tested against the uuids resolved for
 *that* column; with `search_refs` the record is tested against the union. Those agree because
-uuid spaces are disjoint by construction: a column targeting list X only ever holds X's uuids,
+uuid spaces are disjoint by construction: a column targeting table X only ever holds X's uuids,
 so a uuid resolved for column A cannot appear in column B's cell unless both target the same
-list — in which case both are permitted or both are not, and `_reference_matches` returns the
+table — in which case both are permitted or both are not, and `_reference_matches` returns the
 same set for each.
 
 ## Where it is maintained
 
-`_validate_data` (`items/services.py:911`) is the one seam every write passes through — the API,
+`_validate_data` (`records/services.py:911`) is the one seam every write passes through — the API,
 a form, and the CSV import — and it already computes the calculated index at its end. Both
 columns are computed in the same place, from the settled record, for the same reason: every
 operand is in its final shape by then.
@@ -209,7 +209,7 @@ What can make them stale, and what handles it:
 | rich-text sanitiser changed | old text lingers | nightly sweep |
 
 The sweep is a new maintenance module in the exact shape of `maintenance/recompute_calculated.py`:
-chunked, committed per batch, per-list advisory lock (its **own** namespace — see the collision
+chunked, committed per batch, per-table advisory lock (its **own** namespace — see the collision
 note at `backfill.py:62`), idempotent, and safe to kill. Everything in the table above is a
 lingering *extra* match, never a missing one, which is what makes a nightly backstop adequate
 rather than a correctness requirement — the same argument that licenses the calculated sweep.
@@ -224,7 +224,7 @@ rather than a correctness requirement — the same argument that licenses the ca
    and any drift between it and `_validate_data` produces records that are silently unsearchable.
    One spelling, invoked from a job that can be run, killed and re-run.
 4. `CREATE INDEX CONCURRENTLY` for both (`postgresql_concurrently=True` plus an autocommit block
-   in Alembic — a plain `create_index` here would lock writes on `list_items` for the duration).
+   in Alembic — a plain `create_index` here would lock writes on `table_records` for the duration).
 5. Switch `_apply_search` over. This is the only irreversible-feeling step, and it is not: the
    old predicate can be restored without touching data, since the columns are additive.
 
@@ -249,15 +249,15 @@ Each of these can sink the design, and each is cheap to check before any code is
 
 3. **Index size against 1 GB of storage.** A trigram GIN index commonly runs one to three times
    the size of the text it covers. At 100k records this could plausibly be 30–80 MB for one
-   list, against a gigabyte that holds roughly 500k records for the *whole* tenant
+   table, against a gigabyte that holds roughly 500k records for the *whole* tenant
    (see [deployment](capacity-and-performance.md)). Measure `pg_relation_size` on the seeded
-   list before committing. On this deployment it is entirely possible that disk, not time, is
+   table before committing. On this deployment it is entirely possible that disk, not time, is
    the binding constraint — which would not make the design wrong, but would make it something
-   to enable per list rather than everywhere.
+   to enable per table rather than everywhere.
 
 4. **Write cost.** Every record write gains a string build (cheap, pure Python over the row's
    own values) and GIN index maintenance (not cheap). The clone plan already identifies GIN
-   maintenance on `ix_list_items_data` as the dominant per-insert cost, and this adds a second
+   maintenance on `ix_table_records_data` as the dominant per-insert cost, and this adds a second
    GIN index to the same table. Measure a bulk insert before and after; if it is bad, GIN's
    `fastupdate` and a tuned `gin_pending_list_limit` are the levers.
 
@@ -271,7 +271,7 @@ Each of these can sink the design, and each is cheap to check before any code is
 - A test that a record whose reference target is renamed is still found by the new name and no
   longer found by the old — the property the uuid choice buys, and the one worth pinning against
   a later "optimisation" that stores labels.
-- A test that a search cannot match a column uuid, and one that a lookup into a list the caller
+- A test that a search cannot match a column uuid, and one that a lookup into a table the caller
   lacks `lookup` on contributes nothing. Guarantees 1 and 2, pinned.
 - The sweep gets `test_maintenance_batching.py`'s treatment: chunk size forced below the row
   count, proving the last batch lands.
@@ -288,21 +288,21 @@ Each of these can sink the design, and each is cheap to check before any code is
   suffers. Worth a minimum-length guard only if measurement says so.
 - **`_SEARCH_REF_MAX = 200`.** A label matching more than 200 target rows is silently truncated
   today, and this design inherits that. It is a pre-existing correctness gap, not a new one, and
-  it deserves its own fix — probably a subquery rather than a materialised list, which
+  it deserves its own fix — probably a subquery rather than a materialised table, which
   `search_refs && (SELECT array_agg(...))` accommodates without changing the index.
-- **The target-list scan inside `_reference_matches`.** Resolving a lookup label runs
-  `data ->> '<display-key>' ILIKE '%…%'` against the *target* list — the original unindexable
-  shape, one list over. Searching a 100k list that looks up another 100k list therefore still
+- **The target-table scan inside `_reference_matches`.** Resolving a lookup label runs
+  `data ->> '<display-key>' ILIKE '%…%'` against the *target* table — the original unindexable
+  shape, one table over. Searching a 100k table that looks up another 100k table therefore still
   scans 100k rows, just somewhere else.
 
   Fixing it needs a third derived column, `display_text`, holding just the display column's
   value — trigram-indexed for `_reference_matches`, and plainly indexed for the exact-label
   resolution a write does when a lookup cell arrives as a name rather than a uuid
-  (`items/services.py:1348`, an `IN` over the same unindexable extraction, which every CSV
+  (`records/services.py:1348`, an `IN` over the same unindexable extraction, which every CSV
   import runs per batch).
 
   It is a clean follow-on rather than part of this change, because its staleness rule is
-  different: changing *which* column is the display column invalidates a whole list at once,
+  different: changing *which* column is the display column invalidates a whole table at once,
   where the two columns above are invalidated only by their own record. That is still bounded
   and still a job, but it is a second argument to make rather than a corollary of the first.
   Worth doing second, and worth deciding on its own evidence.

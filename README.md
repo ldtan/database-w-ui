@@ -1,11 +1,11 @@
 # Database with UI
 
-A self-hostable app for building flexible databases through a UI: create **lists**
-(tables), add typed **columns**, store **records**, and configure **views**, **forms** and
-**metrics** (totals, averages and counts) over each list — a minimal, self-hosted take on
+A self-hostable app for building flexible databases through a UI: create **tables**, add
+typed **columns**, store **records**, and configure **views**, **forms** and **metrics**
+(totals, averages and counts) over each table — a minimal, self-hosted take on
 Airtable/NocoDB.
 
-A list's schema is fully dynamic — records are stored as `JSONB` keyed by column UUID, so
+A table's schema is fully dynamic — records are stored as `JSONB` keyed by column UUID, so
 adding, renaming, or removing a column never requires a database migration.
 
 Everything is behind a sign-in. A deployment may optionally put a **public landing page**
@@ -68,11 +68,11 @@ Two things autogenerate gets wrong, both of which have already bitten this proje
       op.execute("ALTER TYPE column_type ADD VALUE IF NOT EXISTS 'time'")
   ```
 
-- **It omits `use_alter` foreign keys** (the circular `lists.primary_column_id → columns.id`),
+- **It omits `use_alter` foreign keys** (the circular `tables.primary_column_id → columns.id`),
   so they must be added with an explicit `op.create_foreign_key`.
 
 Add a new model? Register it in `src/infrastructure/model_registry.py` — the single import
-list shared by the app, the tests, and Alembic. A model missing from it makes autogenerate
+table shared by the app, the tests, and Alembic. A model missing from it makes autogenerate
 emit a `DROP TABLE` for its table.
 
 `tests/test_migrations.py` builds a database *through the migrations* and asserts it matches
@@ -117,14 +117,14 @@ host:
   `calculated` column may reference and every function it can call, with parameters and
   examples. The same reference, written for the people using the app, is in the in-app
   **Guide** under *Calculated columns: writing a formula*.
-- [Data model design](docs/data-model-design.md) — the six models (lists, columns,
-  list_items, views, forms, metrics), the JSONB record strategy, column types, and the
+- [Data model design](docs/data-model-design.md) — the six models (tables, columns,
+  table_records, views, forms, metrics), the JSONB record strategy, column types, and the
   decisions behind them.
 - [Known gaps, gotchas, and follow-ups](docs/known-gaps.md) — what is deliberately
   unfinished, behavior that surprises people, and the traps waiting for whoever edits the
   code next. **Read before touching permissions, theming, the schema, or any control the
   guide and the in-app tours describe by name.**
-- [Planned features](docs/planned-features.md) — ten asked-for capabilities: list
+- [Planned features](docs/planned-features.md) — ten asked-for capabilities: table
   transfer, cross-workspace moves, cloning, nested and cross-workspace lookups, live
   records, metrics, QR codes for records, and column type conversion (including duplicating a column) are
   built; copying into an *already existing* column is not. What exists to build on, the

@@ -10,9 +10,9 @@ import json
 import pytest
 
 
-async def _add_rating_column(client, list_uuid: str, name="score", **config) -> str:
+async def _add_rating_column(client, table_uuid: str, name="score", **config) -> str:
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": name,
             "display_name": name.title(),
@@ -24,41 +24,41 @@ async def _add_rating_column(client, list_uuid: str, name="score", **config) -> 
     return resp.json()["uuid"]
 
 
-async def test_accepts_a_rating_on_the_default_scale(client, list_uuid):
-    col = await _add_rating_column(client, list_uuid)
+async def test_accepts_a_rating_on_the_default_scale(client, table_uuid):
+    col = await _add_rating_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: 4}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: 4}}
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["data"][col] == 4
 
 
 @pytest.mark.parametrize("value", [0, 6, -1, 2.5, "4", True])
-async def test_rejects_anything_off_the_scale(client, list_uuid, value):
+async def test_rejects_anything_off_the_scale(client, table_uuid, value):
     """Zero included: an unrated record is an empty cell, not a nought."""
-    col = await _add_rating_column(client, list_uuid)
+    col = await _add_rating_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert resp.status_code == 400, f"{value!r} was accepted: {resp.text}"
 
 
-async def test_max_sets_the_top_of_the_scale(client, list_uuid):
-    col = await _add_rating_column(client, list_uuid, max=10)
+async def test_max_sets_the_top_of_the_scale(client, table_uuid):
+    col = await _add_rating_column(client, table_uuid, max=10)
     ok = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: 9}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: 9}}
     )
     assert ok.status_code == 201, ok.text
     nope = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: 11}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: 11}}
     )
     assert nope.status_code == 400
 
 
 @pytest.mark.parametrize("bad", [0, 11, 2.5, "five"])
-async def test_a_scale_must_be_readable(client, list_uuid, bad):
+async def test_a_scale_must_be_readable(client, table_uuid, bad):
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "score",
             "display_name": "Score",
@@ -69,10 +69,10 @@ async def test_a_scale_must_be_readable(client, list_uuid, bad):
     assert resp.status_code == 400, resp.text
 
 
-async def test_a_rating_column_has_no_min(client, list_uuid):
+async def test_a_rating_column_has_no_min(client, table_uuid):
     """A configurable floor would give the column two ways to say "unrated"."""
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "score",
             "display_name": "Score",
@@ -83,11 +83,11 @@ async def test_a_rating_column_has_no_min(client, list_uuid):
     assert resp.status_code == 400, resp.text
 
 
-async def test_rating_icon_is_checked(client, list_uuid):
-    await _add_rating_column(client, list_uuid, rating_icon="heart")
+async def test_rating_icon_is_checked(client, table_uuid):
+    await _add_rating_column(client, table_uuid, rating_icon="heart")
 
     bad = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "other",
             "display_name": "Other",
@@ -98,18 +98,18 @@ async def test_rating_icon_is_checked(client, list_uuid):
     assert bad.status_code == 400, bad.text
 
 
-async def test_it_sorts_and_filters_as_a_number(client, list_uuid):
+async def test_it_sorts_and_filters_as_a_number(client, table_uuid):
     """The whole reason `NUMERIC_TYPES` exists: as text, 10 sorts before 9."""
-    col = await _add_rating_column(client, list_uuid, max=10)
+    col = await _add_rating_column(client, table_uuid, max=10)
     # Inserted out of order, so a real sort is distinguishable from insertion order.
     for value in (9, 10, 2):
         resp = await client.post(
-            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+            f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
         )
         assert resp.status_code == 201, resp.text
 
     ordered = await client.get(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         params={"sort_by": col, "sort_dir": "asc"},
     )
     assert ordered.status_code == 200, ordered.text
@@ -122,22 +122,22 @@ async def test_it_sorts_and_filters_as_a_number(client, list_uuid):
         }
     )
     above = await client.get(
-        f"/api/lists/{list_uuid}/items/", params={"filters": filters}
+        f"/api/tables/{table_uuid}/records/", params={"filters": filters}
     )
     assert above.status_code == 200, above.text
     assert [r["data"][col] for r in above.json()] == [10]
 
 
-async def test_a_metric_can_average_it(client, list_uuid):
-    col = await _add_rating_column(client, list_uuid)
+async def test_a_metric_can_average_it(client, table_uuid):
+    col = await _add_rating_column(client, table_uuid)
     for value in (2, 4):
         resp = await client.post(
-            f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+            f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
         )
         assert resp.status_code == 201, resp.text
 
     created = await client.post(
-        f"/api/lists/{list_uuid}/metrics/",
+        f"/api/tables/{table_uuid}/metrics/",
         json={
             "name": "mean_score",
             "display_name": "Mean score",
@@ -146,5 +146,5 @@ async def test_a_metric_can_average_it(client, list_uuid):
     )
     assert created.status_code == 201, created.text
 
-    body = (await client.get(f"/api/lists/{list_uuid}/metrics/values")).json()
+    body = (await client.get(f"/api/tables/{table_uuid}/metrics/values")).json()
     assert next(v["value"] for v in body["values"] if v["name"] == "mean_score") == 3

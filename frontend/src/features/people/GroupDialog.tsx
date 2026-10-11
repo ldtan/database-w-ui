@@ -25,9 +25,9 @@ interface Props {
  * A group is a *principal*: it can hold grants, and everyone in it inherits them.
  * So adding someone to a group here hands them, silently, every permission that
  * group has anywhere in the app — which is why this dialog is superuser-only, and
- * why membership is worth more care than the plain list of checkboxes suggests.
+ * why membership is worth more care than the plain table of checkboxes suggests.
  *
- * The `name`/`display_name` pair carries more weight here than it does for a list.
+ * The `name`/`display_name` pair carries more weight here than it does for a table.
  * A group's slug is what a batch-user CSV's `groups` column and an exported `group`
  * cell name it by, so changing it after the fact invalidates files people are
  * holding — hence `linked={false}` when editing, the same as everywhere else.
@@ -37,7 +37,7 @@ export function GroupDialog({ visible, onHide, group }: Props) {
   const toast = useToast();
   const editing = !!group;
 
-  // Its own fetch, not the page's: that list is filtered by the page's search box,
+  // Its own fetch, not the page's: that table is filtered by the page's search box,
   // and the member picker must offer every user regardless of what is typed there.
   const users = useQuery({
     queryKey: ["users", "all"],

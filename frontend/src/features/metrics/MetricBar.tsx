@@ -3,13 +3,13 @@ import { Skeleton } from "primereact/skeleton";
 
 import { api } from "../../lib/api";
 import { METRIC_REFRESH_SECONDS } from "../../lib/config";
-import { useLiveList } from "../../lib/useLiveList";
+import { useLiveTable } from "../../lib/useLiveTable";
 import type { FilterGroup, Metric, MetricValue, MetricValues } from "../../lib/types";
 import { recordScopeParams } from "../views/recordQuery";
 import { metricsKey, metricValuesKey, metricValuesPrefix } from "./metricKeys";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   metrics: Metric[];
   /** The view, search and filter the grid is showing, so the cards describe the
    *  same records. All three are part of the query key: a different question is a
@@ -17,9 +17,9 @@ interface Props {
   viewUuid: string | null;
   q: string;
   filters: FilterGroup;
-  /** Whether the strip is revealed. Off by default (see ListDetailPage), and it
+  /** Whether the strip is revealed. Off by default (see TableDetailPage), and it
    *  gates the query as well as the markup — a metric is a scan of the whole
-   *  list, re-run on the live interval, so a hidden strip must cost nothing
+   *  table, re-run on the live interval, so a hidden strip must cost nothing
    *  rather than merely look like it does. */
   visible: boolean;
 }
@@ -42,15 +42,15 @@ function format(value: MetricValue["value"], metric: Metric): string {
 /**
  * The strip of aggregate cards above the grid.
  *
- * Every card comes from one scan of the list, so they always agree with each
+ * Every card comes from one scan of the table, so they always agree with each
  * other — and the scan runs through the same permission filter and view filters
  * the grid does, so they agree with what is on screen rather than with the
- * list's true total. Two people looking at the same card can therefore see
+ * table's true total. Two people looking at the same card can therefore see
  * different numbers, which is correct: a total is a read of the records, and you
  * cannot total what you cannot see.
  */
 export function MetricBar({
-  listUuid,
+  tableUuid,
   metrics,
   viewUuid,
   q,
@@ -58,14 +58,14 @@ export function MetricBar({
   visible,
 }: Props) {
   // Keyed on the metric-values *prefix* rather than this card strip's exact key: a
-  // live event names the list alone, and every scope's totals went stale together.
-  const live = useLiveList(listUuid, {
-    queryKey: metricValuesPrefix(listUuid),
+  // live event names the table alone, and every scope's totals went stale together.
+  const live = useLiveTable(tableUuid, {
+    queryKey: metricValuesPrefix(tableUuid),
     minSeconds: METRIC_REFRESH_SECONDS,
   });
   const values = useQuery({
     // Cards follow the records — same guardrails, same invalidation — but on a
-    // slower clock. A metric is an aggregate over the whole list where a page of
+    // slower clock. A metric is an aggregate over the whole table where a page of
     // rows is one indexed query, so matching intervals meant the dearest query on
     // the screen ran as often as the cheapest. The backend compiles the common
     // formulas to SQL, which makes most of them cheap, but not the ones that fall
@@ -75,12 +75,12 @@ export function MetricBar({
     // refreshes the cards too, and the interval only carries other people's
     // changes.
     ...live,
-    queryKey: metricValuesKey(listUuid, viewUuid, q, filters),
+    queryKey: metricValuesKey(tableUuid, viewUuid, q, filters),
     queryFn: () =>
       // The same builder the grid's own query uses, so "which records" cannot be
       // answered one way for the rows and another for the totals above them.
       api.get<MetricValues>(
-        `/lists/${listUuid}/metrics/values?${recordScopeParams({ viewUuid, q, filters })}`,
+        `/tables/${tableUuid}/metrics/values?${recordScopeParams({ viewUuid, q, filters })}`,
       ),
     enabled: visible && metrics.length > 0,
   });
@@ -136,18 +136,18 @@ export function MetricBar({
       {truncated && (
         <small style={{ color: "var(--text-muted)" }}>
           Over the first {values.data?.row_count.toLocaleString()} records — this
-          list is too large to total in full.
+          table is too large to total in full.
         </small>
       )}
     </div>
   );
 }
 
-/** The list's metrics. Shared by the bar and the settings panel so both read
+/** The table's metrics. Shared by the bar and the settings panel so both read
  *  one cache entry rather than each fetching the same definitions. */
-export function useMetrics(listUuid: string) {
+export function useMetrics(tableUuid: string) {
   return useQuery({
-    queryKey: metricsKey(listUuid),
-    queryFn: () => api.get<Metric[]>(`/lists/${listUuid}/metrics/`),
+    queryKey: metricsKey(tableUuid),
+    queryFn: () => api.get<Metric[]>(`/tables/${tableUuid}/metrics/`),
   });
 }

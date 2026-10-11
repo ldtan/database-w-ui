@@ -35,7 +35,7 @@ interface SortableListProps<T> {
 export const DRAG_GRIP_WIDTH = "1.5rem";
 
 /**
- * A vertical list whose rows can be dragged into a new order.
+ * A vertical table whose rows can be dragged into a new order.
  *
  * Three decisions in here are load-bearing.
  *
@@ -44,7 +44,7 @@ export const DRAG_GRIP_WIDTH = "1.5rem";
  * before any of them see it. Only the grip gets the drag listeners.
  *
  * **Drag never replaces the buttons.** Each caller keeps its up/down chevrons, so
- * reordering still works by keyboard, on a touch screen, and while the list is
+ * reordering still works by keyboard, on a touch screen, and while the table is
  * scrolled — all cases a drag handles badly or not at all. dnd-kit's keyboard
  * sensor is wired too, but as a second way in rather than the only one.
  *
@@ -142,7 +142,7 @@ function SortableRow({
       ref={setNodeRef}
       className={className}
       style={{
-        // x is zeroed so a row can only travel up and down: this is a list, and a
+        // x is zeroed so a row can only travel up and down: this is a table, and a
         // row dragged sideways is a row on its way to being dropped nowhere.
         transform: transform
           ? CSS.Transform.toString({ ...transform, x: 0, scaleX: 1, scaleY: 1 })

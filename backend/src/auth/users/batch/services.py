@@ -9,7 +9,7 @@ stops bootstrapping a workspace months after anyone remembers there are two path
 ``UserService.create`` and ``WorkspaceService.create`` each commit internally, so
 every row is already its own transaction. That is exactly the isolation
 skip-and-report wants, which is why there is no savepoint machinery here -- unlike
-list import, which inserts into one session and commits in batches for speed.
+table import, which inserts into one session and commits in batches for speed.
 """
 import secrets
 from uuid import UUID

@@ -20,7 +20,7 @@ A grant is swept when it can never apply again:
 
 A grant on something still *inside* the window is left alone: that resource can still
 be restored, and its sharing should come back with it. This is the same rule the
-purges follow, and the reason `purge_deleted_items` deletes an item's grants itself
+purges follow, and the reason `purge_deleted_records` deletes a record's grants itself
 rather than leaving them to this job — by the time it has destroyed the row, the
 grant's resource is unidentifiable.
 
@@ -28,7 +28,7 @@ Kept separate from the purges on purpose: destroying records is not the same dec
 as tidying config that already has no effect, and they deserve their own cadence.
 
 Chunked and committed per batch like the purges, and for the same reason twice over: a
-grant is created per shared record, so a busy list's worth of them is not a small
+grant is created per shared record, so a busy table's worth of them is not a small
 number, and the predicate that finds them is a NOT EXISTS against five tables. Nothing
 here is ever half-wrong — every grant this deletes was already inert.
 """
@@ -50,10 +50,10 @@ CHUNK = 5_000
 # that the database cannot know this — so it is written down here, once.
 _RESOURCE_TABLES = {
     "workspace": "workspaces",
-    "list": "lists",
+    "table": "tables",
     "view": "views",
     "form": "forms",
-    "item": "list_items",
+    "record": "table_records",
 }
 
 # A grant is dead when its resource, or its principal, is gone or expired. "Gone"
