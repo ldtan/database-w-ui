@@ -28,8 +28,8 @@ interface Props {
  *  visible and in what order.
  *
  *  One component, rendered both on the toolbar (where you change these while
- *  watching the grid react) and in List settings → Views (where they sit with the
- *  rest of the list's configuration). Two copies of this markup would drift.
+ *  watching the grid react) and in Table settings → Views (where they sit with the
+ *  rest of the table's configuration). Two copies of this markup would drift.
  *
  *  On the toolbar every one of these is a *button*, and each says whether it is
  *  currently doing anything — "Filter" against "Filter 2", "Group" against
@@ -59,7 +59,7 @@ export function ViewControls({
 
   // Drag by the grip, or one place at a time with the chevrons. The buttons are
   // not a fallback for a browser that cannot drag — they are how this works with a
-  // keyboard, on a touch screen, and when the list is long enough to scroll while
+  // keyboard, on a touch screen, and when the table is long enough to scroll while
   // you are holding a row.
   const columnList = (
     <SortableList
@@ -67,7 +67,7 @@ export function ViewControls({
       idOf={(col) => col.uuid}
       onReorder={onReorderColumn}
       // minWidth so the overlay panel does not shrink-wrap to the longest name,
-      // which made the panel a different width on every list.
+      // which made the panel a different width on every table.
       className="flex flex-col gap-1 min-w-60"
     >
       {(col, i) => (
@@ -110,7 +110,7 @@ export function ViewControls({
   }));
 
   // Stacked: the settings tab, where an overlay panel inside a dialog is awkward,
-  // so the column list and the grouping are simply shown.
+  // so the column table and the grouping are simply shown.
   if (stacked) {
     return (
       <div className="flex flex-col gap-3">
@@ -161,7 +161,7 @@ export function ViewControls({
 
       <Button
         label={groupColumn ? `Grouped by ${groupColumn.display_name}` : "Group"}
-        icon="pi pi-list"
+        icon="pi pi-table"
         text
         className={groupColumn ? "is-on" : undefined}
         onClick={(e) => groupPanel.current?.toggle(e)}

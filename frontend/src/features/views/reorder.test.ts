@@ -26,7 +26,7 @@ describe("moveTo", () => {
 
   it("is a no-op for out-of-range indices, because both callers can produce them", () => {
     // The up button on the first row, the down button on the last, and a drag that
-    // ends outside the list. None of them has anything to do with an exception.
+    // ends outside the table. None of them has anything to do with an exception.
     expect(moveTo(ROWS, 0, -1)).toEqual([...ROWS]);
     expect(moveTo(ROWS, 3, 4)).toEqual([...ROWS]);
     expect(moveTo(ROWS, -1, 0)).toEqual([...ROWS]);

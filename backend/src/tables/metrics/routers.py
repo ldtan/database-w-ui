@@ -1,0 +1,196 @@
+from typing import Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.auth.dependencies import get_current_user
+from src.auth.users.models import User
+from src.core.exceptions import ConflictError, UnknownReferenceError, ValidationError
+from src.infrastructure.database import get_db
+from src.permissions.enums import Action, ResourceType
+from src.permissions.services import PermissionService
+
+from ..bin import services as bin_services
+from ..bin.schemas import BinnedChildRead
+from ..dependencies import filter_param, get_table_or_404
+from ..models import Table
+from .models import Metric
+from .schemas import MetricCreate, MetricRead, MetricUpdate, MetricValues
+from .services import MetricService
+
+
+router = APIRouter(prefix="/{table_uuid}/metrics", tags=["metrics"])
+
+
+async def _or_404(db: AsyncSession, table: Table, uuid: UUID) -> Metric:
+    """The metric with this uuid, or 404.
+
+    No visibility check of its own, unlike views and forms: a metric carries no
+    permissions separate from its table, so reaching this route is the whole gate
+    and there is nothing this could confirm that `list_metrics` does not already
+    show.
+    """
+    metric = await MetricService.get_by_uuid(db, table.id, uuid)
+    if metric is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Metric not found"
+        )
+    return metric
+
+
+@router.post("/", response_model=MetricRead, status_code=status.HTTP_201_CREATED)
+async def create_metric(
+    payload: MetricCreate,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    try:
+        return await MetricService.create(db, table, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValidationError, UnknownReferenceError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.get("/", response_model=list[MetricRead])
+async def list_metrics(
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    return await MetricService.list(db, table.id)
+
+
+# Declared before `/{uuid}`. Names no longer compete for the segment, but ordering
+# still decides the route: FastAPI matches on path *shape* and validates afterwards,
+# so a later `/values` would be captured by `/{uuid}` and rejected as a malformed
+# uuid rather than reaching this.
+@router.get("/values", response_model=MetricValues)
+async def metric_values(
+    view_uuid: Optional[str] = Query(default=None),
+    q: Optional[str] = Query(default=None),
+    filters: Optional[dict] = Depends(filter_param),
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Every metric's value over the records this caller can see.
+
+    Takes the same `view_uuid`, `q` and `filters` as the records endpoint, so the
+    numbers describe exactly what the grid is showing — including a filter applied
+    for this request only, which never touched the view.
+    """
+    return await MetricService.evaluate(db, table, current_user, view_uuid, q, filters)
+
+
+# Before `/{uuid}` for the same reason as `/values` above.
+@router.get("/deleted", response_model=list[BinnedChildRead])
+async def list_deleted_metrics(
+    response: Response,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """The table's binned metrics — see src.tables.bin.services for what appears here
+    and why this is gated on the table rather than on each metric."""
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    response.headers["X-Total-Count"] = str(
+        await bin_services.count_deleted(db, Metric, table.id)
+    )
+    return await bin_services.list_deleted(db, Metric, table.id, skip=skip, limit=limit)
+
+
+@router.get("/{uuid}", response_model=MetricRead)
+async def get_metric(
+    uuid: UUID,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _or_404(db, table, uuid)
+
+
+@router.patch("/{uuid}", response_model=MetricRead)
+async def update_metric(
+    uuid: UUID,
+    payload: MetricUpdate,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    metric = await _or_404(db, table, uuid)
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    try:
+        updated = await MetricService.update(db, table, metric.uuid, payload)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except (ValidationError, UnknownReferenceError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if updated is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Metric not found"
+        )
+    return updated
+
+
+@router.delete("/{uuid}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_metric(
+    uuid: UUID,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    metric = await _or_404(db, table, uuid)
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    await MetricService.delete(db, table.id, metric.uuid)
+
+
+@router.post("/{uuid}/restore", response_model=MetricRead)
+async def restore_metric(
+    uuid: UUID,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    try:
+        restored = await bin_services.restore(db, Metric, table.id, uuid)
+    except ConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    if restored is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )
+    return restored
+
+
+@router.delete("/{uuid}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def purge_metric(
+    uuid: UUID,
+    table: Table = Depends(get_table_or_404),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    # Only something already in the bin can be purged; a live metric 404s here, so
+    # destroying one is always two deliberate steps. Same rule as records and tables.
+    await PermissionService.require(
+        db, current_user, ResourceType.table, table.id, Action.configure
+    )
+    if not await bin_services.purge(db, Metric, table.id, uuid):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Not found in the bin"
+        )

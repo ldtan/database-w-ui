@@ -1,7 +1,7 @@
 /** Colour cells: `#rrggbb`, and what to draw the swatch on.
  *
  *  Mirrors `normalize_color` / `_COLOR_RE` in
- *  backend/src/lists/columns/validation.py. The server decides what is stored;
+ *  backend/src/tables/columns/validation.py. The server decides what is stored;
  *  this renders what is already in a cell, including values that predate the
  *  column being a `color` column (a conversion from `text` normalises them, but a
  *  cell can still be read while an older value sits in it).
@@ -27,7 +27,7 @@ export function isColor(value: unknown): value is string {
   return typeof value === "string" && COLOR_RE.test(normalizeColor(value));
 }
 
-/** The palette a colour column offers first, or an empty list. Offered, never
+/** The palette a colour column offers first, or an empty table. Offered, never
  *  enforced — the server accepts any valid colour whatever the swatches say,
  *  because the point of a colour field is picking one. */
 export function colorSwatches(column: Column): string[] {

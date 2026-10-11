@@ -137,7 +137,7 @@ describe("temporalStatus", () => {
   });
 
   it("echoes the server's own wording for a value it cannot read", () => {
-    // These strings are `_TEMPORAL` in backend/src/lists/columns/validation.py.
+    // These strings are `_TEMPORAL` in backend/src/tables/columns/validation.py.
     // If one of them changes there, this is what says so.
     expect(temporalStatus(col("date"), "2026-02-30").message).toContain(
       "a date (YYYY-MM-DD)",

@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.core.config import settings
 from src.core.exceptions import ConflictError, PermissionDeniedError
 from src.core.utils import LIKE_ESCAPE, coerce_uuid, like_pattern
-from src.lists.purge import drain_records
+from src.tables.purge import drain_records
 
 from .models import Workspace
 from .schemas import WorkspaceCreate, WorkspaceUpdate
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from src.auth.users.models import User
 
 # The reserved name/label of every user's "Incoming" workspace — the immutable drop
-# point transferred lists land in (see get_or_create_inbox). The name is reserved so
+# point transferred tables land in (see get_or_create_inbox). The name is reserved so
 # an ordinary workspace can never occupy the slot (see create).
 INBOX_NAME = "incoming"
 INBOX_DISPLAY = "Incoming"
@@ -106,7 +106,7 @@ class WorkspaceService:
         ``shared`` splits that set by ownership: True is the workspaces someone else
         handed over whole, False the caller's own. The UI shows them as separate
         sections, because a workspace shared with you and one you own afford
-        different things — and mixing them was why every list inside a shared
+        different things — and mixing them was why every table inside a shared
         workspace also appeared, flattened, under "Shared with me"."""
         from src.permissions.services import PermissionService
 
@@ -148,8 +148,8 @@ class WorkspaceService:
     def _guard_system_workspace(workspace: Workspace) -> None:
         """A system workspace (the transfers inbox) is immutable: it cannot be
         renamed, re-described, moved into, or deleted. Mirrors the system-group
-        guard. Its *lists* stay ordinary, so the recipient can still move a
-        transferred list out or delete it — only the workspace itself is frozen."""
+        guard. Its *tables* stay ordinary, so the recipient can still move a
+        transferred table out or delete it — only the workspace itself is frozen."""
         if workspace.is_system:
             raise PermissionDeniedError(
                 f"The {INBOX_DISPLAY!r} workspace is immutable"
@@ -184,7 +184,7 @@ class WorkspaceService:
 
     @classmethod
     async def create_default(cls, db: AsyncSession, owner_id: int) -> Workspace:
-        """Ensure a user has a workspace so they can create lists immediately.
+        """Ensure a user has a workspace so they can create tables immediately.
 
         Called when a user is created. Idempotent: if the user already has a
         workspace, the first one is returned instead of creating another.
@@ -206,13 +206,13 @@ class WorkspaceService:
     async def get_or_create_inbox(cls, db: AsyncSession, owner_id: int) -> Workspace:
         """The user's immutable "Incoming" workspace, minted on first use.
 
-        Transferred lists land here (see ``ListService.transfer_to_user``). Looked up
+        Transferred tables land here (see ``TableService.transfer_to_user``). Looked up
         by ``is_system`` rather than by name, so a user who happens to have named an
         ordinary workspace before the reservation existed can't be mistaken for it —
         though ``create`` now reserves the name, so the slot is free to mint.
 
         Flushes but does not commit: the caller (a transfer) owns the transaction, so
-        the inbox and the list move land atomically. Idempotent — returns the existing
+        the inbox and the table move land atomically. Idempotent — returns the existing
         inbox if there is one.
         """
         existing = (
@@ -231,7 +231,7 @@ class WorkspaceService:
             owner_id=owner_id,
             name=INBOX_NAME,
             display_name=INBOX_DISPLAY,
-            description="Lists other people have transferred to you.",
+            description="Tables other people have transferred to you.",
             is_system=True,
         )
         db.add(inbox)
@@ -271,13 +271,13 @@ class WorkspaceService:
     ) -> Optional[Workspace]:
         """Hand a workspace, and everything in it, to another user.
 
-        Ownership of a workspace is the ``owner_id`` column itself, so unlike a list
+        Ownership of a workspace is the ``owner_id`` column itself, so unlike a table
         transfer there is no inbox to move into — the row changes hands where it
-        stands. Its lists come along without being touched: a list belongs to whoever
+        stands. Its tables come along without being touched: a table belongs to whoever
         owns its workspace, so re-owning the workspace re-owns them all, and every
         uuid in the tree survives (bookmarks and links keep working).
 
-        Grants are deliberately left untouched, exactly as ``ListService.transfer_to_user``
+        Grants are deliberately left untouched, exactly as ``TableService.transfer_to_user``
         leaves them: a grant points at the workspace by ``resource_id``, which does not
         change, so everyone the giver shared with keeps their access. The giver's own
         access was the implicit owner short-circuit and ends here — there is no grant to
@@ -287,7 +287,7 @@ class WorkspaceService:
         to pass on.
 
         Note the giver keeps any *other* workspace, so a lookup column pointing from a
-        transferred list into a retained one becomes cross-owner — buildable but not
+        transferred table into a retained one becomes cross-owner — buildable but not
         writable (see docs/known-gaps.md). Whole-workspace transfers keep lookup graphs
         intact only when the graph lived inside the one workspace.
         """
@@ -302,7 +302,7 @@ class WorkspaceService:
         )
         # Assign the relationship rather than the bare owner_id: a loaded many-to-one
         # overwrites a plain FK change on flush, which is what silently left a moved
-        # list in place until ListService started doing the same.
+        # table in place until TableService started doing the same.
         workspace.owner = recipient
 
         await db.flush()
@@ -354,25 +354,25 @@ class WorkspaceService:
         workspace = await cls.get_any_by_uuid(db, uuid)
         if workspace is None:
             return False
-        # The inbox cannot be deleted, only emptied — its lists are the recipient's
+        # The inbox cannot be deleted, only emptied — its tables are the recipient's
         # to move out or delete individually.
         cls._guard_system_workspace(workspace)
 
-        # Deferred import avoids a module cycle (lists.services imports this one).
-        from src.lists.events.broker import broker
-        from src.lists.services import ListService
+        # Deferred import avoids a module cycle (tables.services imports this one).
+        from src.tables.events.broker import broker
+        from src.tables.services import TableService
 
         now = datetime.now(timezone.utc)
-        # Cascade the soft delete to the workspace's lists and their descendants,
+        # Cascade the soft delete to the workspace's tables and their descendants,
         # all in this one transaction.
-        scrubbed = await ListService.soft_delete_for_workspace(db, workspace.id, now)
+        scrubbed = await TableService.soft_delete_for_workspace(db, workspace.id, now)
         workspace.deleted_at = now
         await db.commit()
-        # Lists whose lookup cells the cascade emptied — typically outside this
-        # workspace, since those are the ones still readable. See ListService.delete
+        # Tables whose lookup cells the cascade emptied — typically outside this
+        # workspace, since those are the ones still readable. See TableService.delete
         # for why the signal waits for the commit.
-        for list_id in scrubbed:
-            broker.notify(list_id)
+        for table_id in scrubbed:
+            broker.notify(table_id)
         return True
 
     # -- the bin: view, restore, and purge soft-deleted workspaces ----------
@@ -443,29 +443,29 @@ class WorkspaceService:
     async def restore(
         cls, db: AsyncSession, uuid: Union[str, UUID]
     ) -> Optional[Workspace]:
-        """Bring a soft-deleted workspace back, along with the lists (and their
+        """Bring a soft-deleted workspace back, along with the tables (and their
         descendants) that went down *with it*. Returns None if it is not in the bin.
 
         The cascade delete stamped the workspace and everything it took down with one
         identical ``deleted_at``; restore reverses exactly that set by matching it, so
-        a list the owner had binned on its own — a different timestamp — stays binned.
+        a table the owner had binned on its own — a different timestamp — stays binned.
 
         A workspace name is unique per owner among live rows, so a name freed while
         this one sat deleted can be taken; restoring then collides and raises
         ``ConflictError`` (HTTP 409), just as a record restore can.
 
-        Note: references *into* this workspace's lists were scrubbed at delete time
-        (see ``ListService.delete``), so cross-list lookups pointing at them are not
-        brought back — the lists themselves and their records are.
+        Note: references *into* this workspace's tables were scrubbed at delete time
+        (see ``TableService.delete``), so cross-table lookups pointing at them are not
+        brought back — the tables themselves and their records are.
         """
         workspace = await cls.get_deleted_by_uuid(db, uuid)
         if workspace is None:
             return None
 
-        # Deferred import avoids a module cycle (lists.services imports this one).
-        from src.lists.services import ListService
+        # Deferred import avoids a module cycle (tables.services imports this one).
+        from src.tables.services import TableService
 
-        await ListService.restore_for_workspace(
+        await TableService.restore_for_workspace(
             db, workspace.id, workspace.deleted_at
         )
         workspace.deleted_at = None
@@ -482,14 +482,14 @@ class WorkspaceService:
         it. Returns False if it is not in the bin.
 
         Mirrors the workspace purge job's cascade, but for one workspace in a single
-        transaction: run the list cascade for its lists (drain the records, break the
+        transaction: run the table cascade for its tables (drain the records, break the
         circular foreign key, delete descendant grants, then
-        views/forms/metrics/columns/lists), then the workspace's own grants, then the
+        views/forms/metrics/columns/tables), then the workspace's own grants, then the
         workspace. Inbound references were already scrubbed at soft-delete time.
         Irreversible.
 
         The records go in batches (``drain_records``) without committing between them,
-        for the reason ``ListService.purge`` gives: a workspace is only purgeable while
+        for the reason ``TableService.purge`` gives: a workspace is only purgeable while
         it is still restorable, so a half-finished purge must roll back whole.
         """
         workspace = await cls.get_deleted_by_uuid(db, uuid)
@@ -497,24 +497,24 @@ class WorkspaceService:
             return False
 
         workspace_ids = [workspace.id]
-        list_ids = list(
+        table_ids = list(
             (
                 await db.execute(
                     text(
-                        "SELECT id FROM lists WHERE workspace_id = ANY(:workspace_ids)"
+                        "SELECT id FROM tables WHERE workspace_id = ANY(:workspace_ids)"
                     ),
                     {"workspace_ids": workspace_ids},
                 )
             ).scalars().all()
         )
-        if list_ids:
-            await drain_records(db, list_ids, commit=False)
-            # Break the circular dependency (lists.primary_column_id -> columns.id).
+        if table_ids:
+            await drain_records(db, table_ids, commit=False)
+            # Break the circular dependency (tables.primary_column_id -> columns.id).
             await db.execute(
                 text(
-                    "UPDATE lists SET primary_column_id = NULL WHERE id = ANY(:list_ids)"
+                    "UPDATE tables SET primary_column_id = NULL WHERE id = ANY(:table_ids)"
                 ),
-                {"list_ids": list_ids},
+                {"table_ids": table_ids},
             )
             # The records' grants went with them above — once they are deleted nothing
             # is left to find their grants by.
@@ -522,19 +522,19 @@ class WorkspaceService:
                 text(
                     """
                     DELETE FROM permission_grants
-                     WHERE (resource_type = 'list' AND resource_id = ANY(:list_ids))
-                        OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE list_id = ANY(:list_ids)))
-                        OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE list_id = ANY(:list_ids)))
+                     WHERE (resource_type = 'table' AND resource_id = ANY(:table_ids))
+                        OR (resource_type = 'view' AND resource_id IN (SELECT id FROM views WHERE table_id = ANY(:table_ids)))
+                        OR (resource_type = 'form' AND resource_id IN (SELECT id FROM forms WHERE table_id = ANY(:table_ids)))
                     """
                 ),
-                {"list_ids": list_ids},
+                {"table_ids": table_ids},
             )
-            await db.execute(text("DELETE FROM views WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
-            await db.execute(text("DELETE FROM forms WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM views WHERE table_id = ANY(:table_ids)"), {"table_ids": table_ids})
+            await db.execute(text("DELETE FROM forms WHERE table_id = ANY(:table_ids)"), {"table_ids": table_ids})
             # Metrics are never a grant target, so they appear here but not above.
-            await db.execute(text("DELETE FROM metrics WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
-            await db.execute(text("DELETE FROM columns WHERE list_id = ANY(:list_ids)"), {"list_ids": list_ids})
-            await db.execute(text("DELETE FROM lists WHERE id = ANY(:list_ids)"), {"list_ids": list_ids})
+            await db.execute(text("DELETE FROM metrics WHERE table_id = ANY(:table_ids)"), {"table_ids": table_ids})
+            await db.execute(text("DELETE FROM columns WHERE table_id = ANY(:table_ids)"), {"table_ids": table_ids})
+            await db.execute(text("DELETE FROM tables WHERE id = ANY(:table_ids)"), {"table_ids": table_ids})
 
         await db.execute(
             text(

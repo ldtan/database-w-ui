@@ -17,9 +17,9 @@ from sqlalchemy import func, select, update
 
 from src.auth.users.schemas import UserCreate
 from src.auth.users.services import UserService
-from src.lists.items.models import ListItem
+from src.tables.records.models import TableRecord
 from src.maintenance import _references, sweep_orphan_grants
-from src.maintenance.purge_deleted_items import purge as purge_items
+from src.maintenance.purge_deleted_records import purge as purge_items
 from src.maintenance.sweep_orphan_grants import sweep
 from src.permissions.models import PermissionGrant
 
@@ -53,7 +53,7 @@ async def _backdate(session_factory, model, uuid, days=45) -> None:
 
 async def _cells(session_factory, key: str) -> list:
     async with session_factory() as db:
-        rows = (await db.execute(select(ListItem.data))).scalars().all()
+        rows = (await db.execute(select(TableRecord.data))).scalars().all()
     return [row.get(key) for row in rows]
 
 
@@ -64,10 +64,10 @@ async def _grants(session_factory) -> int:
 
 @pytest_asyncio.fixture
 async def target_row(client, workspace_uuid, add_column):
-    """A row on another list, for the lookups below to point at and then lose."""
-    target_list = (
+    """A row on another table, for the lookups below to point at and then lose."""
+    target_table = (
         await client.post(
-            "/api/lists/",
+            "/api/tables/",
             json={
                 "name": "targets",
                 "display_name": "Targets",
@@ -76,44 +76,44 @@ async def target_row(client, workspace_uuid, add_column):
         )
     ).json()["uuid"]
     label = await add_column(
-        target_list, name="label", display_name="Label", type="text"
+        target_table, name="label", display_name="Label", type="text"
     )
     created = await client.post(
-        f"/api/lists/{target_list}/items/", json={"data": {label: "pointed at"}}
+        f"/api/tables/{target_table}/records/", json={"data": {label: "pointed at"}}
     )
     assert created.status_code == 201, created.text
-    return target_list, created.json()["uuid"]
+    return target_table, created.json()["uuid"]
 
 
-async def _expire_target(client, session_factory, target_list, row) -> None:
+async def _expire_target(client, session_factory, target_table, row) -> None:
     """The reference survives the delete — that is what makes it restorable, and what
     lets the cell read as "(deleted)" meanwhile. Only past the window is it cleared."""
     assert (
-        await client.delete(f"/api/lists/{target_list}/items/{row}")
+        await client.delete(f"/api/tables/{target_table}/records/{row}")
     ).status_code == 204
-    await _backdate(session_factory, ListItem, row)
+    await _backdate(session_factory, TableRecord, row)
 
 
 async def test_every_batch_of_stale_lookups_is_cleared(
-    client, session_factory, list_uuid, add_column, target_row
+    client, session_factory, table_uuid, add_column, target_row
 ):
     """`ROWS` records pointing at one doomed target. The clearing is one column's worth
-    of work, but that column can span every record the list has."""
-    target_list, row = target_row
+    of work, but that column can span every record the table has."""
+    target_table, row = target_row
     link = await add_column(
-        list_uuid,
+        table_uuid,
         name="link",
         display_name="Link",
         type="lookup",
-        config={"target_list_uuid": target_list},
+        config={"target_table_uuid": target_table},
     )
     for _ in range(ROWS):
         created = await client.post(
-            f"/api/lists/{list_uuid}/items/", json={"data": {link: row}}
+            f"/api/tables/{table_uuid}/records/", json={"data": {link: row}}
         )
         assert created.status_code == 201, created.text
 
-    await _expire_target(client, session_factory, target_list, row)
+    await _expire_target(client, session_factory, target_table, row)
     await purge_items(days=30)
 
     # Every one, not the first two.
@@ -121,49 +121,49 @@ async def test_every_batch_of_stale_lookups_is_cleared(
 
 
 async def test_every_batch_of_a_multi_valued_lookup_is_cleared(
-    client, session_factory, list_uuid, add_column, target_row
+    client, session_factory, table_uuid, add_column, target_row
 ):
     """The array shape of the same rewrite: a cell holding several uuids keeps the ones
     still worth pointing at rather than being nulled. Both branches of the CASE have to
     survive being run a batch at a time."""
-    target_list, row = target_row
+    target_table, row = target_row
     link = await add_column(
-        list_uuid,
+        table_uuid,
         name="links",
         display_name="Links",
         type="lookup",
-        config={"target_list_uuid": target_list, "multiple": True},
+        config={"target_table_uuid": target_table, "multiple": True},
     )
     for _ in range(ROWS):
         created = await client.post(
-            f"/api/lists/{list_uuid}/items/", json={"data": {link: [row]}}
+            f"/api/tables/{table_uuid}/records/", json={"data": {link: [row]}}
         )
         assert created.status_code == 201, created.text
 
-    await _expire_target(client, session_factory, target_list, row)
+    await _expire_target(client, session_factory, target_table, row)
     await purge_items(days=30)
 
     assert await _cells(session_factory, link) == [[]] * ROWS
 
 
 async def test_every_batch_of_orphan_grants_is_swept(
-    client, session_factory, list_uuid, add_column, alice
+    client, session_factory, table_uuid, add_column, alice
 ):
     """Grants for records that no longer exist at all — what a hard delete leaves if
-    something skips the purge path. There is one per share, so a busy list's worth is
+    something skips the purge path. There is one per share, so a busy table's worth is
     not a small number."""
     column = await add_column(
-        list_uuid, name="title", display_name="Title", type="text"
+        table_uuid, name="title", display_name="Title", type="text"
     )
     for n in range(ROWS):
         created = await client.post(
-            f"/api/lists/{list_uuid}/items/", json={"data": {column: f"row {n}"}}
+            f"/api/tables/{table_uuid}/records/", json={"data": {column: f"row {n}"}}
         )
         assert created.status_code == 201, created.text
         granted = await client.post(
             "/api/permissions/grants",
             json={
-                "resource_type": "item",
+                "resource_type": "record",
                 "resource_uuid": created.json()["uuid"],
                 "user_uuid": alice,
                 "actions": ["view"],
@@ -175,7 +175,7 @@ async def test_every_batch_of_orphan_grants_is_swept(
 
     # Destroy the records out from under the grants, leaving every one an orphan.
     async with session_factory() as db:
-        await db.execute(ListItem.__table__.delete())
+        await db.execute(TableRecord.__table__.delete())
         await db.commit()
 
     assert await sweep(days=30) == ROWS
@@ -183,15 +183,15 @@ async def test_every_batch_of_orphan_grants_is_swept(
 
 
 async def test_a_sweep_with_nothing_to_do_stops_immediately(
-    client, session_factory, list_uuid, alice
+    client, session_factory, table_uuid, alice
 ):
     """The loop's exit, on the case that is normal in a healthy database: a grant whose
     resource is alive is not swept, and the first empty select ends the pass."""
     granted = await client.post(
         "/api/permissions/grants",
         json={
-            "resource_type": "list",
-            "resource_uuid": list_uuid,
+            "resource_type": "table",
+            "resource_uuid": table_uuid,
             "user_uuid": alice,
             "actions": ["view"],
         },

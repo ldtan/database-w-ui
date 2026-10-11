@@ -7,8 +7,8 @@ safe to re-run: a second run fills the gaps left by a first one that died halfwa
 and leaves everything else alone, including edits made by hand while exploring.
 
 Records are the one thing without a natural key — a record is pure data (D2), so
-there is nothing to match on. `seed_records` therefore takes the list as its unit:
-a list that already holds live records is left untouched rather than doubled.
+there is nothing to match on. `seed_records` therefore takes the table as its unit:
+a table that already holds live records is left untouched rather than doubled.
 
 Writes go through the **real services**, not raw INSERTs, so seeded data is
 validated exactly as the API validates it: a lookup pointing nowhere, a formula
@@ -37,25 +37,25 @@ from src.auth.users.schemas import (
     UserSettingsUpdate,
 )
 from src.auth.users.services import UserGroupService, UserService
-from src.lists.columns.models import Column
-from src.lists.columns.schemas import ColumnConfig, ColumnCreate
-from src.lists.columns.services import ColumnService
-from src.lists.forms.enums import FormType
-from src.lists.forms.models import Form
-from src.lists.forms.schemas import FormConfig, FormCreate
-from src.lists.forms.services import FormService
-from src.lists.items.models import ListItem
-from src.lists.items.schemas import ListItemCreate
-from src.lists.items.services import ListItemService
-from src.lists.metrics.models import Metric
-from src.lists.metrics.schemas import MetricConfig, MetricCreate
-from src.lists.metrics.services import MetricService
-from src.lists.models import List as ListModel
-from src.lists.schemas import ListCreate, ListUpdate
-from src.lists.services import ListService
-from src.lists.views.models import View
-from src.lists.views.schemas import ViewConfig, ViewCreate
-from src.lists.views.services import ViewService
+from src.tables.columns.models import Column
+from src.tables.columns.schemas import ColumnConfig, ColumnCreate
+from src.tables.columns.services import ColumnService
+from src.tables.forms.enums import FormType
+from src.tables.forms.models import Form
+from src.tables.forms.schemas import FormConfig, FormCreate
+from src.tables.forms.services import FormService
+from src.tables.records.models import TableRecord
+from src.tables.records.schemas import TableRecordCreate
+from src.tables.records.services import TableRecordService
+from src.tables.metrics.models import Metric
+from src.tables.metrics.schemas import MetricConfig, MetricCreate
+from src.tables.metrics.services import MetricService
+from src.tables.models import Table
+from src.tables.schemas import TableCreate, TableUpdate
+from src.tables.services import TableService
+from src.tables.views.models import View
+from src.tables.views.schemas import ViewConfig, ViewCreate
+from src.tables.views.services import ViewService
 from src.people.models import Person
 from src.people.schemas import PersonCreate
 from src.people.services import PersonService
@@ -71,7 +71,7 @@ class Report(Counter):
     """What the run created, versus what it found already in place.
 
     A counter rather than a log: on a re-run the interesting number is how much was
-    *new*, and "created 0 lists" is exactly the reassurance an idempotent script
+    *new*, and "created 0 tables" is exactly the reassurance an idempotent script
     owes its operator.
     """
 
@@ -218,7 +218,7 @@ async def ensure_workspace(
     return workspace
 
 
-async def ensure_list(
+async def ensure_table(
     db: AsyncSession,
     report: Report,
     workspace: Workspace,
@@ -227,31 +227,31 @@ async def ensure_list(
     display_name: str,
     description: Optional[str] = None,
     settings: Optional[dict] = None,
-) -> ListModel:
-    """A list. Creating one auto-provisions the audit columns, a grid view and the
+) -> Table:
+    """A table. Creating one auto-provisions the audit columns, a grid view and the
     three default forms — this returns after that has happened.
 
-    Always resolved through `ListService.get_any_by_uuid`, whatever branch it takes,
-    because that is the one loader that eager-loads `List.workspace`. Several
+    Always resolved through `TableService.get_any_by_uuid`, whatever branch it takes,
+    because that is the one loader that eager-loads `Table.workspace`. Several
     services reach for it (`_lookup_target_id` reads its owner), and under asyncpg a
     lazy load outside the greenlet raises rather than quietly fetching.
     """
     existing = (
         await db.execute(
-            select(ListModel.uuid).where(
-                ListModel.workspace_id == workspace.id,
-                ListModel.name == name,
-                ListModel.deleted_at.is_(None),
+            select(Table.uuid).where(
+                Table.workspace_id == workspace.id,
+                Table.name == name,
+                Table.deleted_at.is_(None),
             )
         )
     ).scalars().first()
     if existing is not None:
-        report.found("lists")
-        return await ListService.get_any_by_uuid(db, existing)
+        report.found("tables")
+        return await TableService.get_any_by_uuid(db, existing)
 
-    lst = await ListService.create(
+    table = await TableService.create(
         db,
-        ListCreate(
+        TableCreate(
             name=name,
             display_name=display_name,
             description=description,
@@ -259,40 +259,40 @@ async def ensure_list(
             workspace_uuid=workspace.uuid,
         ),
     )
-    report.made("lists")
-    return lst
+    report.made("tables")
+    return table
 
 
 async def set_primary_column(
-    db: AsyncSession, lst: ListModel, column: Column
-) -> ListModel:
-    """Point the list's display field at one of its columns.
+    db: AsyncSession, table: Table, column: Column
+) -> Table:
+    """Point the table's display field at one of its columns.
 
-    Worth doing on every list that anything links to: a row's label falls back from
-    the lookup's `display_column_uuid` to this, and only then to the list's *first*
+    Worth doing on every table that anything links to: a row's label falls back from
+    the lookup's `display_column_uuid` to this, and only then to the table's *first*
     column — which is rarely the one a human would have picked.
     """
-    if lst.primary_column_id == column.id:
-        return lst
-    return await ListService.update(
-        db, lst.uuid, ListUpdate(primary_column_uuid=column.uuid)
+    if table.primary_column_id == column.id:
+        return table
+    return await TableService.update(
+        db, table.uuid, TableUpdate(primary_column_uuid=column.uuid)
     )
 
 
-async def set_unique_permissions(db: AsyncSession, lst: ListModel) -> ListModel:
-    """Stop the list inheriting its workspace's grants, so its own stand alone."""
-    if not lst.permissions_inherit:
-        return lst
-    return await ListService.update(db, lst.uuid, ListUpdate(permissions_inherit=False))
+async def set_unique_permissions(db: AsyncSession, table: Table) -> Table:
+    """Stop the table inheriting its workspace's grants, so its own stand alone."""
+    if not table.permissions_inherit:
+        return table
+    return await TableService.update(db, table.uuid, TableUpdate(permissions_inherit=False))
 
 
-# -- list configuration ----------------------------------------------------
+# -- table configuration ----------------------------------------------------
 
 
 async def ensure_column(
     db: AsyncSession,
     report: Report,
-    lst: ListModel,
+    table: Table,
     actor: User,
     *,
     name: str,
@@ -307,11 +307,11 @@ async def ensure_column(
     among live columns, so restricting this to live rows would let a scenario that
     deliberately bins one recreate it on the next run — and bin the new one too,
     growing a pile of identical binned columns. The same rule holds for views, and
-    for lists via `list_exists`.
+    for tables via `table_exists`.
     """
     existing = (
         await db.execute(
-            select(Column).where(Column.list_id == lst.id, Column.name == name)
+            select(Column).where(Column.table_id == table.id, Column.name == name)
         )
     ).scalars().first()
     if existing is not None:
@@ -320,7 +320,7 @@ async def ensure_column(
 
     column = await ColumnService.create(
         db,
-        lst,
+        table,
         ColumnCreate(
             name=name,
             display_name=display_name,
@@ -337,7 +337,7 @@ async def ensure_column(
 async def ensure_view(
     db: AsyncSession,
     report: Report,
-    lst: ListModel,
+    table: Table,
     *,
     name: str,
     display_name: str,
@@ -348,7 +348,7 @@ async def ensure_view(
     """A saved view. A binned one counts as already there — see `ensure_column`."""
     existing = (
         await db.execute(
-            select(View).where(View.list_id == lst.id, View.name == name)
+            select(View).where(View.table_id == table.id, View.name == name)
         )
     ).scalars().first()
     if existing is not None:
@@ -357,7 +357,7 @@ async def ensure_view(
 
     view = await ViewService.create(
         db,
-        lst,
+        table,
         ViewCreate(
             name=name,
             display_name=display_name,
@@ -373,7 +373,7 @@ async def ensure_view(
 async def ensure_form(
     db: AsyncSession,
     report: Report,
-    lst: ListModel,
+    table: Table,
     *,
     name: str,
     display_name: str,
@@ -384,7 +384,7 @@ async def ensure_form(
     existing = (
         await db.execute(
             select(Form).where(
-                Form.list_id == lst.id, Form.name == name, Form.deleted_at.is_(None)
+                Form.table_id == table.id, Form.name == name, Form.deleted_at.is_(None)
             )
         )
     ).scalars().first()
@@ -394,7 +394,7 @@ async def ensure_form(
 
     form = await FormService.create(
         db,
-        lst,
+        table,
         FormCreate(
             name=name,
             display_name=display_name,
@@ -410,7 +410,7 @@ async def ensure_form(
 async def ensure_metric(
     db: AsyncSession,
     report: Report,
-    lst: ListModel,
+    table: Table,
     *,
     name: str,
     display_name: str,
@@ -424,7 +424,7 @@ async def ensure_metric(
     existing = (
         await db.execute(
             select(Metric).where(
-                Metric.list_id == lst.id,
+                Metric.table_id == table.id,
                 Metric.name == name,
                 Metric.deleted_at.is_(None),
             )
@@ -436,7 +436,7 @@ async def ensure_metric(
 
     metric = await MetricService.create(
         db,
-        lst,
+        table,
         MetricCreate(
             name=name,
             display_name=display_name,
@@ -457,21 +457,21 @@ async def ensure_metric(
 async def seed_records(
     db: AsyncSession,
     report: Report,
-    lst: ListModel,
+    table: Table,
     actor: User,
     columns: dict[str, Column],
     rows: Sequence[dict],
 ) -> list[str]:
-    """Write `rows` (keyed by column *name*) as records, unless the list has some.
+    """Write `rows` (keyed by column *name*) as records, unless the table has some.
 
-    The list is the unit of idempotency because a record has no natural key: `data`
+    The table is the unit of idempotency because a record has no natural key: `data`
     is keyed by column uuid and holds nothing that identifies the row across runs.
     Anything already here therefore wins, and nothing is duplicated.
 
-    **Returns the list's row uuids either way** — the ones just written, or the ones
-    already there, in insertion order. Callers link one list to another by position
+    **Returns the table's row uuids either way** — the ones just written, or the ones
+    already there, in insertion order. Callers link one table to another by position
     (`students[4]` is the fifth student), so a skip has to hand back something a
-    later phase can still point at, or a re-run would build lists full of empty
+    later phase can still point at, or a re-run would build tables full of empty
     lookups.
 
     Values are passed through as written and validated per column — a choice label
@@ -480,9 +480,9 @@ async def seed_records(
     """
     existing = (
         await db.execute(
-            select(ListItem.uuid)
-            .where(ListItem.list_id == lst.id, ListItem.deleted_at.is_(None))
-            .order_by(ListItem.id)
+            select(TableRecord.uuid)
+            .where(TableRecord.table_id == table.id, TableRecord.deleted_at.is_(None))
+            .order_by(TableRecord.id)
         )
     ).scalars().all()
     if existing:
@@ -495,65 +495,65 @@ async def seed_records(
         for name, value in row.items():
             column = columns.get(name)
             if column is None:
-                raise KeyError(f"{lst.name!r} has no column named {name!r}")
+                raise KeyError(f"{table.name!r} has no column named {name!r}")
             data[str(column.uuid)] = value
-        item = await ListItemService.create(db, lst, ListItemCreate(data=data), actor)
-        created.append(str(item.uuid))
+        record = await TableRecordService.create(db, table, TableRecordCreate(data=data), actor)
+        created.append(str(record.uuid))
     report["records created"] += len(created)
     return created
 
 
 async def bin_records(
-    db: AsyncSession, report: Report, lst: ListModel, uuids: Sequence[str]
+    db: AsyncSession, report: Report, table: Table, uuids: Sequence[str]
 ) -> None:
-    """Soft-delete a few records so the list's bin has something in it.
+    """Soft-delete a few records so the table's bin has something in it.
 
-    A list that already has something binned is left alone. Callers pick the rows
+    A table that already has something binned is left alone. Callers pick the rows
     to bin off the *live* ones, so without this each run would eat another couple
     of records — a seeder that quietly shrinks its own data every time it runs.
     """
     already = await db.scalar(
         select(func.count())
-        .select_from(ListItem)
-        .where(ListItem.list_id == lst.id, ListItem.deleted_at.is_not(None))
+        .select_from(TableRecord)
+        .where(TableRecord.table_id == table.id, TableRecord.deleted_at.is_not(None))
     )
     if already:
         return
     for uuid in uuids:
-        if await ListItemService.delete(db, lst, uuid):
+        if await TableRecordService.delete(db, table, uuid):
             report["records binned"] += 1
 
 
-async def list_exists(db: AsyncSession, workspace_id: int, name: str) -> bool:
-    """Whether a list of this name is in the workspace, **bin included**.
+async def table_exists(db: AsyncSession, workspace_id: int, name: str) -> bool:
+    """Whether a table of this name is in the workspace, **bin included**.
 
-    `ensure_list` deliberately ignores binned rows — a name is only unique among
-    live lists, so a deleted one must not block re-creating it. That is wrong for
-    a list the scenario deletes on purpose: without this check every run would
+    `ensure_table` deliberately ignores binned rows — a name is only unique among
+    live tables, so a deleted one must not block re-creating it. That is wrong for
+    a table the scenario deletes on purpose: without this check every run would
     create another and bin it too.
     """
     found = await db.scalar(
-        select(ListModel.id).where(
-            ListModel.workspace_id == workspace_id, ListModel.name == name
+        select(Table.id).where(
+            Table.workspace_id == workspace_id, Table.name == name
         )
     )
     return found is not None
 
 
-async def list_owned_by(db: AsyncSession, owner: User, name: str) -> bool:
-    """Whether this user owns a live list of this name in any of their workspaces.
+async def table_owned_by(db: AsyncSession, owner: User, name: str) -> bool:
+    """Whether this user owns a live table of this name in any of their workspaces.
 
-    How a transfer is recognised on a re-run: the list is no longer where it was
+    How a transfer is recognised on a re-run: the table is no longer where it was
     created, so the only way to tell it has already been handed over is to ask
     whether the recipient has it.
     """
     found = await db.scalar(
-        select(ListModel.id)
-        .join(Workspace, ListModel.workspace_id == Workspace.id)
+        select(Table.id)
+        .join(Workspace, Table.workspace_id == Workspace.id)
         .where(
             Workspace.owner_id == owner.id,
-            ListModel.name == name,
-            ListModel.deleted_at.is_(None),
+            Table.name == name,
+            Table.deleted_at.is_(None),
             Workspace.deleted_at.is_(None),
         )
     )

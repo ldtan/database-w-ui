@@ -70,7 +70,7 @@ const KINDS: Record<PrincipalKind, KindSpec> = {
  * Destroying an account **409s while it still owns workspaces**: `owner_id` is a
  * non-null foreign key, so the alternative to refusing would be taking somebody's
  * data down with the account. The message names the workspaces, and it reaches the
- * user unchanged through the error toast — that list is the whole point of the
+ * user unchanged through the error toast — that table is the whole point of the
  * refusal, so it must not be flattened into "could not delete".
  */
 export function DeletedPrincipalsDialog({

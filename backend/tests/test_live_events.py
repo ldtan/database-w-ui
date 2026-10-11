@@ -1,4 +1,4 @@
-"""Live records: the broker, and the stream `GET /lists/{uuid}/events` serves.
+"""Live records: the broker, and the stream `GET /tables/{uuid}/events` serves.
 
 Two things about testing this are unlike the rest of the suite, and both shape
 everything below.
@@ -13,7 +13,7 @@ stream is open, it starts the request as a task, does the thing, and then awaits
 
 **The route resolves its caller by calling `get_current_user` directly**, not by
 declaring it as a dependency — that is the whole point of it (see the module docstring
-in src/lists/events/routers.py). So `app.dependency_overrides` does not reach it, and
+in src/tables/events/routers.py). So `app.dependency_overrides` does not reach it, and
 `make_client` from test_permissions cannot be borrowed. The permission tests here mint
 real tokens with `DISABLE_AUTH` off instead, which is the better test anyway: the
 hand-rolled auth is the part with no framework underneath it.
@@ -30,9 +30,9 @@ from src.auth.users.schemas import UserCreate
 from src.auth.users.services import UserService
 from src.core.config import settings
 from src.infrastructure import database as db_module
-from src.lists.events.broker import ListEventBroker, broker, reset_shutdown
-from src.lists.schemas import ListCreate
-from src.lists.services import ListService
+from src.tables.events.broker import TableEventBroker, broker, reset_shutdown
+from src.tables.schemas import TableCreate
+from src.tables.services import TableService
 from src.permissions.enums import Action, ResourceType
 from src.permissions.schemas import GrantCreate
 from src.permissions.services import PermissionService
@@ -76,8 +76,8 @@ def _short_streams():
 # -- the broker ------------------------------------------------------------
 
 
-async def test_notify_wakes_every_watcher_of_that_list_and_no_others():
-    bus = ListEventBroker()
+async def test_notify_wakes_every_watcher_of_that_table_and_no_others():
+    bus = TableEventBroker()
     with bus.subscribe(1) as first, bus.subscribe(1) as second, bus.subscribe(2) as other:
         bus.notify(1)
         assert first.is_set() and second.is_set()
@@ -91,7 +91,7 @@ async def test_a_burst_of_notifies_coalesces_into_one_wake_up():
     are the same message. A queue would deliver 200 of them and the client would
     refetch 200 times; one bit of state cannot.
     """
-    bus = ListEventBroker()
+    bus = TableEventBroker()
     with bus.subscribe(1) as changed:
         for _ in range(200):
             bus.notify(1)
@@ -101,14 +101,14 @@ async def test_a_burst_of_notifies_coalesces_into_one_wake_up():
         assert not changed.is_set()
 
 
-async def test_notifying_a_list_nobody_watches_is_a_no_op():
-    bus = ListEventBroker()
+async def test_notifying_a_table_nobody_watches_is_a_no_op():
+    bus = TableEventBroker()
     bus.notify(999)  # must not raise, and must not create a watcher set
     assert bus.watcher_count(999) == 0
 
 
 async def test_a_subscriber_is_removed_however_its_block_ends():
-    bus = ListEventBroker()
+    bus = TableEventBroker()
     with bus.subscribe(1):
         assert bus.watcher_count(1) == 1
     assert bus.watcher_count(1) == 0
@@ -125,27 +125,27 @@ async def test_a_subscriber_is_removed_however_its_block_ends():
 
 
 @pytest_asyncio.fixture
-async def live_list(client, list_uuid):
-    """A list with one text column.
+async def live_table(client, table_uuid):
+    """A table with one text column.
 
-    Returns `(list uuid, column uuid, list id)`. The column's **uuid** is the key a
-    record's `data` is written under (data-model D2), and the list's integer id is
+    Returns `(table uuid, column uuid, table id)`. The column's **uuid** is the key a
+    record's `data` is written under (data-model D2), and the table's integer id is
     what the broker is keyed on.
     """
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={"name": "title", "display_name": "Title", "type": "text"},
     )
     assert resp.status_code == 201, resp.text
     column_uuid = resp.json()["uuid"]
     async with db_module.SessionLocal() as db:
-        lst = await ListService.get_any_by_uuid(db, list_uuid)
-        return list_uuid, column_uuid, lst.id
+        table = await TableService.get_any_by_uuid(db, table_uuid)
+        return table_uuid, column_uuid, table.id
 
 
-async def test_a_stream_opens_pings_and_ends_at_its_deadline(client, live_list):
-    list_uuid, column_uuid, _ = live_list
-    resp = await client.get(f"/api/lists/{list_uuid}/events")
+async def test_a_stream_opens_pings_and_ends_at_its_deadline(client, live_table):
+    table_uuid, column_uuid, _ = live_table
+    resp = await client.get(f"/api/tables/{table_uuid}/events")
 
     assert resp.status_code == 200
     assert resp.headers["content-type"].startswith("text/event-stream")
@@ -154,29 +154,29 @@ async def test_a_stream_opens_pings_and_ends_at_its_deadline(client, live_list):
     assert resp.headers["cache-control"] == "no-cache, no-transform"
     assert resp.headers["x-accel-buffering"] == "no"
     # The opening comment: it flushes the response head so the client knows the
-    # stream is open before anything has happened on a list that may be quiet.
+    # stream is open before anything has happened on a table that may be quiet.
     assert resp.text.startswith(PING)
     # And it ended by itself, which is what SSE_MAX_STREAM_SECONDS is for.
     assert _count(resp.text, CHANGED) == 0
 
 
-async def test_an_idle_stream_keeps_saying_something(client, live_list):
+async def test_an_idle_stream_keeps_saying_something(client, live_table):
     """Without traffic a proxy reaps the connection and the server never learns the
     peer has gone. More than one ping in a second of silence is the whole assertion."""
     settings.SSE_HEARTBEAT_SECONDS = 0.2
-    list_uuid, column_uuid, _ = live_list
-    resp = await client.get(f"/api/lists/{list_uuid}/events")
+    table_uuid, column_uuid, _ = live_table
+    resp = await client.get(f"/api/tables/{table_uuid}/events")
     assert _count(resp.text, PING) >= 3
 
 
-async def test_a_record_write_reaches_an_open_stream(client, live_list):
+async def test_a_record_write_reaches_an_open_stream(client, live_table):
     """The feature, end to end: POST a record and the watcher is told to look again."""
-    list_uuid, column_uuid, _ = live_list
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    table_uuid, column_uuid, _ = live_table
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.1)  # let the subscription register before writing
 
     created = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {column_uuid: "hello"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {column_uuid: "hello"}}
     )
     assert created.status_code == 201, created.text
 
@@ -187,53 +187,53 @@ async def test_a_record_write_reaches_an_open_stream(client, live_list):
     assert "hello" not in resp.text
 
 
-async def test_the_frame_carries_no_record_data_for_any_write(client, live_list):
+async def test_the_frame_carries_no_record_data_for_any_write(client, live_table):
     """The same guarantee across the other write paths, since each one is its own
     `notify` call site and a payload could be introduced at any of them."""
-    list_uuid, column_uuid, _ = live_list
+    table_uuid, column_uuid, _ = live_table
     created = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {column_uuid: "secret"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {column_uuid: "secret"}}
     )
-    item_uuid = created.json()["uuid"]
+    record_uuid = created.json()["uuid"]
 
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.1)
     patched = await client.patch(
-        f"/api/lists/{list_uuid}/items/{item_uuid}", json={"data": {column_uuid: "other"}}
+        f"/api/tables/{table_uuid}/records/{record_uuid}", json={"data": {column_uuid: "other"}}
     )
     assert patched.status_code == 200, patched.text
 
     resp = await stream
     assert _count(resp.text, CHANGED) == 1
     assert "secret" not in resp.text and "other" not in resp.text
-    assert item_uuid not in resp.text
+    assert record_uuid not in resp.text
 
 
-async def test_writes_to_another_list_do_not_wake_this_stream(
-    client, live_list, workspace_uuid
+async def test_writes_to_another_table_do_not_wake_this_stream(
+    client, live_table, workspace_uuid
 ):
-    list_uuid, column_uuid, _ = live_list
+    table_uuid, column_uuid, _ = live_table
     other = await client.post(
-        "/api/lists/",
+        "/api/tables/",
         json={"name": "l2", "display_name": "L2", "workspace_uuid": workspace_uuid},
     )
     other_uuid = other.json()["uuid"]
     await client.post(
-        f"/api/lists/{other_uuid}/columns/",
+        f"/api/tables/{other_uuid}/columns/",
         json={"name": "title", "display_name": "Title", "type": "text"},
     )
 
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.1)
     await client.post(
-        f"/api/lists/{other_uuid}/items/", json={"data": {column_uuid: "elsewhere"}}
+        f"/api/tables/{other_uuid}/records/", json={"data": {column_uuid: "elsewhere"}}
     )
 
     resp = await stream
     assert _count(resp.text, CHANGED) == 0
 
 
-async def test_an_import_wakes_watchers_once_not_once_per_row(client, live_list):
+async def test_an_import_wakes_watchers_once_not_once_per_row(client, live_table):
     """A 200-row import must cost one refetch, not 200. Half of that is the import
     notifying once; the other half is the Event mailbox, which would coalesce it
     anyway. Both are worth having — the granularity is deliberate, not incidental.
@@ -247,13 +247,13 @@ async def test_an_import_wakes_watchers_once_not_once_per_row(client, live_list)
     about how fast the import happened to be.
     """
     settings.SSE_MAX_STREAM_SECONDS = 5
-    list_uuid, column_uuid, _ = live_list
+    table_uuid, column_uuid, _ = live_table
     csv = "title\n" + "\n".join(f"row {n}" for n in range(200))
 
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.1)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/import",
+        f"/api/tables/{table_uuid}/import",
         files={"file": ("rows.csv", csv, "text/csv")},
     )
     assert resp.status_code == 200, resp.text
@@ -263,14 +263,14 @@ async def test_an_import_wakes_watchers_once_not_once_per_row(client, live_list)
     assert _count(events.text, CHANGED) == 1
 
 
-async def test_a_bulk_delete_that_moves_nothing_says_nothing(client, live_list):
+async def test_a_bulk_delete_that_moves_nothing_says_nothing(client, live_table):
     """A watcher woken for a write that did not happen refetches an unchanged page,
     which is the cost polling had and push exists to remove."""
-    list_uuid, column_uuid, _ = live_list
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    table_uuid, column_uuid, _ = live_table
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.1)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/bulk-delete",
+        f"/api/tables/{table_uuid}/records/bulk-delete",
         json={"uuids": ["00000000-0000-0000-0000-000000000000"]},
     )
     assert resp.status_code == 200, resp.text
@@ -280,16 +280,16 @@ async def test_a_bulk_delete_that_moves_nothing_says_nothing(client, live_list):
     assert _count(events.text, CHANGED) == 0
 
 
-async def test_shutdown_ends_an_open_stream(client, live_list):
+async def test_shutdown_ends_an_open_stream(client, live_table):
     """Otherwise a stream is an in-flight request forever and uvicorn's graceful
     shutdown waits out every subscriber's full lifetime on each redeploy."""
-    from src.lists.events.broker import begin_shutdown
+    from src.tables.events.broker import begin_shutdown
 
     settings.SSE_MAX_STREAM_SECONDS = 30  # long enough that only shutdown can end it
     settings.SSE_HEARTBEAT_SECONDS = 0.1
-    list_uuid, column_uuid, _ = live_list
+    table_uuid, column_uuid, _ = live_table
 
-    stream = asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+    stream = asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
     await asyncio.sleep(0.2)
     begin_shutdown()
 
@@ -308,7 +308,7 @@ async def test_the_lifespan_flips_the_shutdown_flag(engine, session_factory):
     context manager is the smallest thing that would notice.
     """
     from main import create_app, lifespan
-    from src.lists.events.broker import shutdown_event
+    from src.tables.events.broker import shutdown_event
 
     orig_engine, orig_factory = db_module.engine, db_module.SessionLocal
     db_module.engine, db_module.SessionLocal = engine, session_factory
@@ -323,27 +323,27 @@ async def test_the_lifespan_flips_the_shutdown_flag(engine, session_factory):
         db_module.engine, db_module.SessionLocal = orig_engine, orig_factory
 
 
-async def test_an_unknown_list_is_a_404(client):
+async def test_an_unknown_table_is_a_404(client):
     resp = await client.get(
-        "/api/lists/00000000-0000-0000-0000-000000000000/events"
+        "/api/tables/00000000-0000-0000-0000-000000000000/events"
     )
     assert resp.status_code == 404
 
 
-async def test_the_route_can_be_switched_off(client, live_list):
+async def test_the_route_can_be_switched_off(client, live_table):
     """`SSE_ENABLED=False` is the deployment's kill switch. It answers 503 rather
     than 404 because the client reads it as "fall back to polling", which is a
-    statement about the transport and not about the list."""
+    statement about the transport and not about the table."""
     settings.SSE_ENABLED = False
-    list_uuid, column_uuid, _ = live_list
-    resp = await client.get(f"/api/lists/{list_uuid}/events")
+    table_uuid, column_uuid, _ = live_table
+    resp = await client.get(f"/api/tables/{table_uuid}/events")
     assert resp.status_code == 503
 
 
-async def test_a_caller_with_no_token_is_refused(client, live_list):
-    list_uuid, column_uuid, _ = live_list
+async def test_a_caller_with_no_token_is_refused(client, live_table):
+    table_uuid, column_uuid, _ = live_table
     resp = await client.get(
-        f"/api/lists/{list_uuid}/events", headers={"Authorization": ""}
+        f"/api/tables/{table_uuid}/events", headers={"Authorization": ""}
     )
     assert resp.status_code == 401
 
@@ -385,7 +385,7 @@ def app_client(engine, session_factory):
     return _build
 
 
-async def test_the_stream_is_gated_on_being_able_to_view_the_list(
+async def test_the_stream_is_gated_on_being_able_to_view_the_table(
     session_factory, app_client, real_auth
 ):
     async with session_factory() as db:
@@ -398,15 +398,15 @@ async def test_the_stream_is_gated_on_being_able_to_view_the_list(
         ws = await WorkspaceService.create(
             db, owner.id, WorkspaceCreate(name="w", display_name="W")
         )
-        lst = await ListService.create(
-            db, ListCreate(name="l", display_name="L", workspace_uuid=ws.uuid)
+        table = await TableService.create(
+            db, TableCreate(name="l", display_name="L", workspace_uuid=ws.uuid)
         )
-        list_uuid, list_id = str(lst.uuid), lst.id
+        table_uuid, table_id = str(table.uuid), table.id
         owner_token, stranger_token = _token(owner), _token(stranger)
         stranger_uuid = str(stranger.uuid)
 
     async with app_client() as http:
-        url = f"/api/lists/{list_uuid}/events"
+        url = f"/api/tables/{table_uuid}/events"
 
         # The owner is let in.
         resp = await http.get(url, headers={"Authorization": f"Bearer {owner_token}"})
@@ -418,7 +418,7 @@ async def test_the_stream_is_gated_on_being_able_to_view_the_list(
             url, headers={"Authorization": f"Bearer {stranger_token}"}
         )
         assert resp.status_code == 403
-        assert broker.watcher_count(list_id) == 0
+        assert broker.watcher_count(table_id) == 0
 
     # Given `view`, the same person is let in. This is also the seam that closes
     # late: authorization is checked at connect and never again, so revoking this
@@ -430,47 +430,47 @@ async def test_the_stream_is_gated_on_being_able_to_view_the_list(
             db,
             granter,
             GrantCreate(
-                resource_type=ResourceType.list,
-                resource_uuid=list_uuid,
+                resource_type=ResourceType.table,
+                resource_uuid=table_uuid,
                 user_uuid=stranger_uuid,
                 actions=[Action.view],
             ),
         )
     async with app_client() as http:
         resp = await http.get(
-            f"/api/lists/{list_uuid}/events",
+            f"/api/tables/{table_uuid}/events",
             headers={"Authorization": f"Bearer {stranger_token}"},
         )
         assert resp.status_code == 200
 
 
-async def test_an_open_stream_does_not_hold_a_pooled_connection(client, live_list):
-    """The regression test for the reason this route is not on the lists router.
+async def test_an_open_stream_does_not_hold_a_pooled_connection(client, live_table):
+    """The regression test for the reason this route is not on the tables router.
 
-    `src/lists/routers.py` applies `Depends(get_current_user)`, which takes
+    `src/tables/routers.py` applies `Depends(get_current_user)`, which takes
     `Depends(get_db)`, and a yield dependency is released only once the response
     completes — which for a stream is when the browser closes it. Mounting the route
     there would check a session out of the pool per subscriber, and the engine takes
-    SQLAlchemy's defaults (5 + 10 overflow), so roughly fifteen open lists would
+    SQLAlchemy's defaults (5 + 10 overflow), so roughly fifteen open tables would
     stall every other request in the app until `pool_timeout`.
 
     Nothing else in the suite would notice that: the app would still build, the route
     would still stream, and the failure would arrive in production as "the site hangs
-    when a few people have a list open". So: more streams than the pool can hold,
+    when a few people have a table open". So: more streams than the pool can hold,
     open at once, and an ordinary request answered while they are.
     """
     settings.SSE_MAX_STREAM_SECONDS = 3
     settings.SSE_HEARTBEAT_SECONDS = 0.2
-    list_uuid, column_uuid, _ = live_list
+    table_uuid, column_uuid, _ = live_table
 
     streams = [
-        asyncio.create_task(client.get(f"/api/lists/{list_uuid}/events"))
+        asyncio.create_task(client.get(f"/api/tables/{table_uuid}/events"))
         for _ in range(20)
     ]
     try:
         await asyncio.sleep(0.3)
         resp = await asyncio.wait_for(
-            client.get(f"/api/lists/{list_uuid}/items/"), timeout=10
+            client.get(f"/api/tables/{table_uuid}/records/"), timeout=10
         )
         assert resp.status_code == 200
     finally:

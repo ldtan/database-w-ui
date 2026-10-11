@@ -1,15 +1,15 @@
-/** Which columns go into a list's QR codes, and the saving of that choice.
+/** Which columns go into a table's QR codes, and the saving of that choice.
  *
- *  The shape is lifted from the export dialog's column list (`ImportExportDialog`): a
- *  `Set` of uuids, All/None, and a scrolling list of checkboxes whose labels show the
+ *  The shape is lifted from the export dialog's column table (`ImportExportDialog`): a
+ *  `Set` of uuids, All/None, and a scrolling table of checkboxes whose labels show the
  *  `display_name` with the `name` in parentheses. That last detail matters more here than
  *  it does there — the `name` **is** the key the payload is written under, so somebody
- *  authoring a code by hand is reading it off this list.
+ *  authoring a code by hand is reading it off this table.
  *
- *  **The selection is saved on the list**, not held per session, because it describes a
- *  printed artifact rather than how somebody is working right now: every badge for a list
+ *  **The selection is saved on the table**, not held per session, because it describes a
+ *  printed artifact rather than how somebody is working right now: every badge for a table
  *  should carry the same fields, and re-picking them per print is how two batches end up
- *  disagreeing. It lives in `lists.settings.qr` — the first key of that blob anything
+ *  disagreeing. It lives in `tables.settings.qr` — the first key of that blob anything
  *  reads — and saving needs `configure`, so a viewer gets the layout and cannot change it.
  */
 import { useMemo } from "react";
@@ -21,16 +21,16 @@ import { Message } from "primereact/message";
 import { api } from "../../lib/api";
 import { QR_UUID_KEY } from "../../lib/qr";
 import { useToast } from "../../lib/toast";
-import { listSettings, type Column, type ListRead } from "../../lib/types";
+import { tableSettings, type Column, type TableRead } from "../../lib/types";
 
 export interface QrSelection {
-  /** Column **names**, in the order the list declares them. Names rather than uuids
+  /** Column **names**, in the order the table declares them. Names rather than uuids
    *  because that is the payload's key, and because a clone keeps every name. */
   columns: string[];
   includeUuid: boolean;
 }
 
-/** The saved selection, or the sensible default for a list that has none.
+/** The saved selection, or the sensible default for a table that has none.
  *
  *  The default is the **primary column plus the uuid**: a badge that says who it is and
  *  carries a machine id, which is the shape the scanner was built around ("a badge's code
@@ -38,14 +38,14 @@ export interface QrSelection {
  *  because every field added is bytes, and bytes are modules.
  */
 export function resolveQrSelection(
-  lst: ListRead | undefined,
+  lst: TableRead | undefined,
   columns: Column[],
 ): QrSelection {
-  const saved = listSettings(lst).qr;
+  const saved = tableSettings(lst).qr;
   if (saved && Array.isArray(saved.columns)) {
     const names = new Set(columns.map((c) => c.name));
     return {
-      // Filtered against the list's current columns: a saved selection outlives the
+      // Filtered against the table's current columns: a saved selection outlives the
       // columns it names, and one that was renamed away should quietly stop appearing
       // rather than show as a ghost tick. The server ignores it too.
       columns: saved.columns.filter(
@@ -59,17 +59,17 @@ export function resolveQrSelection(
 }
 
 export function QrColumnPicker({
-  listUuid,
+  tableUuid,
   columns,
   selection,
   onChange,
   canSave,
 }: {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   selection: QrSelection;
   onChange: (next: QrSelection) => void;
-  /** `configure` on the list. Without it the picker still works for this print — it is
+  /** `configure` on the table. Without it the picker still works for this print — it is
    *  the *saving* that is gated, not the choosing. */
   canSave: boolean;
 }) {
@@ -79,24 +79,24 @@ export function QrColumnPicker({
 
   const save = useMutation({
     mutationFn: () =>
-      api.patch(`/lists/${listUuid}`, {
+      api.patch(`/tables/${tableUuid}`, {
         settings: {
           qr: { columns: selection.columns, include_uuid: selection.includeUuid },
         },
       }),
     onSuccess: () => {
-      // The list object carries `settings`, so anything holding it has to re-read.
-      queryClient.invalidateQueries({ queryKey: ["list", listUuid] });
-      queryClient.invalidateQueries({ queryKey: ["lists"] });
-      toast.success("Saved", "New codes for this list will use these fields.");
+      // The table object carries `settings`, so anything holding it has to re-read.
+      queryClient.invalidateQueries({ queryKey: ["table", tableUuid] });
+      queryClient.invalidateQueries({ queryKey: ["tables"] });
+      toast.success("Saved", "New codes for this table will use these fields.");
     },
     onError: () => toast.error("Could not save", "The fields were not changed."),
   });
 
   function toggle(name: string, on: boolean) {
     const next = on
-      ? // Kept in the list's own column order rather than click order, so the payload's
-        // key order is a property of the list and not of how somebody ticked.
+      ? // Kept in the table's own column order rather than click order, so the payload's
+        // key order is a property of the table and not of how somebody ticked.
         columns.filter((c) => chosen.has(c.name) || c.name === name).map((c) => c.name)
       : selection.columns.filter((n) => n !== name);
     onChange({ ...selection, columns: next });
@@ -164,7 +164,7 @@ export function QrColumnPicker({
         // floating in the middle, reading as a layout accident.
         <div className="flex">
           <Button
-            label="Save as this list's default"
+            label="Save as this table's default"
             icon="pi pi-check"
             text
             size="small"
@@ -173,12 +173,12 @@ export function QrColumnPicker({
           />
         </div>
       ) : (
-        // Worded to be true whether or not the list has a saved default — a viewer
-        // opening this on a list nobody has configured would otherwise be told it has
+        // Worded to be true whether or not the table has a saved default — a viewer
+        // opening this on a table nobody has configured would otherwise be told it has
         // one. What they can be told either way is what their change does and does not do.
         <Message
           severity="info"
-          text="Changes here apply to this print only. Saving them as the list's default needs permission to configure the list."
+          text="Changes here apply to this print only. Saving them as the table's default needs permission to configure the table."
         />
       )}
     </div>

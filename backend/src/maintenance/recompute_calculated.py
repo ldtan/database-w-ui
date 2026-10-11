@@ -1,10 +1,10 @@
-"""Rebuild the stored index behind every list's calculated columns.
+"""Rebuild the stored index behind every table's calculated columns.
 
 A calculated cell is written whenever its record is written, so ordinary editing keeps
 the index current for free. A **schema** change does not: editing a formula, or renaming,
 deleting or restoring a column some formula reads, changes what every record's calculated
 cells should say without touching a record. The app offers a re-index for exactly that
-moment (`POST /lists/{uuid}/columns/recompute`), and this is the backstop for the times
+moment (`POST /tables/{uuid}/columns/recompute`), and this is the backstop for the times
 nobody pressed it — or a deferred run was truncated by a redeploy or a free-tier
 spin-down.
 
@@ -25,8 +25,8 @@ Safe to run repeatedly (idempotent — a record whose index already agrees is le
 not rewritten with identical bytes), and safe to kill (each chunk commits on its own, and
 the next run picks up whatever was missed).
 
-A list already being re-indexed by the app is **skipped rather than waited for**: both
-take the same per-list advisory lock, and duplicating a scan that is already running is
+A table already being re-indexed by the app is **skipped rather than waited for**: both
+take the same per-table advisory lock, and duplicating a scan that is already running is
 the one expensive mistake available here.
 """
 import argparse
@@ -35,23 +35,23 @@ import asyncio
 from sqlalchemy import distinct, select
 
 # Registers every model. An entry point that imports only the models it names leaves
-# the mappers half-configured — `Column.list` cannot resolve `List` — so this import
+# the mappers half-configured — `Column.table` cannot resolve `Table` — so this import
 # is load-bearing, exactly as it is for main.py, the tests and Alembic's env.py.
 import src.infrastructure.model_registry  # noqa: F401
 from src.infrastructure import database as db_module
-from src.lists.columns.backfill import recompute_records, try_lock, unlock
-from src.lists.columns.enums import COMPUTED_TYPES
-from src.lists.columns.models import Column, in_shape
+from src.tables.columns.backfill import recompute_records, try_lock, unlock
+from src.tables.columns.enums import COMPUTED_TYPES
+from src.tables.columns.models import Column, in_shape
 
 
-async def _lists_with_formulas(db) -> list[int]:
-    """Every list holding a live calculated column.
+async def _tables_with_formulas(db) -> list[int]:
+    """Every table holding a live calculated column.
 
-    `in_shape`, matching the job itself: a hidden column is not a field of the list,
+    `in_shape`, matching the job itself: a hidden column is not a field of the table,
     so it neither feeds a formula nor gets one.
     """
     result = await db.execute(
-        select(distinct(Column.list_id)).where(
+        select(distinct(Column.table_id)).where(
             Column.type.in_(COMPUTED_TYPES), in_shape()
         )
     )
@@ -59,25 +59,25 @@ async def _lists_with_formulas(db) -> list[int]:
 
 
 async def recompute(dry_run: bool = False) -> dict[int, int]:
-    """Bring every list's calculated index in line with its formulas.
+    """Bring every table's calculated index in line with its formulas.
 
-    Returns {list_id: records changed}, omitting the lists that needed nothing. A list
+    Returns {table_id: records changed}, omitting the tables that needed nothing. A table
     whose lock is held is omitted too — it is being done by whoever holds it.
     """
     changed: dict[int, int] = {}
     async with db_module.SessionLocal() as db:
-        for list_id in await _lists_with_formulas(db):
+        for table_id in await _tables_with_formulas(db):
             if dry_run:
-                rows = await recompute_records(db, list_id, dry_run=True)
-            elif not await try_lock(db, list_id):
+                rows = await recompute_records(db, table_id, dry_run=True)
+            elif not await try_lock(db, table_id):
                 continue
             else:
                 try:
-                    rows = await recompute_records(db, list_id)
+                    rows = await recompute_records(db, table_id)
                 finally:
-                    await unlock(db, list_id)
+                    await unlock(db, table_id)
             if rows:
-                changed[list_id] = rows
+                changed[table_id] = rows
     return changed
 
 
@@ -95,8 +95,8 @@ async def _main() -> None:
     if not changed:
         print("Every calculated column's index already matches its formulas.")
         return
-    for list_id, rows in changed.items():
-        print(f"{verb} {rows:>9,} record(s) — list_id {list_id}")
+    for table_id, rows in changed.items():
+        print(f"{verb} {rows:>9,} record(s) — table_id {table_id}")
     print(f"{verb} {sum(changed.values()):,} record(s) in total.")
 
 

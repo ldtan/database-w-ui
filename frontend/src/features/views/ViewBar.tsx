@@ -19,20 +19,20 @@ import {
 } from "../permissions/useEffectiveActions";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   views: View[];
   activeUuid: string | null;
   onSelect: (uuid: string) => void;
   currentConfig: ViewConfig;
   // Sharing a view is configuring it, not using it, so the toolbar leaves it out
-  // and List settings → Views offers it. Same bar, one button apart.
+  // and Table settings → Views offers it. Same bar, one button apart.
   showShare?: boolean;
   /**
    * Whether the page's live state has drifted from what this view has stored.
    *
    * It decides whether "Save view" is *enabled*, not whether it is there. Both
    * have been tried: the button first sat on the toolbar permanently, reading as
-   * one of the things you do to a list rather than as an offer to keep the
+   * one of the things you do to a table rather than as an offer to keep the
    * arrangement you just made; hiding it until there was something to save fixed
    * that and introduced two worse problems. You could only discover the button by
    * changing something first, which is the wrong order to learn a control in, and
@@ -49,9 +49,9 @@ interface Props {
 /**
  * Choose a view, save the current one, share it, add another.
  *
- * Every one of those degrades on its own, so this renders on a list with no views
+ * Every one of those degrades on its own, so this renders on a table with no views
  * at all — where it reduces to a single "New view" button. That is the case it
- * matters most in: the way you make a list's first view is to arrange the records
+ * matters most in: the way you make a table's first view is to arrange the records
  * the way you want and keep the arrangement, and the button that keeps it lives
  * here. The bar used to be hidden in exactly that situation, which took the
  * filter, grouping and column controls with it.
@@ -60,14 +60,14 @@ interface Props {
  * grouping, hidden columns, page size) into the view. Nothing the toolbar does
  * persists until that button is pressed: a view is a saved arrangement, and changing
  * what you are looking at is not the same as changing what everyone else will look
- * at. The filter joined that list when filtering stopped writing straight to the
+ * at. The filter joined that table when filtering stopped writing straight to the
  * view; it was the one control that changed a shared object the moment you used it.
  *
  * A view can carry its own grants, so who may save or share *this* view is asked
- * per view, while adding one is a permission on the list.
+ * per view, while adding one is a permission on the table.
  */
 export function ViewBar({
-  listUuid,
+  tableUuid,
   views,
   activeUuid,
   onSelect,
@@ -78,28 +78,28 @@ export function ViewBar({
   const queryClient = useQueryClient();
   const toast = useToast();
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
+    queryClient.invalidateQueries({ queryKey: ["views", tableUuid] });
     // Sort/filter are applied server-side by view, so records must refetch too.
-    queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+    queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
     queryClient.invalidateQueries({ queryKey: ["effective"] });
   };
 
   const activeView = views.find((v) => v.uuid === activeUuid) ?? null;
-  // Adding a view is a list-level change; saving or sharing one is scoped to
+  // Adding a view is a table-level change; saving or sharing one is scoped to
   // that view, which may carry its own grants.
-  const listActions = useEffectiveActions("list", listUuid);
+  const tableActions = useEffectiveActions("table", tableUuid);
   const canView = useEffectiveActionsMap(
     "view",
     views.map((view) => view.uuid),
   );
   const canSave = !!activeView && canView(activeView.uuid, "configure");
   const canShare = !!activeView && canView(activeView.uuid, "share");
-  // Spelled out where it stands alone: the settings tab, and a list with no views.
+  // Spelled out where it stands alone: the settings tab, and a table with no views.
   const spellOutNew = showShare || views.length === 0;
 
   const save = useMutation({
     mutationFn: () =>
-      api.patch<View>(`/lists/${listUuid}/views/${activeUuid}`, {
+      api.patch<View>(`/tables/${tableUuid}/views/${activeUuid}`, {
         config: currentConfig,
       }),
     onSuccess: () => {
@@ -129,11 +129,11 @@ export function ViewBar({
   const [sharing, setSharing] = useState(false);
   const setInherit = useMutation({
     mutationFn: (value: boolean) =>
-      api.patch(`/lists/${listUuid}/views/${activeUuid}`, {
+      api.patch(`/tables/${tableUuid}/views/${activeUuid}`, {
         permissions_inherit: value,
       }),
     onSuccess: () =>
-      queryClient.invalidateQueries({ queryKey: ["views", listUuid] }),
+      queryClient.invalidateQueries({ queryKey: ["views", tableUuid] }),
     onError: (err) =>
       toast.error(
         "Could not update inheritance",
@@ -145,7 +145,7 @@ export function ViewBar({
   const [newName, setNewName] = useState("");
   const create = useMutation({
     mutationFn: () =>
-      api.post<View>(`/lists/${listUuid}/views/`, {
+      api.post<View>(`/tables/${tableUuid}/views/`, {
         name: slugify(newName),
         display_name: newName,
         config: currentConfig,
@@ -163,7 +163,7 @@ export function ViewBar({
     <div className="flex flex-wrap items-center gap-1">
       {/* A picker with nothing to pick is worse than no picker: it takes the width
           of the widest control on the bar to say "View", and implies there are
-          views to choose between. What a list with no views needs is the button
+          views to choose between. What a table with no views needs is the button
           below, not this. */}
       {views.length > 0 && (
         <Dropdown
@@ -228,10 +228,10 @@ export function ViewBar({
           onClick={() => setSharing(true)}
         />
       )}
-      {listActions.has("configure") && (
+      {tableActions.has("configure") && (
         // Icon-only on the toolbar, where it is a rarity beside controls used
         // constantly; the settings tab has the room to spell it out. So does a
-        // list with no views, where there is no dropdown beside it to lend it
+        // table with no views, where there is no dropdown beside it to lend it
         // context and a lone "+" among the record controls says nothing about
         // what it adds — which is the one moment this button matters most.
         <Button

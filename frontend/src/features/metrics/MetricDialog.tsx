@@ -16,7 +16,7 @@ import { metricsKey } from "./metricKeys";
 import { ErrorMessage } from "../../components/ErrorMessage";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   /** Null when adding. */
   metric: Metric | null;
   visible: boolean;
@@ -32,7 +32,7 @@ interface Props {
  *  people open this dialog to ask. Mirrors `REFERENCEABLE_TYPES` on the server. */
 const AGGREGATABLE = ["number", "rating", "duration", "text", "calculated"];
 
-export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
+export function MetricDialog({ tableUuid, metric, visible, onHide }: Props) {
   const queryClient = useQueryClient();
   const toast = useToast();
   const editing = metric !== null;
@@ -57,11 +57,11 @@ export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
   }, [visible, metric]);
 
   const columns = useQuery({
-    queryKey: ["columns", listUuid],
-    queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
+    queryKey: ["columns", tableUuid],
+    queryFn: () => api.get<Column[]>(`/tables/${tableUuid}/columns/`),
     enabled: visible,
   });
-  // Formulas name columns by their slug, not their label — so this is the list
+  // Formulas name columns by their slug, not their label — so this is the table
   // someone actually has to type, and it is worth showing rather than guessing at.
   const referenceable = (columns.data ?? [])
     .filter((c) => AGGREGATABLE.includes(c.type))
@@ -83,13 +83,13 @@ export function MetricDialog({ listUuid, metric, visible, onHide }: Props) {
         },
       };
       return editing
-        ? api.patch<Metric>(`/lists/${listUuid}/metrics/${metric.uuid}`, body)
-        : api.post<Metric>(`/lists/${listUuid}/metrics/`, body);
+        ? api.patch<Metric>(`/tables/${tableUuid}/metrics/${metric.uuid}`, body)
+        : api.post<Metric>(`/tables/${tableUuid}/metrics/`, body);
     },
     onSuccess: (saved) => {
-      queryClient.invalidateQueries({ queryKey: metricsKey(listUuid) });
+      queryClient.invalidateQueries({ queryKey: metricsKey(tableUuid) });
       // The values live under the items key, so this refreshes the cards too.
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       toast.success(editing ? "Metric updated" : "Metric added", saved.display_name);
       onHide();
     },

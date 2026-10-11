@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, TableRecord } from "../../lib/types";
 import { isNewRow, landedOnPage, newRowItem, NEW_ROW_UUID } from "./newRow";
 import { buildRecordData, type ResolvedField } from "./recordValues";
 
@@ -21,8 +21,8 @@ const field = (col: Column, enabled = true): ResolvedField => ({
   label: col.display_name,
 });
 
-const item = (uuid: string): ListItem =>
-  ({ uuid, data: {}, permissions_inherit: true }) as ListItem;
+const item = (uuid: string): TableRecord =>
+  ({ uuid, data: {}, permissions_inherit: true }) as TableRecord;
 
 describe("isNewRow", () => {
   it("knows the draft row", () => {

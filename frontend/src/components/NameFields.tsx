@@ -21,11 +21,11 @@ interface Props {
 }
 
 /**
- * The two identifiers every workspace, list, column, view and form carries: the
+ * The two identifiers every workspace, table, column, view and form carries: the
  * label the UI shows, and the `name` — a slug that code addresses the resource by.
  * What that means depends on the resource: a column's name keys an export's headers,
- * and a list's children can be addressed by name in API paths
- * (`/lists/{list}/columns/first_name`). Hence the deliberately general help text —
+ * and a table's children can be addressed by name in API paths
+ * (`/tables/{table}/columns/first_name`). Hence the deliberately general help text —
  * it must be true of a workspace as well as a column.
  *
  * While creating, the name follows the label, which is what the app did silently

@@ -1,7 +1,7 @@
 /** Rating cells: an integer, and the scale it is a point on.
  *
  *  Mirrors `rating_scale` / `RATING_MAX` in
- *  backend/src/lists/columns/validation.py. The scale lives in the column's shared
+ *  backend/src/tables/columns/validation.py. The scale lives in the column's shared
  *  `max` key — the top of a rating is a bound like any other, so it needs no key of
  *  its own — and the bottom is always 1, because a rating of zero is what an *empty*
  *  cell means and a configurable floor would give the column two ways to say

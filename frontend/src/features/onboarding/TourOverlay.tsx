@@ -55,7 +55,7 @@ function same(a: Box | null, b: Box | null): boolean {
  *
  * A frame loop rather than listeners. The element can arrive late (the tour
  * navigates to a page whose data is still loading), move (the page it is on
- * fades in, a workspace's lists expand above it), or go away entirely — and
+ * fades in, a workspace's tables expand above it), or go away entirely — and
  * scroll, resize, layout and animation are four separate subscriptions that
  * still would not catch all of that. One `querySelector` per frame for the
  * length of a tour is cheap, and it is only mounted while a tour is running.
@@ -241,7 +241,7 @@ export function TourOverlay({ tour, steps, index, onIndex, onClose }: Props) {
       );
       if (!focusable.length) return;
       // Wrapping at the end, and also from the card itself — which holds focus at
-      // the start of every step and is not in this list, so shift-tabbing off it
+      // the start of every step and is not in this table, so shift-tabbing off it
       // would otherwise land on the page behind.
       const from = document.activeElement as HTMLElement | null;
       const leaving = !from || !focusable.includes(from);

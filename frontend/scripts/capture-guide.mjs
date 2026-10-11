@@ -69,10 +69,10 @@ const MODES = ["light", "dark"];
 // waiting half a minute to say so makes a run nobody sits through.
 const SELECTOR_TIMEOUT = 8_000;
 
-// Names the tenant uses, in one place: the seeder can rename a list without this
+// Names the tenant uses, in one place: the seeder can rename a table without this
 // file turning into a hunt for string literals.
 const WORKSPACE = "Sales";
-const LIST = "Contacts";
+const TABLE = "Contacts";
 
 // --- plumbing -------------------------------------------------------------
 
@@ -125,14 +125,14 @@ async function resolveTenant(token) {
   const workspace = workspaces.find((w) => w.display_name === WORKSPACE);
   if (!workspace) throw new Error(`No workspace named ${WORKSPACE}. Seed the demo.`);
 
-  const lists = await apiGet(
-    `/lists/?workspace_uuid=${workspace.uuid}&limit=100`,
+  const tables = await apiGet(
+    `/tables/?workspace_uuid=${workspace.uuid}&limit=100`,
     token,
   );
-  const list = lists.find((l) => l.display_name === LIST);
-  if (!list) throw new Error(`No list named ${LIST} in ${WORKSPACE}. Seed the demo.`);
+  const table = tables.find((l) => l.display_name === TABLE);
+  if (!table) throw new Error(`No table named ${TABLE} in ${WORKSPACE}. Seed the demo.`);
 
-  return { workspaceUuid: workspace.uuid, listUuid: list.uuid };
+  return { workspaceUuid: workspace.uuid, tableUuid: table.uuid };
 }
 
 /** Everything a shot is handed. Keeping navigation on here rather than in each
@@ -159,20 +159,20 @@ function makeCtx(page, tenant) {
 
     async workspace() {
       await ctx.goto(`/workspaces/${tenant.workspaceUuid}`);
-      await page.getByText(LIST, { exact: true }).first().waitFor();
+      await page.getByText(TABLE, { exact: true }).first().waitFor();
       await ctx.settle();
     },
 
-    /** The Contacts list, with its records actually on screen. */
-    async list() {
-      await ctx.goto(`/lists/${tenant.listUuid}`);
+    /** The Contacts table, with its records actually on screen. */
+    async table() {
+      await ctx.goto(`/tables/${tenant.tableUuid}`);
       await page.getByText("Ada Lovelace").first().waitFor();
       await ctx.settle();
     },
 
-    /** The list's settings dialog, open on one of its tabs. */
+    /** The table's settings dialog, open on one of its tabs. */
     async settings(tab) {
-      await ctx.list();
+      await ctx.table();
       await page.getByRole("button", { name: "Settings", exact: true }).click();
       const dialog = page.getByRole("dialog");
       await dialog.waitFor();
@@ -181,21 +181,21 @@ function makeCtx(page, tenant) {
       return dialog;
     },
 
-    /** An item on the list page's overflow ("⋯") menu. */
+    /** An item on the table page's overflow ("⋯") menu. */
     async moreMenu(item) {
-      await page.getByRole("button", { name: "More list actions" }).click();
+      await page.getByRole("button", { name: "More table actions" }).click();
       await page.getByRole("menuitem", { name: item }).click();
       await ctx.settle();
     },
 
-    /** An action on the first list card of a workspace page. A card shows one
+    /** An action on the first table card of a workspace page. A card shows one
      *  action inline (Share) and folds the rest behind a "⋮" — see RowActions —
      *  so everything interesting here is two clicks, not one. */
     async cardAction(label) {
       await ctx.workspace();
-      // By name, not "the first card": the first is whichever list sorts first,
+      // By name, not "the first card": the first is whichever table sorts first,
       // and a picture captioned with the guide's running example should be of it.
-      const card = page.locator(".card-grid > div").filter({ hasText: LIST });
+      const card = page.locator(".card-grid > div").filter({ hasText: TABLE });
       await card.getByRole("button", { name: "More actions" }).click();
       await page.getByRole("menuitem", { name: label }).click();
       await ctx.settle();
@@ -204,7 +204,7 @@ function makeCtx(page, tenant) {
     /** Let React paint, queries land, and any transition finish. Animations are
      *  off (see `prepare`), so the fixed pause is short on purpose.
      *
-     *  The wait before it is the one that matters: a loading list renders
+     *  The wait before it is the one that matters: a loading table renders
      *  `.skeleton` bars, and a fixed pause is a bet on how long a query takes.
      *  Most shots hide that bet behind a `waitFor` on something the data
      *  produces — but `shell` photographs the home page as a whole and has
@@ -345,14 +345,14 @@ const SHOTS = [
   {
     id: "nav-tree",
     section: "getting-around",
-    alt: "The navigation strip, with workspaces expanded to show the lists inside.",
+    alt: "The navigation strip, with workspaces expanded to show the tables inside.",
     caption:
-      "Click the arrow beside a workspace to see its lists; click the name to open the workspace itself.",
+      "Click the arrow beside a workspace to see its tables; click the name to open the workspace itself.",
     async run(ctx) {
       await ctx.home();
       // Sales by name, not "the first branch": the first is the Personal
       // workspace every account is given, and it is empty, so opening it
-      // illustrated the sentence with the words "No lists yet".
+      // illustrated the sentence with the words "No tables yet".
       await ctx.page.getByRole("button", { name: `Expand ${WORKSPACE}` }).click();
       await ctx.settle();
       // Top of the rail down to the last thing in the tree. The rail itself is
@@ -375,11 +375,11 @@ const SHOTS = [
     },
   },
   {
-    id: "lists",
-    section: "list",
-    alt: "A workspace opened, showing its lists as cards with actions on each.",
+    id: "tables",
+    section: "table",
+    alt: "A workspace opened, showing its tables as cards with actions on each.",
     caption:
-      "Inside a workspace. Each list card carries share, move, duplicate, rename and delete.",
+      "Inside a workspace. Each table card carries share, move, duplicate, rename and delete.",
     async run(ctx) {
       await ctx.workspace();
       return ctx.page.locator("main");
@@ -388,7 +388,7 @@ const SHOTS = [
   {
     id: "columns",
     section: "columns",
-    alt: "The Columns tab of a list's settings, listing each column with its type.",
+    alt: "The Columns tab of a table's settings, listing each column with its type.",
     caption:
       "Settings → Columns. Every column, its short name in brackets, and the buttons that change it.",
     async run(ctx) {
@@ -428,7 +428,7 @@ const SHOTS = [
     section: "formulas",
     alt: "The Add column dialog with Calculated chosen, showing the Formula box and the columns it may name.",
     caption:
-      "A calculated column holds a formula. The dialog lists the short names you are allowed to use.",
+      "A calculated column holds a formula. The dialog tables the short names you are allowed to use.",
     async run(ctx) {
       const settings = await ctx.settings("Columns");
       await settings.getByRole("button", { name: "Add column" }).click();
@@ -448,10 +448,10 @@ const SHOTS = [
   {
     id: "records",
     section: "records",
-    alt: "The Contacts list, showing records in a table.",
-    caption: "A list with records in it — the screen you will spend most time on.",
+    alt: "The Contacts table, showing records in a table.",
+    caption: "A table with records in it — the screen you will spend most time on.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       return ctx.page.locator("main");
     },
   },
@@ -462,7 +462,7 @@ const SHOTS = [
     caption:
       "Adding a record. Required fields carry a star; the City box waits on Country.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.page.getByRole("button", { name: "Add record" }).click();
       await ctx.settle();
       return ctx.page.getByRole("dialog");
@@ -475,7 +475,7 @@ const SHOTS = [
     caption:
       "City is nested under Country: choose France and it offers French cities only.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.page.getByRole("button", { name: "Add record" }).click();
       await ctx.settle();
       const dialog = ctx.page.getByRole("dialog");
@@ -510,7 +510,7 @@ const SHOTS = [
     caption:
       "The arrow beside “Add record” opens the two QR options.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       const split = ctx.page.locator(".p-splitbutton");
       await split.locator("button.p-splitbutton-menubutton").click();
       await ctx.settle();
@@ -522,10 +522,10 @@ const SHOTS = [
     section: "find",
     alt: "The toolbar above the records: view, columns, filter, group, sort, metrics and search.",
     caption:
-      "The bar above your records. Everything here changes how you are looking, not what the list is.",
+      "The bar above your records. Everything here changes how you are looking, not what the table is.",
     async run(ctx) {
-      await ctx.list();
-      return ctx.page.locator('[data-tour="list-toolbar"]');
+      await ctx.table();
+      return ctx.page.locator('[data-tour="table-toolbar"]');
     },
   },
   {
@@ -534,7 +534,7 @@ const SHOTS = [
     alt: "The filter dialog, with one condition made of a column, an operator and a value.",
     caption: "A filter is one or more conditions, matched all or any.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.page.getByRole("button", { name: "Filter" }).click();
       await ctx.settle();
       const dialog = ctx.page.getByRole("dialog");
@@ -547,11 +547,11 @@ const SHOTS = [
     id: "views",
     section: "views",
     minFrame: 1100,
-    alt: "The view dropdown open, listing the saved views of a list.",
+    alt: "The view dropdown open, listing the saved views of a table.",
     caption: "Saved ways of looking. The “+” beside it makes a new one.",
     async run(ctx) {
-      await ctx.list();
-      const bar = ctx.page.locator('[data-tour="list-toolbar"]');
+      await ctx.table();
+      const bar = ctx.page.locator('[data-tour="table-toolbar"]');
       await bar.locator(".p-dropdown").first().click();
       await ctx.settle();
       return [bar, ctx.page.locator(".p-dropdown-panel")];
@@ -560,7 +560,7 @@ const SHOTS = [
   {
     id: "forms",
     section: "forms",
-    alt: "The Forms tab of a list's settings, with a row per field.",
+    alt: "The Forms tab of a table's settings, with a row per field.",
     caption:
       "Settings → Forms. Tick what appears, tick what can be typed into, and reorder.",
     async run(ctx) {
@@ -574,14 +574,14 @@ const SHOTS = [
     caption:
       "Metrics, shown after clicking the Metrics button. They follow whatever is on screen.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.page.getByRole("button", { name: /^Metrics/ }).click();
       await ctx.settle();
       // The toolbar as well as the cards. Three small cards on their own framed
       // to the guide's width came out as a thin band floating in the middle of
       // nothing; with the button that revealed them in shot, the picture is the
       // sentence beside it.
-      return [ctx.page.locator('[data-tour="list-toolbar"]'), ctx.page.locator(".metric-card")];
+      return [ctx.page.locator('[data-tour="table-toolbar"]'), ctx.page.locator(".metric-card")];
     },
   },
   {
@@ -596,7 +596,7 @@ const SHOTS = [
       // the dialog's own scrollport — the form for adding somebody comes first.
       // Scrolled to the *last* row rather than to the heading, which is already
       // just inside the fold and so satisfies "if needed" without moving.
-      await dialog.locator(".row-list-item").last().scrollIntoViewIfNeeded();
+      await dialog.locator(".row-table-item").last().scrollIntoViewIfNeeded();
       await ctx.settle();
       return dialog;
     },
@@ -605,19 +605,19 @@ const SHOTS = [
     id: "transfer",
     section: "transfer",
     alt: "The move-or-transfer dialog, offering another workspace or another person.",
-    caption: "Move a list to another workspace, or hand it to somebody else.",
+    caption: "Move a table to another workspace, or hand it to somebody else.",
     async run(ctx) {
-      await ctx.cardAction("Move or transfer list");
+      await ctx.cardAction("Move or transfer table");
       return ctx.page.getByRole("dialog");
     },
   },
   {
     id: "duplicate",
     section: "duplicate",
-    alt: "The duplicate-list dialog, with the option to copy the records too.",
+    alt: "The duplicate-table dialog, with the option to copy the records too.",
     caption: "Duplicating takes the structure; the records are a tick box.",
     async run(ctx) {
-      await ctx.cardAction("Duplicate list");
+      await ctx.cardAction("Duplicate table");
       return ctx.page.getByRole("dialog");
     },
   },
@@ -627,7 +627,7 @@ const SHOTS = [
     alt: "The import and export dialog, on its export tab.",
     caption: "Export picks a format, columns, and optionally a filter; import takes a file.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.moreMenu("Import / Export");
       return ctx.page.getByRole("dialog");
     },
@@ -639,7 +639,7 @@ const SHOTS = [
     caption:
       "A bin sits beside everything you can delete. This is the one for records; Restore sits at the end of each row.",
     async run(ctx) {
-      await ctx.list();
+      await ctx.table();
       await ctx.moreMenu("Deleted records");
       return ctx.page.getByRole("dialog");
     },
@@ -691,7 +691,7 @@ async function writeManifest() {
     `/**
  * What each picture in the guide shows — generated, do not edit.
  *
- * Written by \`scripts/capture-guide.mjs\` from its own \`SHOTS\` list, which is
+ * Written by \`scripts/capture-guide.mjs\` from its own \`SHOTS\` table, which is
  * also what took the images in \`public/guide/\`. Run \`npm run capture:guide\` to
  * rebuild both together; editing this by hand puts a caption under a picture that
  * nothing else agrees with.
@@ -767,7 +767,7 @@ async function main() {
           localStorage.setItem(
             "dbui.onboarding.v1",
             JSON.stringify({
-              [user]: { welcomed: true, seen: ["basics", "workspace", "list"] },
+              [user]: { welcomed: true, seen: ["basics", "workspace", "table"] },
             }),
           );
           document.addEventListener("DOMContentLoaded", () => {

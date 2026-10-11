@@ -31,8 +31,8 @@ import { cleanConditions } from "../views/operators";
 import { importErrorsCsv } from "./importErrors";
 
 interface Props {
-  listUuid: string;
-  listName: string;
+  tableUuid: string;
+  tableName: string;
   columns: Column[];
   // Import writes records; export only reads them.
   canImport: boolean;
@@ -50,13 +50,13 @@ interface Props {
 
 type Format = "csv" | "json";
 
-// How many skipped rows are listed in the dialog. Past this the list stops being
+// How many skipped rows are listed in the dialog. Past this the table stops being
 // something you read and starts being something you scroll — which is what the
 // downloaded file is for.
 const ERRORS_SHOWN = 20;
 
 /**
- * Get records out of a list, and back into one.
+ * Get records out of a table, and back into one.
  *
  * Both halves are keyed by column **name**, not uuid: a file whose headers read
  * `first_name` is one a person can write and a spreadsheet can produce, and it
@@ -68,7 +68,7 @@ const ERRORS_SHOWN = 20;
  * Filter dialog uses), and "Use current filters and sort" fills those fields in from
  * what the grid is showing — so "export what I am looking at" is one click, and the
  * conditions it applied are still on screen to read and to edit. Import is offered
- * only with `create` **and** `edit` on the list, since a file can do both; it
+ * only with `create` **and** `edit` on the table, since a file can do both; it
  * reports per-row errors rather than failing the whole file, and offers the skipped
  * rows back as a file to correct and re-upload (see `importErrors.ts`).
  *
@@ -76,8 +76,8 @@ const ERRORS_SHOWN = 20;
  * leaves them out — see `writable` below.
  */
 export function ImportExportDialog({
-  listUuid,
-  listName,
+  tableUuid,
+  tableName,
   columns,
   canImport,
   currentFilters,
@@ -137,7 +137,7 @@ export function ImportExportDialog({
     setFailure(null);
     setExportError(null);
     // `columns` is a prop array, so it is a new identity after any refetch of
-    // ["columns", listUuid] — which meant untick twenty of twenty-five, let an
+    // ["columns", tableUuid] — which meant untick twenty of twenty-five, let an
     // invalidation land (add a column in another tab, edit one in the settings
     // behind this dialog), and all twenty-five were ticked again. Re-seeding is
     // for a dialog that has just opened, or one whose columns arrived after it
@@ -199,7 +199,7 @@ export function ImportExportDialog({
     try {
       // The server streams the file (any size); values and headers (column
       // names) are formatted server-side.
-      const blob = await api.postBlob(`/lists/${listUuid}/export`, {
+      const blob = await api.postBlob(`/tables/${tableUuid}/export`, {
         format,
         columns: chosen.map((c) => c.name),
         filters: { conjunction, conditions: cleanConditions(conditions) },
@@ -208,8 +208,8 @@ export function ImportExportDialog({
           : [],
         limit,
       });
-      downloadBlob(`${listName}.${format}`, blob);
-      toast.success("Export ready", `${listName}.${format}`);
+      downloadBlob(`${tableName}.${format}`, blob);
+      toast.success("Export ready", `${tableName}.${format}`);
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Export failed";
       setExportError(message);
@@ -220,7 +220,7 @@ export function ImportExportDialog({
   }
 
   // Every writable column, not the export tab's ticked subset: a template answers
-  // "what shape does a file for this list have?", and the answer is the whole list
+  // "what shape does a file for this table have?", and the answer is the whole table
   // minus what you cannot write — which is where `writable` differs from the export
   // half. Columns you have nothing to say about can be deleted from the file —
   // import only sets the ones it finds.
@@ -228,13 +228,13 @@ export function ImportExportDialog({
     if (templateFormat === "json") {
       const sample = Object.fromEntries(writable.map((c) => [c.name, ""]));
       downloadFile(
-        `${listName}-template.json`,
+        `${tableName}-template.json`,
         JSON.stringify([sample], null, 2),
         "application/json",
       );
     } else {
       downloadFile(
-        `${listName}-template.csv`,
+        `${tableName}-template.csv`,
         toCsv(writable.map((c) => c.name), []),
         "text/csv",
       );
@@ -258,11 +258,11 @@ export function ImportExportDialog({
         file.name.toLowerCase().endsWith(".json") ? "json" : "csv",
       );
       const summary = await api.postForm<ImportSummary>(
-        `/lists/${listUuid}/import`,
+        `/tables/${tableUuid}/import`,
         form,
       );
       setResult(summary);
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       const skipped = summary.errors.length;
       if (skipped === 0) {
         toast.success("Import complete", `${summary.created} record(s) added`);
@@ -460,7 +460,7 @@ export function ImportExportDialog({
               </FieldRow>
               <Field label="Filters" optional>
                 <FilterConditionsEditor
-                  listUuid={listUuid}
+                  tableUuid={tableUuid}
                   columns={columns}
                   conjunction={conjunction}
                   onConjunctionChange={setConjunction}
@@ -540,7 +540,7 @@ export function ImportExportDialog({
                         size="small"
                         onClick={() =>
                           downloadFile(
-                            `${listName}-import-errors.csv`,
+                            `${tableName}-import-errors.csv`,
                             errorsCsv,
                             "text/csv",
                           )

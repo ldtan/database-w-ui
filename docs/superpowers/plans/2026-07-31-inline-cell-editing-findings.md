@@ -51,7 +51,7 @@ This is the split the file's own header already gestures at ("What this file doe
 | `frontend/src/features/records/inlineEdit.tsx` | `InlineCellEditor` only; gains the Escape handlers | 2, 8 |
 | `frontend/src/features/records/RecordFields.tsx` | Use `clearedNested` and `textMode` | 2, 6 |
 | `frontend/src/features/records/renderCell.tsx` | Use `textMode`; `editing` flag for link cells | 6, 7 |
-| `frontend/src/features/lists/ListDetailPage.tsx` | `commitCell`, `saveCell`, cell callbacks, `cellMemo` | 3, 4, 7, 9, 12, 13 |
+| `frontend/src/features/tables/TableDetailPage.tsx` | `commitCell`, `saveCell`, cell callbacks, `cellMemo` | 3, 4, 7, 9, 12, 13 |
 
 ---
 
@@ -141,17 +141,17 @@ const NO_FILTER: FilterGroup = { conjunction: "and", conditions: [] };
 
 describe("recordPagesKey", () => {
   it("names the grid's pages inside the records namespace", () => {
-    expect(recordPagesKey("list-1")).toEqual(["items", "list-1", "page"]);
+    expect(recordPagesKey("table-1")).toEqual(["records", "table-1", "page"]);
   });
 
-  // The bug this pins: both keys live under ["items", listUuid] so that one
+  // The bug this pins: both keys live under ["records", tableUuid] so that one
   // invalidation refreshes the grid and the metric cards together. That makes the
   // prefix unsafe to *write* through, and a page-shaped updater handed a
   // MetricValues throws inside onMutate — which runs before mutationFn, so the
   // PATCH is never sent at all. They must diverge before the write filter's depth.
   it("does not prefix-match the metric values key", () => {
-    const pages = recordPagesKey("list-1");
-    const metrics = metricValuesKey("list-1", null, "", NO_FILTER);
+    const pages = recordPagesKey("table-1");
+    const metrics = metricValuesKey("table-1", null, "", NO_FILTER);
     expect(metrics.slice(0, pages.length)).not.toEqual(pages);
   });
 });
@@ -195,7 +195,7 @@ rather than injected so that `tsconfig` needs no new `types` entry and a reader
 can see where `describe` comes from.
 
 The first test is the one the last fix should have had: the grid's pages and the
-metric cards' values share the `["items", listUuid]` namespace on purpose, and
+metric cards' values share the `["records", tableUuid]` namespace on purpose, and
 must diverge before the depth a cache *write* filters on.
 EOF
 ```
@@ -213,7 +213,7 @@ EOF
 - Modify: `frontend/src/features/records/recordValues.ts` (add `toStored`, `clearedNested`; rewrite `buildRecordData`'s editing branch)
 - Modify: `frontend/src/features/records/inlineEdit.tsx` (remove everything but `InlineCellEditor`)
 - Modify: `frontend/src/features/records/RecordFields.tsx:288-293`
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx:39-45` (imports)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx:39-45` (imports)
 
 **Acceptance Criteria:**
 - [ ] `cellEdit.ts` exports `CellEditKind`, `cellEditKinds`, `cellEditKind`, `CellDraft`, `cellPatch` and imports no React
@@ -401,7 +401,7 @@ Delete from `inlineEdit.tsx`: the `CellEditKind` type, `cellEditKinds`, `cellEdi
 ```ts
 import { useEffect, useRef, useState } from "react";
 
-import type { Column, ListItem } from "../../lib/types";
+import type { Column, TableRecord } from "../../lib/types";
 import type { CellDraft } from "./cellEdit";
 import { RecordField } from "./RecordFields";
 import { deserialize } from "./recordValues";
@@ -415,7 +415,7 @@ Add to the module docstring, after the existing three bullets:
  * tested without one.
 ```
 
-- [ ] **Step 6: Point `ListDetailPage.tsx` at both modules**
+- [ ] **Step 6: Point `TableDetailPage.tsx` at both modules**
 
 Replace the import block at lines 39-45:
 
@@ -577,7 +577,7 @@ Expected: `Tests 15 passed (15)`, then no typecheck output.
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/records frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/records frontend/src/features/tables/TableDetailPage.tsx
 git commit -F - <<'EOF'
 Give a cell's rules one home, and the same one the dialog uses
 
@@ -605,8 +605,8 @@ EOF
 **Goal:** A cell edit survives the grid repaging underneath it, instead of being discarded without a word (#4).
 
 **Files:**
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx:505-527` (`commitCell`)
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx:1135` (`onCellEditComplete`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx:505-527` (`commitCell`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx:1135` (`onCellEditComplete`)
 
 **Acceptance Criteria:**
 - [ ] `commitCell` takes no arguments and reads the record and the column from the draft
@@ -651,7 +651,7 @@ Replace the whole function and its docstring:
 
 - [ ] **Step 2: Update the call site**
 
-At `ListDetailPage.tsx` in the `visibleCols.map` block:
+At `TableDetailPage.tsx` in the `visibleCols.map` block:
 
 ```tsx
                 onCellEditComplete={() => commitCell()}
@@ -669,7 +669,7 @@ Expected: no typecheck output; `Tests 15 passed (15)`.
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/tables/TableDetailPage.tsx
 git commit -F - <<'EOF'
 Keep a cell edit when the row moves out from under it
 
@@ -696,13 +696,13 @@ EOF
 **Goal:** A refused cell write leaves nothing behind even offline, and a burst of writes costs one refetch rather than one each (#7).
 
 **Files:**
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx:338-379` (`saveCell`)
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (module scope: `SETTLE_DELAY_MS`, `withItem`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx:338-379` (`saveCell`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx` (module scope: `SETTLE_DELAY_MS`, `withItem`)
 
 **Acceptance Criteria:**
 - [ ] `onMutate` snapshots with `getQueriesData` and returns `{ previous }`
 - [ ] `onError` restores the snapshot before showing the toast
-- [ ] `onSuccess` writes the returned `ListItem` into the cached pages
+- [ ] `onSuccess` writes the returned `TableRecord` into the cached pages
 - [ ] `onSettled` schedules a debounced invalidate; the timer is cleared on unmount
 - [ ] Ten commits in quick succession produce one invalidate
 
@@ -722,13 +722,13 @@ const SETTLE_DELAY_MS = 800;
 
 /** One page with one record replaced, or the page untouched if it is not on it. */
 function withItem(
-  page: Page<ListItem>,
+  page: Page<TableRecord>,
   uuid: string,
-  next: (item: ListItem) => ListItem,
-): Page<ListItem> {
+  next: (record: TableRecord) => TableRecord,
+): Page<TableRecord> {
   return {
     ...page,
-    items: page.items.map((item) => (item.uuid === uuid ? next(item) : item)),
+    records: page.records.map((record) => (record.uuid === uuid ? next(record) : record)),
   };
 }
 ```
@@ -748,7 +748,7 @@ Immediately above `const saveCell = useMutation({`:
     if (settleTimer.current !== null) window.clearTimeout(settleTimer.current);
     settleTimer.current = window.setTimeout(() => {
       settleTimer.current = null;
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
     }, SETTLE_DELAY_MS);
   };
   useEffect(
@@ -762,38 +762,38 @@ Immediately above `const saveCell = useMutation({`:
 - [ ] **Step 3: Rewrite `saveCell`**
 
 ```tsx
-  // One cell, committed on its own. `PATCH /items/{uuid}` merges the keys it is
+  // One cell, committed on its own. `PATCH /records/{uuid}` merges the keys it is
   // given onto the stored record, so the body is the one column that changed (plus
   // any lookup nested under it, which `cellPatch` clears) rather than the record.
   const saveCell = useMutation({
     mutationFn: (vars: { uuid: string; patch: Record<string, unknown> }) =>
-      api.patch<ListItem>(`/lists/${listUuid}/items/${vars.uuid}`, {
+      api.patch<TableRecord>(`/tables/${tableUuid}/records/${vars.uuid}`, {
         data: vars.patch,
       }),
     // Show the value the moment it is committed. Without this the cell falls back
     // to what it held until the write lands — a visible flick back to the old
     // value on every edit, which reads as the save having failed.
     //
-    // Keyed on the *pages* rather than on `["items", listUuid]`, which is the
+    // Keyed on the *pages* rather than on `["records", tableUuid]`, which is the
     // namespace the metric values share (see `recordKeys`): matching that would
-    // hand this page-shaped updater a `MetricValues`, and `page.items.map` on an
-    // object with no `items` throws — inside `onMutate`, which runs before
+    // hand this page-shaped updater a `MetricValues`, and `page.records.map` on an
+    // object with no `records` throws — inside `onMutate`, which runs before
     // `mutationFn`, so the PATCH would never even be sent.
     onMutate: (vars) => {
       // Snapshotted before the write so that a refusal can be taken back without
       // asking the server anything. A refetch cannot do that job: offline there
       // is nothing to refetch, and the value the server rejected would sit on
       // screen until the connection came back.
-      const previous = queryClient.getQueriesData<Page<ListItem>>({
-        queryKey: recordPagesKey(listUuid),
+      const previous = queryClient.getQueriesData<Page<TableRecord>>({
+        queryKey: recordPagesKey(tableUuid),
       });
-      queryClient.setQueriesData<Page<ListItem>>(
-        { queryKey: recordPagesKey(listUuid) },
+      queryClient.setQueriesData<Page<TableRecord>>(
+        { queryKey: recordPagesKey(tableUuid) },
         (page) =>
           page &&
-          withItem(page, vars.uuid, (item) => ({
-            ...item,
-            data: { ...item.data, ...vars.patch },
+          withItem(page, vars.uuid, (record) => ({
+            ...record,
+            data: { ...record.data, ...vars.patch },
           })),
       );
       return { previous };
@@ -802,8 +802,8 @@ Immediately above `const saveCell = useMutation({`:
     // calculated columns recomputed and `onupdate` columns stamped. Refetching the
     // page to ask again would be a slower way to learn less than we already hold.
     onSuccess: (saved) => {
-      queryClient.setQueriesData<Page<ListItem>>(
-        { queryKey: recordPagesKey(listUuid) },
+      queryClient.setQueriesData<Page<TableRecord>>(
+        { queryKey: recordPagesKey(tableUuid) },
         (page) => page && withItem(page, saved.uuid, () => saved),
       );
     },
@@ -835,7 +835,7 @@ Expected: no typecheck output, `Tests 15 passed (15)`, `✓ built`.
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/tables/TableDetailPage.tsx
 git commit -F - <<'EOF'
 Take back a refused cell write, and stop asking twice about an accepted one
 
@@ -1175,7 +1175,7 @@ EOF
 
 **Files:**
 - Modify: `frontend/src/features/records/renderCell.tsx:26-33` (signature) and `:65-81` (link branch)
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the column `body`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx` (the column `body`)
 
 **Acceptance Criteria:**
 - [ ] `renderCell` takes `editing = false` as its last parameter
@@ -1192,13 +1192,13 @@ EOF
 ```tsx
 export function renderCell(
   column: Column,
-  row: ListItem,
-  listUuid: string,
+  row: TableRecord,
+  tableUuid: string,
   principalUuids: Record<PrincipalType, string[]>,
   lookupUuids: Map<string, string[]>,
   variant: CellVariant = "compact",
   /** The grid is in edit mode and this cell will open an editor. Defaults to
-   *  false so the card list and the read-only dialog are unaffected. */
+   *  false so the card table and the read-only dialog are unaffected. */
   editing = false,
 ) {
 ```
@@ -1235,14 +1235,14 @@ Replace the link branch:
 
 - [ ] **Step 3: Pass it from the grid**
 
-In `ListDetailPage.tsx`, in the column's `body`:
+In `TableDetailPage.tsx`, in the column's `body`:
 
 ```tsx
-                body={(row: ListItem) => {
+                body={(row: TableRecord) => {
                   const cell = renderCell(
                     col,
                     row,
-                    listUuid,
+                    tableUuid,
                     principalUuids,
                     lookupUuids,
                     "compact",
@@ -1260,7 +1260,7 @@ cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/records/renderCell.tsx frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/records/renderCell.tsx frontend/src/features/tables/TableDetailPage.tsx
 git commit -F - <<'EOF'
 Let a link cell be edited from the part of it that looks editable
 
@@ -1380,7 +1380,7 @@ EOF
 **Goal:** Rich-text and multiline columns stop being mouse-only in edit mode (#11).
 
 **Files:**
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `kind === "dialog"` branch of the column `body`)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx` (the `kind === "dialog"` branch of the column `body`)
 
 **Acceptance Criteria:**
 - [ ] The span has `role="button"`, `tabIndex={0}` and an `aria-label` naming the column
@@ -1401,7 +1401,7 @@ EOF
                   // click is off while the mode is on — leaving this the only route
                   // to those columns, and until now a mouse-only one.
                   if (kind !== "dialog" || !canItem(row.uuid, "edit")) return cell;
-                  const openRecord = () => setRecordDialog({ open: true, item: row });
+                  const openRecord = () => setRecordDialog({ open: true, record: row });
                   const hint = `Edit ${col.display_name} in the record's own form`;
                   return (
                     <span
@@ -1432,7 +1432,7 @@ cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/tables/TableDetailPage.tsx
 git commit -F - <<'EOF'
 Reach a rich text cell without a mouse
 
@@ -1537,7 +1537,7 @@ Branch: `fix/cell-permission-gating`
 /**
  * A column the server writes for you cannot be an input, whatever a form config
  * says: `config.onupdate` is stamped over anything sent on every accepted write
- * (`ListItemService._validate_data`). Read-only rather than absent, because a
+ * (`TableRecordService._validate_data`). Read-only rather than absent, because a
  * "last modified" is exactly the sort of thing you want to *see* on a record —
  * which is what `enabled: false` already means everywhere it is read.
  *
@@ -1669,7 +1669,7 @@ EOF
 **Goal:** The class, the body and the edit gate cannot disagree about the same cell (#14).
 
 **Files:**
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `visibleCols.map` block)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx` (the `visibleCols.map` block)
 - Modify: `frontend/src/features/records/cellEdit.ts` (delete `cellEditKind`)
 
 **Acceptance Criteria:**
@@ -1693,7 +1693,7 @@ EOF
             // One answer for the outline, the cell body and the gate on opening an
             // editor. Asked separately they could disagree about the same cell —
             // a cell drawn as editable that refuses to open, or the reverse.
-            const isEditable = (row: ListItem) =>
+            const isEditable = (row: TableRecord) =>
               kind !== "locked" && canItem(row.uuid, "edit");
             return (
 ```
@@ -1701,7 +1701,7 @@ EOF
 - [ ] **Step 2: Use it in all three callbacks**
 
 ```tsx
-                bodyClassName={(row: ListItem) =>
+                bodyClassName={(row: TableRecord) =>
                   !isEditable(row)
                     ? ""
                     : kind === "inline"
@@ -1711,12 +1711,12 @@ EOF
 ```
 
 ```tsx
-                body={(row: ListItem) => {
+                body={(row: TableRecord) => {
                   const editing = isEditable(row);
                   const cell = renderCell(
                     col,
                     row,
-                    listUuid,
+                    tableUuid,
                     principalUuids,
                     lookupUuids,
                     "compact",
@@ -1727,13 +1727,13 @@ EOF
 
 ```tsx
                 onBeforeCellEditShow={(e) =>
-                  isEditable(e.rowData as ListItem) ? undefined : false
+                  isEditable(e.rowData as TableRecord) ? undefined : false
                 }
 ```
 
 - [ ] **Step 3: Delete `cellEditKind`**
 
-Remove the function from `cellEdit.ts` and drop it from the `../records/cellEdit` import in `ListDetailPage.tsx`. Add `type CellEditKind` to that import.
+Remove the function from `cellEdit.ts` and drop it from the `../records/cellEdit` import in `TableDetailPage.tsx`. Add `type CellEditKind` to that import.
 
 - [ ] **Step 4: Verify**
 
@@ -1745,7 +1745,7 @@ cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/lists/ListDetailPage.tsx frontend/src/features/records/cellEdit.ts
+git add frontend/src/features/tables/TableDetailPage.tsx frontend/src/features/records/cellEdit.ts
 git commit -F - <<'EOF'
 Ask once whether a cell can be edited
 
@@ -1768,18 +1768,18 @@ EOF
 
 **Goal:** Cells that become editable after the permission query resolves actually become editable (#8) — with the render cost measured before the approach is locked in.
 
-> **USER-ORDERED GATE — NON-SKIPPABLE.** This task was requested by the user in the current conversation. It MUST NOT be closed by walking around it, by declaring it "verified inline", or by substituting a cheaper check. Close only after every item in `acceptanceCriteria` has been re-validated independently, with output captured.
+> **USER-ORDERED GATE — NON-SKIPPABLE.** This task was requested by the user in the current conversation. It MUST NOT be closed by walking around it, by declaring it "verified inline", or by substituting a cheaper check. Close only after every record in `acceptanceCriteria` has been re-validated independently, with output captured.
 
 **Files:**
-- Modify: `frontend/src/features/lists/ListDetailPage.tsx` (the `<DataTable>` element)
+- Modify: `frontend/src/features/tables/TableDetailPage.tsx` (the `<DataTable>` element)
 
 **Acceptance Criteria:**
 - [ ] `cellMemo={false}` is set on the `<DataTable>` with a comment naming why the memo cannot be narrowed
-- [ ] The grid is exercised on a real list with the permission map resolving late, and the affordance appears on rows the caller may edit
+- [ ] The grid is exercised on a real table with the permission map resolving late, and the affordance appears on rows the caller may edit
 - [ ] Interaction cost is observed on a full page and reported with what was measured and how
 - [ ] If the cost is judged unacceptable, `cellMemo={false}` is reverted and `editMode` is instead gated on the effective-actions query settling — and the narrower hole (a mid-session Share change) is stated in the commit message
 
-**Verify:** Run the app (`uvicorn main:create_app --factory` on :5000, `npm run dev`, open `http://localhost:5173`), load a list seeded by `uv run python -m src.demo.school`, toggle "Edit cells", and exercise the grid. Capture what was measured.
+**Verify:** Run the app (`uvicorn main:create_app --factory` on :5000, `npm run dev`, open `http://localhost:5173`), load a table seeded by `uv run python -m src.demo.school`, toggle "Edit cells", and exercise the grid. Capture what was measured.
 
 **Steps:**
 
@@ -1788,7 +1788,7 @@ EOF
 On the `<DataTable>` element, next to `editMode`:
 
 ```tsx
-          // PrimeReact memoises every body cell against a fixed prop list
+          // PrimeReact memoises every body cell against a fixed prop table
           // (datatable.cjs.js:493) that does not include the column, so a cell
           // holds on to the `canItem` closure it first rendered with. When the
           // effective-actions query resolves after the grid has drawn, cells that
@@ -1818,7 +1818,7 @@ cd C:/Users/Asus/Projects/database-w-ui/frontend && npm run dev
 
 Open `http://localhost:5173` (not `127.0.0.1` — vite binds IPv6 here).
 
-- [ ] **Step 3: Seed a list worth measuring on, if one is not there**
+- [ ] **Step 3: Seed a table worth measuring on, if one is not there**
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui/backend && uv run --system-certs python -m src.demo.school
@@ -1828,7 +1828,7 @@ This is idempotent and re-runnable. It seeds ~740 records across every column ty
 
 - [ ] **Step 4: Check the correctness half**
 
-Hard-reload the list page so the effective-actions query resolves after the first paint, turn on "Edit cells", and confirm every row the caller may edit shows the dashed `cell-editable` outline and opens an editor on click. Before this change, rows that resolved late stayed flat and refused to open.
+Hard-reload the table page so the effective-actions query resolves after the first paint, turn on "Edit cells", and confirm every row the caller may edit shows the dashed `cell-editable` outline and opens an editor on click. Before this change, rows that resolved late stayed flat and refused to open.
 
 - [ ] **Step 5: Measure the cost half**
 
@@ -1842,7 +1842,7 @@ If it is perceptible, revert `cellMemo={false}` and gate the edit mode instead:
 
 ```tsx
           // Applied only once the per-row permissions have resolved. `editMode` is
-          // in the cell memo's compare list, so flipping it re-renders every cell
+          // in the cell memo's compare table, so flipping it re-renders every cell
           // with a final `canItem` — where turning the mode on beforehand would
           // leave cells holding the closure they first drew with. The hole this
           // leaves is narrower than the one it closes: a permission changed through
@@ -1860,7 +1860,7 @@ carries the flag keeps every existing `can(uuid, action)` working untouched. In
 /** The batch answer for a collection: callable per row, and able to say whether
  *  it has arrived. Most callers only hide a control and can ignore `ready`; one
  *  that changes a grid's *mode* cannot, because PrimeReact memoises its cells
- *  against a prop list this is not part of. */
+ *  against a prop table this is not part of. */
 export type ActionsMap = ((
   uuid: string,
   action: PermissionAction,
@@ -1876,13 +1876,13 @@ and at the end of `useEffectiveActionsMap`, replacing the bare `return`:
     return fallbackActions?.has(action) ?? false;
   }) as ActionsMap;
   // Nothing to wait for when there is nothing to ask about: the query is disabled
-  // on an empty list, so it would never report success.
+  // on an empty table, so it would never report success.
   can.ready = key.length === 0 || query.isSuccess;
   return can;
 ```
 
 with its declared return type changed from the inline function type to `ActionsMap`.
-Then in `ListDetailPage.tsx`, `permissionsReady` is simply `canItem.ready`.
+Then in `TableDetailPage.tsx`, `permissionsReady` is simply `canItem.ready`.
 
 Say plainly in the commit message which branch was taken and why.
 
@@ -1894,14 +1894,14 @@ cd C:/Users/Asus/Projects/database-w-ui/frontend && npx tsc --noEmit && npm test
 
 ```bash
 cd C:/Users/Asus/Projects/database-w-ui
-git add frontend/src/features/lists/ListDetailPage.tsx
+git add frontend/src/features/tables/TableDetailPage.tsx
 git commit
 ```
 
 Write the message in the repo's style, and include: what the stale closure did, why `cellMemoProps` cannot be narrowed, what was measured and how, and which branch was taken.
 
 ```json:metadata
-{"userGate": true, "tags": ["user-gate"], "requiresUserSpecification": true, "files": ["frontend/src/features/lists/ListDetailPage.tsx"], "verifyCommand": "cd frontend && npm run dev  # then exercise the grid by hand", "acceptanceCriteria": ["cellMemo={false} set with a comment naming why the memo cannot be narrowed", "affordance appears on rows whose permissions resolved after first paint", "interaction cost observed on a full page and reported with method", "if cost unacceptable, reverted to gating editMode and the narrower hole stated"], "modelTier": "frontier"}
+{"userGate": true, "tags": ["user-gate"], "requiresUserSpecification": true, "files": ["frontend/src/features/tables/TableDetailPage.tsx"], "verifyCommand": "cd frontend && npm run dev  # then exercise the grid by hand", "acceptanceCriteria": ["cellMemo={false} set with a comment naming why the memo cannot be narrowed", "affordance appears on rows whose permissions resolved after first paint", "interaction cost observed on a full page and reported with method", "if cost unacceptable, reverted to gating editMode and the narrower hole stated"], "modelTier": "frontier"}
 ```
 
 ---
@@ -1941,7 +1941,7 @@ gh pr create --base main --head fix/cell-permission-gating \
 A column with \`config.onupdate\` is written by the server on every accepted write. Both editing surfaces offered it as an input. \`resolveFields\` now returns it \`enabled: false\` — read-only rather than absent, so a \"last modified\" is still visible on the record — and that one rule reaches the dialog, the grid, the view dialog and the QR fill through machinery that already existed.
 
 ## #8 — the stale permission closure
-PrimeReact memoises body cells against a fixed prop list (\`datatable.cjs.js:493\`) that excludes the column, so a cell keeps the \`canItem\` closure it first rendered with. Cells that became editable after the effective-actions query resolved never gained the affordance and refused to open.
+PrimeReact memoises body cells against a fixed prop table (\`datatable.cjs.js:493\`) that excludes the column, so a cell keeps the \`canItem\` closure it first rendered with. Cells that became editable after the effective-actions query resolved never gained the affordance and refused to open.
 
 Narrowing the memo does not work: adding \`column\` to \`cellMemoProps\` compares a React element rebuilt every render, so it would never match and the memo would be off in all but name.
 

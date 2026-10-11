@@ -3,7 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../lib/api";
-import type { ListRead, Workspace } from "../lib/types";
+import type { TableRead, Workspace } from "../lib/types";
 
 interface NavLinkProps {
   to: string;
@@ -52,11 +52,11 @@ function NavSkeleton({ rows = 3 }: { rows?: number }) {
   );
 }
 
-/** The lists of one workspace, fetched only once it is expanded — a tree that
- *  loaded every list of every workspace on mount would spend a phone's network
- *  on branches nobody looked at. The query key is the one ListsPage uses, so
+/** The tables of one workspace, fetched only once it is expanded — a tree that
+ *  loaded every table of every workspace on mount would spend a phone's network
+ *  on branches nobody looked at. The query key is the one TablesPage uses, so
  *  expanding a workspace you have already visited costs nothing. */
-function WorkspaceLists({
+function WorkspaceTables({
   workspaceUuid,
   activePath,
   onNavigate,
@@ -65,33 +65,33 @@ function WorkspaceLists({
   activePath: string;
   onNavigate?: () => void;
 }) {
-  const lists = useQuery({
-    queryKey: ["lists", workspaceUuid],
+  const tables = useQuery({
+    queryKey: ["tables", workspaceUuid],
     queryFn: () =>
-      api.get<ListRead[]>(`/lists/?workspace_uuid=${workspaceUuid}`),
+      api.get<TableRead[]>(`/tables/?workspace_uuid=${workspaceUuid}`),
   });
 
-  if (lists.isLoading) return <NavSkeleton rows={2} />;
-  if (!lists.data?.length) {
+  if (tables.isLoading) return <NavSkeleton rows={2} />;
+  if (!tables.data?.length) {
     return (
       <span
         className="px-2 py-1 text-sm"
         style={{ color: "var(--text-muted)", marginLeft: "1.5rem" }}
       >
-        No lists yet
+        No tables yet
       </span>
     );
   }
   return (
     <>
-      {lists.data.map((list) => (
+      {tables.data.map((table) => (
         <NavLink
-          key={list.uuid}
-          to={`/lists/${list.uuid}`}
-          label={list.display_name}
+          key={table.uuid}
+          to={`/tables/${table.uuid}`}
+          label={table.display_name}
           icon="pi pi-table"
           indent
-          active={activePath === `/lists/${list.uuid}`}
+          active={activePath === `/tables/${table.uuid}`}
           onNavigate={onNavigate}
         />
       ))}
@@ -142,7 +142,7 @@ function WorkspaceBranch({
       </div>
       {open && (
         <div className="flex flex-col gap-0.5">
-          <WorkspaceLists
+          <WorkspaceTables
             workspaceUuid={workspace.uuid}
             activePath={pathname}
             onNavigate={onNavigate}
@@ -163,7 +163,7 @@ interface Props {
 }
 
 /**
- * Everywhere you can go: the app's sections, your workspaces and their lists,
+ * Everywhere you can go: the app's sections, your workspaces and their tables,
  * and everything other people have shared with you.
  *
  * One component, rendered in two places — the desktop sidebar and the mobile
@@ -173,13 +173,13 @@ interface Props {
  *
  * "Shared with me" holds two different things, and they are fetched by two
  * different questions. A whole workspace someone shared appears as a branch, and
- * its lists come from expanding it. A list shared *on its own* sits in a
+ * its tables come from expanding it. A table shared *on its own* sits in a
  * workspace you cannot open, so it hangs off nothing and is listed flat — that is
- * what `workspace_hidden=true` asks for. Asking only "which lists do I not own?"
- * would return both sets, and every list of a shared workspace would appear
+ * what `workspace_hidden=true` asks for. Asking only "which tables do I not own?"
+ * would return both sets, and every table of a shared workspace would appear
  * twice: once under its branch and once in the flat run below.
  *
- * The workspace whose page (or whose list) you are on expands itself, so
+ * The workspace whose page (or whose table) you are on expands itself, so
  * arriving anywhere by any route leaves the tree showing where you are.
  */
 export function NavTree({ enabled, onNavigate }: Props) {
@@ -198,12 +198,12 @@ export function NavTree({ enabled, onNavigate }: Props) {
     queryFn: () => api.get<Workspace[]>("/workspaces/?shared=true"),
     enabled,
   });
-  // Lists shared with you on their own: their workspace is not yours to see, so
+  // Tables shared with you on their own: their workspace is not yours to see, so
   // they hang off no branch above and would otherwise be unreachable.
   const shared = useQuery({
-    queryKey: ["lists", "shared", "unreachable"],
+    queryKey: ["tables", "shared", "unreachable"],
     queryFn: () =>
-      api.get<ListRead[]>("/lists/?shared=true&workspace_hidden=true"),
+      api.get<TableRead[]>("/tables/?shared=true&workspace_hidden=true"),
     enabled,
   });
 
@@ -296,13 +296,13 @@ export function NavTree({ enabled, onNavigate }: Props) {
               onNavigate={onNavigate}
             />
           ))}
-          {shared.data?.map((list) => (
+          {shared.data?.map((table) => (
             <NavLink
-              key={list.uuid}
-              to={`/lists/${list.uuid}`}
-              label={list.display_name}
+              key={table.uuid}
+              to={`/tables/${table.uuid}`}
+              label={table.display_name}
               icon="pi pi-table"
-              active={pathname === `/lists/${list.uuid}`}
+              active={pathname === `/tables/${table.uuid}`}
               onNavigate={onNavigate}
             />
           ))}

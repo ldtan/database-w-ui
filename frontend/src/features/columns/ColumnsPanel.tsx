@@ -13,13 +13,13 @@ import type {
   ConversionReport,
   RecomputeReport,
 } from "../../lib/types";
-import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
+import { DeletedConfigDialog } from "../tables/DeletedConfigDialog";
 import { compareValues } from "../records/sortRows";
 import { ColumnDialog } from "./ColumnDialog";
 import { ConversionReportDialog } from "./ConversionReportDialog";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   workspaceUuid: string | null;
   columns: Column[];
   canConfigure: boolean;
@@ -27,10 +27,10 @@ interface Props {
 
 const TYPE_LABELS = new Map(COLUMN_TYPE_OPTIONS.map((o) => [o.value, o.label]));
 
-/** The list's fields: add, modify, delete. Lives in List settings rather than the
+/** The table's fields: add, modify, delete. Lives in Table settings rather than the
  *  grid header, where a delete button per column crowded out the data. */
 export function ColumnsPanel({
-  listUuid,
+  tableUuid,
   workspaceUuid,
   columns,
   canConfigure,
@@ -55,7 +55,7 @@ export function ColumnsPanel({
 
   // Alphabetical, because this panel is an *inventory* — you come here to find a
   // named field among fifty and change it. The API returns `position, id` order,
-  // which is the list's default *display* order and is what the grid and the form
+  // which is the table's default *display* order and is what the grid and the form
   // editor want; here it degrades to creation order, since nothing in the UI ever
   // writes `position` (known-gaps.md), and hunting through it by eye is the problem.
   // Sorting only what is shown: the grid's order is not this component's business.
@@ -71,9 +71,9 @@ export function ColumnsPanel({
   );
 
   const remove = useMutation({
-    mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/columns/${uuid}`),
+    mutationFn: (uuid: string) => api.del(`/tables/${tableUuid}/columns/${uuid}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["columns", tableUuid] });
       toast.success("Column deleted");
     },
     onError: (err) =>
@@ -90,9 +90,9 @@ export function ColumnsPanel({
   // change can do it — editing a record re-indexes that record for free.
   const recompute = useMutation({
     mutationFn: () =>
-      api.post<RecomputeReport>(`/lists/${listUuid}/columns/recompute`),
+      api.post<RecomputeReport>(`/tables/${tableUuid}/columns/recompute`),
     onSuccess: (report) => {
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       if (report.deferred) {
         toast.success(
           "Refreshing in the background",
@@ -108,11 +108,11 @@ export function ColumnsPanel({
       }
     },
     // 409 is an expected answer, not a fault: someone else's refresh — or the
-    // other tab's — is already doing this list. Say so plainly.
+    // other tab's — is already doing this table. Say so plainly.
     onError: (err) =>
       toast.error(
         err instanceof ApiError && err.status === 409
-          ? "A refresh is already running for this list"
+          ? "A refresh is already running for this table"
           : "Could not refresh",
         err instanceof ApiError && err.status !== 409 ? err.message : undefined,
       ),
@@ -121,10 +121,10 @@ export function ColumnsPanel({
   function confirmRecompute() {
     confirmDialog({
       message:
-        "Rebuild sorting and filtering for this list's calculated columns? " +
+        "Rebuild sorting and filtering for this table's calculated columns? " +
         "The values shown in the grid are always up to date — this brings the " +
         "stored copy that sorting, filtering and search use into line with the " +
-        "current formulas. It reads every record, so a large list takes a while.",
+        "current formulas. It reads every record, so a large table takes a while.",
       header: "Refresh calculated columns",
       icon: "pi pi-refresh",
       acceptLabel: "Refresh",
@@ -149,7 +149,7 @@ export function ColumnsPanel({
           text={
             canConfigure
               ? "No columns yet. Add one to define what a record holds."
-              : "This list has no columns yet."
+              : "This table has no columns yet."
           }
         />
       )}
@@ -219,7 +219,7 @@ export function ColumnsPanel({
       {/* The bin sits with this panel's own actions rather than on a screen of its
           own: a deleted column is looked for where the live ones are listed. It is
           offered whenever the panel is editable at all, because the route is gated
-          on the list's `configure` — exactly like adding and deleting here. */}
+          on the table's `configure` — exactly like adding and deleting here. */}
       {canConfigure && (
         <div className="flex flex-wrap items-center gap-2">
           <Button
@@ -236,7 +236,7 @@ export function ColumnsPanel({
             size="small"
             onClick={() => setShowDeleted(true)}
           />
-          {/* One button for the list, not one per column, because the columns are
+          {/* One button for the table, not one per column, because the columns are
               not independent: a formula may read another calculated column, so the
               chain is rebuilt as a whole and re-indexing half of it would mean
               nothing. Offered only when there is a formula to re-index.
@@ -258,7 +258,7 @@ export function ColumnsPanel({
       )}
 
       <ColumnDialog
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         workspaceUuid={workspaceUuid}
         column={editing.column}
         visible={editing.open}
@@ -284,7 +284,7 @@ export function ColumnsPanel({
       {converting && (
         <ColumnDialog
           key={`convert:${converting.uuid}`}
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           workspaceUuid={workspaceUuid}
           column={converting}
           visible
@@ -304,7 +304,7 @@ export function ColumnsPanel({
       {duplicating && (
         <ColumnDialog
           key={`duplicate:${duplicating.uuid}`}
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           workspaceUuid={workspaceUuid}
           column={duplicating}
           visible
@@ -321,7 +321,7 @@ export function ColumnsPanel({
       )}
       {review && (
         <ConversionReportDialog
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           column={review.column}
           newType={review.newType}
           report={review.report}
@@ -329,7 +329,7 @@ export function ColumnsPanel({
         />
       )}
       <DeletedConfigDialog
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         kind="columns"
         visible={showDeleted}
         onHide={() => setShowDeleted(false)}

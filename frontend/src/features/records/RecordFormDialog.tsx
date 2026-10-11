@@ -7,17 +7,17 @@ import { Message } from "primereact/message";
 
 import { api } from "../../lib/api";
 import { useToast } from "../../lib/toast";
-import type { Column, Form, ListItem } from "../../lib/types";
+import type { Column, Form, TableRecord } from "../../lib/types";
 import { applyFieldConditions } from "../forms/conditions";
 import { RecordFields } from "./RecordFields";
 import { buildRecordData, deserialize, resolveFields } from "./recordValues";
 import { ErrorMessage } from "../../components/ErrorMessage";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   form: Form | null; // the create/update form whose config drives the layout
-  item: ListItem | null; // null => create, otherwise edit
+  item: TableRecord | null; // null => create, otherwise edit
   /** Values to open a *new* record with, keyed by column uuid (the QR scanner's). */
   prefill?: Record<string, unknown> | null;
   /** What the QR scanner has to say: a key the form has no field for, or, when a
@@ -26,26 +26,26 @@ interface Props {
   visible: boolean;
   onHide: () => void;
   /** Overrides "Add record" / "Edit record" when the dialog is opened from
-   *  somewhere that has to say *which* list is being added to — a lookup
+   *  somewhere that has to say *which* table is being added to — a lookup
    *  creating a row in its target. */
   header?: string;
   /** The record that was just created, for a caller that needs its uuid rather
    *  than just the side effect. Runs before `onHide`; the toast and the `items`
    *  invalidation happen either way, since the row is real whatever the caller
    *  goes on to do with it. */
-  onCreated?: (item: ListItem) => void;
+  onCreated?: (item: TableRecord) => void;
 }
 
 /**
- * Add or edit one record, laid out by the list's form.
+ * Add or edit one record, laid out by the table's form.
  *
  * The inputs are not chosen here so much as *derived*: `resolveFields` applies the
  * form's config (which columns, in what order, with what labels, and which are
  * read-only), and each field's editor comes from its column's `type` and `config`.
  * A new column therefore appears in this dialog without touching it — that is the
- * point of the config-driven design, and the reason there is no per-list form code.
+ * point of the config-driven design, and the reason there is no per-table form code.
  *
- * Which form? The list's `create` form when adding and its `update` form when
+ * Which form? The table's `create` form when adding and its `update` form when
  * editing, picked by the page. Values are sent under column **uuids**, never names,
  * because that is how records are stored.
  *
@@ -55,7 +55,7 @@ interface Props {
  * does not bypass it.
  */
 export function RecordFormDialog({
-  listUuid,
+  tableUuid,
   columns,
   form,
   item,
@@ -75,7 +75,7 @@ export function RecordFormDialog({
   // apply conditions (the grid's cell editing, the QR fill) go on calling it directly.
   //
   // Both answers are kept because "no fields" has two causes now, and telling somebody
-  // to add a column when the list has plenty is worse than saying nothing.
+  // to add a column when the table has plenty is worse than saying nothing.
   const laidOut = resolveFields(columns, form);
   const fields = applyFieldConditions(laidOut, form, values, columns);
 
@@ -135,11 +135,11 @@ export function RecordFormDialog({
     mutationFn: () => {
       const data = buildRecordData(fields, values, !!item);
       return item
-        ? api.patch<ListItem>(`/lists/${listUuid}/items/${item.uuid}`, { data })
-        : api.post<ListItem>(`/lists/${listUuid}/items/`, { data });
+        ? api.patch<TableRecord>(`/tables/${tableUuid}/records/${item.uuid}`, { data })
+        : api.post<TableRecord>(`/tables/${tableUuid}/records/`, { data });
     },
     onSuccess: (saved) => {
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       toast.success(item ? "Record updated" : "Record added");
       if (!item) onCreated?.(saved);
       onHide();
@@ -188,7 +188,7 @@ export function RecordFormDialog({
           <p className="field-hint">Add a column first.</p>
         )}
         {/* Every field this form has is conditional and none of them apply. Saying so
-            beats an empty dialog, and beats "add a column first" — the list has
+            beats an empty dialog, and beats "add a column first" — the table has
             columns, they just do not apply to the record as it stands. */}
         {laidOut.length > 0 && fields.length === 0 && (
           <p className="field-hint">
@@ -197,7 +197,7 @@ export function RecordFormDialog({
           </p>
         )}
         <RecordFields
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           fields={fields}
           columns={columns}
           values={values}

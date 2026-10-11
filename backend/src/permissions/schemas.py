@@ -68,7 +68,7 @@ class ResourceRef(BaseModel):
 
 class EffectiveActionsQuery(BaseModel):
     """Ask for the caller's actions on many resources in one round trip — the UI
-    gates per-row controls (a page of records, a workspace's lists)."""
+    gates per-row controls (a page of records, a workspace's tables)."""
 
     resources: list[ResourceRef] = Field(default_factory=list, max_length=500)
 

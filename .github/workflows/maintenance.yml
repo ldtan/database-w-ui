@@ -71,22 +71,22 @@ jobs:
         continue-on-error: true
         run: uv run python -m src.maintenance.purge_deleted_workspaces
 
-      - name: Purge deleted lists
-        id: purge_lists
+      - name: Purge deleted tables
+        id: purge_tables
         continue-on-error: true
-        run: uv run python -m src.maintenance.purge_deleted_lists
+        run: uv run python -m src.maintenance.purge_deleted_tables
 
       - name: Purge deleted records
-        id: purge_items
+        id: purge_records
         continue-on-error: true
-        run: uv run python -m src.maintenance.purge_deleted_items
+        run: uv run python -m src.maintenance.purge_deleted_records
 
-      # After the list purge, which owns the children of a deleted list; this one
-      # only takes views/forms/metrics binned on their own under a live list.
+      # After the table purge, which owns the children of a deleted table; this one
+      # only takes views/forms/metrics binned on their own under a live table.
       - name: Purge deleted views, forms and metrics
         id: purge_config
         continue-on-error: true
-        run: uv run python -m src.maintenance.purge_deleted_list_config
+        run: uv run python -m src.maintenance.purge_deleted_table_config
 
       - name: Purge deleted users and groups
         id: purge_principals
@@ -115,8 +115,8 @@ jobs:
         if: >-
           steps.reconcile.outcome == 'failure' ||
           steps.purge_workspaces.outcome == 'failure' ||
-          steps.purge_lists.outcome == 'failure' ||
-          steps.purge_items.outcome == 'failure' ||
+          steps.purge_tables.outcome == 'failure' ||
+          steps.purge_records.outcome == 'failure' ||
           steps.purge_config.outcome == 'failure' ||
           steps.purge_principals.outcome == 'failure' ||
           steps.sweep_grants.outcome == 'failure' ||

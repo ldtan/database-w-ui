@@ -8,9 +8,9 @@ via a column default, or by widening `allowed_schemes`.
 import pytest
 
 
-async def _add_link_column(client, list_uuid: str, **config) -> str:
+async def _add_link_column(client, table_uuid: str, **config) -> str:
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "site",
             "display_name": "Site",
@@ -22,10 +22,10 @@ async def _add_link_column(client, list_uuid: str, **config) -> str:
     return resp.json()["uuid"]
 
 
-async def test_accepts_an_http_url(client, list_uuid):
-    col = await _add_link_column(client, list_uuid)
+async def test_accepts_an_http_url(client, table_uuid):
+    col = await _add_link_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "https://example.com/docs?a=1"}},
     )
     assert resp.status_code == 201, resp.text
@@ -44,32 +44,32 @@ async def test_accepts_an_http_url(client, list_uuid):
         "https://",  # scheme but no host
     ],
 )
-async def test_rejects_unsafe_or_malformed_urls(client, list_uuid, value):
-    col = await _add_link_column(client, list_uuid)
+async def test_rejects_unsafe_or_malformed_urls(client, table_uuid, value):
+    col = await _add_link_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert resp.status_code == 400, f"{value!r} was accepted: {resp.text}"
 
 
-async def test_allowed_schemes_narrows_but_cannot_widen(client, list_uuid):
+async def test_allowed_schemes_narrows_but_cannot_widen(client, table_uuid):
     # A column may opt into a narrower safe set...
-    col = await _add_link_column(client, list_uuid, allowed_schemes=["mailto"])
+    col = await _add_link_column(client, table_uuid, allowed_schemes=["mailto"])
     ok = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "mailto:someone@example.com"}},
     )
     assert ok.status_code == 201, ok.text
     # ...and http is then no longer accepted on that column.
     nope = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: "https://example.com"}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: "https://example.com"}}
     )
     assert nope.status_code == 400
 
     # But it cannot re-enable a dangerous scheme: whoever configures a column is
-    # an ordinary list editor, so this must be rejected at column-create time.
+    # an ordinary table editor, so this must be rejected at column-create time.
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "evil",
             "display_name": "Evil",
@@ -80,9 +80,9 @@ async def test_allowed_schemes_narrows_but_cannot_widen(client, list_uuid):
     assert resp.status_code == 400, resp.text
 
 
-async def test_a_columns_default_is_validated_too(client, list_uuid):
+async def test_a_columns_default_is_validated_too(client, table_uuid):
     resp = await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": "site",
             "display_name": "Site",
@@ -93,12 +93,12 @@ async def test_a_columns_default_is_validated_too(client, list_uuid):
     assert resp.status_code == 400, resp.text
 
 
-async def test_import_cannot_smuggle_an_unsafe_url(client, list_uuid):
+async def test_import_cannot_smuggle_an_unsafe_url(client, table_uuid):
     """Import goes through the same validation, so a CSV is not a side door."""
-    col = await _add_link_column(client, list_uuid)
+    col = await _add_link_column(client, table_uuid)
     csv = "site\njavascript:alert(1)\nhttps://example.com\n"
     resp = await client.post(
-        f"/api/lists/{list_uuid}/import",
+        f"/api/tables/{table_uuid}/import",
         files={"file": ("rows.csv", csv, "text/csv")},
     )
     assert resp.status_code == 200, resp.text
@@ -106,16 +106,16 @@ async def test_import_cannot_smuggle_an_unsafe_url(client, list_uuid):
     assert body["created"] == 1
     assert len(body["errors"]) == 1
 
-    items = (await client.get(f"/api/lists/{list_uuid}/items/")).json()
-    assert [i["data"][col] for i in items] == ["https://example.com"]
+    records = (await client.get(f"/api/tables/{table_uuid}/records/")).json()
+    assert [i["data"][col] for i in records] == ["https://example.com"]
 
 
-async def test_a_url_is_stored_trimmed(client, list_uuid):
+async def test_a_url_is_stored_trimmed(client, table_uuid):
     """The check parses the trimmed URL, so the trimmed URL is what gets stored —
     otherwise `unique` and `max_length` see padding the validator never did."""
-    col = await _add_link_column(client, list_uuid)
+    col = await _add_link_column(client, table_uuid)
     resp = await client.post(
-        f"/api/lists/{list_uuid}/items/",
+        f"/api/tables/{table_uuid}/records/",
         json={"data": {col: "  https://example.com  "}},
     )
     assert resp.status_code == 201, resp.text

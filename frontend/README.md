@@ -1,6 +1,6 @@
 # Database with UI — Frontend
 
-React + TypeScript SPA for the lists/tables app, talking to the FastAPI backend.
+React + TypeScript SPA for the tables/tables app, talking to the FastAPI backend.
 
 ## Stack
 
@@ -78,7 +78,7 @@ src/
   lib/            # api client (fetch + auth/refresh), auth + theme + toast contexts,
                   # themeSync (ties the theme to the account) and timezoneSync (the
                   # same for the browser's zone), query client, hand-written API types,
-                  # liveStream + useLiveList (the SSE subscription and the polling
+                  # liveStream + useLiveTable (the SSE subscription and the polling
                   # fallback), columnTypes (the one list of what a column may be), and
                   # the per-type value helpers each new column type brought with it:
                   # phone, email, color, rating, duration, location, temporal, links
@@ -99,23 +99,23 @@ src/
     onboarding/   # the guided tours, the welcome dialog and the help widget —
                   # the "show me" half of what the guide page writes down
     guide/        # GuidePage, the written walkthrough, and its generated figures
-    workspaces/   # workspaces + the lists shared with you directly
-    lists/        # lists of a workspace; a list's records; the List settings dialog;
+    workspaces/   # workspaces + the tables shared with you directly
+    tables/        # tables of a workspace; a table's records; the Table settings dialog;
                   # DeletedConfigDialog, the bin its four config kinds share
-    columns/      # add/edit a column, the columns panel in List settings, and the
+    columns/      # add/edit a column, the columns panel in Table settings, and the
                   # type-conversion report
     records/      # the record form and its fields, the mobile card layout, renderCell,
                   # inline cell editing, the archive surface, the per-type editors
                   # (PhoneInput, TemporalInput), the QR scanner + submitting session,
                   # and QR *generation* (QrCodeDialog, QrColumnPicker)
     views/        # the view bar, filter/group/column controls, filter conditions
-    forms/        # per-list form layouts, and the per-field conditions editor
+    forms/        # per-table form layouts, and the per-field conditions editor
     metrics/      # the aggregate cards above the grid, and their settings panel
     permissions/  # Share dialog/panel and the effective-actions hooks
     people/       # accounts and groups (identity administration), their bin,
                   # and batch account creation from a CSV
     profile/      # your own account and profile
-    transfer/     # CSV/JSON import + export, for a list's records
+    transfer/     # CSV/JSON import + export, for a table's records
     lookups/      # lookup cells, fields and filter inputs
     principals/   # user/group cells, fields and filter inputs
     locations/    # the map + address picker behind a `location` cell
@@ -183,9 +183,9 @@ VITE_HOME_ENABLED=true
 
 A column's `type` and `config` drive everything about it: `renderCell` picks how it
 displays, `RecordField` picks its input, `FilterConditionsEditor` picks its filter
-control. Adding a column type means teaching those, not writing per-list code — but
+control. Adding a column type means teaching those, not writing per-table code — but
 "those" is now longer than three, and a type taught to only some of them half-works
-silently. The full list, which `docs/data-model-design.md` §5 also carries:
+silently. The full table, which `docs/data-model-design.md` §5 also carries:
 
 | File | What it decides |
 |------|-----------------|
@@ -198,7 +198,7 @@ silently. The full list, which `docs/data-model-design.md` §5 also carries:
 | `features/columns/columnAdvanced.ts` | `ADVANCED_KEYS` — leave the new setting out and the column opens with it folded away invisibly |
 | `features/records/qrFill.ts` | `shape()` — how a QR code's JSON becomes the form's value |
 
-The backend half is `src/lists/transfer/services.py` (export and import cell handling).
+The backend half is `src/tables/transfer/services.py` (export and import cell handling).
 
 ## The guide's screenshots are taken from the running app
 
@@ -217,7 +217,7 @@ npm run capture:guide                              # or `… capture:guide recor
 Two things follow from it that are worth knowing:
 
 - **The captions live in `features/guide/figures.ts`, which is generated.** The capture
-  script writes it from the same list that took the pictures, so a caption cannot come
+  script writes it from the same table that took the pictures, so a caption cannot come
   loose from its image. Edit `SHOTS` in the script, not that file.
 - **It is the only check on prose the guide has.** Each shot clicks controls by the labels
   the guide's own sentences quote, so a renamed button fails the run instead of leaving the
@@ -286,12 +286,12 @@ the camera, so forgetting it would resubmit it ten times a second for as long as
 there. Waiting the window out costs nothing, either — a code rejected for what it contains
 will be rejected again on sight.
 
-Presets live on `ListDetailPage`, not in the session, so closing the scanner and reopening
+Presets live on `TableDetailPage`, not in the session, so closing the scanner and reopening
 it keeps the event you are taking attendance for. They are not persisted further: this is
 the answer to "what is happening right now", not a setting.
 
 **`qrFill.ts` does not validate, deliberately.** The backend validates every value on write
-(`src/lists/columns/validation.py`) and is the only thing that does — restating "what a
+(`src/tables/columns/validation.py`) and is the only thing that does — restating "what a
 link's scheme may be" or "what this choice column's options are" in the browser would be
 two rulebooks to keep in step, and the frontend's is the one that would silently fall
 behind. A bad value is therefore submitted and comes back as the server's error, which is
@@ -303,7 +303,7 @@ a rule: `"30"` into a number for the `InputNumber`, `"yes"` into a boolean for t
 the form uses for a stored value), and a person's name into the uuid a reference cell
 stores, so its picker can render it. The first two mirror the backend's *importer*
 (`_parse_cell`), which is where a QR's laxness comes from; the last is only for display,
-since the item service resolves reference names on write by itself. **Every translation
+since the record service resolves reference names on write by itself. **Every translation
 falls back to the raw value** rather than dropping it — an unresolvable name is still
 submitted, because the server resolves names too and will say precisely why it cannot.
 
@@ -321,7 +321,7 @@ Scanning uses `html5-qrcode`, with **an image fallback that is not a nicety**:
 scanner that only scanned would be a dead button. Both paths end in the same place: the
 code's text, handed to `qrFill`.
 
-`QrScanDialog` is **lazy-loaded** (`React.lazy` + `Suspense` in `ListDetailPage`): the
+`QrScanDialog` is **lazy-loaded** (`React.lazy` + `Suspense` in `TableDetailPage`): the
 decoder is ~110 kB gzipped, a quarter of the whole bundle, and most sessions never open
 the scanner. Import it that way, not directly — and note that `QrSubmitSession` renders it,
 so that must be lazy too or the decoder returns to the main bundle by the back door.
@@ -334,11 +334,11 @@ the selection bar lays out a printable sheet of them. Both are `QrCodeDialog` �
 because a sheet of forty and a sheet of one differ only in layout, and two would mean two
 copies of the picker, the request, the size advice and the print path.
 
-**The payload comes from the server**, `POST /lists/{uuid}/items/qr`, and that is the
+**The payload comes from the server**, `POST /tables/{uuid}/records/qr`, and that is the
 load-bearing decision rather than an arbitrary split. A generated code has to be scannable
 *back* by the Fill flow above, which means its values must be the ones the importer reads —
 and resolving a reference cell to that value needs the database and the caller's permissions
-on the *target* list. The grid does already hold labels for the rows on screen, so building
+on the *target* table. The grid does already hold labels for the rows on screen, so building
 the payload here was the cheaper option and the wrong one: the screen's rules are not quite
 the export's (a group shows its `display_name` and exports its slug `name`), so some codes
 would not have round-tripped. The route shares `json_row` with the export for exactly that
@@ -350,11 +350,11 @@ could, silently, since `uuid` is a legal column name. `qrFill` skips `_`-prefixe
 **without reporting them**, because an "unknown field" issue on every scan of every code the
 app itself generated is noise rather than information.
 
-**Which fields go on the code is saved on the list** (`lists.settings.qr`, column *names*),
-because it describes a printed artifact: every badge for a list should carry the same
+**Which fields go on the code is saved on the table** (`tables.settings.qr`, column *names*),
+because it describes a printed artifact: every badge for a table should carry the same
 fields. Saving needs `configure`, so a viewer gets the layout and cannot change it; changing
 the ticks without that permission still applies to the print in front of them. The default
-for a list that has saved nothing is the primary column plus `_uuid` — a badge that says who
+for a table that has saved nothing is the primary column plus `_uuid` — a badge that says who
 it is and carries a machine id.
 
 **Size is the constraint to design around, and it is density rather than capacity.** A code
@@ -405,7 +405,7 @@ out row folded into `AccountMenu`, whose menu already carried the same three lin
 and both actions.
 
 It renders **one** component, `components/NavTree.tsx` — the app's sections, your
-workspaces with their lists (fetched lazily, per expanded workspace), and the lists
+workspaces with their tables (fetched lazily, per expanded workspace), and the tables
 shared with you. Two copies would be two ideas of what the app contains, and they
 would drift the first time a section was added to one of them.
 
@@ -457,7 +457,7 @@ label were both `text-sm font-medium`, so a dialog of thirty fields had thirty
 identically-weighted rows and no shape to skim. A dialog should read as two or
 three things to decide.
 
-Two dialogs are **tabbed** rather than stacked, for the same reason: list settings
+Two dialogs are **tabbed** rather than stacked, for the same reason: table settings
 (columns / permissions / views / forms) and import-export. Getting data out and
 putting data in are different jobs, and only one of them is ever why you opened
 the dialog. A tabbed dialog passes `contentStyle={{ padding: 0 }}` so the tab
@@ -472,20 +472,20 @@ overflowed the page and `body { overflow-x: hidden }` clipped them away.
 ## The records toolbar
 
 Everything that changes *what you are looking at* is on one bar; everything that
-changes *what the list is* is behind Settings or its overflow. The bar's controls are
+changes *what the table is* is behind Settings or its overflow. The bar's controls are
 buttons rather than dropdowns sitting at their placeholder text, and each says whether
 it is currently doing anything — "Filter" against "Filter ②", "Group" against "Grouped
 by Status", "Sort" against "Score ↑". A control holding a non-default setting takes the
 `is-on` class, which tints it.
 
-**"Save view" appears only when there is something to save.** `ListDetailPage`
+**"Save view" appears only when there is something to save.** `TableDetailPage`
 fingerprints the page's live config against the active view's stored one (defaults
 applied to both sides, since a view saved before `group_by` existed has no key for it)
 and passes `dirty` to `ViewBar`.
 
 **Metrics are behind their own toolbar button, and the button gates the query rather
-than just the markup.** A list nobody is totalling costs nothing; rendering the strip
-hidden with its query still enabled would quietly turn every open list into a repeating
+than just the markup.** A table nobody is totalling costs nothing; rendering the strip
+hidden with its query still enabled would quietly turn every open table into a repeating
 full scan. See `docs/known-gaps.md` §9.
 
 ## Bins
@@ -497,10 +497,10 @@ things" screen: you go looking for a missing view where the views are listed.
 
 | Component | Where it is offered | Gated on |
 |-----------|--------------------|----------|
-| `BinnedRecordsDialog` | the list page's overflow menu | list-level `delete` |
-| `DeletedListsDialog` | the lists page | the workspace's `delete` |
+| `BinnedRecordsDialog` | the table page's overflow menu | table-level `delete` |
+| `DeletedTablesDialog` | the tables page | the workspace's `delete` |
 | `DeletedWorkspacesDialog` | the workspaces page | ownership (the backend scopes it) |
-| `DeletedConfigDialog` | each tab of List settings | list-level `configure` |
+| `DeletedConfigDialog` | each tab of Table settings | table-level `configure` |
 | `DeletedPrincipalsDialog` | the People page, per section | superuser |
 
 `DeletedConfigDialog` and `DeletedPrincipalsDialog` are each **one component covering
@@ -516,12 +516,12 @@ the row shape match. What does *not* match is why they exist. A delete says "thi
 mistake and it goes for good in thirty days"; an archive says "this happened and I have
 finished with it", so it has **no retention window, no deadline to display and no
 permanent-delete action**. Unarchiving cannot conflict where a restore can. `ArchiveHint`
-is the nudge toward it on a list that has grown long.
+is the nudge toward it on a table that has grown long.
 
 Two things are worth copying if a sixth kind ever gets one:
 
-- **The bin's query key is nested under its subject's live key** — `["views", listUuid,
-  "deleted", first, rows]`. Every `invalidateQueries({ queryKey: ["views", listUuid] })`
+- **The bin's query key is nested under its subject's live key** — `["views", tableUuid,
+  "deleted", first, rows]`. Every `invalidateQueries({ queryKey: ["views", tableUuid] })`
   already in the app therefore refreshes the bin by prefix match, so deleting something
   leaves the bin correct without the delete having to know a bin exists.
 - **A restore can legitimately fail, and the message matters.** A name is unique only
@@ -561,23 +561,23 @@ Two things are worth copying if a sixth kind ever gets one:
   the account's copy is applied once on sign-in, and every later change here is pushed
   up. It lives outside `ThemeProvider` because that provider wraps `AuthProvider` and so
   cannot ask who is signed in.
-- Server state is TanStack Query with **shared keys** (`["items", listUuid]`,
-  `["columns", listUuid]`, `["person", "me"]`…). Two components asking the same question
+- Server state is TanStack Query with **shared keys** (`["records", tableUuid]`,
+  `["columns", tableUuid]`, `["person", "me"]`…). Two components asking the same question
   make one request, and a dialog's `invalidateQueries` refreshes the page behind it.
   Retries and refetch-on-focus are off on purpose — see `lib/queryClient.ts`.
-- **An open list is kept current by a server push**, through `lib/useLiveList.ts` —
-  spread its result into the items `useQuery` and it does the rest. It subscribes to
-  `GET /lists/{uuid}/events` and invalidates the key you name when the server says that
-  list changed. Four things about it are load-bearing:
+- **An open table is kept current by a server push**, through `lib/useLiveTable.ts` —
+  spread its result into the records `useQuery` and it does the rest. It subscribes to
+  `GET /tables/{uuid}/events` and invalidates the key you name when the server says that
+  table changed. Four things about it are load-bearing:
   - **It falls back to polling, and that path is not new code.** A proxy that buffers
     event streams, a deployment with `SSE_ENABLED=False`, a network that forbids them —
     any of those and the hook returns the `refetchInterval` it used to return
     unconditionally, every `LIVE_REFRESH_SECONDS`. So "live" degrades rather than breaks.
-  - **An event carries no record data.** It says *this list changed*; the refetch it
-    provokes is an ordinary permissioned `GET /items/`, so push can no more surface a row
+  - **An event carries no record data.** It says *this table changed*; the refetch it
+    provokes is an ordinary permissioned `GET /records/`, so push can no more surface a row
     the viewer may not see than polling could.
   - **Each caller names the key it wants refreshed**, and may set a `minSeconds` floor.
-    Invalidating the whole `["items", listUuid]` namespace would be simpler and wrong: the
+    Invalidating the whole `["records", tableUuid]` namespace would be simpler and wrong: the
     metric values live under that prefix and are a scan of every visible record, so
     refreshing them per write, per viewer, costs more than the polling this replaced.
   - **An abandoned tab costs nothing.** The stream closes while the tab is hidden and
@@ -587,7 +587,7 @@ Two things are worth copying if a sixth kind ever gets one:
   `href`. The backend already restricts schemes, but rows predating that check, or
   arriving by import, mean a raw `href={value}` is stored XSS.
 - **Next step for type safety: a typed client.** The *schemas* are now generated (above),
-  but the *endpoints* are not: `api.get<ListItem[]>(\`/lists/${uuid}/items/\`)` is a string
+  but the *endpoints* are not: `api.get<TableRecord[]>(\`/tables/${uuid}/records/\`)` is a string
   and a type argument the caller supplies, so a wrong path or a stale response type still
   compiles. Adopting `openapi-fetch` over `api-schema.ts` would check the path, its
   parameters and its response against the OpenAPI document at compile time. It touches

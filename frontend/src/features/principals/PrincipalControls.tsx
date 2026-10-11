@@ -22,7 +22,7 @@ interface Option {
 
 // How many suggestions a search returns. The picker is a typeahead, not a
 // directory listing: with thousands of accounts, showing "the first 25 matches,
-// keep typing" beats pretending a scroll list is browsable.
+// keep typing" beats pretending a scroll table is browsable.
 const SUGGESTION_LIMIT = 25;
 // The batch-resolve endpoint's cap (max_length on the `uuid` query param).
 const RESOLVE_CHUNK = 500;
@@ -34,8 +34,8 @@ const PATHS: Record<PrincipalType, string> = {
 
 // Users are labelled by **username, never the connected person's name**: person
 // records are private (owner or superuser only), while /auth/users is readable by
-// any authenticated user so the Share dialog can list principals. Rendering
-// "Grace Hopper" in a cell would leak personal data to every viewer of the list.
+// any authenticated user so the Share dialog can table principals. Rendering
+// "Grace Hopper" in a cell would leak personal data to every viewer of the table.
 //
 // A group has no such constraint, so it gets its `display_name` — which is why a
 // cell reads "Registrar's Office" while an export of the same cell writes

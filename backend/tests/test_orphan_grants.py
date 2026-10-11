@@ -1,7 +1,7 @@
 """Grants outlive the things they were about, and nothing cascades.
 
 `permission_grants` points at its resource with no foreign key — `resource_id` means a
-different table per `resource_type` — so a deleted list, view or account leaves its
+different table per `resource_type` — so a deleted table, view or account leaves its
 grants behind. They are inert, but they accumulate and they make "who has access?"
 answer with the names of people who don't.
 """
@@ -13,7 +13,7 @@ from sqlalchemy import func, select, update
 from src.auth.users.schemas import UserCreate, UserGroupCreate
 from src.auth.users.services import UserGroupService, UserService
 from src.auth.users.models import User, UserGroup
-from src.lists.models import List
+from src.tables.models import Table
 from src.maintenance.sweep_orphan_grants import sweep
 from src.permissions.models import PermissionGrant
 
@@ -57,16 +57,16 @@ async def _share(client, resource_type, resource_uuid, **who):
 
 
 async def test_the_share_dialog_stops_listing_deleted_principals(
-    client, session_factory, list_uuid, principals
+    client, session_factory, table_uuid, principals
 ):
-    """The live bug: "who has access to this list?" was answering with a deleted user
+    """The live bug: "who has access to this table?" was answering with a deleted user
     and a deleted group. Both are inert — the account cannot log in, the group has no
     members — but naming them is worse than useless to whoever is auditing."""
     alice, editors = principals
-    await _share(client, "list", list_uuid, user_uuid=alice)
-    await _share(client, "list", list_uuid, group_uuid=editors)
+    await _share(client, "table", table_uuid, user_uuid=alice)
+    await _share(client, "table", table_uuid, group_uuid=editors)
 
-    url = f"/api/permissions/grants?resource_type=list&resource_uuid={list_uuid}"
+    url = f"/api/permissions/grants?resource_type=table&resource_uuid={table_uuid}"
     assert len((await client.get(url)).json()) == 2
 
     async with session_factory() as db:
@@ -83,24 +83,24 @@ async def test_the_share_dialog_stops_listing_deleted_principals(
 
 
 async def test_a_grant_inside_the_window_is_left_alone(
-    client, session_factory, list_uuid, principals
+    client, session_factory, table_uuid, principals
 ):
     """The resource can still be restored, and its sharing should come back with it."""
     alice, _ = principals
-    await _share(client, "list", list_uuid, user_uuid=alice)
-    assert (await client.delete(f"/api/lists/{list_uuid}")).status_code == 204
+    await _share(client, "table", table_uuid, user_uuid=alice)
+    assert (await client.delete(f"/api/tables/{table_uuid}")).status_code == 204
 
     assert await sweep(days=30, dry_run=True) == 0
     assert await _grants(session_factory) == 1
 
 
 async def test_grants_are_swept_once_the_resource_is_past_the_window(
-    client, session_factory, list_uuid, principals
+    client, session_factory, table_uuid, principals
 ):
     alice, _ = principals
-    await _share(client, "list", list_uuid, user_uuid=alice)
-    await client.delete(f"/api/lists/{list_uuid}")
-    await _expire(session_factory, List, list_uuid)
+    await _share(client, "table", table_uuid, user_uuid=alice)
+    await client.delete(f"/api/tables/{table_uuid}")
+    await _expire(session_factory, Table, table_uuid)
 
     assert await sweep(days=30, dry_run=True) == 1
     assert await _grants(session_factory) == 1  # a dry run deletes nothing
@@ -111,11 +111,11 @@ async def test_grants_are_swept_once_the_resource_is_past_the_window(
 
 
 async def test_grants_are_swept_once_the_principal_is_past_the_window(
-    client, session_factory, list_uuid, principals
+    client, session_factory, table_uuid, principals
 ):
     alice, editors = principals
-    await _share(client, "list", list_uuid, user_uuid=alice)
-    await _share(client, "list", list_uuid, group_uuid=editors)
+    await _share(client, "table", table_uuid, user_uuid=alice)
+    await _share(client, "table", table_uuid, group_uuid=editors)
 
     async with session_factory() as db:
         await UserService.delete(db, alice)
@@ -128,15 +128,15 @@ async def test_grants_are_swept_once_the_principal_is_past_the_window(
     assert await _grants(session_factory) == 0
 
 
-async def test_expired_grants_are_swept(client, session_factory, list_uuid, principals):
+async def test_expired_grants_are_swept(client, session_factory, table_uuid, principals):
     """A grant that has already outlived its expiry should be removed by the sweep."""
     alice, _ = principals
-    await _share(client, "list", list_uuid, user_uuid=alice)
+    await _share(client, "table", table_uuid, user_uuid=alice)
 
     async with session_factory() as db:
         grant = (
             await db.execute(
-                select(PermissionGrant).where(PermissionGrant.resource_type == "list")
+                select(PermissionGrant).where(PermissionGrant.resource_type == "table")
             )
         ).scalars().first()
         assert grant is not None

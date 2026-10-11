@@ -20,7 +20,7 @@ export const COLUMN_TYPE_OPTIONS: { label: string; value: ColumnType }[] = [
   { label: "Duration", value: "duration" },
   { label: "User", value: "user" },
   { label: "Group", value: "group" },
-  { label: "Lookup (link to another list)", value: "lookup" },
+  { label: "Lookup (link to another table)", value: "lookup" },
   { label: "Calculated (formula)", value: "calculated" },
 ];
 
@@ -57,7 +57,7 @@ export function conversionTargets(from: ColumnType) {
 
 /** The types a *copy* of this column could have.
  *
- *  Same list as a conversion's, plus the source's own type — which `canConvert`
+ *  Same table as a conversion's, plus the source's own type — which `canConvert`
  *  excludes as a no-op and which is the commonest thing to want from a duplicate:
  *  the same column again. The backend's `is_supported` already treats a same-type
  *  pair as a straight copy. */

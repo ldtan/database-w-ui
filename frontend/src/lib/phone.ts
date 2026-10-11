@@ -43,13 +43,13 @@ const FORMATS: PhoneFormat[] = ["e164", "national", "international"];
 
 /** Every country the phone metadata knows, labelled and sorted for a dropdown.
  *
- *  The codes come from libphonenumber (so the list is exactly what the server's
+ *  The codes come from libphonenumber (so the table is exactly what the server's
  *  `SUPPORTED_REGIONS` will accept — the two ship the same underlying data), and the
  *  names from `Intl.DisplayNames`, which is in the browser already and localises
  *  itself. A build with no `Intl.DisplayNames` falls back to the bare codes rather
  *  than to an empty dropdown.
  *
- *  Computed once: 245 entries through `Intl` is cheap but not free, and the list
+ *  Computed once: 245 entries through `Intl` is cheap but not free, and the table
  *  cannot change while the page is open. */
 let countryOptionsCache: { label: string; value: string }[] | null = null;
 
@@ -108,12 +108,12 @@ const countriesCache = new Map<string, PhoneCountry[]>();
  *  part that matters anyway — it is what the picker actually contributes.
  *
  *  Memoised per config, the way `countryOptions` is memoised globally: this runs on
- *  every render of every open phone editor, and the list cannot change under it. */
+ *  every render of every open phone editor, and the table cannot change under it. */
 export function phoneCountries(column: Column): PhoneCountry[] {
   return countryChoices(allowedRegions(column), phoneRegion(column));
 }
 
-/** The same list, for a column that does not exist yet.
+/** The same table, for a column that does not exist yet.
  *
  *  Split out for the column dialog, which is choosing the very config
  *  `phoneCountries` would read. Both go through here so a country is labelled the
@@ -134,15 +134,15 @@ export function countryChoices(
       value: o.value as CountryCode,
     }));
   // The rest stay alphabetical: only the preferred one moves.
-  const list =
+  const table =
     preferred && options.some((o) => o.value === preferred)
       ? [
           ...options.filter((o) => o.value === preferred),
           ...options.filter((o) => o.value !== preferred),
         ]
       : options;
-  countriesCache.set(key, list);
-  return list;
+  countriesCache.set(key, table);
+  return table;
 }
 
 /** A real number from a country, written the way a format asks for.
@@ -404,7 +404,7 @@ export function phoneFormat(column: Column): PhoneFormat {
 }
 
 /** The column's default region, or undefined. Checked against the library's own
- *  country list so a config this build does not know cannot throw inside a cell. */
+ *  country table so a config this build does not know cannot throw inside a cell. */
 export function phoneRegion(column: Column): CountryCode | undefined {
   const region = column.config.default_region;
   if (typeof region !== "string" || !region.trim()) return undefined;

@@ -40,7 +40,7 @@ import type {
   ColumnType,
   ConversionReport,
   FilterCondition,
-  ListRead,
+  TableRead,
   TextMode,
   Workspace,
 } from "../../lib/types";
@@ -119,7 +119,7 @@ const MAP_LINK_OPTIONS = [
 
 // Sentinel for the temporal "Default value" dropdown meaning "a fixed value I pick".
 const SPECIFIC = "__specific__";
-// Sentinel for the lookup "Workspace" dropdown: lists shared with the user from
+// Sentinel for the lookup "Workspace" dropdown: tables shared with the user from
 // other people's workspaces, which don't belong to a workspace the user owns.
 const SHARED = "__shared__";
 
@@ -143,7 +143,7 @@ const FORMULA_REFERENCEABLE: ColumnType[] = [
 ];
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   workspaceUuid: string | null;
   // null => create a new column; otherwise edit this one.
   column: Column | null;
@@ -178,7 +178,7 @@ interface Props {
  *  is the identity: a conversion keeps the column's name and uuid, so there is
  *  nothing to name. */
 export function ColumnDialog({
-  listUuid,
+  tableUuid,
   workspaceUuid,
   column,
   visible,
@@ -212,12 +212,12 @@ export function ColumnDialog({
   const [maxDate, setMaxDate] = useState<Date | null>(null);
   const [integerOnly, setIntegerOnly] = useState(false);
   const [choices, setChoices] = useState("");
-  // Choice: whether a record may answer with something not on the list. What gets
+  // Choice: whether a record may answer with something not on the table. What gets
   // typed is stored as itself, so this widens what the column accepts rather than
   // adding a value to it.
   const [allowOther, setAllowOther] = useState(false);
   const [linkText, setLinkText] = useState("");
-  // Colour: the palette the picker offers first, typed as a ";"-separated list of
+  // Colour: the palette the picker offers first, typed as a ";"-separated table of
   // hex values — the same shorthand a choice column's options use. Offered and
   // never enforced, so an empty palette is a colour column that works normally.
   const [swatchText, setSwatchText] = useState("");
@@ -235,7 +235,7 @@ export function ColumnDialog({
   const [mapZoom, setMapZoom] = useState<number | null>(null);
   const [mapLink, setMapLink] = useState("osm");
   // 245 entries through `Intl.DisplayNames`, computed once per module and memoised
-  // here so re-rendering the dialog does not walk the list again. Labelled with
+  // here so re-rendering the dialog does not walk the table again. Labelled with
   // dial codes by the same function the record editors use, so a country reads the
   // same where a column is set up and where its cells are filled in.
   const countries = useMemo(() => countryChoices(), []);
@@ -264,26 +264,26 @@ export function ColumnDialog({
   const [ratingIcon, setRatingIcon] = useState("star");
   // Duration: how seconds are written. A display setting, like `number_format`.
   const [durationFmt, setDurationFmt] = useState("h:mm");
-  // Which workspace's lists the target dropdown is drawn from. A lookup can point
-  // at any list the user can view — their own across workspaces, or one shared
-  // with them (the SHARED bucket). Defaults to the current list's workspace.
+  // Which workspace's tables the target dropdown is drawn from. A lookup can point
+  // at any table the user can view — their own across workspaces, or one shared
+  // with them (the SHARED bucket). Defaults to the current table's workspace.
   const [targetWorkspace, setTargetWorkspace] = useState<string | null>(null);
-  const [targetListUuid, setTargetListUuid] = useState<string | null>(null);
+  const [targetTableUuid, setTargetTableUuid] = useState<string | null>(null);
   const [displayColumnUuid, setDisplayColumnUuid] = useState<string | null>(null);
-  // Nested lookup: the sibling lookup this one nests under, and the target-list
+  // Nested lookup: the sibling lookup this one nests under, and the target-table
   // lookup column its filter matches on. Set and cleared together.
   const [parentColumnUuid, setParentColumnUuid] = useState<string | null>(null);
   const [targetFilterColumnUuid, setTargetFilterColumnUuid] = useState<
     string | null
   >(null);
-  // A lookup's saved option filter, over the *target list's* columns. Held as the
+  // A lookup's saved option filter, over the *target table's* columns. Held as the
   // two halves the editor takes; recombined into a FilterGroup when saving.
   const [optionConjunction, setOptionConjunction] = useState<"and" | "or">("and");
   const [optionConditions, setOptionConditions] = useState<FilterCondition[]>([]);
   const [multiple, setMultiple] = useState(false);
   // A lookup that may create its own target rows. Purely an affordance: the
   // button it turns on is shown only to people who can already create rows in
-  // the target list, and the target's own route is what enforces that.
+  // the target table, and the target's own route is what enforces that.
   const [allowCreate, setAllowCreate] = useState(false);
   const [formula, setFormula] = useState("");
   const [textMode, setTextMode] = useState<TextMode>("single");
@@ -303,7 +303,7 @@ export function ColumnDialog({
   // keeps not having one.
   const [defaultChecked, setDefaultChecked] = useState<boolean | null>(null);
   const [defaultChoice, setDefaultChoice] = useState<string | null>(null);
-  // The same setting for a `multiple` choice column, which stores a list. Held
+  // The same setting for a `multiple` choice column, which stores a table. Held
   // apart rather than as one union-typed piece of state, following the rule above:
   // one per family, and only the one matching the current shape is read.
   const [defaultChoices, setDefaultChoices] = useState<string[]>([]);
@@ -367,7 +367,7 @@ export function ColumnDialog({
       setMapZoom(null);
       setMapLink("osm");
       setTargetWorkspace(workspaceUuid);
-      setTargetListUuid(null);
+      setTargetTableUuid(null);
       setDisplayColumnUuid(null);
       setParentColumnUuid(null);
       setTargetFilterColumnUuid(null);
@@ -408,7 +408,7 @@ export function ColumnDialog({
       setMapZoom(null);
       setMapLink("osm");
       setTargetWorkspace(workspaceUuid);
-      setTargetListUuid(null);
+      setTargetTableUuid(null);
       setDisplayColumnUuid(null);
       setParentColumnUuid(null);
       setTargetFilterColumnUuid(null);
@@ -454,9 +454,9 @@ export function ColumnDialog({
     setRatingIcon((config.rating_icon as string) ?? "star");
     setDurationFmt((config.duration_format as string) ?? "h:mm");
     // Left null so the seeding effect can resolve which workspace the stored
-    // target lives in (the config only records the list, not its workspace).
+    // target lives in (the config only records the table, not its workspace).
     setTargetWorkspace(null);
-    setTargetListUuid((config.target_list_uuid as string) ?? null);
+    setTargetTableUuid((config.target_table_uuid as string) ?? null);
     setDisplayColumnUuid((config.display_column_uuid as string) ?? null);
     setParentColumnUuid((config.parent_column_uuid as string) ?? null);
     setTargetFilterColumnUuid(
@@ -480,7 +480,7 @@ export function ColumnDialog({
     if (typeof def === "string") setDefaultText(def);
     if (typeof def === "number") setDefaultNumber(def);
     setDefaultChecked(typeof def === "boolean" ? def : null);
-    // A choice default is stored as the option itself — as a list of them on a
+    // A choice default is stored as the option itself — as a table of them on a
     // `multiple` column, which is the shape the server validates it in.
     if (typeof def === "string") setDefaultChoice(def);
     if (Array.isArray(def)) setDefaultChoices(def as string[]);
@@ -499,7 +499,7 @@ export function ColumnDialog({
 
     // A duplicate keeps the source's settings — that is what makes it a copy —
     // but must not keep its name, which is taken. `_copy` matches how cloning a
-    // list names its result.
+    // table names its result.
     if (duplicating) {
       setName(`${column.name}_copy`.slice(0, 120));
       setDisplayName(`${column.display_name} (copy)`);
@@ -514,15 +514,15 @@ export function ColumnDialog({
     enabled: type === "lookup",
   });
 
-  // On edit, the stored config names only the target list, not its workspace, so
+  // On edit, the stored config names only the target table, not its workspace, so
   // resolve which bucket it lives in and open the selector there. Fetching the
-  // list tells us its workspace; if that isn't one the user owns (or the fetch is
+  // table tells us its workspace; if that isn't one the user owns (or the fetch is
   // forbidden), it must have been shared with them.
-  const storedTarget = column?.config.target_list_uuid as string | undefined;
+  const storedTarget = column?.config.target_table_uuid as string | undefined;
   const needSeed = type === "lookup" && !!storedTarget && targetWorkspace === null;
   const seedMeta = useQuery({
-    queryKey: ["list-meta", storedTarget],
-    queryFn: () => api.get<ListRead>(`/lists/${storedTarget}`),
+    queryKey: ["table-meta", storedTarget],
+    queryFn: () => api.get<TableRead>(`/tables/${storedTarget}`),
     enabled: needSeed,
     retry: false,
   });
@@ -539,42 +539,42 @@ export function ColumnDialog({
     myWorkspaces.data,
   ]);
 
-  // Candidate target lists in the chosen workspace (self included), or every list
+  // Candidate target tables in the chosen workspace (self included), or every table
   // shared with the user when the SHARED bucket is chosen.
   //
-  // `lookup_targets=true` on the shared query adds the lists granted `lookup` but
+  // `lookup_targets=true` on the shared query adds the tables granted `lookup` but
   // not `view` — shared *only* as a lookup target, so absent from every other
   // listing by design. Without it they are unreachable: the picker would not name
   // them and the column could not be built. They are always in someone else's
   // workspace (you hold `view` on your own), so the owned-workspace query has no
   // use for the flag.
-  const lists = useQuery({
-    queryKey: ["lookup-target-lists", targetWorkspace],
+  const tables = useQuery({
+    queryKey: ["lookup-target-tables", targetWorkspace],
     queryFn: () =>
-      api.get<ListRead[]>(
+      api.get<TableRead[]>(
         targetWorkspace === SHARED
-          ? `/lists/?shared=true&lookup_targets=true&limit=1000`
-          : `/lists/?workspace_uuid=${targetWorkspace}&limit=1000`,
+          ? `/tables/?shared=true&lookup_targets=true&limit=1000`
+          : `/tables/?workspace_uuid=${targetWorkspace}&limit=1000`,
       ),
     enabled: type === "lookup" && !!targetWorkspace,
   });
-  // Keep the currently-selected target visible even before its workspace's lists
+  // Keep the currently-selected target visible even before its workspace's tables
   // load (the moment the dialog opens on edit): show it, labelled from the seed
-  // fetch, until the full list arrives.
-  const listOptions = useMemo(() => {
-    const opts = (lists.data ?? []).map((l) => ({
+  // fetch, until the full table arrives.
+  const tableOptions = useMemo(() => {
+    const opts = (tables.data ?? []).map((l) => ({
       label: l.display_name,
       value: l.uuid,
     }));
-    if (targetListUuid && !opts.some((o) => o.value === targetListUuid)) {
+    if (targetTableUuid && !opts.some((o) => o.value === targetTableUuid)) {
       opts.unshift({
         label: seedMeta.data?.display_name ?? "…",
-        value: targetListUuid,
+        value: targetTableUuid,
       });
     }
     return opts;
-  }, [lists.data, targetListUuid, seedMeta.data]);
-  // Columns of the chosen target list, offered as the label to show per row.
+  }, [tables.data, targetTableUuid, seedMeta.data]);
+  // Columns of the chosen target table, offered as the label to show per row.
   //
   // A target shared only as a lookup target (granted `lookup`, not `view`) refuses
   // this: `lookup` hands over row labels, not the target's schema. So it can 403,
@@ -582,17 +582,17 @@ export function ColumnDialog({
   // the nesting pair simply cannot be chosen, and the server's own fallback (the
   // target's primary column, else its first) supplies the label.
   const targetColumns = useQuery({
-    queryKey: ["columns", targetListUuid],
-    queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
-    enabled: type === "lookup" && !!targetListUuid,
+    queryKey: ["columns", targetTableUuid],
+    queryFn: () => api.get<Column[]>(`/tables/${targetTableUuid}/columns/`),
+    enabled: type === "lookup" && !!targetTableUuid,
     retry: false,
   });
   const targetSchemaHidden = targetColumns.isError;
-  // This list's own columns — for a formula, the columns it may reference; for a
+  // This table's own columns — for a formula, the columns it may reference; for a
   // lookup, the sibling lookups it could nest under.
   const ownColumns = useQuery({
-    queryKey: ["columns", listUuid],
-    queryFn: () => api.get<Column[]>(`/lists/${listUuid}/columns/`),
+    queryKey: ["columns", tableUuid],
+    queryFn: () => api.get<Column[]>(`/tables/${tableUuid}/columns/`),
     enabled: type === "calculated" || type === "lookup",
   });
   // Never *this* column, on top of the type gate: naming itself is a cycle of length
@@ -604,27 +604,27 @@ export function ColumnDialog({
     .map((c) => c.name);
 
   // Nested lookup candidates. A sibling lookup qualifies as a parent when the
-  // target list has at least one lookup column pointing back at the sibling's
+  // target table has at least one lookup column pointing back at the sibling's
   // target — that column is what the filter matches on ("Cities.Country" for a
   // "Country" parent). Both dropdowns are derived, so an impossible pairing is
   // simply never offered.
   const targetLookups = (targetColumns.data ?? []).filter(
-    (c) => c.type === "lookup" && !!c.config.target_list_uuid,
+    (c) => c.type === "lookup" && !!c.config.target_table_uuid,
   );
   const parentOptions = (ownColumns.data ?? []).filter(
     (c) =>
       c.type === "lookup" &&
       c.uuid !== column?.uuid &&
-      !!c.config.target_list_uuid &&
+      !!c.config.target_table_uuid &&
       targetLookups.some(
-        (t) => t.config.target_list_uuid === c.config.target_list_uuid,
+        (t) => t.config.target_table_uuid === c.config.target_table_uuid,
       ),
   );
   const parentColumn =
     parentOptions.find((c) => c.uuid === parentColumnUuid) ?? null;
   const matchOptions = parentColumn
     ? targetLookups.filter(
-        (t) => t.config.target_list_uuid === parentColumn.config.target_list_uuid,
+        (t) => t.config.target_table_uuid === parentColumn.config.target_table_uuid,
       )
     : [];
 
@@ -754,7 +754,7 @@ export function ColumnDialog({
       }
       if (type === "user" || type === "group") config.multiple = multiple;
       if (type === "lookup") {
-        config.target_list_uuid = targetListUuid;
+        config.target_table_uuid = targetTableUuid;
         config.display_column_uuid = displayColumnUuid;
         config.multiple = multiple;
         // Always sent, for the merge reason above: omitting it would leave a
@@ -817,7 +817,7 @@ export function ColumnDialog({
           // that was never given one does not.
           defaultValue = defaultChecked;  // true, false, or null for none
         else if (type === "choice")
-          // A `multiple` column's cells hold a list, and so must its default —
+          // A `multiple` column's cells hold a table, and so must its default —
           // `validate_scalar` refuses a bare string on one.
           defaultValue = multiple
             ? defaultChoices.length
@@ -846,20 +846,20 @@ export function ColumnDialog({
         // this is a dry run: it writes nothing and creates nothing, so the report
         // it returns costs nothing to walk away from.
         return api.post<ConversionReport>(
-          `/lists/${listUuid}/columns/${column.uuid}/convert`,
+          `/tables/${tableUuid}/columns/${column.uuid}/convert`,
           duplicating
             ? { type, config, name, display_name: displayName }
             : { type, config },
         );
       }
       if (editing) {
-        return api.patch<Column>(`/lists/${listUuid}/columns/${column.uuid}`, {
+        return api.patch<Column>(`/tables/${tableUuid}/columns/${column.uuid}`, {
           name,
           display_name: displayName,
           config,
         });
       }
-      return api.post<Column>(`/lists/${listUuid}/columns/`, {
+      return api.post<Column>(`/tables/${tableUuid}/columns/`, {
         name,
         display_name: displayName,
         type,
@@ -868,14 +868,14 @@ export function ColumnDialog({
     },
     onSuccess: (saved) => {
       if (copying) {
-        // Deliberately no cache invalidation: the list is unchanged until the
+        // Deliberately no cache invalidation: the table is unchanged until the
         // conversion is applied, and refetching here would suggest otherwise.
         onConverted?.(saved as ConversionReport);
         onHide();
         return;
       }
-      queryClient.invalidateQueries({ queryKey: ["columns", listUuid] });
-      queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["columns", tableUuid] });
+      queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
       // Turning `multiple` off rewrites records, and the labels a lookup/user cell
       // renders are keyed on the values it holds.
       queryClient.invalidateQueries({ queryKey: ["lookup-labels"] });
@@ -895,7 +895,7 @@ export function ColumnDialog({
   });
 
   // Going from several values to one is the only edit here that loses data, so it
-  // asks first. The records are not rewritten on the spot (on a large list that
+  // asks first. The records are not rewritten on the spot (on a large table that
   // would be a multi-minute lock inside this request) — the extra values are hidden
   // immediately and cleared out later, which is exactly what the message promises.
   function onSave() {
@@ -971,7 +971,7 @@ export function ColumnDialog({
               // Identity is not editable in a conversion, so it cannot be invalid.
               // A duplicate names a new column, so it is checked as usual.
               (!converting && (!displayName.trim() || !isValidName(name))) ||
-              (type === "lookup" && !targetListUuid) ||
+              (type === "lookup" && !targetTableUuid) ||
               // A half-configured nesting: the pairing is set together or not at all.
               (type === "lookup" && !!parentColumnUuid && !targetFilterColumnUuid) ||
               (isCalculated && !formula.trim())
@@ -1061,7 +1061,7 @@ export function ColumnDialog({
                   // change and existing records are already in the right shape.
                   hint={
                     textMode === "rich"
-                      ? "A small editor with bold, italic, lists, quotes and links. Existing plain text is kept, and switching back to plain shows the words without their formatting."
+                      ? "A small editor with bold, italic, tables, quotes and links. Existing plain text is kept, and switching back to plain shows the words without their formatting."
                       : "How the field is filled in. Both store plain text, so this can be changed later without touching existing records."
                   }
                 >
@@ -1100,7 +1100,7 @@ export function ColumnDialog({
                 <Field
                   label="Workspace"
                   htmlFor="col-target-ws"
-                  hint="Point at a list in any of your workspaces, or one shared with you."
+                  hint="Point at a table in any of your workspaces, or one shared with you."
                 >
                   <Dropdown
                     inputId="col-target-ws"
@@ -1114,9 +1114,9 @@ export function ColumnDialog({
                     ]}
                     onChange={(e) => {
                       setTargetWorkspace(e.value);
-                      // The list, its display column and any nesting all belong
+                      // The table, its display column and any nesting all belong
                       // to the workspace being left; clear them so nothing dangles.
-                      setTargetListUuid(null);
+                      setTargetTableUuid(null);
                       setDisplayColumnUuid(null);
                       setParentColumnUuid(null);
                       setTargetFilterColumnUuid(null);
@@ -1129,22 +1129,22 @@ export function ColumnDialog({
                   />
                 </Field>
                 <Field
-                  label="Target list"
+                  label="Target table"
                   htmlFor="col-target"
                   hint={
-                    targetListUuid && targetSchemaHidden
-                      ? "This list is shared with you as a lookup target only, so its columns aren’t yours to browse. Rows will be labelled by the list’s own default column."
+                    targetTableUuid && targetSchemaHidden
+                      ? "This table is shared with you as a lookup target only, so its columns aren’t yours to browse. Rows will be labelled by the table’s own default column."
                       : undefined
                   }
                 >
                   <Dropdown
                     inputId="col-target"
-                    value={targetListUuid}
-                    options={listOptions}
+                    value={targetTableUuid}
+                    options={tableOptions}
                     onChange={(e) => {
-                      setTargetListUuid(e.value);
-                      setDisplayColumnUuid(null); // columns differ per target list
-                      // A nesting pairing is specific to the old target list.
+                      setTargetTableUuid(e.value);
+                      setDisplayColumnUuid(null); // columns differ per target table
+                      // A nesting pairing is specific to the old target table.
                       setParentColumnUuid(null);
                       setTargetFilterColumnUuid(null);
                       // So is an option filter: its conditions name the old
@@ -1153,12 +1153,12 @@ export function ColumnDialog({
                       // filter that reads as set and offers everything.
                       setOptionConditions([]);
                     }}
-                    placeholder={lists.isLoading ? "Loading…" : "Select a list…"}
+                    placeholder={tables.isLoading ? "Loading…" : "Select a table…"}
                     filter
                     className="w-full"
                   />
                 </Field>
-                {targetListUuid && !targetSchemaHidden && (
+                {targetTableUuid && !targetSchemaHidden && (
                   <Field label="Column to show" htmlFor="col-display">
                     <Dropdown
                       inputId="col-display"
@@ -1351,7 +1351,7 @@ export function ColumnDialog({
                 // it — the same option means the same thing either way, and the
                 // control it lives in is about to be swapped out from under it.
                 // The rule is `coerce_shape`'s: first element on the way down,
-                // one-element list on the way up.
+                // one-element table on the way up.
                 if (next) setDefaultChoices(defaultChoice ? [defaultChoice] : []);
                 else setDefaultChoice(defaultChoices[0] ?? null);
               }}
@@ -1364,8 +1364,8 @@ export function ColumnDialog({
                 // reconcile converges them. Saving that way asks first (see
                 // `onSave`), so this is the warning before the warning.
                 editing && multiple
-                  ? "Records hold a list of options. Turning this off keeps only the first value of each record — until they are next edited, switching back restores the rest."
-                  : "Records may hold several options at once, stored as a list."
+                  ? "Records hold a table of options. Turning this off keeps only the first value of each record — until they are next edited, switching back restores the rest."
+                  : "Records may hold several options at once, stored as a table."
               }
             />
           )}
@@ -1382,8 +1382,8 @@ export function ColumnDialog({
                 // that were typed, so it groups, filters and exports as its own
                 // value rather than alongside the other write-ins.
                 editing && allowOther
-                  ? "Records may answer with something not on the list, typed in a box below the choices. Turning this off leaves those answers on the records that hold them, but the next edit of such a record must pick one of the options."
-                  : "Records may answer with something not on the list, typed in a box below the choices. What they type is stored as the value itself, so two people writing the same thing differently stay two different values."
+                  ? "Records may answer with something not on the table, typed in a box below the choices. Turning this off leaves those answers on the records that hold them, but the next edit of such a record must pick one of the options."
+                  : "Records may answer with something not on the table, typed in a box below the choices. What they type is stored as the value itself, so two people writing the same thing differently stay two different values."
               }
             />
           )}
@@ -1603,7 +1603,7 @@ export function ColumnDialog({
 
           {type === "lookup" && (
             <>
-              {targetListUuid &&
+              {targetTableUuid &&
                 (parentOptions.length > 0 || parentColumnUuid) && (
                   <>
                     <Field
@@ -1630,8 +1630,8 @@ export function ColumnDialog({
                                   (c) => c.uuid === next,
                                 );
                                 return (
-                                  t.config.target_list_uuid ===
-                                  parent?.config.target_list_uuid
+                                  t.config.target_table_uuid ===
+                                  parent?.config.target_table_uuid
                                 );
                               })
                             : [];
@@ -1648,7 +1648,7 @@ export function ColumnDialog({
                       <Field
                         label="Match on"
                         htmlFor="col-nest-match"
-                        hint={`The target list's column that links each row to a ${
+                        hint={`The target table's column that links each row to a ${
                           parentColumn?.display_name ?? "parent"
                         } selection.`}
                       >
@@ -1677,14 +1677,14 @@ export function ColumnDialog({
                   refusal is what the `lookup` grant is, and a stored filter set
                   by someone who *can* read the schema keeps applying regardless
                   of who opens this dialog. */}
-              {targetListUuid && !targetSchemaHidden && (
+              {targetTableUuid && !targetSchemaHidden && (
                 <Field
                   label="Limit options to"
                   optional
-                  hint="Rows of the target list that don't match are never offered. Records already pointing at one keep it, and still show its name."
+                  hint="Rows of the target table that don't match are never offered. Records already pointing at one keep it, and still show its name."
                 >
                   <FilterConditionsEditor
-                    listUuid={targetListUuid}
+                    tableUuid={targetTableUuid}
                     columns={targetColumns.data ?? []}
                     conjunction={optionConjunction}
                     onConjunctionChange={setOptionConjunction}
@@ -1709,7 +1709,7 @@ export function ColumnDialog({
                 checked={allowCreate}
                 onChange={setAllowCreate}
                 label="Let people add a new row while filling this in"
-                hint="Only for people who can already create rows in the target list; everyone else just sees the search. Typing a name that doesn't exist still fails on import and in the API."
+                hint="Only for people who can already create rows in the target table; everyone else just sees the search. Typing a name that doesn't exist still fails on import and in the API."
               />
             </>
           )}
@@ -1826,7 +1826,7 @@ export function ColumnDialog({
                       />
                     ) : (
                       // Typable when the column takes an answer of its own, because
-                      // then a default off the option list is as valid as a cell
+                      // then a default off the option table is as valid as a cell
                       // holding one — the server judges it by the same rule.
                       <Dropdown
                         inputId="col-default"

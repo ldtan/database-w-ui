@@ -79,9 +79,9 @@ services:
     # the app are per-process and silently wrong at two instances**, none of which
     # raises, logs, or degrades visibly:
     #
-    #   - `lists/events/broker.py` — the SSE fan-out is a module-level dict, so a
+    #   - `tables/events/broker.py` — the SSE fan-out is a module-level dict, so a
     #     write handled by instance A never wakes a subscriber held by instance B.
-    #     Half the open lists simply stop updating, and look idle rather than broken.
+    #     Half the open tables simply stop updating, and look idle rather than broken.
     #     The documented swap is Postgres LISTEN/NOTIFY behind the same two methods.
     #   - `auth/tokens/throttle.py` — the login throttle's counters, so N instances
     #     allow N times the attempts before locking out.
@@ -108,7 +108,7 @@ services:
         value: "22"
       # "Live records" **fallback** polling interval in seconds.
       #
-      # An open list normally holds an SSE stream (GET /lists/{uuid}/events) and
+      # An open table normally holds an SSE stream (GET /tables/{uuid}/events) and
       # refetches when the server says its records moved, so this interval is not
       # used at all on a healthy deployment. It is what the app falls back to when
       # the stream cannot be held open — a proxy that buffers text/event-stream,
@@ -130,7 +130,7 @@ services:
       # 30). Both are dearer questions than a page of rows, which is one indexed
       # query stopped by LIMIT — a metric scans every record the caller can see, and
       # the count has no limit to stop it either (12 ms unfiltered but 268 ms under
-      # a search, on a 100k list). Lowering the value below therefore speeds up the
+      # a search, on a 100k table). Lowering the value below therefore speeds up the
       # records alone, which is the intent.
       #
       # Those two floors are not fallback-only: under push they throttle how often
@@ -147,19 +147,19 @@ services:
       # nothing at any interval — this is a bill for tabs someone is using.
       #
       # The ceiling is set by the worst tab open, not the average one: a search on
-      # a large list costs ~500 ms a page rather than ~23, so one such viewer is
+      # a large table costs ~500 ms a page rather than ~23, so one such viewer is
       # ~33 ms/sec on its own. If that shape ever becomes routine, raise this back
       # up or set VITE_COUNT_REFRESH_SECONDS explicitly rather than absorbing it.
       - key: VITE_LIVE_REFRESH_SECONDS
         value: "15"
-      # How many live records a list may hold before the app suggests archiving,
+      # How many live records a table may hold before the app suggests archiving,
       # or `0` to never suggest it. Optional — the app defaults to 25000, which was
       # measured as where search and non-compiled metrics start to be felt on 0.1
       # CPU. At 0.5 CPU it is conservative by roughly 5×, but it is left alone
       # deliberately: raising it is a claim about wall time nobody has measured on
       # this plan, and the Postgres-side costs in the same table did not move at all.
       # It is a suggestion about the reads that scale with the row count, not a
-      # general "your list is big" warning; the paged listing is flat at any size.
+      # general "your table is big" warning; the paged listing is flat at any size.
       # See docs/capacity-and-performance.md § "When to archive".
       - key: VITE_ARCHIVE_HINT_THRESHOLD
         value: "25000"
@@ -283,7 +283,7 @@ envVarGroups:
       - key: LOGIN_THROTTLE_WINDOW_MINUTES
         value: "15"
 
-      # "Live records" server push. An open list holds GET /lists/{uuid}/events and
+      # "Live records" server push. An open table holds GET /tables/{uuid}/events and
       # refetches when told its records moved; the SPA falls back to polling on its
       # own if the stream will not stay open, so none of these three is required and
       # the defaults (True / 300 / 15) are the intended settings.
@@ -302,7 +302,7 @@ envVarGroups:
       # API's own origin for this one route, which means setting ALLOWED_ORIGINS.
       # Check with:
       #   curl -N -H "Authorization: Bearer <token>" \
-      #        https://<web-host>/api/lists/<uuid>/events
+      #        https://<web-host>/api/tables/<uuid>/events
       # A ": ping" should appear at once, and more of them every 15 seconds.
       - key: SSE_ENABLED
         value: "True"

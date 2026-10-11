@@ -13,7 +13,7 @@ async def _authenticate(token: str) -> None:
     """Resolve the caller inside a session opened and closed before the search runs.
 
     Authenticated is the whole access rule: geocoding is not about any particular
-    list, so there is no resource to check a permission against. What the check buys
+    table, so there is no resource to check a permission against. What the check buys
     is that this cannot be used as an open relay to a third party under the
     deployment's own identity — the thing that would get its User-Agent blocked and
     take every location column down with it.

@@ -27,7 +27,7 @@ from src.core.exceptions import (
 from src.infrastructure.database import get_db
 
 
-# Reads stay open to any authenticated user: the Share dialog lists users and
+# Reads stay open to any authenticated user: the Share dialog tables users and
 # groups to grant to, so gating them would break sharing. Writes are superuser-only
 # — accounts and group membership sit *under* the permission model (groups are
 # principals in the grant table), so whoever can edit them can route around it.

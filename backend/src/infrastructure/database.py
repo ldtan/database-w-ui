@@ -22,7 +22,7 @@ def make_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession
     # default (True), reading any attribute of an object after db.commit()
     # triggers a lazy reload; under the async asyncpg driver that lazy IO happens
     # outside the greenlet and raises MissingGreenlet. Services pass loaded
-    # objects (e.g. the parent list) into helpers after committing, so they must
+    # objects (e.g. the parent table) into helpers after committing, so they must
     # not re-expire. Tests build their session factory through this same function
     # so their configuration can never drift from the app's (see conftest.py).
     return async_sessionmaker(engine, expire_on_commit=False)

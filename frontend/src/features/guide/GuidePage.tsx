@@ -20,8 +20,8 @@ import { SECTIONS } from "./sections";
  * screens and there is no session to walk them with. Everything else is identical —
  * one document, not two, which is the point.
  *
- * The ids in `sections.ts` are the anchor targets of the contents list at the top.
- * SECTIONS and the <Section> ids have to stay in step — the list is generated from
+ * The ids in `sections.ts` are the anchor targets of the contents table at the top.
+ * SECTIONS and the <Section> ids have to stay in step — the table is generated from
  * it — and `guide.test.ts` now fails when they don't, along with a figure named
  * here that nobody captured and an in-page link to a section that isn't there.
  *
@@ -30,7 +30,7 @@ import { SECTIONS } from "./sections";
  * had become a sidebar. A UI change is not finished until this and
  * `onboarding/tours.ts` have been re-read; see "Gotchas for whoever edits this
  * next" in `docs/known-gaps.md`. `COLUMN_TYPE_OPTIONS` below is the pattern
- * where it can be avoided: the type list is generated rather than retyped.
+ * where it can be avoided: the type table is generated rather than retyped.
  *
  * The `<Figure>`s are the other half of that pattern, and the stronger half:
  * each is a screenshot taken by `scripts/capture-guide.mjs` driving the real app,
@@ -168,16 +168,16 @@ function FunctionTable() {
   );
 }
 
-/** A titled section with a stable id so the contents list can jump to it.
+/** A titled section with a stable id so the contents table can jump to it.
  *
  *  `guide-section` carries the scroll offset (themes.css): the heading is a jump
  *  target, and on a narrow screen the sticky app header would otherwise cover the
  *  one the reader just asked for.
  *
  *  It ends with a link back to the contents, because this page is long enough that
- *  the list at the top is off-screen for all but the first section or two, and
+ *  the table at the top is off-screen for all but the first section or two, and
  *  scrolling back up through twenty-odd sections to reach it is the only route
- *  there otherwise. `topLink={false}` for the first section, where the list is
+ *  there otherwise. `topLink={false}` for the first section, where the table is
  *  already a few lines above. */
 function Section({
   id,
@@ -245,10 +245,10 @@ function Callout({
 }
 
 /** Plain-language description for each column type, keyed by its stored value. The
- *  labels themselves come from the same list the "Add column" menu uses, so they
+ *  labels themselves come from the same table the "Add column" menu uses, so they
  *  can never drift from what the app actually offers. */
 const TYPE_HELP: Record<string, string> = {
-  text: "Writing — a name, a title, a reference number. Choose how it is filled in: one line, several lines for notes or an address, or rich text, which gives you bold, italic, lists, quotes and links. You can change that later without disturbing what is already stored.",
+  text: "Writing — a name, a title, a reference number. Choose how it is filled in: one line, several lines for notes or an address, or rich text, which gives you bold, italic, tables, quotes and links. You can change that later without disturbing what is already stored.",
   number: "A number you can total or compare. You can set a smallest and largest allowed value, or require whole numbers only.",
   checkbox: "A simple yes/no, on/off tick — “Paid?”, “Active?”.",
   choice: "A fixed set of options you pick from, like Todo, Doing, Done — so everyone uses the same wording. Can allow one option or several. You can also allow an “Other” answer, which adds a box for anything the options don’t cover.",
@@ -264,7 +264,7 @@ const TYPE_HELP: Record<string, string> = {
   duration: "A length of time — how long a lesson ran, hours worked. Type it as 1:30 or 90m and choose how it is shown (1:30, 1:30:00, 90:00 or 1.5 hours). It totals and averages like a number, so “Total hours” is a metric you can add.",
   user: "A pointer to a person who has an account here. Can allow one person or several.",
   group: "A pointer to a group of people. Can allow one group or several.",
-  lookup: "A link to a row in another list — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from. It can also let people add a missing row to the other list without leaving the form they are filling in.",
+  lookup: "A link to a row in another table — one of yours, in any of your workspaces, or one someone shared with you — for example, linking an order to a customer. One lookup can also narrow another, so picking a country leaves only its cities to choose from. It can also let people add a missing row to the other table without leaving the form they are filling in.",
   calculated: "A value worked out automatically from your other columns using a formula, such as qty * price. You never type into it — see “Calculated columns: writing a formula” below.",
 };
 
@@ -272,7 +272,7 @@ const TYPE_HELP: Record<string, string> = {
  * Land on the section a `#fragment` names, when the reader *arrives* at the guide
  * already asking for one.
  *
- * The contents list at the top of this page has never needed it: those are same-page
+ * The contents table at the top of this page has never needed it: those are same-page
  * fragment anchors, which the browser handles by itself. What does need it is a link
  * from somewhere else — the home page points at `#columns`, `#views`, `#sharing` —
  * and neither way of arriving works on its own. A client-side navigation does not
@@ -374,7 +374,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         data-tour="guide-contents"
       >
         <div className="font-semibold mb-2">On this page</div>
-        {/* The whole list in one column is most of a screen before the guide has
+        {/* The whole table in one column is most of a screen before the guide has
             started. Two columns on anything but a phone. */}
         <ol
           className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1"
@@ -395,7 +395,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
       </nav>
 
       <Callout tone="tip" title="We’ll build one thing together">
-        As we go, imagine you’re building a simple <strong>Contacts</strong> list —
+        As we go, imagine you’re building a simple <strong>Contacts</strong> table —
         people’s names, emails, and whether you’ve reached out. Every step below uses
         it as an example, so the buttons you read about are the ones you’d really
         click.
@@ -410,7 +410,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </p>
         <p>
           People use it for things like a contact book, an inventory, a task
-          tracker, a guest list, a simple CRM — anything that is really “a table of
+          tracker, a guest table, a simple CRM — anything that is really “a table of
           things, each with the same set of details.”
         </p>
       </Section>
@@ -419,12 +419,12 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>The whole app is built from five simple ideas:</p>
         <ul className="flex flex-col gap-2">
           <li>
-            <strong>Workspace</strong> — a folder that holds related lists (for
+            <strong>Workspace</strong> — a folder that holds related tables (for
             example, a “Sales” workspace).
           </li>
           <li>
-            <strong>List</strong> — a single table (like “Contacts”). This is the
-            heart of the app.
+            <strong>Table</strong> — one set of records sharing the same columns
+            (like “Contacts”). This is the heart of the app.
           </li>
           <li>
             <strong>Column</strong> — one kind of detail every row records (like
@@ -436,18 +436,18 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
             a value in each column.
           </li>
           <li>
-            <strong>View</strong> — a saved way of looking at a list: which rows
+            <strong>View</strong> — a saved way of looking at a table: which rows
             show, how they’re sorted and grouped, and which columns appear.
           </li>
         </ul>
         <p style={{ color: "var(--text-muted)" }}>
-          If you know spreadsheets: a list is a sheet, a column is a column, and a
+          If you know spreadsheets: a table is a sheet, a column is a column, and a
           record is a row — with the app keeping the rules tidy for you.
         </p>
         <p style={{ color: "var(--text-muted)" }}>
           Two more words turn up later, once you have records to look at:{" "}
           <strong>forms</strong> shape the screen people fill in, and{" "}
-          <strong>metrics</strong> are the running totals above a list. Both have
+          <strong>metrics</strong> are the running totals above a table. Both have
           their own sections below; neither is something you need on day one.
         </p>
       </Section>
@@ -487,13 +487,13 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
           <li>
             Under <strong>Workspaces</strong>, each of your workspaces is listed by
-            name. Click the small arrow beside one to open it up and see the lists
-            inside, then click a list to go straight to it — no need to go through
+            name. Click the small arrow beside one to open it up and see the tables
+            inside, then click a table to go straight to it — no need to go through
             the workspace first. Clicking the <em>name</em> opens the workspace
             itself.
           </li>
           <li>
-            <strong>Shared with me</strong>, at the bottom of that tree, holds lists
+            <strong>Shared with me</strong>, at the bottom of that tree, holds tables
             other people have given you directly. They live in someone else’s
             workspace, so this is the only place they appear.
           </li>
@@ -518,22 +518,22 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <Callout tone="tip" title="Rather be shown than read?">
           A tour dims the page and points at one thing at a time, in the app
           itself. <Ui>Show me around</Ui> is the general one — the rail, your
-          workspaces, and where to make your first list — and there are two more
+          workspaces, and where to make your first table — and there are two more
           that appear only where they apply: one on a workspace page, one on a
-          list. All three live behind the <Ui>?</Ui> button, and you can leave any
+          table. All three live behind the <Ui>?</Ui> button, and you can leave any
           of them part-way with <Ui>Esc</Ui> and pick it up again later.
         </Callout>
         <p>
           Your <Link to="/" style={{ color: "var(--brand)" }}>home page</Link> is a
-          dashboard: how many workspaces you have and how many lists other people
+          dashboard: how many workspaces you have and how many tables other people
           have shared with you, then cards for your most recent workspaces and those
-          shared lists, so you can jump straight back into what you were doing.
+          shared tables, so you can jump straight back into what you were doing.
           Underneath, <Ui>Explore</Ui> links to the main corners of the app.
         </p>
         <Callout tone="tip" title="On a phone or a narrow window?">
           There isn’t room for the strip beside the page, so it folds away behind
           the ☰ button at the top left. Tap it and the same map slides out — your
-          workspaces, their lists, and everywhere else — with your account and{" "}
+          workspaces, their tables, and everywhere else — with your account and{" "}
           <Ui>Log out</Ui> at the top of it. The circle at the top right of the bar
           does the same job as the one at the bottom of the strip.
         </Callout>
@@ -541,8 +541,8 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="workspace" title="Step 1 · Make a workspace">
         <p>
-          A workspace is just a folder to keep related lists together. Let’s make one
-          to hold our Contacts list.
+          A workspace is just a folder to keep related tables together. Let’s make one
+          to hold our Contacts table.
         </p>
         <ol className="flex flex-col gap-2">
           <li>
@@ -560,7 +560,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </ol>
         <Figure name="workspaces" />
         <Callout tone="tip" title="Two names, one thing">
-          Each workspace (and list) has an everyday <Ui>Name</Ui> and a shorter{" "}
+          Each workspace (and table) has an everyday <Ui>Name</Ui> and a shorter{" "}
           <Ui>API name</Ui>. You only ever need the everyday name — the app fills in
           the short one for you. The short one matters only to people connecting other
           software, and changing it later can break those connections, so leave it be
@@ -568,19 +568,19 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </Callout>
       </Section>
 
-      <Section id="list" title="Step 2 · Make a list">
-        <p>Inside your workspace, a list is the actual table.</p>
+      <Section id="table" title="Step 2 · Make a table">
+        <p>Inside your workspace, a table is the actual table.</p>
         <ol className="flex flex-col gap-2">
           <li>Open your <em>Sales</em> workspace.</li>
           <li>
-            Click <Ui>New list</Ui>, type <em>Contacts</em>, and click{" "}
+            Click <Ui>New table</Ui>, type <em>Contacts</em>, and click{" "}
             <Ui>Create</Ui>.
           </li>
-          <li>Click the list’s card to open it.</li>
+          <li>Click the table’s card to open it.</li>
         </ol>
-        <Figure name="lists" />
+        <Figure name="tables" />
         <p>
-          A brand-new list has no records and none of your own columns yet — so the
+          A brand-new table has no records and none of your own columns yet — so the
           next step is to decide what details each contact should have.
         </p>
       </Section>
@@ -588,11 +588,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
       <Section id="columns" title="Step 3 · Add columns">
         <p>
           Columns are the details every record will fill in. You set these up in the
-          list’s settings.
+          table’s settings.
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            With your list open, click <Ui>Settings</Ui>, then the <Ui>Columns</Ui>{" "}
+            With your table open, click <Ui>Settings</Ui>, then the <Ui>Columns</Ui>{" "}
             tab.
           </li>
           <li>Click <Ui>Add column</Ui>.</li>
@@ -607,7 +607,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </ol>
         <Figure name="columns" />
         <Figure name="add-column" />
-        <p>For our Contacts list, you might add:</p>
+        <p>For our Contacts table, you might add:</p>
         <ul className="flex flex-col gap-1">
           <li>
             <em>Full name</em> — <Ui>Text</Ui>, and tick <Ui>Required</Ui>{" "}
@@ -650,7 +650,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
         </ul>
         <Callout tone="tip" title="Four columns are already there">
-          Every list starts with <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
+          Every table starts with <Ui>Created at</Ui>, <Ui>Updated at</Ui>,{" "}
           <Ui>Created by</Ui> and <Ui>Updated by</Ui>. The app fills them in for you
           — when the record was made and last changed, and by whom — so nobody types
           into them, and they’re kept out of the add/edit screen. They still show in
@@ -706,11 +706,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <Callout tone="warn" title="Turning it back off">
           Records that already hold a write-in keep it, and it still shows and exports.
           But the column no longer accepts it, so the next person to edit one of those
-          records has to pick from the list. Nothing is rewritten behind your back.
+          records has to pick from the table. Nothing is rewritten behind your back.
         </Callout>
         <h3 className="font-semibold pt-1">Picking more than one</h3>
         <p>
-          Tick <Ui>Allow selecting multiple options</Ui> and the column takes a list
+          Tick <Ui>Allow selecting multiple options</Ui> and the column takes a table
           rather than a single answer — programmes a student is enrolled in, tags on
           a ticket. The cell becomes a picker you add to and remove from, and the grid
           shows the values separated by commas.
@@ -766,16 +766,16 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           Both work the same way, and it’s worth knowing why: the app does a{" "}
           <strong>trial run</strong> first and shows you exactly what would and
           wouldn’t convert. That trial writes nothing at all — while you’re reading
-          the report your list is untouched, and every view, filter and form still
+          the report your table is untouched, and every view, filter and form still
           sees the old column, working normally. Only when you click <Ui>Apply</Ui>{" "}
           (or <Ui>Add column</Ui>, for a copy) does anything change, and then it all
           changes at once. <Ui>Cancel</Ui> costs you nothing.
         </p>
         <p style={{ color: "var(--text-muted)" }}>
-          Because it happens in one go, a busy list is worth converting when nobody
+          Because it happens in one go, a busy table is worth converting when nobody
           else is typing into it: if a record changes while the conversion is running,
           the app stops and undoes the whole thing rather than half-converting your
-          list. Try again and it goes through.
+          table. Try again and it goes through.
         </p>
         <Figure name="change-type" />
         <p>
@@ -798,7 +798,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           Turning <Ui>Text</Ui> into <Ui>Choice</Ui> is the clever one: leave the
           options blank and the app reads your records and offers one option per
           distinct value it finds. Type the options yourself instead and anything
-          outside your list is reported as a failure rather than quietly added —
+          outside your table is reported as a failure rather than quietly added —
           unless you also tick <Ui>Allow an “Other” answer</Ui>, which is usually what
           you want here: the options say what people should pick from now on, and
           what’s already written stays put.
@@ -826,7 +826,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>Now the fun part — putting real contacts in.</p>
         <ol className="flex flex-col gap-2">
           <li>
-            With the list open, click <Ui>Add record</Ui>.
+            With the table open, click <Ui>Add record</Ui>.
           </li>
           <li>
             Fill in the fields. Any marked with a star (<strong>*</strong>) are
@@ -853,16 +853,16 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
         </ul>
         <Callout tone="warn" title="Add a column first">
-          If a list has no columns yet, the add screen just says{" "}
+          If a table has no columns yet, the add screen just says{" "}
           <Ui>Add a column first.</Ui> Set up at least one column (previous step)
           before adding records.
         </Callout>
         <Callout tone="tip" title="Other people’s changes arrive on their own">
-          You don’t need to refresh. While you have a list open, records that
+          You don’t need to refresh. While you have a table open, records that
           somebody else adds, edits, archives or deletes appear within a second or
           so — and so do changes you make in another tab on another device. If a row
           seems to change under you, that is usually why rather than anything you
-          did. On a connection that won’t hold the live link open, the list falls
+          did. On a connection that won’t hold the live link open, the table falls
           back to refreshing itself every so often instead, so it still catches up,
           just less promptly.
         </Callout>
@@ -873,8 +873,8 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         title="Linked columns that narrow each other"
       >
         <p>
-          A <Ui>Lookup (link to another list)</Ui> column normally offers every
-          row of the list it points at. When two of those columns belong
+          A <Ui>Lookup (link to another table)</Ui> column normally offers every
+          row of the table it points at. When two of those columns belong
           together — a{" "}
           <em>Country</em> and a <em>City</em> on the same record — you can{" "}
           <strong>nest</strong> one under the other, so choosing the first decides
@@ -882,27 +882,27 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           suggests French cities.
         </p>
         <p>
-          <strong>What you need first.</strong> Three lists, in a chain: a{" "}
-          <em>Countries</em> list, a <em>Cities</em> list that itself has a link
-          column pointing at <em>Countries</em>, and the list you’re really filling
+          <strong>What you need first.</strong> Three tables, in a chain: a{" "}
+          <em>Countries</em> table, a <em>Cities</em> table that itself has a link
+          column pointing at <em>Countries</em>, and the table you’re really filling
           in (say <em>Contacts</em>) with a link to each. That middle column — the
           one on <em>Cities</em> saying which country a city is in — is what makes
           the narrowing possible.
         </p>
         <p>
-          <strong>Setting it up.</strong> In the list you’re filling in, go to{" "}
+          <strong>Setting it up.</strong> In the table you’re filling in, go to{" "}
           <Ui>Settings</Ui> → <Ui>Columns</Ui> and add or edit the <em>City</em>{" "}
           column:
         </p>
         <ol className="flex flex-col gap-2">
           <li>
             Pick the <Ui>Workspace</Ui> that holds <em>Cities</em> (the current one
-            by default, or <Ui>Shared with me</Ui> for a list someone shared), then
-            set the <Ui>Target list</Ui> to <em>Cities</em>, as with any link column.
+            by default, or <Ui>Shared with me</Ui> for a table someone shared), then
+            set the <Ui>Target table</Ui> to <em>Cities</em>, as with any link column.
           </li>
           <li>
             Under <Ui>Nest under (optional)</Ui>, choose <em>Country</em> — the
-            column on <em>this</em> list whose choice should do the narrowing.
+            column on <em>this</em> table whose choice should do the narrowing.
           </li>
           <li>
             Under <Ui>Match on</Ui>, choose the column on <em>Cities</em> that says
@@ -928,8 +928,8 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <ul className="flex flex-col gap-1">
           <li>
             <Ui>Nest under</Ui> only appears when a sensible pairing exists. If you
-            can’t see it, the target list has no column pointing back at the other
-            column’s list — add that link column there first.
+            can’t see it, the target table has no column pointing back at the other
+            column’s table — add that link column there first.
           </li>
           <li>
             To undo the nesting, set <Ui>Nest under</Ui> back to{" "}
@@ -943,7 +943,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
           <li>
             Filtering and searching are deliberately <em>not</em> narrowed: there,
-            you’re looking across the whole list, not filling in one record.
+            you’re looking across the whole table, not filling in one record.
           </li>
         </ul>
         <Callout tone="tip" title="Turning it on later is safe">
@@ -959,7 +959,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           The usual snag with a link column is the row that isn’t there yet: someone
           filling in a contact needs the city <em>Cebu</em>, it has never been added
           to <em>Cities</em>, and they have to abandon what they were doing, go to
-          the other list, add it, and come back. Ticking{" "}
+          the other table, add it, and come back. Ticking{" "}
           <Ui>Let people add a new row while filling this in</Ui> on the link column
           removes that trip — searching for something that doesn’t exist offers to
           create it, right there in the picker.
@@ -967,11 +967,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>
           <strong>It is judged person by person, not once when you set it up.</strong>{" "}
           The box being ticked doesn’t grant anybody anything. Each person filling in
-          the form is checked against their own access to the target list: someone
+          the form is checked against their own access to the target table: someone
           who can already add rows to <em>Cities</em> gets the offer, and someone who
           can’t simply sees the ordinary search, with no broken button and no error.
           So turning it on is safe even when the people using the form have a mix of
-          access — including on a list that was only shared with you as a link target.
+          access — including on a table that was only shared with you as a link target.
         </p>
         <Callout tone="warn" title="Only in the picker">
           This is a convenience in the form, not a new rule. Importing a file or
@@ -992,14 +992,14 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>
           Add one under <Ui>Settings</Ui> → <Ui>Columns</Ui> → <Ui>Add column</Ui>,
           pick the type, and type the formula into the <Ui>Formula</Ui> box. The
-          dialog lists, underneath, the columns you’re allowed to name.
+          dialog tables, underneath, the columns you’re allowed to name.
         </p>
         <Figure name="formula" />
 
         <h3 className="font-semibold pt-1">Naming your columns</h3>
         <p>
           A formula refers to a column by its <strong>short name</strong> — the one
-          shown in brackets beside it in the columns list, like{" "}
+          shown in brackets beside it in the columns table, like{" "}
           <Code>unit_price</Code> — not by its pretty display name. These kinds of
           column can be named: <strong>Number</strong>, <strong>Rating</strong>,{" "}
           <strong>Duration</strong>, <strong>Text</strong> (any input style),{" "}
@@ -1145,7 +1145,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </ul>
         <p style={{ color: "var(--text-muted)" }}>
           A plain <strong>Date</strong> column has no time on it, so the time pieces
-          read as midnight. Anything after a <Code>%</Code> that isn’t in the list
+          read as midnight. Anything after a <Code>%</Code> that isn’t in the table
           above isn’t understood — the app tells you so when you save, rather than
           leaving you a column full of blanks.
         </p>
@@ -1200,7 +1200,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
           <li>
             <Code>DEFAULT(nickname, DEFAULT(first_name, "friend"))</Code> — work
-            down a list until something has been filled in.
+            down a table until something has been filled in.
           </li>
           <li>
             <Code>DEFAULT(notes, "—")</Code> — a dash where a cell is blank, so the
@@ -1263,13 +1263,13 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
         <h3 className="font-semibold pt-1">Every function at a glance</h3>
         <p>
-          The whole list, for looking one up. Anything with a <Code>?</Code> after
+          The whole table, for looking one up. Anything with a <Code>?</Code> after
           it can be left out. Function names are always in capitals; the column
           names in the examples are made up, so swap in your own.
         </p>
         <FunctionTable />
         <p style={{ color: "var(--text-muted)" }}>
-          Metrics — the summary cards above a list — understand all of these too,
+          Metrics — the summary cards above a table — understand all of these too,
           and add their own for totalling a whole column. See{" "}
           <a href="#metrics" style={{ color: "var(--brand)" }}>
             Metrics
@@ -1308,7 +1308,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           If any column the formula names is empty on that record, the result is
           blank (—) rather than zero — an unfinished row should look unfinished.
           Dividing by zero comes out blank the same way, so one odd record never
-          spoils the rest of the list. So does a result that would run to tens of
+          spoils the rest of the table. So does a result that would run to tens of
           thousands of characters: a formula fills a cell in a table, and{" "}
           <Code>REPLACE</Code> in particular can grow text faster than you’d
           expect.
@@ -1397,7 +1397,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
           <li>
             A code the app rejects doesn’t stop the queue: the reason is shown under
-            the camera and in the list of recent scans, and the next person can scan
+            the camera and in the table of recent scans, and the next person can scan
             straight away. Rescanning the same code won’t help — it’ll be refused for
             the same reason — so add that one record by hand afterwards.
           </li>
@@ -1444,9 +1444,9 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
             makes a new record rather than finding the old one.
           </li>
           <li>
-            The fields you choose are remembered <strong>for the list</strong>, so every
+            The fields you choose are remembered <strong>for the table</strong>, so every
             batch of badges you print comes out the same. Saving that choice needs
-            permission to configure the list; without it you can still change the fields
+            permission to configure the table; without it you can still change the fields
             for the print in front of you.
           </li>
           <li>
@@ -1463,14 +1463,14 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="find" title="Find records: search, sort, group, filter">
         <p>
-          As a list grows, four tools help you find what you need. They live in the
+          As a table grows, four tools help you find what you need. They live in the
           bar above your records.
         </p>
         <Figure name="toolbar" />
         <ul className="flex flex-col gap-2">
           <li>
             <strong>Search</strong> — type in <Ui>Search records…</Ui> to narrow to
-            rows that match. It searches the whole list, not just the page you’re on.
+            rows that match. It searches the whole table, not just the page you’re on.
           </li>
           <li>
             <strong>Sort</strong> — click <Ui>Sort</Ui>, pick a column, and choose{" "}
@@ -1533,7 +1533,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            To switch views, use the <Ui>View</Ui> dropdown at the top of the list.
+            To switch views, use the <Ui>View</Ui> dropdown at the top of the table.
           </li>
           <li>
             To make one, click the <Ui>+</Ui> beside that dropdown, type a{" "}
@@ -1567,7 +1567,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>
           A <strong>form</strong> controls the screen people see when adding or
           editing a record — which fields appear, in what order, and what they’re
-          called. Every list has a default form, and you can tune it under{" "}
+          called. Every table has a default form, and you can tune it under{" "}
           <Ui>Settings</Ui> → <Ui>Forms</Ui>.
         </p>
         <ul className="flex flex-col gap-1">
@@ -1597,7 +1597,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="metrics" title="Metrics: totals, averages and counts">
         <p>
-          A <strong>metric</strong> answers a question about the whole list rather
+          A <strong>metric</strong> answers a question about the whole table rather
           than about one record: <em>how many hours altogether?</em>,{" "}
           <em>what does a job cost on average?</em>, <em>how many people are on
           this?</em> Each one shows as a small card above the records.
@@ -1605,14 +1605,14 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <p>
           Add one under <Ui>Settings</Ui> → <Ui>Metrics</Ui> →{" "}
           <Ui>Add metric</Ui>. Give it a name, then write a formula in the{" "}
-          <Ui>Formula</Ui> box — the dialog lists the columns you can use.
+          <Ui>Formula</Ui> box — the dialog tables the columns you can use.
         </p>
         <p>
           The cards stay <strong>out of the way until you ask for them</strong>:
           click <Ui>Metrics</Ui> on the toolbar above the records to show or hide
-          them. The number on that button is how many the list has, so you can tell
-          a hidden strip from a list with none. They start hidden every time you
-          open a list — working out a total means reading every record, so it is
+          them. The number on that button is how many the table has, so you can tell
+          a hidden strip from a table with none. They start hidden every time you
+          open a table — working out a total means reading every record, so it is
           not something the app does over your shoulder.
         </p>
         <Figure name="metrics" />
@@ -1655,11 +1655,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         <ul className="flex flex-col gap-1">
           <li>
             <strong>Whatever is on screen.</strong> Switch to a view that filters the
-            list, or type in the search box, and the cards follow — so they always
+            table, or type in the search box, and the cards follow — so they always
             describe the records you are actually looking at.
           </li>
           <li>
-            <strong>Only records you’re allowed to see.</strong> If a list is shared
+            <strong>Only records you’re allowed to see.</strong> If a table is shared
             with you but some records are not, your totals cover your records. Two
             people can see different numbers on the same card, and both are right.
           </li>
@@ -1685,13 +1685,13 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
       <Section id="sharing" title="Sharing and permissions">
         <p>
           Nothing is shared until you say so. You can share a whole workspace, a
-          single list, an individual record, or a form — and control exactly what each
+          single table, an individual record, or a form — and control exactly what each
           person or group may do.
         </p>
         <ol className="flex flex-col gap-2">
           <li>
-            Open sharing for the item — the share icon on a workspace or list card,
-            or <Ui>Settings</Ui> → <Ui>Permissions</Ui> once the list is open.
+            Open sharing for the item — the share icon on a workspace or table card,
+            or <Ui>Settings</Ui> → <Ui>Permissions</Ui> once the table is open.
           </li>
           <li>
             Under <Ui>Add people or groups</Ui>, type a name to find the person or
@@ -1718,8 +1718,8 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <li><strong>Share</strong> — manage who has access.</li>
           <li><strong>Manage</strong> — full control (includes all of the above).</li>
           <li>
-            <strong>Lookup</strong> — use the list as a lookup target: its values can
-            be picked and shown in someone else’s lookup column, but the list itself
+            <strong>Lookup</strong> — use the table as a lookup target: its values can
+            be picked and shown in someone else’s lookup column, but the table itself
             stays hidden.
           </li>
         </ul>
@@ -1729,9 +1729,9 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <em>Manager</em> = full control. Anyone who can View can also look up, so
           you only need <em>Lookup</em> on its own.
         </p>
-        <Callout tone="tip" title="Sharing a list you don’t want to hand over">
+        <Callout tone="tip" title="Sharing a table you don’t want to hand over">
           <p>
-            <Ui>Lookup</Ui> is for the lists that exist to be referenced —{" "}
+            <Ui>Lookup</Ui> is for the tables that exist to be referenced —{" "}
             <em>Schools</em>, <em>Departments</em>, <em>Countries</em>. Share one that
             way and other people can point a lookup column at it and see its labels in
             their own records, but it never appears in their{" "}
@@ -1740,14 +1740,14 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </p>
           <p>
             It still shows them the values of the labelling column for every row they
-            can reach, so use it for reference data rather than for a list with
+            can reach, so use it for reference data rather than for a table with
             something to hide in it.
           </p>
         </Callout>
         <Callout tone="tip" title="Good to know">
           The owner of an item always keeps full access. A row shows a friendly
           reminder like <Ui>Expires today</Ui> when access is ending, and{" "}
-          <Ui>Expired</Ui> once it has. For a list you can turn on{" "}
+          <Ui>Expired</Ui> once it has. For a table you can turn on{" "}
           <Ui>Unique permissions</Ui> to ignore access handed down from its workspace
           and use only the people you add here. Sharing with a group grants everyone
           in it — a quick way to give a whole team access at once.
@@ -1758,15 +1758,15 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           including people who join later. Share with it when something is meant for
           the whole organisation. On the <Ui>People</Ui> page it looks like a group
           with no members: that’s expected, since membership is automatic rather than
-          a list someone maintains. For the same reason the app won’t let anyone
+          a table someone maintains. For the same reason the app won’t let anyone
           rename, edit, or delete it.
         </Callout>
       </Section>
 
       <Section id="transfer" title="Moving and giving things away">
         <p>
-          A list doesn’t have to stay where you made it. Open a workspace to see its
-          lists; each one has a <Ui>Move or transfer</Ui> button (the paper-plane
+          A table doesn’t have to stay where you made it. Open a workspace to see its
+          tables; each one has a <Ui>Move or transfer</Ui> button (the paper-plane
           icon), alongside Share, Rename, and Delete.
         </p>
         <Figure name="transfer" />
@@ -1775,23 +1775,23 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <Ui>Move to workspace</Ui>, pick one of your other workspaces, and click{" "}
           <Ui>Move</Ui>. Everything travels with it — columns, records, views, and
           forms — and everyone you’ve already shared it with keeps their access. You can
-          only move a list into a workspace you’re allowed to set up.
+          only move a table into a workspace you’re allowed to set up.
         </p>
         <p>
           <strong>Give it to another person.</strong> Choose{" "}
           <Ui>Transfer to user</Ui>, pick the person, and click <Ui>Transfer</Ui>. The
-          list becomes theirs:
+          table becomes theirs:
         </p>
         <ul className="flex flex-col gap-1">
           <li>
             It lands in that person’s <Ui>Incoming</Ui> workspace — a folder everyone
-            has for lists sent to them.
+            has for tables sent to them.
           </li>
           <li>
             They become the owner, so <strong>you lose access</strong> unless they later
             share it back. People you’d already shared it with keep theirs.
           </li>
-          <li>Only a list’s owner can give it away.</li>
+          <li>Only a table’s owner can give it away.</li>
           <li>
             The person receiving it can keep it — moving it out of{" "}
             <Ui>Incoming</Ui> into a workspace of their own — or turn it down by deleting
@@ -1799,22 +1799,22 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
         </ul>
         <Callout tone="tip" title="Your Incoming folder">
-          Once someone transfers you a list, an <Ui>Incoming</Ui> workspace appears among
+          Once someone transfers you a table, an <Ui>Incoming</Ui> workspace appears among
           your workspaces. You can’t rename or delete it — it’s just a landing spot — but
-          the lists inside are yours to move elsewhere or remove.
+          the tables inside are yours to move elsewhere or remove.
         </Callout>
         <p>
           <strong>Give away a whole workspace.</strong> On the <Ui>Workspaces</Ui> page,
           each workspace you own has its own <Ui>Transfer workspace</Ui> button behind the
-          same paper-plane icon. Every list inside goes with it in one step, and nothing
+          same paper-plane icon. Every table inside goes with it in one step, and nothing
           changes name or address on the way — no <Ui>Incoming</Ui> folder is involved,
-          because the workspace itself is the thing changing hands. As with a list, only
+          because the workspace itself is the thing changing hands. As with a table, only
           the owner can give one away, everyone you’d shared it with keeps their access,
           and you lose yours. If the person already has a workspace by that name, the one
           arriving is renamed rather than refused.
         </p>
         <Callout tone="warn" title="Transferring is one-way">
-          After you transfer a list — or a workspace, and all the lists in it — it belongs
+          After you transfer a table — or a workspace, and all the tables in it — it belongs
           to the other person; getting it back means asking them to transfer or share it to
           you. If you only want someone to help with it,{" "}
           <a href="#sharing" style={{ color: "var(--brand)" }}>share it</a> with them
@@ -1822,11 +1822,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </Callout>
       </Section>
 
-      <Section id="duplicate" title="Duplicating a list">
+      <Section id="duplicate" title="Duplicating a table">
         <p>
-          Need a second list just like one you already have — a fresh month’s tracker,
+          Need a second table just like one you already have — a fresh month’s tracker,
           or a template to build on? Open a workspace and click the{" "}
-          <Ui>Duplicate</Ui> button (the copy icon) on any list.
+          <Ui>Duplicate</Ui> button (the copy icon) on any table.
         </p>
         <ol className="flex flex-col gap-2">
           <li>
@@ -1852,7 +1852,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
         </ul>
         <Callout tone="tip" title="Structure now, data later">
-          Leaving the records out is the quick way to turn a finished list into a
+          Leaving the records out is the quick way to turn a finished table into a
           reusable template — duplicate it empty, then fill the copy fresh. Copy the
           records when you truly want a running duplicate of everything as it stands.
         </Callout>
@@ -1860,7 +1860,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="people" title="People, groups, and your profile">
         <p>
-          The <Ui>People</Ui> page lists everyone with an account and every group.
+          The <Ui>People</Ui> page tables everyone with an account and every group.
           Anyone can look; only an <strong>administrator</strong> (a “superuser”) can
           add or change accounts.
         </p>
@@ -1886,7 +1886,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <li>
             They can also create groups (<Ui>New group</Ui>) and choose their members —
             handy for sharing with a whole team in one go. A group has two names, the
-            same as a list does: the <Ui>Name</Ui> you read on screen, and an{" "}
+            same as a table does: the <Ui>Name</Ui> you read on screen, and an{" "}
             <Ui>API name</Ui> underneath it — a short one like <code>year_9</code>{" "}
             that files use. Renaming the first is free; the second is what an import
             file and an exported spreadsheet refer to, so changing it can leave older
@@ -1919,7 +1919,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="import-export" title="Import and export">
         <p>
-          You don’t have to type everything. Open a list, click the <Ui>⋯</Ui>{" "}
+          You don’t have to type everything. Open a table, click the <Ui>⋯</Ui>{" "}
           button beside <Ui>Settings</Ui>, and choose <Ui>Import / Export</Ui>. It
           has a tab for each direction.
         </p>
@@ -1969,25 +1969,25 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           heading per column, ready to fill in and upload straight back. Calculated
           columns aren’t in the template — they work themselves out from your other
           columns, so there is nothing to fill in. They <em>are</em> on the{" "}
-          <Ui>Columns</Ui> and <Ui>Sort by</Ui> lists, because an export is a file
+          <Ui>Columns</Ui> and <Ui>Sort by</Ui> tables, because an export is a file
           you read: the worked-out value goes into it, and is ignored again if you
           upload the same file back.
         </p>
         <Callout tone="warn" title="Match the headings">
-          Your file’s column headings must match your list’s underlying column names
+          Your file’s column headings must match your table’s underlying column names
           (the short name shown in brackets next to each column), not necessarily the
-          pretty display names. Headings the list doesn’t recognise are simply
+          pretty display names. Headings the table doesn’t recognise are simply
           ignored, and a bad row is skipped while the good rows still import — nothing
           all-or-nothing.
         </Callout>
         <p>
-          This is for the <em>records inside a list</em>. Setting up a lot of{" "}
+          This is for the <em>records inside a table</em>. Setting up a lot of{" "}
           <em>people</em> is a separate thing in a separate place — see{" "}
           <a href="#people" style={{ color: "var(--brand)" }}>
             People, groups, and your profile
           </a>
-          . One difference worth knowing if you do both: a list ignores a heading it
-          doesn’t recognise, because every list has its own columns. The people file
+          . One difference worth knowing if you do both: a table ignores a heading it
+          doesn’t recognise, because every table has its own columns. The people file
           refuses one instead, because there its headings are a fixed set, and a
           misspelt <Ui>first_name</Ui> would otherwise quietly leave every name blank.
         </p>
@@ -1995,7 +1995,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
 
       <Section id="archive" title="Archiving records you’re done with">
         <p>
-          Lists grow, and most of what fills them stops being interesting long before
+          Tables grow, and most of what fills them stops being interesting long before
           anyone wants it gone: last year’s orders, closed tickets, people who left.
           Deleting them is wrong — you may well need them again, and the bin would
           destroy them in a month. <strong>Archiving</strong> is the answer to that:
@@ -2013,8 +2013,8 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <li>your metrics — totals and averages stop counting it.</li>
         </ul>
         <p>
-          That last one is the point as much as the tidiness is. A list the app no
-          longer has to read through on every search and every total is a list that
+          That last one is the point as much as the tidiness is. A table the app no
+          longer has to read through on every search and every total is a table that
           stays quick, however much history has piled up behind it.
         </p>
         <p>
@@ -2024,13 +2024,13 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </p>
         <p>
           <strong>Getting it back.</strong> Go to <Ui>⋯</Ui> →{" "}
-          <Ui>Archived records</Ui>, which lists everything put aside, and bring back
+          <Ui>Archived records</Ui>, which tables everything put aside, and bring back
           what you need. It returns exactly as it was.
         </p>
         <Callout tone="tip" title="Links to an archived record still read properly">
-          If another list points at a record you archive, that link doesn’t break or
+          If another table points at a record you archive, that link doesn’t break or
           empty itself — it goes on showing the name as before. Archiving changes
-          which lists a record appears in, not whether it exists.
+          which tables a record appears in, not whether it exists.
         </Callout>
         <Callout tone="warn" title="Archiving is not deleting, and the bin is not archiving">
           They are two separate things and either can be undone, so the only real
@@ -2048,11 +2048,11 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
         </p>
         <ul className="flex flex-col gap-2">
           <li>
-            <strong>A record.</strong> Open the list, click the <Ui>⋯</Ui> button
+            <strong>A record.</strong> Open the table, click the <Ui>⋯</Ui> button
             beside <Ui>Settings</Ui>, and choose <Ui>Deleted records</Ui>.
           </li>
           <li>
-            <strong>A list.</strong> Open the workspace it was in and click{" "}
+            <strong>A table.</strong> Open the workspace it was in and click{" "}
             <Ui>Deleted</Ui>.
           </li>
           <li>
@@ -2060,7 +2060,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
             <Ui>Deleted</Ui>.
           </li>
           <li>
-            <strong>A column, view, form, or metric.</strong> Open the list, click{" "}
+            <strong>A column, view, form, or metric.</strong> Open the table, click{" "}
             <Ui>Settings</Ui>, go to that tab, and click <Ui>Deleted</Ui> — each of
             the four has its own bin, on its own tab.
           </li>
@@ -2096,19 +2096,19 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </a>
           .
         </Callout>
-        <Callout tone="tip" title="A list deleted with its workspace">
-          Restoring a workspace brings its lists back with it. That’s why a list that
-          went down with its workspace isn’t in the <Ui>Deleted lists</Ui> bin on its
+        <Callout tone="tip" title="A table deleted with its workspace">
+          Restoring a workspace brings its tables back with it. That’s why a table that
+          went down with its workspace isn’t in the <Ui>Deleted tables</Ui> bin on its
           own — restore the workspace and you’ll find it inside.
         </Callout>
-        <Callout tone="warn" title="Links to a deleted list don’t come back">
-          If other lists had{" "}
+        <Callout tone="warn" title="Links to a deleted table don’t come back">
+          If other tables had{" "}
           <a href="#nested-lookups" style={{ color: "var(--brand)" }}>
             link columns
           </a>{" "}
-          pointing at a list you delete, those cells are emptied — they’d point at
-          nothing. Restoring the list brings back its own records, but not the links
-          other lists had to it; you’d pick those again.
+          pointing at a table you delete, those cells are emptied — they’d point at
+          nothing. Restoring the table brings back its own records, but not the links
+          other tables had to it; you’d pick those again.
         </Callout>
         <Callout tone="warn" title="A deleted column is hidden, not erased">
           Deleting a column hides what it held; every record still carries those
@@ -2153,7 +2153,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
             have view-only access — ask its owner.
           </li>
           <li>
-            <strong>“Add a column first.”</strong> A list needs at least one column
+            <strong>“Add a column first.”</strong> A table needs at least one column
             before you can add records, import, or use the bin. Set one up under{" "}
             <Ui>Settings</Ui> → <Ui>Columns</Ui>.
           </li>
@@ -2181,7 +2181,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           </li>
           <li>
             <strong>A search found nothing on this page.</strong> Search covers the
-            whole list and jumps you to the first page of matches — if it’s empty,
+            whole table and jumps you to the first page of matches — if it’s empty,
             there really are no matches.
           </li>
           <li>
@@ -2208,7 +2208,7 @@ export function GuidePage({ standalone = false }: { standalone?: boolean }) {
           <Link to="/workspaces" style={{ color: "var(--brand)", fontWeight: 600 }}>
             Workspaces
           </Link>{" "}
-          and make your first list.
+          and make your first table.
         </p>
       </Section>
     </div>

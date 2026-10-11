@@ -1,13 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 
 import { api } from "../../lib/api";
-import type { Column, Form, ListItem, ListRead } from "../../lib/types";
+import type { Column, Form, TableRecord, TableRead } from "../../lib/types";
 import { RecordFormDialog } from "../records/RecordFormDialog";
 import { resolveDisplayColumn } from "./displayColumn";
 
 interface Props {
-  /** The lookup's target list — the one gaining a row, not the one being edited. */
-  targetListUuid: string;
+  /** The lookup's target table — the one gaining a row, not the one being edited. */
+  targetTableUuid: string;
   /** What was typed into the picker, which becomes the new row's label. */
   term: string;
   /** The referring lookup's `display_column_uuid`, if it set one. Unset is the
@@ -24,28 +24,28 @@ interface Props {
 }
 
 /**
- * Add a row to a lookup's target list without leaving the record being filled in.
+ * Add a row to a lookup's target table without leaving the record being filled in.
  *
- * It is the target list's own create form, rendered where the picker was — not a
+ * It is the target table's own create form, rendered where the picker was — not a
  * shortcut around it. That matters more than it sounds: the target may have
  * required columns of its own, and a "quick create" writing nothing but the typed
  * label would be refused by the write path with a message about a column that is
  * not on screen. Everything else follows from reusing `RecordFormDialog` — field
  * order, read-only fields, conditions and the `POST` itself are the ones the
- * target list already had.
+ * target table already had.
  *
  * **Permissions are not checked here and must not be.** The caller only offers
- * this when the user has `create` on the target, and `POST /lists/{it}/items/`
+ * this when the user has `create` on the target, and `POST /tables/{it}/records/`
  * enforces the same thing regardless. Two independent checks, neither of them
  * this component's business.
  *
  * The queries are the target's, so a caller with `create` — which confers `view`
- * — can always run them. They are keyed exactly as the target list's own page
+ * — can always run them. They are keyed exactly as the target table's own page
  * keys them, so opening this dialog warms that page's cache rather than
  * duplicating it.
  */
 export function CreateTargetRowDialog({
-  targetListUuid,
+  targetTableUuid,
   term,
   displayColumnUuid,
   filterColumnUuid,
@@ -56,19 +56,19 @@ export function CreateTargetRowDialog({
 }: Props) {
   // `enabled` on all three: this mounts alongside every lookup field that offers
   // creation, and most are never opened.
-  const list = useQuery({
-    queryKey: ["list", targetListUuid],
-    queryFn: () => api.get<ListRead>(`/lists/${targetListUuid}`),
+  const table = useQuery({
+    queryKey: ["table", targetTableUuid],
+    queryFn: () => api.get<TableRead>(`/tables/${targetTableUuid}`),
     enabled: visible,
   });
   const columns = useQuery({
-    queryKey: ["columns", targetListUuid],
-    queryFn: () => api.get<Column[]>(`/lists/${targetListUuid}/columns/`),
+    queryKey: ["columns", targetTableUuid],
+    queryFn: () => api.get<Column[]>(`/tables/${targetTableUuid}/columns/`),
     enabled: visible,
   });
   const forms = useQuery({
-    queryKey: ["forms", targetListUuid],
-    queryFn: () => api.get<Form[]>(`/lists/${targetListUuid}/forms/`),
+    queryKey: ["forms", targetTableUuid],
+    queryFn: () => api.get<Form[]>(`/tables/${targetTableUuid}/forms/`),
     enabled: visible,
   });
 
@@ -79,7 +79,7 @@ export function CreateTargetRowDialog({
   // that the row comes back from the search under the name it was created with.
   const labelKey = resolveDisplayColumn(
     displayColumnUuid,
-    list.data?.primary_column,
+    table.data?.primary_column,
     cols,
   );
 
@@ -92,7 +92,7 @@ export function CreateTargetRowDialog({
   // usable for the cell it was created for.
   if (filterColumnUuid && parentValues && parentValues.length > 0) {
     // The filter column is a lookup of the target's, so it has its own shape.
-    // Writing a bare string into a multi-valued one would be refused, and a list
+    // Writing a bare string into a multi-valued one would be refused, and a table
     // into a single-valued one likewise; any one of the parent's rows satisfies
     // the check, which asks for an intersection rather than an equality.
     const filterColumn = cols.find((c) => c.uuid === filterColumnUuid);
@@ -103,20 +103,20 @@ export function CreateTargetRowDialog({
 
   if (!visible) return null;
   // The dialog is only as good as the form behind it; opening an empty one over a
-  // list whose schema has not arrived would look like a list with no fields.
-  if (columns.isPending || forms.isPending || list.isPending) return null;
+  // table whose schema has not arrived would look like a table with no fields.
+  if (columns.isPending || forms.isPending || table.isPending) return null;
 
   return (
     <RecordFormDialog
-      listUuid={targetListUuid}
+      tableUuid={targetTableUuid}
       columns={cols}
       form={createForm}
       item={null}
       prefill={prefill}
       visible
       onHide={onHide}
-      header={`Add to ${list.data?.display_name ?? "the linked list"}`}
-      onCreated={(created: ListItem) => onCreated(created.uuid)}
+      header={`Add to ${table.data?.display_name ?? "the linked table"}`}
+      onCreated={(created: TableRecord) => onCreated(created.uuid)}
     />
   );
 }

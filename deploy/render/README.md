@@ -84,8 +84,8 @@ if it happens, and the migration is already in the right place for it.
 
 **`VITE_LIVE_REFRESH_SECONDS` is now only a fallback.** It has been demoted twice. On the free
 plan it did double duty — a focused tab polling kept the instance from spinning down — and
-`starter` ended that. Then live records became a **server push**: an open list holds
-`GET /lists/{uuid}/events` and refetches when told to, so on a healthy deployment this interval
+`starter` ended that. Then live records became a **server push**: an open table holds
+`GET /tables/{uuid}/events` and refetches when told to, so on a healthy deployment this interval
 is not used at all. It is what the app falls back to when the stream cannot be held open, which
 is worth keeping set rather than zeroed for exactly that case.
 
@@ -94,7 +94,7 @@ makes the events route answer `503`, which every client reads as "fall back to p
 an environment change plus an API restart; putting it in the SPA's build-time config would have
 made turning push off a rebuild and a redeploy of the static site. `SSE_MAX_STREAM_SECONDS`
 (300) is also **the revocation window** — authorization is checked at connect and never again,
-so losing `view` on a list stops the signals at the subscriber's next reconnect and not before.
+so losing `view` on a table stops the signals at the subscriber's next reconnect and not before.
 
 **`GEOCODE_USER_AGENT` is not set here, and address search is anonymous to Nominatim as a
 result.** Their policy asks to be able to contact the caller, and the default value literally
@@ -140,7 +140,7 @@ much worse.
 ([`../../.github/workflows/maintenance.yml`](../../.github/workflows/maintenance.yml)), because
 Render's Cron Job is a **paid** service type. Eight of them today — the shape reconcile, the
 five purges, the orphan-grant sweep and the calculated-column re-index — and their **order
-matters** where they overlap, which the workflow encodes: the workspace and list purges own
+matters** where they overlap, which the workflow encodes: the workspace and table purges own
 everything under a deleted parent, so they run before the jobs that sweep individual children,
 and the grant sweep runs after all of them because the purges are what orphan grants in the
 first place. (The re-index is independent and sits at the end.) All

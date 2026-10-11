@@ -141,10 +141,10 @@ async def workspace_uuid(client):
 
 
 @pytest_asyncio.fixture
-async def list_uuid(client, workspace_uuid):
+async def table_uuid(client, workspace_uuid):
     resp = await client.post(
-        "/api/lists/",
-        json={"name": "l1", "display_name": "List 1", "workspace_uuid": workspace_uuid},
+        "/api/tables/",
+        json={"name": "l1", "display_name": "Table 1", "workspace_uuid": workspace_uuid},
     )
     assert resp.status_code == 201, resp.text
     return resp.json()["uuid"]
@@ -154,8 +154,8 @@ async def list_uuid(client, workspace_uuid):
 def add_column(client):
     """Return a helper that creates a column and returns its uuid."""
 
-    async def _add(list_uuid: str, **body) -> str:
-        resp = await client.post(f"/api/lists/{list_uuid}/columns/", json=body)
+    async def _add(table_uuid: str, **body) -> str:
+        resp = await client.post(f"/api/tables/{table_uuid}/columns/", json=body)
         assert resp.status_code == 201, resp.text
         return resp.json()["uuid"]
 

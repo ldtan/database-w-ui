@@ -32,37 +32,37 @@ currently explains where an account comes from) and `features/auth/LoginPage.tsx
 offers nowhere to go but in. The guide's "Signing in" section says the same thing a
 third time and would need the same edit.
 
-## 2. A record shared without its list can't be viewed in the UI
+## 2. A record shared without its table can't be viewed in the UI
 
-The API supports this on purpose — item routes use `resolve_list_or_404` (existence only)
-rather than `get_list_or_404` (which requires list `view`). Verified: a user with `edit`
-on one record and *no* grant on the list gets 200 on that record and sees only it in the
-list's records.
+The API supports this on purpose — record routes use `resolve_table_or_404` (existence only)
+rather than `get_table_or_404` (which requires table `view`). Verified: a user with `edit`
+on one record and *no* grant on the table gets 200 on that record and sees only it in the
+table's records.
 
-The UI can't render it. `ListDetailPage` is the only place a record appears, and on mount
-it fetches `/lists/{uuid}` and `/lists/{uuid}/columns/`, both gated on list `view`. Both
+The UI can't render it. `TableDetailPage` is the only place a record appears, and on mount
+it fetches `/tables/{uuid}` and `/tables/{uuid}/columns/`, both gated on table `view`. Both
 403 and the page blanks.
 
 The blocker is the **column schema**: records are JSONB keyed by column uuid, so a record
 is unrenderable without the column definitions — and that endpoint requires exactly the
-permission an item-only grantee lacks. Closing this needs a backend change either way:
-let an item grant confer read access to the list's column schema (field names and types,
+permission a record-only grantee lacks. Closing this needs a backend change either way:
+let a record grant confer read access to the table's column schema (field names and types,
 not its records). That is a deliberate widening, not a no-op.
 
 On top of that, pick one:
-- **Degrade `ListDetailPage`** when `/lists/{uuid}` 403s (smaller, one page to maintain).
+- **Degrade `TableDetailPage`** when `/tables/{uuid}` 403s (smaller, one page to maintain).
 - **A dedicated record page/permalink** (cleaner separation, a second page to maintain).
 
 Both also need two fallbacks that are easy to miss: `RecordFormDialog` renders from a Form
-(`/lists/{uuid}/forms/` is *also* gated on list `view`), and `LookupCell` resolves a value
-by fetching a **different** list — so lookups must degrade to an unresolved value when the
-target list isn't visible.
+(`/tables/{uuid}/forms/` is *also* gated on table `view`), and `LookupCell` resolves a value
+by fetching a **different** table — so lookups must degrade to an unresolved value when the
+target table isn't visible.
 
 ## 3. Grants have no foreign key to their resource
 
 `permission_grants` points at its resource via `(resource_type, resource_id)` with **no foreign
 key** — `resource_id` means a different table depending on the type, so the database cannot
-enforce it. Nothing cascades. A deleted list, view or account leaves its grants behind.
+enforce it. Nothing cascades. A deleted table, view or account leaves its grants behind.
 
 They are inert (the resolver walks the live hierarchy, so a grant on a deleted resource resolves
 to nothing) but they accumulate, and they used to make the Share dialog answer "who has access?"
@@ -95,7 +95,7 @@ feature (planned-features #2), which is built for exactly this find→replace-ac
 shape.
 
 `allow_other` widens the same seam rather than closing it. A column that takes an answer of
-the record's own accepts any non-empty string, so nothing about an off-list value is
+the record's own accepts any non-empty string, so nothing about an off-table value is
 irregular while the flag is on — but turning it **off** puts every write-in in exactly the
 position above: still displayed, still exported, and refused on the next write of that
 cell. The dialog says so where the flag is; there is deliberately no sweep that rewrites or
@@ -105,7 +105,7 @@ promotes those answers, for the same reason there is no cascade-rename.
 
 ## 5. A calculated column's value is stored as an *index*, and that has edges
 
-A `calculated` column carries a `formula` in its config — arithmetic over the list's **number**,
+A `calculated` column carries a `formula` in its config — arithmetic over the table's **number**,
 **rating** and **duration** columns, string functions over its **text**, **email** and **choice**
 columns, date functions over its
 **date**/**datetime** columns, and references to other **calculated** columns, all by name
@@ -116,7 +116,7 @@ or a string depending on the formula; the column has no fixed output type. The f
 and evaluated by `columns/formula.py`, which is a deliberately tiny AST walker with an
 allow-list: **it never calls `eval`**, and the only names it resolves are the column values
 handed to it, so a formula cannot reach a builtin, an attribute or a subscript. Keep it that
-way — the moment it grows an `eval` or a real namespace, a list editor (an ordinary user, not
+way — the moment it grows an `eval` or a real namespace, a table editor (an ordinary user, not
 an admin) can run code. Note that `+ - * /` are numbers-only on purpose: text is joined with
 `CONCAT`, so a string can never slip into `*` and become Python's silent repetition.
 
@@ -141,7 +141,7 @@ reported as "sometimes it shows nothing". A cell holding a space is a value to b
 `DEFAULT(TRIM(notes), "—")` is how you say otherwise.
 
 **The load-bearing decision is that the value is written down *and* recomputed.**
-`_validate_data` (`items/services.py`) writes each calculated cell into the record on create and
+`_validate_data` (`records/services.py`) writes each calculated cell into the record on create and
 on every update, under the column's uuid like any other value — which is what gives
 `apply_filters`, `apply_sorts` and `_apply_search` a real `data ->> key` to work with, since
 those run inside Postgres and cannot call a Python evaluator. But `shape_values` still
@@ -172,10 +172,10 @@ for the date-grained two the window is one day on one row. Three consequences:
   the answer as of 03:17 UTC. This is a real edge and not a bug only because of the property above: the
   screen and the export are always right. If a filter on "changed in the last hour" is ever
   wanted, it belongs on `updated_at`, which is a real timestamp, not on a formula.
-- **A `NOW()` column makes every re-index rewrite the whole list.** `recompute_records` skips
+- **A `NOW()` column makes every re-index rewrite the whole table.** `recompute_records` skips
   rows whose stored value already agrees, and with `NOW()` none ever do. That is bounded (a
-  nightly pass over one list) and was the price of not special-casing the function, but it is
-  worth knowing before putting one on a list of a million records.
+  nightly pass over one table) and was the price of not special-casing the function, but it is
+  worth knowing before putting one on a table of a million records.
 
 Reach is not the only thing a formula has to be bounded on. Because it runs once per record on
 every read *and* once per record per re-index, what it may *spend* is bounded too: `MAX_SOURCE`
@@ -186,7 +186,7 @@ composes those factors while the source only grows linearly). The first two are 
 config time; the third blanks the cell, since it depends on the row. Keep all three: without
 them a formula that passes every other check is a way to spend the whole server, which is the
 same problem as running code, arrived at from the other side. (Those three, `ROW_FUNCTIONS`, and
-the two `*_row_expression` seams are public because list **metrics** build a second grammar on
+the two `*_row_expression` seams are public because table **metrics** build a second grammar on
 this one — see §9 below. A metric walks this same tree once per record too, over more records
 than a grid page, so the bounds matter more there, not less.)
 
@@ -206,28 +206,28 @@ The remaining edges:
   **no drift detection** — no schema digest, no `recompute_pending` flag, no automatic backfill
   — because neither entry point needs to detect anything: the column dialog offers a re-index
   right after a formula edit (it just handled the edit), and `Refresh calculated` in the columns
-  panel is always available. `POST /lists/{uuid}/columns/recompute` is the route,
+  panel is always available. `POST /tables/{uuid}/columns/recompute` is the route,
   `columns/backfill.py` the engine, and the nightly `recompute_calculated` the backstop. What
   this costs is a window where a sort or filter answers for the previous formula. A digest and a
   pending badge were built once; they guard against *visible* staleness, which recomputing on
   read has already removed.
-- **A re-index is a full-list rewrite with no row ceiling.** Measured at **~0.035 ms of app
+- **A re-index is a full-table rewrite with no row ceiling.** Measured at **~0.035 ms of app
   CPU per record** with two calculated columns per record, linear from 20k to 50k rows
   (20,000 records ≈ 0.7 s of CPU, ~7 s on a 0.1-CPU instance; 500,000 — the 1 GB ceiling — is
   ~18 s of CPU, ~3 minutes). Above `FORMULA_INLINE_MAX_RECORDS` (5,000) it goes to a FastAPI
   background task and the route answers at once; below it the request does the work. The
   threshold decides who waits, **not** how much is done: a deferred run still walks the whole
-  list, because a half-updated index holds two formulas' answers at once and filters
+  table, because a half-updated index holds two formulas' answers at once and filters
   incoherently, which is strictly worse than one uniformly a version behind. Peak Python memory
   is flat at **2.8 MB** above baseline at both 20k and 50k rows (500-row batches, each committed
   on its own, so no lock is held across the job) and the longest contiguous event-loop block is
-  **~23 ms**, comfortably inside the health check. A pass over an already-current list costs
+  **~23 ms**, comfortably inside the health check. A pass over an already-current table costs
   ~0.026 ms per record and writes nothing, which is what makes the nightly sweep cheap. A background task is awaited inside the ASGI response cycle, so it has **no
   cancel handle** and uvicorn's graceful shutdown waits for it — a redeploy during one is
   delayed and then truncated, which is recoverable precisely because chunks commit
   independently.
-- **One re-index per list, and nothing to unstick.** A session-level `pg_try_advisory_lock`
-  keyed on the list admits one run; a second caller — including a second *person* — gets a 409,
+- **One re-index per table, and nothing to unstick.** A session-level `pg_try_advisory_lock`
+  keyed on the table admits one run; a second caller — including a second *person* — gets a 409,
   which is right, because the index is shared state and the run in flight is doing their work
   too. Session-scoped for two reasons: it survives the per-chunk `COMMIT`, so one connection
   serves the whole job, and Postgres releases it when the connection drops, so a killed process
@@ -236,7 +236,7 @@ The remaining edges:
   (deliberately — re-reading per chunk would produce a mixture rather than a version), so if a
   formula is edited mid-run the finished index is one version behind and the 409 the editor got
   made it look handled. It converges on the next run or the nightly sweep, and it can only open
-  on a list over the deferral threshold with two `configure` holders acting inside the window.
+  on a table over the deferral threshold with two `configure` holders acting inside the window.
 - **Calc-on-calc is allowed; cycles are refused.** `chain.build_chain` topologically sorts the
   graph so a chain settles in one pass per write — `total` reads *this* write's `subtotal` — and
   `find_cycle` refuses a ring at save time, naming it. What a formula may name is
@@ -262,9 +262,9 @@ The remaining edges:
   `_validate_data` writes the computed cell before `_enforce_unique` reads it — the answer
   checked is this write's. The rows it is checked *against* are read as stored, so between a
   formula edit and a re-index uniqueness is judged on the answers the old formula gave: a
-  false conflict, or a missed one, until `POST /lists/{uuid}/columns/recompute` or the
+  false conflict, or a missed one, until `POST /tables/{uuid}/columns/recompute` or the
   nightly sweep runs. This is the one place a stale index is more than a misordered row, and
-  it is left that way rather than recomputing every row of the list on every write. Two other
+  it is left that way rather than recomputing every row of the table on every write. Two other
   edges follow from the check being per-write: turning `unique` on leaves existing duplicates
   alone (they surface the next time one of them is saved), and a re-index that *creates*
   duplicates writes them without complaint. `default` is still refused — a value somebody
@@ -285,7 +285,7 @@ The remaining edges:
   the result is `None` and the cell renders `—`. This is on purpose: an incomplete row should
   read as incomplete, not as `0 * price`. Division by zero, a non-finite result, a formula that
   no longer parses and a cycle are all blank the same way — one bad row must not fail a whole
-  list read, and a calculated column is not a place data hides.
+  table read, and a calculated column is not a place data hides.
 
 ---
 
@@ -295,26 +295,26 @@ Soft delete already destroys nothing (see "Soft delete destroys nothing" below):
 record, user or group only sets `deleted_at`, and the purge jobs hard-delete once a target is
 past its retention window.
 
-**Views, forms, metrics and columns now have a bin too**, at `/lists/{uuid}/{kind}/deleted` with
+**Views, forms, metrics and columns now have a bin too**, at `/tables/{uuid}/{kind}/deleted` with
 `…/{kind}/{uuid}/restore` and `…/{kind}/{uuid}/permanent` — routes on each child's own
-collection, one shared implementation in `src/lists/bin/services.py`, swept by
-`purge_deleted_list_config`. Before that they were the worst of both: deleting one was
+collection, one shared implementation in `src/tables/bin/services.py`, swept by
+`purge_deleted_table_config`. Before that they were the worst of both: deleting one was
 irreversible *and* kept the row forever, because nothing read `deleted_at` back and no job
 reclaimed it. Three things about that surface are deliberate and worth knowing:
 
 - **uuid only, never a name.** Every child route is uuid-only now, but the bin could never
   have been anything else: the unique index on `name` is partial (`WHERE deleted_at IS
   NULL`), so a binned `sales` view and a live one coexist legitimately and a name in the bin
-  has no single answer. (These routes sat at `/lists/{uuid}/bin/{kind}` until children became
+  has no single answer. (These routes sat at `/tables/{uuid}/bin/{kind}` until children became
   uuid-only — the `/bin/` prefix existed only because `deleted` was itself a legal name.)
-- **Gated on list-level `configure`**, the authority that creates them, because a deleted view
+- **Gated on table-level `configure`**, the authority that creates them, because a deleted view
   resolves to no permission context of its own. That makes the bin coarser than the live routes
-  for a view whose `permissions_inherit` is False — its recovery belongs to the list configurer.
+  for a view whose `permissions_inherit` is False — its recovery belongs to the table configurer.
 - **A column's restore is partial, and says so.** Restoring clears `deleted_at` and nothing
-  else, matching the other three. But deleting a column also nulls the list's
+  else, matching the other three. But deleting a column also nulls the table's
   `primary_column_id` if it pointed there, and un-nests every lookup whose pairing referenced
-  it — neither comes back. `RestoredColumnRead` reports the first (`list_has_no_primary_column`,
-  read off the list's *current* state, so a primary chosen meanwhile is not flagged). It cannot
+  it — neither comes back. `RestoredColumnRead` reports the first (`table_has_no_primary_column`,
+  read off the table's *current* state, so a primary chosen meanwhile is not flagged). It cannot
   report the second: the pairing was cleared on the dependents, and an un-paired lookup is
   indistinguishable from one that never had a parent.
 
@@ -336,21 +336,21 @@ Filtering is safe against write-back because an update merges onto the *stored* 
 `set_committed_value` and never flushes — so a client that reads a filtered record and PATCHes
 it cannot erase what it was not shown (`test_writing_a_record_does_not_erase_a_deleted_columns_values`).
 
-**Delete for good exists** for records, lists, workspaces and now these four: a `…/permanent`
+**Delete for good exists** for records, tables, workspaces and now these four: a `…/permanent`
 route on each, valid only from the bin, so destroying something is always two deliberate steps
-(`test_permanent_delete.py`, `test_list_config_bin.py`). Each clears its target's grants itself,
+(`test_permanent_delete.py`, `test_table_config_bin.py`). Each clears its target's grants itself,
 because nothing else can once the row is gone (gap 3).
 
-**Records now have a bin.** Each list page has a "Deleted records" surface
-(`DeletedRecordsDialog`) backed by `GET /lists/{uuid}/items/deleted` and
-`POST /lists/{uuid}/items/{uuid}/restore` (`ListItemService.list_deleted`/`restore`). It lists
+**Records now have a bin.** Each table page has a "Deleted records" surface
+(`DeletedRecordsDialog`) backed by `GET /tables/{uuid}/records/deleted` and
+`POST /tables/{uuid}/records/{uuid}/restore` (`TableRecordService.list_deleted`/`restore`). It tables
 soft-deleted rows still inside the retention window and restores them. Two things settled the
 shape and are worth keeping in mind before extending it:
 
-- **Authority is the list, not the record.** A soft-deleted item resolves to *no* permission
+- **Authority is the table, not the record.** A soft-deleted record resolves to *no* permission
   context (`_security_context` returns `None` for a deleted resource), so there is nothing to
-  check per record. The bin is gated on list-level `delete`; the workspace owner always
-  qualifies via the owner short-circuit. This is why the trash is **per-list and owner/grant
+  check per record. The bin is gated on table-level `delete`; the workspace owner always
+  qualifies via the owner short-circuit. This is why the trash is **per-table and owner/grant
   driven**, not superuser-driven — `is_superuser` is orthogonal to data access.
 - **Restore's one live edge is uniqueness.** A `unique` column may have gained a duplicate while
   the row sat in the bin, so `restore` runs `_enforce_unique` and can legitimately 409. The
@@ -360,7 +360,7 @@ shape and are worth keeping in mind before extending it:
 
 **Principals have a bin too**, at `/auth/users/deleted` and `/auth/groups/deleted` with
 `restore` and `permanent` on each, one shared implementation in `src/auth/users/bin.py`. It is a
-*separate* surface with a *different* authority — `require_superuser`, not list ownership —
+*separate* surface with a *different* authority — `require_superuser`, not table ownership —
 because accounts and groups are identity administration and sit under the permission model:
 restoring a group hands back every grant it held. Three things about it are unlike the others:
 
@@ -395,31 +395,31 @@ added. Two components cover the four that arrived together, each written once ag
 kind rather than copied per kind, matching the API modules behind them:
 
 - `DeletedConfigDialog` serves columns, views, forms and metrics, mounted from each kind's own
-  tab in List settings — the bin sits beside the thing it holds, which is where the records,
-  lists and workspaces bins already sat. It is the caller that checks list-level `configure`
+  tab in Table settings — the bin sits beside the thing it holds, which is where the records,
+  tables and workspaces bins already sat. It is the caller that checks table-level `configure`
   before offering it, matching the gate on the routes. Restoring a column is the one case with
-  something to report back: `list_has_no_primary_column` becomes a warning toast, because that
+  something to report back: `table_has_no_primary_column` becomes a warning toast, because that
   is the half of the delete the restore cannot undo.
 - `DeletedPrincipalsDialog` serves accounts and groups from the People page, offered only to a
   superuser, matching that surface's separate authority. A blocked account purge (the 409 above)
-  reaches the user as the backend's own message, workspace names included — that list is the
+  reaches the user as the backend's own message, workspace names included — that table is the
   entire point of the refusal and must not be flattened into "could not delete".
 
-Each bin's query key is nested under its subject's live key — `["views", listUuid, "deleted",
+Each bin's query key is nested under its subject's live key — `["views", tableUuid, "deleted",
 …]` — so every `invalidateQueries` already in the app refreshes the bin by prefix match.
 Deleting a view leaves the bin correct without the delete having to know a bin exists.
 
 What is still missing:
 
-- **Lists cascade-scrub on delete, and restore does not undo that.** A list restore brings back
-  its columns, records, views, forms and metrics (`_LIST_CHILD_MODELS`, matched on the shared
+- **Tables cascade-scrub on delete, and restore does not undo that.** A table restore brings back
+  its columns, records, views, forms and metrics (`_TABLE_CHILD_MODELS`, matched on the shared
   `deleted_at`), but the *inbound* lookup references scrubbed at delete time do not come back
-  (see "Deleting a list is the deliberate exception"). Since the scrub also clears the
+  (see "Deleting a table is the deliberate exception"). Since the scrub also clears the
   referencing **column's** config — target, display column, nesting pairing, option filters
-  and `required` — the restored list comes back with nothing pointing at it, and each of those
+  and `required` — the restored table comes back with nothing pointing at it, and each of those
   columns has to be retargeted by hand. That is the larger half of the loss, and it is a
   deliberate trade: the values are unrecoverable either way, so the alternative was leaving
-  the column pointing at a list that might never come back and could not be edited meanwhile.
+  the column pointing at a table that might never come back and could not be edited meanwhile.
 
 Only targets still *within* the retention window belong in the bin; once purged they are
 unrecoverable and simply gone from it.
@@ -430,9 +430,9 @@ Records — and only records — also carry `archived_at`. It exists for a diffe
 `deleted_at` and behaves differently at almost every edge, so the two are worth keeping apart
 in your head: a delete says *this was a mistake and it goes for good in thirty days*, an
 archive says *this happened and I have finished with it*. What it buys is that
-`ListItemService._select` stops returning the record, which takes it out of the grid, the
+`TableRecordService._select` stops returning the record, which takes it out of the grid, the
 count, search, filters, sorts and the metric scan in one predicate — and out of
-`ix_list_items_list_id_id`, which is partial on **both** flags. That index and `_select` have
+`ix_table_records_table_id_id`, which is partial on **both** flags. That index and `_select` have
 to keep saying the same thing: a partial index is only usable when the query's predicate
 implies the index's, so dropping `archived_at` from either quietly costs the index rather
 than returning wrong rows, which is the harder failure to notice.
@@ -446,8 +446,8 @@ Five things about it are deliberate:
   archiving and then deleting puts the record in the *bin* — the surface with the deadline on
   it, because a record about to be purged must not be hiding somewhere with none. `delete`
   does not clear `archived_at`, so restoring returns it to the archive rather than silently to
-  the live list. This is also why the delete path resolves through
-  `ListItemService.get_unbinned_by_uuid` (live *or* archived) rather than `get_by_uuid`:
+  the live table. This is also why the delete path resolves through
+  `TableRecordService.get_unbinned_by_uuid` (live *or* archived) rather than `get_by_uuid`:
   without it an archived record could not be binned at all.
 - **Unarchive cannot 409, and restore can.** `_enforce_unique` scans `deleted_at IS NULL`,
   which an archived row satisfies — so an archived record never releases its unique values and
@@ -456,22 +456,22 @@ Five things about it are deliberate:
 - **Rendering a label is uuid-keyed and always works; matching a label is search, and archived
   records are out of it.** So a cell already pointing at an archived row still shows its name
   (the options endpoint's resolving branch, `uuid IN (…)`, is unfiltered), while no picker
-  offers it, no search in the referring list finds it by that label, and nothing new may link
+  offers it, no search in the referring table finds it by that label, and nothing new may link
   to it — by name *or* by pasted uuid, since `_resolve_lookup_values`'s two branches have to
   agree or a uuid would make a link the picker refuses. The one place this reaches across
-  lists is `_reference_matches`, which does filter archived rows: its `LIMIT` bounds the
+  tables is `_reference_matches`, which does filter archived rows: its `LIMIT` bounds the
   result and not the scan, so leaving it unfiltered would have kept one query reading the
   whole archive while every query around it got smaller.
 - **Maintenance and structural paths still see archived rows**, deliberately: the purge job,
-  the list cascade, the permanent column-delete scrub, and the whole conversion path — a
+  the table cascade, the permanent column-delete scrub, and the whole conversion path — a
   conversion rewrites archived rows too, or unarchiving one would return data in the old type.
-  `ListService.clone` copies them and carries `archived_at` over. Export is the exception that
+  `TableService.clone` copies them and carries `archived_at` over. Export is the exception that
   proves the rule: it excludes them like every other read, but takes `include_archived` so
   archiving cannot make records permanently unexportable.
 
-**Access is list-level `delete`, like the bin, but for a different reason.** A soft-deleted
+**Access is table-level `delete`, like the bin, but for a different reason.** A soft-deleted
 record resolves to no permission context at all; an archived one still does. The gate is the
-same because archiving is what takes a record away from everyone who can read the list, so the
+same because archiving is what takes a record away from everyone who can read the table, so the
 authority to see the archive is the authority to have put things in it.
 
 ---
@@ -495,7 +495,7 @@ Two consequences worth knowing before extending it:
   import and QR submissions share. Don't "fix" the endpoint to require the param.
 - **A dangling pairing degrades, everywhere.** Deleting or retargeting the parent or the
   filter column cascade-clears the pairing (`_clear_dependent_nesting`), and so does deleting
-  the *list* either of them targets — `_scrub_references_to_lists` blanks the column's config
+  the *table* either of them targets — `_scrub_references_to_tables` blanks the column's config
   and then runs the same cascade outward, because a child whose own target survives is not
   itself in scope for the scrub. If a stale pairing is ever encountered anyway (a race, a
   hand-edited config), the picker, the record dialog and the write validation all treat the
@@ -523,7 +523,7 @@ from nothing else. Do not add a filter query parameter to the options endpoint, 
 into a read of the whole target.
 
 The same asymmetry is why `_validate_option_filters` **skips** validation when the caller
-cannot `view` the target. A lookup-only grantee is refused `GET /lists/{it}/columns/` on
+cannot `view` the target. A lookup-only grantee is refused `GET /tables/{it}/columns/` on
 purpose; an error that distinguished "not a column of the target" from "accepted" would answer
 that same question one uuid at a time. They get the silent drop instead — a worse filter for
 them, rather than a schema oracle for everyone. `tests/test_lookup_option_filters.py` pins
@@ -531,19 +531,19 @@ all of it, `test_the_endpoint_takes_no_filter_from_the_caller` most of all.
 
 ### `allow_create` is a third advisory setting, and the one most likely to be misread
 
-A lookup may let the picker **add** a missing row to its target list rather than dead-end
+A lookup may let the picker **add** a missing row to its target table rather than dead-end
 (data-model §5). It reads like a permission and is not one. The button appears only for a
 caller who holds `create` on the target, that is resolved per caller rather than from the
-column, and `POST /lists/{target}/items/` re-checks it regardless — so the flag can only ever
-surface a shortcut to somebody who could already have walked over to the target list and
+column, and `POST /tables/{target}/records/` re-checks it regardless — so the flag can only ever
+surface a shortcut to somebody who could already have walked over to the target table and
 added the row by hand. It is not validated against the *configurer's* access either, because
-whoever configures a list is routinely not whoever fills its forms, and the target's grants
-move independently of the referring list's.
+whoever configures a table is routinely not whoever fills its forms, and the target's grants
+move independently of the referring table's.
 
 The reason this does not reopen the hole the rest of this section guards: `create` confers
 `view` (`permissions/enums.py` `_IMPLIES`), so being eligible for the button already implies
 being able to read the target's schema. A lookup-only grantee is eligible for nothing, sees
-no button, and is still refused `GET /lists/{it}/columns/` — which is also why they could not
+no button, and is still refused `GET /tables/{it}/columns/` — which is also why they could not
 fill in a create form even if one were somehow put in front of them.
 
 Three consequences, all of them the advisory deal again:
@@ -551,7 +551,7 @@ Three consequences, all of them the advisory deal again:
 - **Only the pickers honour it.** An unknown label is still `UnknownReferenceError` from CSV
   import, from the QR fill and from a direct API write. `_validate_lookup` has no
   side effects and must keep none: it runs once per row of an import, so auto-creating there
-  would turn one mistyped column into thousands of rows in somebody else's reference list.
+  would turn one mistyped column into thousands of rows in somebody else's reference table.
 - **A created row need not satisfy `option_filters`,** which are not enforced on write. The
   cell resolves and displays its label; no later search offers the row. Exactly the state a
   filter turned on over populated data already produces.
@@ -581,7 +581,7 @@ the user and group pickers keep closing silently on no results as they always ha
 ## 8. Rich text is HTML in a cell, and some things treat it as text
 
 A `text` column in `rich` mode stores HTML. Sanitising is on the **write** path
-(`ListItemService._validate_data` -> `columns/richtext.py`), so it covers direct API
+(`TableRecordService._validate_data` -> `columns/richtext.py`), so it covers direct API
 writes and CSV import as well as the editor, and rendering it back is safe because of
 that and only because of that. Two places still see the markup:
 
@@ -605,7 +605,7 @@ sanitiser drops looks like it works and then silently loses the formatting on sa
 ## 9. Metrics are recomputed per request, and the scan is bounded
 
 A metric (data-model §9) stores a formula, never a number: `GET
-/lists/{uuid}/metrics/values` answers every card over the records in scope, together, per
+/tables/{uuid}/metrics/values` answers every card over the records in scope, together, per
 request. A total is therefore never stale, and nothing has to be backfilled when a record, a
 formula or a filter changes. A `calculated` column used to make the same bargain and no
 longer does — it writes its answer down as a query index (§5) — but a metric cannot: its
@@ -615,7 +615,7 @@ single value to store. The costs are worth knowing about.
 **There are two paths, and which one runs depends only on the formula.** `metrics/pushdown.py`
 compiles the common aggregate shapes into one SQL statement, so Postgres answers them and no
 record becomes a Python object; anything it cannot compile falls back to the scan below.
-Measured on a 100,000-record list (2026-08-05, same machine and method as
+Measured on a 100,000-record table (2026-08-05, same machine and method as
 capacity-and-performance.md), per request:
 
 | | scan | compiled |
@@ -632,11 +632,11 @@ The scan costs ~20 µs of app CPU per record, and that is the number the row lim
 bound.
 
 - **The same card shows different numbers to different people, on purpose.** Both paths build
-  on `ListItemService.visible_stmt`, so they honour `item_view_filter`. A reader who
+  on `TableRecordService.visible_stmt`, so they honour `record_view_filter`. A reader who
   cannot see a record must not learn its value from a total, which means "Total hours" is
-  the total of *your* hours, not the list's. `row_count` in the response is the count after
+  the total of *your* hours, not the table's. `row_count` in the response is the count after
   permissions, filters and search, so it is the number to show if you want to explain a
-  figure — it will not match the list's record count and is not meant to.
+  figure — it will not match the table's record count and is not meant to.
 - **The scan is capped at `METRIC_ROW_LIMIT` (50,000); the compiled path is not.** Past the
   cap the answers describe the first 50,000 records and `truncated` is set; the card renders
   a note rather than a number that quietly means something else. Refusing outright was the
@@ -657,35 +657,35 @@ bound.
   and every `calculated` column, whose stored value may lag a formula edit (§5) — totalling
   the stale copy is exactly the silently wrong number the scan exists to avoid, so
   aggregating one still means recomputing it per record. `pushdown`'s module docstring is
-  the authority on this list.
+  the authority on this table.
 - **Arithmetic differs in Postgres's favour.** `numeric` is exact decimal where Python's
   floats are binary, so a compiled `SUM(qty * price)` over 100k rows measured
   `106250024.4` against the scan's `106250024.40004165`. The compiled answer is the more
   accurate one, and the gap is far below the 1e-6 the frontend already rounds to. Worth
   knowing before someone reports it as a bug.
 - **Nothing is cached, and the frontend re-asks whenever the records move.** The values
-  query rides `useLiveList`, so a large list is where this will first hurt — and server
-  push made that *more* true, not less: a busy list can produce events far faster than
+  query rides `useLiveTable`, so a large table is where this will first hurt — and server
+  push made that *more* true, not less: a busy table can produce events far faster than
   the old timer ticked. Three things keep it in hand, and they are worth keeping attached
   to each other:
   - **The strip is hidden until the toolbar's Metrics button reveals it**, and `visible`
-    gates the query rather than just the markup — a list nobody is totalling costs
+    gates the query rather than just the markup — a table nobody is totalling costs
     nothing, and the timer only runs for someone actually looking at a total. Making the
     strip default to shown, or rendering it hidden with the query still enabled, quietly
-    turns every open list into a repeating full scan.
+    turns every open table into a repeating full scan.
   - **The cards refresh on their own, slower clock**: `METRIC_REFRESH_SECONDS` (default
-    60) is a *floor* this caller passes `useLiveList`. Under server push it **throttles
+    60) is a *floor* this caller passes `useLiveTable`. Under server push it **throttles
     the invalidation** — the grid refreshes on the event, the strip at most once a minute
     however many events arrive — and on the polling fallback it raises the interval, as
     it always did: same promise about cost, two mechanisms. Keeping it through the swap
-    was not optional. Invalidating the whole `["items", listUuid]` namespace per event
-    would have been simpler and would put a whole-list scan on every write, per viewer,
+    was not optional. Invalidating the whole `["records", tableUuid]` namespace per event
+    would have been simpler and would put a whole-table scan on every write, per viewer,
     which is dearer than the polling push replaced; that is the reason each caller of the
     hook now names the key it wants refreshed. `LIVE_REFRESH_SECONDS = 0` still disables
     the fallback outright. The rows under a total are what has to be live; a total a
     minute old is a total.
   - **Your own edits do not wait for that clock.** The values key is nested under the
-    items key (below), so the invalidation the grid already fires refreshes the cards
+    records key (below), so the invalidation the grid already fires refreshes the cards
     immediately. The throttle above carries only *other people's* changes, which is why
     lengthening it costs so little.
 
@@ -696,14 +696,14 @@ bound.
   metric checks its refs against the live columns before scanning and returns an `error`
   for that card, because a broken `SUM` rendering `0` is the one wrong answer nobody would
   catch. The break costs its own card, never the request.
-- **The values query key is nested under the items key** (`["items", listUuid,
-  "metrics", …]`), so every `invalidateQueries(["items", listUuid])` already in the app
+- **The values query key is nested under the records key** (`["records", tableUuid,
+  "metrics", …]`), so every `invalidateQueries(["records", tableUuid])` already in the app
   refreshes the cards. Keep it that way: a sibling key would need a second invalidation
   beside each of the existing ones, which is correct the day it is written and wrong six
   call sites later.
 
 Two things a metric deliberately does **not** do: it has no `permissions_inherit` (unlike
-views and forms — it carries no permissions of its own, so list `view` reads and list
+views and forms — it carries no permissions of its own, so table `view` reads and table
 `configure` writes), and it has no per-group subtotals (see data-model §10).
 
 ## 10. Two kinds of datetime, and only one of them is an instant
@@ -756,7 +756,7 @@ Follow-ups, in the order they will be missed:
   terminates by inspection (PATCH → cache update → `local === stored` → early return, with
   the `pushed` ref covering the in-flight window), which is not the same as a green test.
 - **Display of instants ignores the setting.** The three `toLocaleString()` call sites (the
-  deleted-workspaces, deleted-lists and deleted-records dialogs) use the browser's zone,
+  deleted-workspaces, deleted-tables and deleted-records dialogs) use the browser's zone,
   which is right in almost every case and inconsistent with the account preference in the
   rest. Centralising them behind one `formatInstant()` would make that a one-line choice.
 - **`zoneinfo` reads the OS tz database**, which Windows does not have — hence the
@@ -800,7 +800,7 @@ buys and what it costs are both worth knowing before extending it.
   record with an empty cell is skipped and stays writable throughout. Writers to those rows
   block for the duration, which is correct for a point-of-no-return operation and is why
   `ROW_CEILING` is now a bound on lock time as well as on work. And a write that lands while
-  the pass is running is refused rather than run over: `_fingerprint` reads the list's row
+  the pass is running is refused rather than run over: `_fingerprint` reads the table's row
   count and newest `updated_at` before the pass and again after the retype, and a change
   rolls the whole thing back with a 409. The conversion's own writes go through raw SQL
   precisely so they do not stamp `updated_at` and trip that check on themselves.
@@ -808,13 +808,13 @@ buys and what it costs are both worth knowing before extending it.
   at the second `_fingerprint` read, not at `COMMIT`, so a row inserted in that last sliver
   is invisible — the same insert race `resanitize.py` already documents, and the reason it
   matters here is that such a record holds a value validated against the *old* type under a
-  column that has just been retyped. It sees `list_items` only, so a concurrent
+  column that has just been retyped. It sees `table_records` only, so a concurrent
   `PATCH /columns/{uuid}` on the source is neither detected nor preserved: `apply` overwrites
   `config` wholesale. And it is blind to the app's other raw-SQL writers of `data`
-  (`backfill`, `resanitize`, `reconcile_shapes`, `_references`, `purge`, the item service's
+  (`backfill`, `resanitize`, `reconcile_shapes`, `_references`, `purge`, the record service's
   cell patch), none of which stamps `updated_at` either — notably a calculated re-index,
   whose advisory lock is deliberately in a *different* namespace, so it can run on the same
-  list concurrently. That is currently harmless because both sides merge inside SQL against
+  table concurrently. That is currently harmless because both sides merge inside SQL against
   the current row version under row locks, but it is harmless by accident: a future writer
   that read a record in Python and wrote the whole blob back would silently lose the
   conversion's work with no fingerprint change.
@@ -833,7 +833,7 @@ buys and what it costs are both worth knowing before extending it.
   catches. Under the staged design the name was held from the moment the report was built,
   which is why abandoning had to release it.
 - **Above `ROW_CEILING` (50k) a conversion is refused**, full stop. The message used to point
-  at a maintenance workflow that never existed; it no longer promises one. If a list that big
+  at a maintenance workflow that never existed; it no longer promises one. If a table that big
   ever becomes plausible, the thing to build is a job that can hold the lock outside a web
   request — not a return to staging.
 - **A duplicate inherits the source's `position`**, which reads as "next to it" and is not.
@@ -842,11 +842,11 @@ buys and what it costs are both worth knowing before extending it.
   renumbering every column after it, which is a reordering feature and not this one. The
   reordering that *has* since shipped does not close this: a view's `column_order` and a
   form's `fields` are drag-editable and the Columns tab sorts by `display_name`, so all three
-  surfaces put the copy somewhere sensible while `position` — the list's default order, which
+  surfaces put the copy somewhere sensible while `position` — the table's default order, which
   the grid falls back to — is still written by nothing.
 - **Copying into an *already existing* column is still not built.** `ConversionService.apply`
   always creates its target, so that needs a target parameter and a decision the planned-features
-  doc still lists as open: overwrite the target, or only fill cells where it is empty.
+  doc still tables as open: overwrite the target, or only fill cells where it is empty.
 - **`Column.hidden` is now set by nothing.** It existed for the staging column and survives
   only so `src/maintenance/drop_conversion_scratch.py` — a one-off, run once after the atomic
   conversion deployed — can find rows the old design stranded. `in_shape()` still tests it, so
@@ -855,7 +855,7 @@ buys and what it costs are both worth knowing before extending it.
 ## 12. A form field's condition is an affordance, not a restriction
 
 A field may be hidden or disabled when a condition over the record's other cells is unmet
-(data-model §8). **The server never reads it.** `ListItemService._validate_data` enforces
+(data-model §8). **The server never reads it.** `TableRecordService._validate_data` enforces
 `required`, `unique`, `min`/`max` and the rest from the *column's* config whatever any form
 says, and it has no form to consult in the first place — the write path is shared with CSV
 import, the QR scanner, the grid's inline cell editing and any direct API call.
@@ -863,7 +863,7 @@ import, the QR scanner, the grid's inline cell editing and any direct API call.
 So the following all hold, and none of them is a bug:
 
 - **A hidden field's column can still be written**, by importing a file, scanning a code,
-  editing the cell in the grid, or `POST /items/`. The form editor's own hint says so, at
+  editing the cell in the grid, or `POST /records/`. The form editor's own hint says so, at
   the control, because "hidden" reads like "protected" and here it is not.
 - **A required column hidden by its condition makes the record unsaveable.** The write is
   refused with `Column 'x' is required` and there is no field on screen to answer it — unless
@@ -896,8 +896,8 @@ fail, it answers a different question, silently and plausibly.
 
 | Reader | Without the branch |
 | --- | --- |
-| `items/filtering.py::_field` | `contains "address"` matches every record; sorting orders by a leading `{` |
-| `ListItemService._apply_search` | a search for `10` matches every latitude and longitude |
+| `records/filtering.py::_field` | `contains "address"` matches every record; sorting orders by a leading `{` |
+| `TableRecordService._apply_search` | a search for `10` matches every latitude and longitude |
 | `transfer/services.py::_csv_cell` | a spreadsheet column full of `{'address': …}` |
 | `columns/conversion.py::_render_scalar` | the same dict repr, written into every record **permanently** — a conversion is the point of no return |
 
@@ -987,7 +987,7 @@ on* when scanned, that skip is what has to change.
 
 **One over-long payload fails the whole sheet, deliberately.** Every code in a batch carries
 the same fields, so if one record's values do not fit then the field choice is wrong for the
-list rather than for that record. Rendering thirty-nine codes and quietly omitting the
+table rather than for that record. Rendering thirty-nine codes and quietly omitting the
 fortieth is how somebody hands out a badge that does not exist, which is worse than being
 told to take a column off.
 
@@ -1007,7 +1007,7 @@ that pattern rather than add a parallel one**, or the two blocks will each hide 
 content. The class is removed on `afterprint` with a timeout fallback, because a browser that
 never fires that event would otherwise leave the app blank.
 
-**`lists.settings` merges shallowly.** Sending `qr` replaces the whole `qr` object rather
+**`tables.settings` merges shallowly.** Sending `qr` replaces the whole `qr` object rather
 than merging into it — right, because `columns` and `include_uuid` are one answer to "what is
 on the badge" and half of one means nothing. But it does mean a client cannot patch one field
 of it, and the frontend sends both every time. Validation is also **per known key**: `qr` is
@@ -1018,7 +1018,7 @@ go on being a blob.
 
 **`is_superuser` and the permission model are orthogonal.** A superuser administers
 *identities* — creating users, promoting them, editing group membership. It does **not**
-grant access to anyone else's workspaces, lists, or records; that is entirely the grant
+grant access to anyone else's workspaces, tables, or records; that is entirely the grant
 system's business. The reason identity administration has to be locked down at all is that
 it sits *underneath* permissions: groups are principals in the grant table, so whoever can
 edit membership can hand themselves any grant a group holds, and whoever can reset a
@@ -1042,11 +1042,11 @@ themselves out of their own data no matter how the grants are arranged, and no g
 *reduce* an owner's access. This is also why the whole pre-existing test suite stayed green
 when permissions landed: `DISABLE_AUTH=True` resolves the caller to the seeded owner.
 
-**"Unique" permissions are opt-out, not opt-in.** A record leaves the list's permission
+**"Unique" permissions are opt-out, not opt-in.** A record leaves the table's permission
 umbrella only when someone flips its `permissions_inherit` to `false`. New records default
-to inheriting, so a row added later to a list with carefully-locked-down records is
-immediately visible to everyone holding list `view`. There is no "every new row in this
-list starts unique" mode. If per-record access is meant to be a list's default posture,
+to inheriting, so a row added later to a table with carefully-locked-down records is
+immediately visible to everyone holding table `view`. There is no "every new row in this
+table starts unique" mode. If per-record access is meant to be a table's default posture,
 that needs building.
 
 **A record added from the grid usually vanishes, and that is the view working.** "Edit
@@ -1071,10 +1071,10 @@ hands everything typed so far to the Add dialog, which lays out every field the 
 re-joins the parent chain, and grants made while the child was independent are kept and
 simply re-union with the inherited ones.
 
-**`ListRead.workspace` exposes only a uuid, deliberately.** A list can be granted without
+**`TableRead.workspace` exposes only a uuid, deliberately.** A table can be granted without
 its workspace, so serializing the workspace's `display_name` would leak the name of a
 workspace the caller was specifically not given access to. This is why the "Shared with me"
-section shows the list's own slug as its subtitle rather than "in «Workspace»".
+section shows the table's own slug as its subtitle rather than "in «Workspace»".
 
 ---
 
@@ -1108,7 +1108,7 @@ migration, an incomplete one, and the enum hole above. Drift is reported, never 
 schema is not mutated behind your back, and with several workers that would race.
 
 **`use_alter` foreign keys need hand-holding in migrations.**
-`lists.primary_column_id → columns.id` is circular (`columns.list_id → lists.id`), so the
+`tables.primary_column_id → columns.id` is circular (`columns.table_id → tables.id`), so the
 model marks it `use_alter=True`. SQLAlchemy omits such keys from `CREATE TABLE`, and
 autogenerate does **not** emit the follow-up `ALTER` — so the generated baseline silently
 had no such constraint until it was added by hand. `tests/test_migrations.py` pins it.
@@ -1123,7 +1123,7 @@ through it.** A grant may carry an `expires_at`; the "still live" check
 (`or_(expires_at IS NULL, expires_at > now())`) lives in
 `PermissionService._principal_condition`, which every authorization read funnels
 through — `effective_actions`, `effective_actions_bulk`, and the three collection
-filters (`workspace_view_filter`, `list_query_filter`, `item_view_filter`). So an
+filters (`workspace_view_filter`, `table_query_filter`, `record_view_filter`). So an
 expired grant is invisible everywhere at once. Any *new* path that queries
 `permission_grants` for authorization must use `_principal_condition` (not roll its
 own principal clause) or it will silently honor expired grants. Compared against DB
@@ -1141,49 +1141,49 @@ with groups eager-loaded and the lazy load would blow up outside the greenlet.
 
 **`PermissionService` is imported lazily inside functions, on purpose.** `permissions.services`
 imports from `auth.users.services` → `workspaces.services`, so a module-level
-`from src.permissions.services import ...` in `workspaces/services.py` or `lists/services.py`
-creates an import cycle. The deferred function-local imports in `list_visible`, `ListService.list`,
-`ListItemService.list`/`query`, `ViewService.list`, and `FormService.list` are load-bearing.
+`from src.permissions.services import ...` in `workspaces/services.py` or `tables/services.py`
+creates an import cycle. The deferred function-local imports in `list_visible`, `TableService.list`,
+`TableRecordService.list`/`query`, `ViewService.list`, and `FormService.list` are load-bearing.
 
-**Moving a list between workspaces must assign the `workspace` relationship, not the
-`workspace_id` FK.** `ListService.get_any_by_uuid` eager-loads `List.workspace`
+**Moving a table between workspaces must assign the `workspace` relationship, not the
+`workspace_id` FK.** `TableService.get_any_by_uuid` eager-loads `Table.workspace`
 (`selectinload`), and SQLAlchemy's unit of work treats a *loaded* many-to-one as
 authoritative: on flush it writes the FK from the relationship, **silently overwriting a
-bare `lst.workspace_id = …` assignment** and leaving the list where it was. Both
-`ListService.update` (the cross-workspace move) and `transfer_to_user` therefore do
+bare `lst.workspace_id = …` assignment** and leaving the table where it was. Both
+`TableService.update` (the cross-workspace move) and `transfer_to_user` therefore do
 `lst.workspace = target`. This was latent for the whole life of the move feature — it had no
-UI and no test, so nothing ever exercised it — and `tests/test_list_transfer.py` now pins it.
-Any new code that re-parents a list has the same trap.
+UI and no test, so nothing ever exercised it — and `tests/test_table_transfer.py` now pins it.
+Any new code that re-parents a table has the same trap.
 
-**Ownership transfer is the "email" model: a list is pushed, not offered.** Handing a list to
-another user (`POST /lists/{uuid}/transfer`) moves it into that user's **immutable `incoming`
+**Ownership transfer is the "email" model: a table is pushed, not offered.** Handing a table to
+another user (`POST /tables/{uuid}/transfer`) moves it into that user's **immutable `incoming`
 workspace** (`is_system`, minted lazily by `WorkspaceService.get_or_create_inbox`, name
 reserved so an ordinary workspace can't occupy the slot). There is deliberately **no
-accept/consent step** — anyone who *owns* a list can drop it on anyone, exactly as email lets
+accept/consent step** — anyone who *owns* a table can drop it on anyone, exactly as email lets
 anyone write to you; the recipient's recourse is to move it out or delete it. The authorization
 is owner-only *on the source* (ownership flows through the workspace, so the caller must own the
-list's current workspace) — **not** `configure` on the target, which is why transfer is a
+table's current workspace) — **not** `configure` on the target, which is why transfer is a
 separate endpoint from the generic move (nobody holds `configure` on a stranger's inbox). The
 inbox is guarded like a system group: `WorkspaceService._guard_system_workspace` refuses to
-rename or delete it (its *lists* stay ordinary, so the recipient can still move or delete them).
-Existing grants survive the move (they key on the list's `resource_id`, unchanged), so the
+rename or delete it (its *tables* stay ordinary, so the recipient can still move or delete them).
+Existing grants survive the move (they key on the table's `resource_id`, unchanged), so the
 giver's previously-shared users keep access; only the giver's *implicit owner* access ends. A
 name clash on landing auto-suffixes rather than 409ing.
 
-**Cloning a list remaps column uuids; get it wrong and records render blank.** `POST
-/lists/{uuid}/clone` (`ListService.clone`) copies a list into the same workspace — structure
+**Cloning a table remaps column uuids; get it wrong and records render blank.** `POST
+/tables/{uuid}/clone` (`TableService.clone`) copies a table into the same workspace — structure
 always, records only when `with_records` is set. The clone's columns are new rows with new
 uuids, so record `data` is keyed against columns that no longer exist unless every reference
 is rewritten through an old→new column-uuid map: the `data` keys, `primary_column_id`, and
 the column-uuid refs inside view configs (`filters`/`sorts`/`group_by`/`hidden_columns`/
 `column_order`) and form configs (`fields[].column_uuid`). Cell *values* are copied verbatim
 — choice labels and lookup/user/group target uuids stay valid — and a **self-referencing
-lookup is deliberately left pointing at the original list** (config and cells), so the clone
+lookup is deliberately left pointing at the original table** (config and cells), so the clone
 "reaches into" its source rather than needing a row-uuid remap; pointing it at the clone
 instead is the deferred alternative. Two easy-to-miss rules: cloning must **not** call
 `_provision_defaults` (it copies the source's real columns/views/forms, so seeding defaults
 would duplicate them), and it must **not** copy grants (the clone is a new resource the cloner
-owns, private like any new list). `tests/test_list_clone.py` pins the remap.
+owns, private like any new table). `tests/test_table_clone.py` pins the remap.
 
 **The PrimeReact theme hardcodes its colors.** `lara-light-cyan/theme.css` defines
 `--primary-color` / `--surface-*` and then never references them (zero `var(--primary-*)`
@@ -1202,12 +1202,12 @@ a `dict` to Pydantic — its contents depend on the column type and are validate
 OpenAPI says only "object". `ColumnConfig` / `ViewConfig` / `FormConfig` in `types.ts` are the
 frontend's own claim about those blobs, and are what can still quietly go stale.
 
-**`ListSettings` joined them**, for a slightly different reason worth distinguishing.
-`lists.settings` is not "typed per column type" — it is a genuinely free-form bag, validated
+**`TableSettings` joined them**, for a slightly different reason worth distinguishing.
+`tables.settings` is not "typed per column type" — it is a genuinely free-form bag, validated
 server-side only for the keys this build understands (`qr` today) and passed through
 otherwise, because stripping a key a newer deploy wrote would destroy it on the next write.
-So OpenAPI says "object" there and always will, and `ListSettings` is the frontend's claim
-about the keys it reads. Read it through `listSettings(lst)` rather than casting at each call
+So OpenAPI says "object" there and always will, and `TableSettings` is the frontend's claim
+about the keys it reads. Read it through `tableSettings(lst)` rather than casting at each call
 site, so there is one place to update when a second key appears.
 Change a config's shape in the backend and nothing will tell you; change it here too.
 Change a config's shape in the backend and nothing will tell you; change it here too.
@@ -1217,10 +1217,10 @@ A typed client (`openapi-fetch`) would close that, at the cost of touching every
 
 **A collection's visibility is resolved in bulk, never per row.** `ViewService.list`
 and `FormService.list` used to loop `PermissionService.has(...)` per row, with a
-comment saying "few views per list" — true in practice and enforced by nothing: there
-is no cap on views or forms, and both listings are fetched on every list open, so the
+comment saying "few views per table" — true in practice and enforced by nothing: there
+is no cap on views or forms, and both listings are fetched on every table open, so the
 cost was a `_security_context` walk plus a grant SELECT per row per page load. Both go
-through `effective_actions_bulk` now, which the items router already used and which
+through `effective_actions_bulk` now, which the records router already used and which
 answers in a fixed number of queries. Any new listing that filters by permission
 should reach for it rather than the loop.
 
@@ -1255,7 +1255,7 @@ single test unreadable.
 
 **`MAX_REQUEST_BYTES` bounds every request body, and is not `MAX_UPLOAD_BYTES`.**
 `core/uploads.py` capped a *file* while reading it; nothing capped a JSON body, and
-`ListItemCreate.data` is a `dict` to Pydantic while a `text` column's `max_length` is
+`TableRecordCreate.data` is a `dict` to Pydantic while a `text` column's `max_length` is
 unset by default — so one request could buffer, parse, sanitise and store tens of
 megabytes on a 512 MB instance. `BodySizeLimitMiddleware` checks `Content-Length`
 first (cheap, catches every ordinary client) *and* counts the stream (a chunked
@@ -1293,21 +1293,21 @@ waiting on a second — exhaust the pool and stall until `pool_timeout`. Reorder
 acquisitions does not help: a session grabs its connection at its *first query*, not at its
 first stream.
 
-**Every read path over records must apply `item_view_filter`.** Per-record permissions are
+**Every read path over records must apply `record_view_filter`.** Per-record permissions are
 only as strong as the weakest path that returns records. Export used to miss this — it
-streamed rows filtered on `list_id` alone, so a list-viewer could export records whose
+streamed rows filtered on `table_id` alone, so a table-viewer could export records whose
 inheritance was broken and were never granted to them, even though the grid hid them
 correctly. Fixed, and `test_http_export_respects_item_permissions` guards it. Any *new*
-endpoint that returns record data needs the same filter; a list-level `view` check is not
+endpoint that returns record data needs the same filter; a table-level `view` check is not
 sufficient.
 
 **And "returns record data" includes copying it somewhere the caller can read.**
-`ListService.clone` missed this for the whole life of the feature, and it was the worse
+`TableService.clone` missed this for the whole life of the feature, and it was the worse
 half of the same bug: a clone does not hand the rows back in the response, it writes them
-into a list the caller owns, where `_COPY_RECORDS` sets `permissions_inherit = true` and
+into a table the caller owns, where `_COPY_RECORDS` sets `permissions_inherit = true` and
 they can be read at leisure afterwards. The route requires `configure` on the workspace,
-which confers `view`, so ordinary list access was enough to lift a record whose
-inheritance was broken. `clone` now takes the acting user and applies `item_view_filter`
+which confers `view`, so ordinary table access was enough to lift a record whose
+inheritance was broken. `clone` now takes the acting user and applies `record_view_filter`
 to its keyset select, and `test_clone_respects_item_permissions` guards it. Note the
 `permissions_inherit = true` is *correct* given that filter and wrong without it —
 everything copied was visible to the cloner, and the clone starts private with no grants.
@@ -1323,10 +1323,10 @@ then repeats forever.
 
 - **An unknown operator was dropped, not refused.** `_condition` returns `None` for an
   operator it does not recognise and `apply_filters` drops that condition — so a typo in
-  the only condition yielded the *unfiltered list*. `FilterCondition.operator` is now a
+  the only condition yielded the *unfiltered table*. `FilterCondition.operator` is now a
   `Literal` over `filtering.FILTER_OPERATORS`, the tuple `_condition` actually answers, so
   it is a 422 on write and on the ad-hoc `filters` param. Note what this deliberately does
-  **not** do: `ViewRead.config` is a plain `dict` and `ListItemService` reads
+  **not** do: `ViewRead.config` is a plain `dict` and `TableRecordService` reads
   `view.config or {}` raw, so a view saved before this still loads and still behaves as it
   did — the type gates writing one, not reading one. `frontend/src/features/views/
   operators.ts` already warned that adding an operator on one side only "gets a filter that
@@ -1344,12 +1344,12 @@ then repeats forever.
 All three are pinned in `tests/test_view_filtering.py`.
 
 **A page of records can be asked for two ways, and the cursor is not just a faster offset.**
-`GET /items/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —
-or `after=<record uuid>` (`ListItemService._after_id`). `after` is a **400** in a sorted,
+`GET /records/` takes `skip` — what a numbered paginator needs, since page 7 *is* an offset —
+or `after=<record uuid>` (`TableRecordService._after_id`). `after` is a **400** in a sorted,
 grouped or `skip`ed listing rather than an approximation: `id > :after` names a position only
 while `id` is the ordering, and a caller cannot tell from the rows it gets back that it
-quietly lost some. A uuid this list does not have, including one since binned, is refused for
-the same reason — starting from the top would read as the list rewinding. Three things follow.
+quietly lost some. A uuid this table does not have, including one since binned, is refused for
+the same reason — starting from the top would read as the table rewinding. Three things follow.
 The cursor is a bare record uuid rather than an encoded blob precisely so it cannot carry a
 stale ordering; don't "improve" it into one. What it fixes is not only depth cost but a
 correctness hole — `skip` names a position, so a record deleted ahead of it pulls every later
@@ -1358,52 +1358,52 @@ makes routine rather than a race. And sorted listings remain offset-only and are
 *everywhere* rather than slow deep (they sort an unindexed expression over the whole matching
 set), so keyset would not have helped them; that is the path to attack next, not this one.
 The count is now a separate question — `total=false` suppresses `X-Total-Count` for a caller
-that already holds it, `GET items/count` asks it alone, and the page is fetched *before* the
+that already holds it, `GET records/count` asks it alone, and the page is fetched *before* the
 total so a rejected `after` pays for no count at all.
 
 **"Live records" is server push, and its refresh must stay a permissioned re-read — never
-a data push.** An open list holds an SSE stream (`GET /lists/{uuid}/events`) and refetches
-when told that list changed; if the stream cannot be held open it falls back to the
+a data push.** An open table holds an SSE stream (`GET /tables/{uuid}/events`) and refetches
+when told that table changed; if the stream cannot be held open it falls back to the
 polling this replaced, every `VITE_LIVE_REFRESH_SECONDS` (default 10, `0` disables; the
-Render deploy sets 15). Both paths go through the `useLiveList` hook
-(`frontend/src/lib/useLiveList.ts`), and a dearer caller may only ever *slow* its own
+Render deploy sets 15). Both paths go through the `useLiveTable` hook
+(`frontend/src/lib/useLiveTable.ts`), and a dearer caller may only ever *slow* its own
 refresh, via the `minSeconds` floor the metric strip passes (§9) — under polling that
 raised the interval, under push it throttles the invalidation. Nothing refreshes at all
 while the tab is hidden or after 5 minutes with no user activity on a visible one; that
 guard now lives in `liveStream.ts`, where it can close the stream and stop the fallback
 timer with one answer instead of two.
 
-The whole thing works precisely *because* every refresh is an ordinary `GET /items/`, so
-it inherits the `item_view_filter` above and can never surface a row the viewer can't see
+The whole thing works precisely *because* every refresh is an ordinary `GET /records/`, so
+it inherits the `record_view_filter` above and can never surface a row the viewer can't see
 — the client is told nothing except "look again." **Five things about the push path are
 load-bearing, and each one is quiet when broken:**
 
-- **An event carries only "list changed," never record data.** A fan-out of rows would
+- **An event carries only "table changed," never record data.** A fan-out of rows would
   bypass the per-record filter every subscriber is entitled to differently. The frames are
   `event: records` and `: ping`; there is nothing else on the channel and nothing else may
   be put there.
 - **The stream holds no pooled DB connection** (see the two-connection rule below), or a
   long-lived subscriber pins a session for its whole life and ~15 of them empty the pool.
-  This is why the route is **not** on the lists router: that router applies
+  This is why the route is **not** on the tables router: that router applies
   `Depends(get_current_user)` → `Depends(get_db)`, and a `yield` dependency is released
   only when the response completes — which for a stream is when the tab closes. It is
   mounted directly in `main.py`, and does its auth and `view` check by hand inside a
   session it closes before streaming. `test_an_open_stream_does_not_hold_a_pooled_connection`
   is what catches a regression; nothing else would, until production hung.
-- **Push opens a timing side channel that polling did not.** A viewer with list `view` but
-  restricted per record learns the instant *any* record in that list is written, including
+- **Push opens a timing side channel that polling did not.** A viewer with table `view` but
+  restricted per record learns the instant *any* record in that table is written, including
   ones they cannot see — their refetch then shows no change. Closing it would mean
   filtering per subscriber, which needs record data on the channel, which is the first
   rule. It reveals timing, never content, and that is the accepted trade.
 - **Authorization is checked at connect and never again**, because there is no session to
   re-check with. `SSE_MAX_STREAM_SECONDS` (300) is therefore the **revocation window**:
-  losing `view` on a list stops the signals reaching that subscriber at their next
+  losing `view` on a table stops the signals reaching that subscriber at their next
   reconnect. Nothing leaks meanwhile — the events carry nothing and every refetch is
   separately permissioned — but the tap closes late, and that setting is how late.
 - **`notify` goes after the commit, never before.** A watcher woken early re-reads the old
   rows and then believes it is current, which is worse than not being told. The scrub a
-  list or workspace delete runs across *other* lists is the awkward case: it does not own
-  its transaction, so it returns the affected list ids and its callers signal after they
+  table or workspace delete runs across *other* tables is the awkward case: it does not own
+  its transaction, so it returns the affected table ids and its callers signal after they
   commit.
 
 Two operational notes. On Render's free tier a focused, open tab polling kept the single
@@ -1418,10 +1418,10 @@ answers are to point the events request at the API origin directly (which means 
 API environment change rather than a frontend rebuild on purpose.
 
 **A `user` cell must never resolve to a person's real name.** `/auth/users` is readable by
-any authenticated user (the Share dialog needs to list principals), but person records are
+any authenticated user (the Share dialog needs to table principals), but person records are
 private — owner or superuser only. So `user` columns label by **username**, in both
 `PrincipalControls.tsx` and the export formatter. Swapping in "first + last name" because it
-reads nicer would hand every viewer of a list the personal details of everyone referenced
+reads nicer would hand every viewer of a table the personal details of everyone referenced
 from it.
 
 **Every reference column exports its label, and the two sides must agree on what the label
@@ -1429,7 +1429,7 @@ is.** `lookup`, `user` and `group` all store a uuid and export the human-readabl
 (row label / username / the group's slug `name`, not its `display_name` — only the slug is
 unique, so only the slug re-imports); import resolves it back. The load-bearing detail is
 that export and import both call `display_column_key` to decide *which* column of the target
-list supplies a row's label — if they ever picked differently, a file this app exported would
+table supplies a row's label — if they ever picked differently, a file this app exported would
 not import back into it. A label matching two rows is rejected rather than guessed (row
 labels, unlike usernames, are not unique), and a row whose label is empty exports as its uuid,
 because that is the only thing that identifies it. One consequence to know about: a
@@ -1445,80 +1445,80 @@ picker over an unbounded set has the same two jobs, and they need different answ
   (capped at 500), **one request per column per page, never one per cell**.
 
 `PrincipalControls` (users/groups) and `LookupControls` (target rows) both do this now; the
-lookup one goes through `GET /lists/{list}/columns/{column}/options`, which is server-side
+lookup one goes through `GET /tables/{table}/columns/{column}/options`, which is server-side
 precisely because only the server knows a row's label (`display_column_key`) — and it applies
-`lookup` on the target list plus the per-record filter, so a picker can never offer a row its
+`lookup` on the target table plus the per-record filter, so a picker can never offer a row its
 user cannot read. Still to convert: `GroupDialog` (member picker) and `PeoplePage`
 (person-name annotations).
 
-**A lookup can target any list its creator can `lookup`, and cross-workspace targets make
+**A lookup can target any table its creator can `lookup`, and cross-workspace targets make
 "degrade to uuid stubs" a routine state, not a rare one.** The config-time check was
-relaxed from "a list you own" to "a list you can `view`" (`ColumnService._validate_config`),
-and then to "a list you can `lookup`" — which `view` confers, so that second step widened
+relaxed from "a table you own" to "a table you can `view`" (`ColumnService._validate_config`),
+and then to "a table you can `lookup`" — which `view` confers, so that second step widened
 the set without changing any existing answer. A lookup may therefore point at another of
-your workspaces, at a list shared to you, or at one shared *only* as a lookup target.
+your workspaces, at a table shared to you, or at one shared *only* as a lookup target.
 Nothing about resolution changed — it re-checks the *reader's* access to the target
 per-caller (the note below), which is what keeps a cross-owner target from leaking. What
 *does* change: a target you don't own can have your access revoked or be deleted entirely
-at any time, independent of the referencing list. When that happens the cells fall back to
+at any time, independent of the referencing table. When that happens the cells fall back to
 uuid stubs (`LookupCell`, `retry: false`) exactly as they always could — it just stops
 being exceptional. A target the creator cannot read is refused indistinguishably from one
-that doesn't exist, so the `target_list_uuid` field can't be used to probe for a stranger's
-lists. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
+that doesn't exist, so the `target_table_uuid` field can't be used to probe for a stranger's
+tables. `tests/test_lookup_options.py` pins all three: own-other-workspace, shared-in, and
 refused-when-unviewable.
 
 **Writing a lookup cell obeys the target's permissions too, and for a while it did not.**
 The relaxation above was applied to the config-time check and not to the write path, which
-went on resolving the target scoped to the owner of the list holding the column
-(`ListItemService._lookup_target_id`). The two disagreed exactly where it mattered: a
+went on resolving the target scoped to the owner of the table holding the column
+(`TableRecordService._lookup_target_id`). The two disagreed exactly where it mattered: a
 cross-owner target the config-time check accepted produced a column that created cleanly and
-then refused every value with "points at a missing target list" — reads fine, writes never.
+then refused every value with "points at a missing target table" — reads fine, writes never.
 The owner scope is now gone, replaced by `lookup` on the target, the same action the read
 path takes. That check is not redundant with the read path's: `_validate_lookup` resolves a
 row by its **label** as well as its uuid, so an unguarded write is a way to probe an
-unreadable list by guessing. It is skipped only where there is no caller to check — a column
+unreadable table by guessing. It is skipped only where there is no caller to check — a column
 conversion re-validating stored data, and the demo seeder. `test_lookup_grants.py` pins both
 halves: `test_a_cross_owner_lookup_accepts_a_write` and
 `test_writing_a_lookup_takes_lookup_on_the_target`. Note the tightening in that second one:
-a grantee who may edit the host list but was never given anything on the target can no longer
+a grantee who may edit the host table but was never given anything on the target can no longer
 write that cell. They could not see the picker either way — the options endpoint always
 required `lookup` — so this makes the write agree with the read rather than taking anything
 away that was usable.
 
-**Resolving a label means reading the target list, so it obeys the *target's* permissions,
-not the exported/edited list's.** `view` on a list must not hand over the contents of a
-different list it happens to point at. The options endpoint enforces this, and so does export
+**Resolving a label means reading the target table, so it obeys the *target's* permissions,
+not the exported/edited table's.** `view` on a table must not hand over the contents of a
+different table it happens to point at. The options endpoint enforces this, and so does export
 (`_lookup_row_labels`) — a caller who cannot read the target gets uuids instead of labels,
 which is what they saw before labels existed. Any new surface that resolves a lookup label
 needs the same check; `test_export_does_not_leak_labels_from_an_unreadable_target` pins it.
 
-**The `lookup` action is that check's other half: a list can be shared *as a lookup target
-only*.** Granting `lookup` lets other people's lookup columns resolve the list's labels
-while the list stays out of `GET /lists/`, out of "Shared with me", and refused by
-`GET /lists/{it}` — a reference list ("Schools", "Departments") without handing it over.
+**The `lookup` action is that check's other half: a table can be shared *as a lookup target
+only*.** Granting `lookup` lets other people's lookup columns resolve the table's labels
+while the table stays out of `GET /tables/`, out of "Shared with me", and refused by
+`GET /tables/{it}` — a reference table ("Schools", "Departments") without handing it over.
 Three things this rests on, all easy to break:
 
-- **The collection filters must test actions, not grant existence.** `list_query_filter`
+- **The collection filters must test actions, not grant existence.** `table_query_filter`
   and `workspace_view_filter` now require `CONFERRED_BY[view]` via jsonb `?|`. Revert
-  either to matching any grant row and the lookup-only list reappears in "Shared with me",
+  either to matching any grant row and the lookup-only table reappears in "Shared with me",
   silently undoing the grant. (This also settled a pre-existing oddity: a grant with an
-  empty action list used to list the resource while permitting nothing on it.)
-- **`item_view_filter` takes the action being exercised.** It short-circuits on the
-  list-level check, so at the default (`view`) a lookup-only grantee falls through to
-  "only items granted individually" — an empty picker. The three label paths (options,
+  empty action table used to table the resource while permitting nothing on it.)
+- **`record_view_filter` takes the action being exercised.** It short-circuits on the
+  table-level check, so at the default (`view`) a lookup-only grantee falls through to
+  "only records granted individually" — an empty picker. The three label paths (options,
   export, search by linked label) pass `lookup`. Per-record grants still apply either way:
-  `lookup` relaxes the list-level gate, not row-level ones.
-- **The target picker needs `GET /lists/?lookup_targets=true`.** A list you cannot name is
-  a list you cannot point a column at. That flag is the single deliberate exception to
-  "lookup-only lists are invisible", it is off by default, and `ColumnDialog`'s shared-lists
-  query is its only caller. The schema stays hidden even then — `GET /lists/{it}/columns/`
+  `lookup` relaxes the table-level gate, not row-level ones.
+- **The target picker needs `GET /tables/?lookup_targets=true`.** A table you cannot name is
+  a table you cannot point a column at. That flag is the single deliberate exception to
+  "lookup-only tables are invisible", it is off by default, and `ColumnDialog`'s shared-tables
+  query is its only caller. The schema stays hidden even then — `GET /tables/{it}/columns/`
   is still refused, so the dialog hides the label-column dropdown (`targetSchemaHidden`) and
   the server's fallback picks the label. `tests/test_lookup_grants.py` pins all of it.
 
 **A row's label falls back: the lookup's `display_column_uuid`, else the target's primary
 column, else its *first* column.** That last step is load-bearing — `primary_column_id` is
-only ever set by an explicit PATCH and is nulled when that column is deleted, so most lists
-have none. Drop it and every lookup at such a list silently degrades to uuid stubs *and* its
+only ever set by an explicit PATCH and is nulled when that column is deleted, so most tables
+have none. Drop it and every lookup at such a table silently degrades to uuid stubs *and* its
 picker's search matches nothing.
 
 Three traps worth knowing if you touch these hooks.
@@ -1529,7 +1529,7 @@ arrive *after* that, so a map computed in the page and passed down freezes at wh
 resolved when the rows last changed: assign a user to a record and the cell sits on `…`
 forever, even though the page-level hook has the name. `PrincipalCell`/`LookupCell` therefore
 take the page's *uuid list* and call the hook themselves. Every cell of a column passes the
-same list, so react-query serves them all from one request — the batching survives.
+same table, so react-query serves them all from one request — the batching survives.
 
 **The query key is the uuid set**, so it changes whenever the records do — including the blip
 where a view swap empties the grid mid-refetch. Without `placeholderData: keepPreviousData`
@@ -1544,10 +1544,10 @@ key off `isFetching`, **not** `isPending` — with `placeholderData` the status 
 permissions.** A `lookup`/`user`/`group` cell stores a uuid while a person types the label, so
 `?q=` resolves the label to uuids first and then matches cells with `?|` (true for a single
 value and for one element of a multi-valued cell alike). Resolving a lookup's label is a read
-of the target list, so it takes `view` on that list plus the per-record filter — otherwise
-search becomes a way to probe the contents of a list you were never given. A caller without
+of the target table, so it takes `view` on that table plus the per-record filter — otherwise
+search becomes a way to probe the contents of a table you were never given. A caller without
 that access simply gets no match on those columns, and
-`test_search_by_lookup_label_obeys_the_target_lists_permissions` pins it. A label resolving to
+`test_search_by_lookup_label_obeys_the_target_tables_permissions` pins it. A label resolving to
 more than `_SEARCH_REF_MAX` (200) rows stops widening there — a search matching thousands of
 target rows is not a search anyone meant to run.
 
@@ -1572,15 +1572,15 @@ implementation, and the seam is where the bugs live:
 
 - Values go through the shared `renderCell`. Ordering was duplicated once and the copies
   drifted — the grid sorted with PrimeReact's comparator (blanks float to the top on a
-  descending sort, `"item10"` before `"item9"`) and the cards with ours, so the same list
+  descending sort, `"item10"` before `"item9"`) and the cards with ours, so the same table
   came out in a different order depending on the width of the screen. Neither sorts now:
   the grid is `lazy`, both layouts render the page the server already ordered, and there
   is one comparator because there is none. `sortRows` survives only as `compareValues`,
-  which `ColumnsPanel` uses to order a column *list*, not records.
+  which `ColumnsPanel` uses to order a column *table*, not records.
 - Reference cells used to sort by the **uuid** they hold rather than the label they show —
   uuid7 is time-ordered, so a lookup sorted by creation order scrambled by hex. They now
   sort server-side by the resolved label: a `lookup` by its target row's display column, a
-  `user` by username, a `group` by display name (`items/references.py`). A multi-valued
+  `user` by username, a `group` by display name (`records/references.py`). A multi-valued
   cell sorts by its *first* link, the only single sortable reading of one. The reach into
   the other table can fail — no `lookup` on the target, a target that is named and
   missing, a target with no column to read a label from — and every one of those falls
@@ -1605,9 +1605,9 @@ the setting that shaped it.
 
 The mismatch is absorbed in **four** places, and nowhere else has to know:
 
-- **Reads** — `coerce_shape` is applied as records leave `ListItemService` (and in the export,
+- **Reads** — `coerce_shape` is applied as records leave `TableRecordService` (and in the export,
   which streams raw JSONB and bypasses that path). A single column returns the array's first
-  element; a multiple column returns a bare value as a one-element list. Put this in the UI
+  element; a multiple column returns a bare value as a one-element table. Put this in the UI
   instead and every surface — grid, editor, filters, forms, the next page someone writes — has
   to remember it, and one of them won't.
 - **Writes** — `_validate_data` coerces the incoming value the same way, so a client echoing
@@ -1618,7 +1618,7 @@ The mismatch is absorbed in **four** places, and nowhere else has to know:
   from the column's *current* `multiple`, so after a toggle it matched nothing and left the
   deleted user's uuid sitting in the record. Nothing to keep in step, so nothing to get out of
   step.
-- **Filters and sorts** — `_field` in `items/filtering.py` reproduces `coerce_shape`'s rule *in
+- **Filters and sorts** — `_field` in `records/filtering.py` reproduces `coerce_shape`'s rule *in
   SQL*, because this is the one reader whose comparison happens in Postgres rather than in Python:
   `CASE WHEN jsonb_typeof(data -> key) = 'array' THEN data -> key ->> 0 ELSE data ->> key END`.
   This edge was **missed for a long time**, and the cost was severe precisely because it was
@@ -1659,33 +1659,33 @@ Three rules hold it together, and all three are easy to get backwards:
   and never when *searching*. Nothing new may be linked to something on its way out.
 - **A stored reference stays saveable.** `_validate_data` passes the cell's current uuids down
   as `kept`; a reference in that set is accepted even if its target is deleted. Without it,
-  binning one row makes every record naming it unsaveable — a fine way to lock a list.
+  binning one row makes every record naming it unsaveable — a fine way to lock a table.
 - **The clear happens once, in `_references.clear_expired`**, driven by the same retention
   window. Shape-agnostic (`?|` plus a `CASE`), set-based (one UPDATE per column, not per row).
 
-**Deleting a *list* is the deliberate exception** and still scrubs. Every value in a lookup
+**Deleting a *table* is the deliberate exception** and still scrubs. Every value in a lookup
 pointing at it goes stale at once, and the permission resolver returns *no access* for a
 deleted resource, so those labels could not even be authorised. The old justification — that
-restoring a list would mean un-cascading its children, which nothing did — has expired:
-`ListService.restore` does exactly that, matching each child on the `deleted_at` the cascade
+restoring a table would mean un-cascading its children, which nothing did — has expired:
+`TableService.restore` does exactly that, matching each child on the `deleted_at` the cascade
 stamped. What has not changed is the asymmetry that makes the scrub a real gap: the restore
-brings the list's own contents back and cannot bring back what was cleared on *other* lists'
+brings the table's own contents back and cannot bring back what was cleared on *other* tables'
 records, because nothing recorded which cells those were (gap 6, "What is still missing").
 
 **The scrub clears the referencing column's *config* as well as its values**, and for a long
-time it cleared only the values. A lookup column left naming a list that no longer exists was
+time it cleared only the values. A lookup column left naming a table that no longer exists was
 not merely stale, it was stuck: `lookup_options` raised, so the options endpoint 404'd and with
 it the picker, the record dialog and every label resolution; `_validate_config` refused any
 PATCH that resent the config, which `ColumnDialog` always does; and the dialog rendered the dead
-uuid as `…` under the hint about lists shared as lookup targets only — an explanation that was
+uuid as `…` under the hint about tables shared as lookup targets only — an explanation that was
 actively wrong. Nothing in the UI could repair it except deleting the column.
 
-`target_list_uuid` now goes, and with it `display_column_uuid`, `target_filter_column_uuid` and
+`target_table_uuid` now goes, and with it `display_column_uuid`, `target_filter_column_uuid` and
 `option_filters`, each of which names a column *of the dead target*. `parent_column_uuid` goes
-too, though it names a sibling on the column's own list that is still alive — the pairing is set
+too, though it names a sibling on the column's own table that is still alive — the pairing is set
 and unset as a unit, and its other half has just been blanked. `required` goes as well, and that
 one is not tidiness: it is enforced over the merged record on every write, and the cell is now
-empty and unfillable, so a ticked `required` would refuse every create and edit on the list that
+empty and unfillable, so a ticked `required` would refuse every create and edit on the table that
 holds the column — and could not be un-ticked on its own, since a config PATCH merges onto what
 is stored and the refusal would then be about the missing target instead. Dropping it follows
 the same rule that refuses `unique` + `multiple`: a column must not claim a guarantee it cannot
@@ -1693,30 +1693,30 @@ enforce. Finally the scrub runs `_clear_dependent_nesting` outward on each colum
 a nested child whose *own* target survives — and which is therefore not in scope for the scrub —
 does not keep a pairing whose halves resolve to nothing.
 
-The column degrades to an unconfigured lookup: the options endpoint answers with an empty list
+The column degrades to an unconfigured lookup: the options endpoint answers with an empty table
 rather than raising (the same tolerance §7 already grants a dangling nesting pairing), the
 picker opens empty, and retargeting is an ordinary PATCH. Note the two absent-target cases stay
 distinguishable on purpose — a config with **no** target returns nothing, while a config naming
-a list that is not there still raises, because that means something got out of step and
+a table that is not there still raises, because that means something got out of step and
 answering "no options" would hide it.
 
 Saving a target-less lookup is still refused. Clearing the config makes the column *fixable*,
 not valid, and the only sensible repairs are retargeting and deleting — both of which work.
-One consequence: a list restore no longer silently re-points these columns. It never restored
+One consequence: a table restore no longer silently re-points these columns. It never restored
 anything usable, since the cells were scrubbed at delete time and cannot come back, so what is
-given up is a column pointing at a live list and holding nothing.
+given up is a column pointing at a live table and holding nothing.
 
 **Columns that lost their target before this shipped are not repaired by the delete-path fix,
 and need the sweep.** The fix changes what a delete does; it does not go back over a database
 that already holds dangling columns, and by the deliberate asymmetry above those are the case
 that *still raises* — so they stay exactly as stuck as the paragraph before last describes.
 `src.maintenance.clear_dangling_lookup_targets` is the one-off that clears them, matching on
-live lookup columns whose `target_list_uuid` names no live list and blanking the same fields
+live lookup columns whose `target_table_uuid` names no live table and blanking the same fields
 the scrub does. It is idempotent, and it must be run once against any database that predates
 the fix — the deployed one included. Until it is, this section's past tense is only true of
-lists deleted since. **Run `--dry-run` first and keep the output**: it names each column and
+tables deleted since. **Run `--dry-run` first and keep the output**: it names each column and
 the target it points at, and clearing is what destroys the only record of that — including
-for targets that are merely soft-deleted and still restorable from the lists bin.
+for targets that are merely soft-deleted and still restorable from the tables bin.
 
 **A `link` value must never reach an `href` unchecked.** The backend only stores URLs whose
 scheme is in the column's `allowed_schemes`, itself capped at `SAFE_LINK_SCHEMES`
@@ -1745,9 +1745,9 @@ those are re-read.** Concretely:
   centred card in the middle of the window — by design, so a missing element is never a
   broken tour, but it means the failure is invisible to CI and to you. Grep `data-tour`
   before removing a component. There are sixteen: the rail, its account band, the nav tree's
-  workspaces section, the mobile burger, the dashboard hero, the first workspace and list
-  card, New workspace, New list, Deleted, the list header's Settings, ⋯ and Add record, the
-  list toolbar, the guide's contents nav, and the help button itself.
+  workspaces section, the mobile burger, the dashboard hero, the first workspace and table
+  card, New workspace, New table, Deleted, the table header's Settings, ⋯ and Add record, the
+  table toolbar, the guide's contents nav, and the help button itself.
 - **Step wording has to survive its element being absent**, since that is what a new account
   with no workspaces already sees. Write the body so it reads as an explanation, not as a
   caption for something under a spotlight.
@@ -1756,7 +1756,7 @@ those are re-read.** Concretely:
   it will point at nothing on one of the two layouts.
 - **Renaming a visible label means editing prose in two files.** The tours and the guide both
   quote labels verbatim (`Add record`, `Save view`, `Nest under`). `COLUMN_TYPE_OPTIONS` is
-  the one place this is already automatic — the guide's type list is generated from it — and
+  the one place this is already automatic — the guide's type table is generated from it — and
   it is the pattern to reach for when a list of labels starts being duplicated.
 - **A genuinely new area of the app wants a tour of its own**, not a tenth step bolted onto
   `basics`. `pageTourFor` matches on the route; adding an entry there and a `Tour` object is
@@ -1764,7 +1764,7 @@ those are re-read.** Concretely:
 
 The guide's **screenshots are the one part of this that does tell you.**
 `frontend/scripts/capture-guide.mjs` drives the real app with Playwright and photographs every
-screen in its `SHOTS` list into `public/guide/`; each shot clicks controls by the labels the
+screen in its `SHOTS` table into `public/guide/`; each shot clicks controls by the labels the
 guide's own prose quotes, so a renamed button fails the capture run with the id of the shot
 that named it. That is an alarm the prose has never had — but only when someone runs it, so:
 
@@ -1794,14 +1794,48 @@ Treat the guide and the tours as part of the UI's surface area rather than as do
 about it.
 
 **The batch-import template's headings are duplicated across the language boundary.**
-`HEADERS` in `features/people/BatchUserDialog.tsx` lists the twelve CSV columns the template
+`HEADERS` in `features/people/BatchUserDialog.tsx` tables the twelve CSV columns the template
 writes; `KNOWN_HEADERS` in `src/auth/users/batch/parsing.py` is the set the server accepts.
 Nothing checks them against each other. This is the same class of duplication the bullet
 above describes, and it is not automatable the way `COLUMN_TYPE_OPTIONS` was — the generated
-`api-schema.ts` publishes the *response* types, not the accepted header list, because the
+`api-schema.ts` publishes the *response* types, not the accepted header table, because the
 headers are a CSV convention rather than a JSON schema.
 
 It fails safely, which is the only reason it is acceptable: a header the frontend invents is
 rejected by `check_headers` with a `400` naming it, so the template breaks loudly on the
 first use rather than silently dropping a column. Adding a column to the import means
 editing both, plus the example row beside `HEADERS` and the guide's People section.
+
+**The `List` → `Table` rename left four things deliberately un-renamed, and one dated
+shim.** The domain noun became `Table` and `ListItem` became `TableRecord` on 2026-10-11
+(migration `f4a9c2e71b85`). Four spellings were kept on purpose, so nobody "finishes the
+job" and breaks something:
+
+- **`_UNIQUE_LOCK_NS = 0x4C495354` still spells `"LIST"`** (`src/tables/records/services.py`).
+  It is a Postgres advisory-lock *namespace*: its only requirement is that every writer
+  picks the same number. Changing it would have meant old and new code holding locks in
+  two different namespaces for the length of a deploy — not serializing against each
+  other at all, which is the one thing it exists to do.
+- **18 NOT NULL constraints still carry `lists_*` / `list_items_*` names.** PG17+
+  catalogues them; they are auto-generated, invisible to the app, and invisible to
+  Alembic (`compare_metadata` diffs column nullability, not constraint names). Renaming
+  them would make the revision fail outright on any server old enough not to have them.
+- **`def list(...)` on every service is the collection-read verb, not the noun.** Ten of
+  them, including `UserService.list` and `WorkspaceService.list`. So are `list_columns`,
+  `list_grants`, `list_deleted`, and friends. Only `list_lists` → `list_tables` moved,
+  because there the *object* was what changed.
+- **`"item"` remains the slug fallback** in `core/utils.py` and `frontend/src/lib/slug.ts`,
+  for any resource whose name slugifies to nothing. It never meant a record.
+
+The shim: **`src/tables/legacy.py` 308-redirects `/api/lists/*` → `/api/tables/*`, and
+must be deleted after 2026-11-11** along with `tests/test_legacy_list_routes.py`. It
+exists because `dbui-api` and `dbui-web` are separate Render services, so the API moves
+before the bundle that calls it — without it, an open tab or a cached bundle gets 404s
+that look like deleted data. It is `include_in_schema=False`, so `npm run gen:api` never
+learns the routes exist and nothing new can come to depend on them. The client-side
+`/lists/:uuid` → `/tables/:uuid` redirect in `App.tsx` is *not* dated: it costs one route
+and keeps every bookmark anyone ever made working.
+
+One behavioural note: the onboarding tour id `list` became `table`, and
+`onboardingState.ts` maps the old value on read. Without that, everyone who had already
+taken the table tour would have been offered it again.

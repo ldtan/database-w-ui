@@ -13,7 +13,7 @@ import { DRAG_GRIP_WIDTH, SortableList } from "../../components/SortableList";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, Form } from "../../lib/types";
-import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
+import { DeletedConfigDialog } from "../tables/DeletedConfigDialog";
 import { ShareDialog } from "../permissions/ShareDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { moveTo } from "../views/reorder";
@@ -70,22 +70,22 @@ function seedRows(form: Form, columns: Column[]): Row[] {
 }
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   forms: Form[];
   // False while the tab is not showing, so it does not seed its editor from a form
   // nobody is looking at.
   active: boolean;
-  /** The list's own `configure`, which is what the bin is gated on — a deleted form
+  /** The table's own `configure`, which is what the bin is gated on — a deleted form
    *  resolves to no permission context of its own, so the per-form answers below
    *  cannot speak for one. */
   canConfigure: boolean;
 }
 
-/** Per-list form layouts. The body of what used to be its own dialog; it now lives
- *  as a tab in List settings. */
+/** Per-table form layouts. The body of what used to be its own dialog; it now lives
+ *  as a tab in Table settings. */
 export function FormsEditor({
-  listUuid,
+  tableUuid,
   columns,
   forms,
   active,
@@ -96,7 +96,7 @@ export function FormsEditor({
   const [selectedUuid, setSelectedUuid] = useState<string | null>(null);
   const [rows, setRows] = useState<Row[]>([]);
   // One panel for every row, and the index of the row it is currently showing. A
-  // panel per row would mount a condition editor per column of the list.
+  // panel per row would mount a condition editor per column of the table.
   const settingsPanel = useRef<OverlayPanel>(null);
   const [settingsFor, setSettingsFor] = useState<number | null>(null);
   const [sharing, setSharing] = useState(false);
@@ -115,7 +115,7 @@ export function FormsEditor({
     forms.find((f) => f.uuid === selectedUuid) ?? forms[0] ?? null;
 
   // A form can be targeted at a specific audience, so its own grants — not the
-  // list's — decide who may edit or re-share it.
+  // table's — decide who may edit or re-share it.
   const canForm = useEffectiveActionsMap(
     "form",
     forms.map((form) => form.uuid),
@@ -154,11 +154,11 @@ export function FormsEditor({
 
   const setInherit = useMutation({
     mutationFn: (value: boolean) =>
-      api.patch(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+      api.patch(`/tables/${tableUuid}/forms/${activeForm!.uuid}`, {
         permissions_inherit: value,
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["forms", tableUuid] });
       queryClient.invalidateQueries({ queryKey: ["effective"] });
     },
     onError: (err) =>
@@ -177,7 +177,7 @@ export function FormsEditor({
   // Seed the editor from the stored form — on a change of *form*, or when the set
   // of columns genuinely changes, and not merely because `columns` is a new array.
   //
-  // It is a prop, so every `invalidateQueries(["columns", listUuid])` gave it a new
+  // It is a prop, so every `invalidateQueries(["columns", tableUuid])` gave it a new
   // identity and re-ran this: reorder six fields and relabel two, switch to the
   // Columns tab, edit any column's display name, come back — and the layout was
   // back to the last save. Worse than losing the work quietly, `dirty` went false
@@ -196,17 +196,17 @@ export function FormsEditor({
     // `config` wholesale, so anything the editor does not model has to be carried
     // across explicitly or saving the layout destroys it.
     mutationFn: () =>
-      api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+      api.patch<Form>(`/tables/${tableUuid}/forms/${activeForm!.uuid}`, {
         config: buildFormConfigPatch(activeForm!, rows),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["forms", tableUuid] });
       toast.success("Form saved", activeForm?.display_name);
     },
   });
 
   /**
-   * Put the ticked parts of this form's settings on every other form of the list.
+   * Put the ticked parts of this form's settings on every other form of the table.
    *
    * It needs a dialog rather than being one button, because applying the *layout* to
    * every form is exactly the thing the add and edit forms exist to differ on — a
@@ -215,7 +215,7 @@ export function FormsEditor({
    * One PATCH per form, in sequence rather than at once — there is no endpoint that
    * takes them together, and a partial failure has to be reportable as one. So a form
    * that refuses is collected rather than thrown, and the toast says which: stopping at
-   * the first would leave the list half-applied with nothing on screen saying where it
+   * the first would leave the table half-applied with nothing on screen saying where it
    * got to.
    */
   const applyToAll = useMutation({
@@ -224,7 +224,7 @@ export function FormsEditor({
       const failed: string[] = [];
       for (const target of others) {
         try {
-          await api.patch<Form>(`/lists/${listUuid}/forms/${target.uuid}`, {
+          await api.patch<Form>(`/tables/${tableUuid}/forms/${target.uuid}`, {
             config: withAppliedSettings(target, activeForm!, parts, columns),
           });
           done.push(target.display_name);
@@ -236,7 +236,7 @@ export function FormsEditor({
     },
     onSuccess: ({ done, failed }) => {
       setApplying(false);
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["forms", tableUuid] });
       if (failed.length === 0) {
         toast.success(
           `Applied to ${done.length} form${done.length === 1 ? "" : "s"}`,
@@ -255,13 +255,13 @@ export function FormsEditor({
 
   const rename = useMutation({
     mutationFn: () =>
-      api.patch<Form>(`/lists/${listUuid}/forms/${activeForm!.uuid}`, {
+      api.patch<Form>(`/tables/${tableUuid}/forms/${activeForm!.uuid}`, {
         name: names.name,
         display_name: names.displayName,
       }),
     onSuccess: (form) => {
       setRenaming(false);
-      queryClient.invalidateQueries({ queryKey: ["forms", listUuid] });
+      queryClient.invalidateQueries({ queryKey: ["forms", tableUuid] });
       toast.success("Form renamed", form.display_name);
     },
   });
@@ -291,7 +291,7 @@ export function FormsEditor({
   );
   const binDialog = (
     <DeletedConfigDialog
-      listUuid={listUuid}
+      tableUuid={tableUuid}
       kind="forms"
       visible={showDeleted}
       onHide={() => setShowDeleted(false)}
@@ -301,7 +301,7 @@ export function FormsEditor({
   if (forms.length === 0) {
     return (
       <div className="flex flex-col gap-3">
-        <Message severity="info" text="This list has no forms." />
+        <Message severity="info" text="This table has no forms." />
         {binButton && <div>{binButton}</div>}
         {binDialog}
       </div>
@@ -328,7 +328,7 @@ export function FormsEditor({
           />
           {/* Beside the picker, where Views keeps "Save view" — the two tabs put the
               same button in the same place, and this is the only control here that
-              writes anything, so it heads the row rather than trailing a list that
+              writes anything, so it heads the row rather than trailing a table that
               can run to a screenful.
 
               Styled as "Save view" is, down to the size, and for the same reasons:
@@ -375,7 +375,7 @@ export function FormsEditor({
               onClick={() => setApplying(true)}
               tooltip={
                 "Put the parts you choose of this form's saved settings on every " +
-                "other form of this list."
+                "other form of this table."
               }
               tooltipOptions={{ position: "bottom" }}
             />
@@ -460,7 +460,7 @@ export function FormsEditor({
                 </span>
                 {/* The dot is what keeps a collapsed setting from being an invisible
                     one: a label override or a condition has to be readable from the
-                    list, or the only way to find one is to open every row.
+                    table, or the only way to find one is to open every row.
 
                     `settings-gear` and not `is-on`: that class is scoped to
                     `.toolbar .p-button`, and this row is not a toolbar, so the tint
@@ -495,11 +495,11 @@ export function FormsEditor({
       </div>
 
       {/* One panel, re-anchored to whichever gear was pressed. Rendered outside the
-          list so a re-order cannot unmount it while it is open. */}
+          table so a re-order cannot unmount it while it is open. */}
       <OverlayPanel ref={settingsPanel} onHide={() => setSettingsFor(null)}>
         {settingsFor !== null && rows[settingsFor] && (
           <FieldSettingsPanel
-            listUuid={listUuid}
+            tableUuid={tableUuid}
             columns={columns}
             column={columns.find(
               (c) => c.uuid === rows[settingsFor].column_uuid,
@@ -570,7 +570,7 @@ export function FormsEditor({
         <div className="flex flex-col gap-3">
           <p className="m-0">
             Apply the settings saved on “{activeForm?.display_name}” to this
-            list’s other {others.length}{" "}
+            table’s other {others.length}{" "}
             {others.length === 1 ? "form" : "forms"}:{" "}
             {others.map((f) => f.display_name).join(", ")}.
           </p>

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-31
 **Scope:** `UserGroup.name` becomes a `NameSlug` code identifier like the one every
-list, column, view and form already carries, and a new `display_name` takes over the
+table, column, view and form already carries, and a new `display_name` takes over the
 job of labelling the group on screen.
 
 ---
@@ -18,11 +18,11 @@ Two wire formats already depend on it:
 - The batch-user CSV's `groups` column resolves rows by exact name
   (`auth/users/batch/services.py:resolve_groups`).
 - Record `group` cells export the group's `name` as the cell value, and import
-  resolves that value back to a uuid (`lists/transfer/services.py:_LabelResolver`).
+  resolves that value back to a uuid (`tables/transfer/services.py:_LabelResolver`).
 
 So renaming a group for cosmetic reasons silently invalidates every saved roster CSV
 and every record export anyone is holding. That is exactly the failure the
-`name`/`display_name` split already prevents for lists — groups are simply the
+`name`/`display_name` split already prevents for tables — groups are simply the
 principal that never got it.
 
 The split gives the rename a place to land: `display_name` changes freely, `name` is
@@ -36,7 +36,7 @@ the second two follow from them.
 1. **A record `group` cell exports the slug, and `display_name` carries no unique
    constraint.** These are one decision, because import resolves the exported label
    back to a uuid and so the label must be unambiguous. Exporting the slug keeps the
-   round-trip honest without constraining `display_name`, which matches how lists
+   round-trip honest without constraining `display_name`, which matches how tables
    already behave. It is also what the export format already does everywhere else:
    `_stream_csv` writes `[c.name for c in columns]` as the header row, so the file is
    slugs throughout rather than gaining an exception for one cell type.
@@ -63,7 +63,7 @@ the second two follow from them.
 
 3. **Search covers both columns.** `name` becoming a slug would otherwise silently
    break two search paths: the group listing's `q` (`UserGroupService._apply_search`)
-   and record filtering on `group` cells (`ListItemService._reference_matches`, which
+   and record filtering on `group` cells (`TableRecordService._reference_matches`, which
    resolves what a person types to uuids). Someone typing "Registrar" must still find
    `registrar_office`, so both match `name` **or** `display_name`.
 
@@ -101,7 +101,7 @@ identically.
   and trailing `_` are trimmed. `"Registrar's Office"` → `registrar_s_office`.
 - A result that does not start with a lowercase letter is prefixed `x_`. `"7th
   Grade"` → `x_7th_grade`, and an empty result (a name that was all punctuation)
-  becomes `item`. Both match `slug.ts`.
+  becomes `record`. Both match `slug.ts`.
 - Truncate to 63 before deduplication so the suffix cannot push it over.
 - **Collisions are real** and must be handled: `"Grade-7 Teachers"` and `"Grade 7
   teachers"` are two distinct rows today that both slugify to `grade_7_teachers`.
@@ -140,10 +140,10 @@ because `name` remains the only unique column.
 slug. A new lookup resolves misses against `display_name` to build the "did you mean"
 suggestion, in one query for the whole file rather than one per bad row.
 
-**`lists/items/services.py`** — `_reference_matches` matches a group by `name` or
+**`tables/records/services.py`** — `_reference_matches` matches a group by `name` or
 `display_name`.
 
-**`lists/transfer/services.py`** — no change. The label is `UserGroup.name`, which is
+**`tables/transfer/services.py`** — no change. The label is `UserGroup.name`, which is
 now the slug, which is what decision 1 wants.
 
 **Frontend** — `GroupDialog` gains a display-name field and slug validation on the
@@ -159,7 +159,7 @@ those keys.
 
 ## Error handling
 
-A `name` that is not a slug is a 422 from Pydantic, the same as for a list. A
+A `name` that is not a slug is a 422 from Pydantic, the same as for a table. A
 duplicate `name` is the existing 409. An unknown group in a CSV row is the existing
 per-row error, now carrying a suggestion when one exists; the row is skipped and the
 rest of the file proceeds, unchanged from today.
@@ -174,7 +174,7 @@ otherwise loop.
   leading digits, all-punctuation names, over-length truncation, and the collision
   sequence. This is where the migration's real risk lives, so it is tested away from
   Postgres.
-- **Round-trip**: export a list with a `group` column, re-import the file, assert the
+- **Round-trip**: export a table with a `group` column, re-import the file, assert the
   cells resolve to the same uuids.
 - **Search**: a group is findable by a fragment of either its slug or its display
   name, in both the group listing and a record filter.

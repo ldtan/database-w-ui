@@ -20,7 +20,7 @@ const ROWS = 10;
  *
  * The bin is your own — a deleted workspace resolves to no permission context, so
  * the backend scopes it to the owner (see WorkspaceService.list_deleted_for_owner).
- * Restoring one brings back the lists that went down with it, so it is offered
+ * Restoring one brings back the tables that went down with it, so it is offered
  * unconditionally on the Workspaces page rather than behind a permission gate.
  */
 export function DeletedWorkspacesDialog({
@@ -56,7 +56,7 @@ export function DeletedWorkspacesDialog({
   const restore = useMutation({
     mutationFn: (uuid: string) => api.post(`/workspaces/${uuid}/restore`),
     onSuccess: () => {
-      // The workspace (and its lists) rejoin the live listing, and its restored
+      // The workspace (and its tables) rejoin the live listing, and its restored
       // grants change what the page may show.
       queryClient.invalidateQueries({ queryKey: ["workspaces"] });
       queryClient.invalidateQueries({ queryKey: ["effective"] });
@@ -86,7 +86,7 @@ export function DeletedWorkspacesDialog({
   const confirmPurge = (uuid: string) =>
     confirmDialog({
       message:
-        "Permanently delete this workspace and all its lists? This cannot be undone.",
+        "Permanently delete this workspace and all its tables? This cannot be undone.",
       header: "Delete permanently",
       icon: "pi pi-exclamation-triangle",
       acceptClassName: "p-button-danger",
@@ -102,7 +102,7 @@ export function DeletedWorkspacesDialog({
     >
       <div className="flex flex-col gap-3">
         <p className="text-sm" style={{ color: "var(--text-muted)" }}>
-          Workspaces deleted recently can be restored here, together with the lists
+          Workspaces deleted recently can be restored here, together with the tables
           they held. They are removed for good once the retention window passes.
         </p>
 

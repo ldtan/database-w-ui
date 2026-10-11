@@ -40,8 +40,8 @@ type Response<T> = { [K in keyof T]-?: T[K] };
 
 export type ResourceLink = Response<Schemas["ResourceLink"]>;
 export type Workspace = Response<Schemas["WorkspaceRead"]>;
-export type ListRead = Response<Schemas["ListRead"]>;
-/** The keys of `lists.settings` this build reads.
+export type TableRead = Response<Schemas["TableRead"]>;
+/** The keys of `tables.settings` this build reads.
  *
  *  Hand-written for the same reason `ColumnConfig` is: the backend types `settings` as a
  *  free-form blob (`{[key: string]: unknown}`) because it *is* one — only the keys the app
@@ -49,9 +49,9 @@ export type ListRead = Response<Schemas["ListRead"]>;
  *  them on the next write. So the generated type cannot narrow this, and this is the
  *  frontend's own claim about it.
  *
- *  Every field optional, because a list that has never been configured has none of them.
- *  Read it through `listSettings()` rather than casting at each call site. */
-export interface ListSettings {
+ *  Every field optional, because a table that has never been configured has none of them.
+ *  Read it through `tableSettings()` rather than casting at each call site. */
+export interface TableSettings {
   /** Which fields a record's QR code carries. Columns are **names** — the payload's own
    *  key, and what makes the setting survive a clone. */
   qr?: {
@@ -61,24 +61,24 @@ export interface ListSettings {
   [key: string]: unknown;
 }
 
-/** A list's settings, typed. The cast lives here once rather than at each reader. */
-export function listSettings(lst: ListRead | undefined): ListSettings {
-  return (lst?.settings ?? {}) as ListSettings;
+/** A table's settings, typed. The cast lives here once rather than at each reader. */
+export function tableSettings(lst: TableRead | undefined): TableSettings {
+  return (lst?.settings ?? {}) as TableSettings;
 }
-export type ListItem = Response<Schemas["ListItemRead"]>;
-// A record in the bin: a ListItem plus when it was deleted.
-export type DeletedListItem = Response<Schemas["DeletedListItemRead"]>;
-// A record in the archive: a ListItem plus when it was archived. A separate axis
+export type TableRecord = Response<Schemas["TableRecordRead"]>;
+// A record in the bin: a TableRecord plus when it was deleted.
+export type DeletedTableRecord = Response<Schemas["DeletedTableRecordRead"]>;
+// A record in the archive: a TableRecord plus when it was archived. A separate axis
 // from the bin — there is no retention window to count down here, so `archived_at`
 // only ever says how long ago, never how long is left.
-export type ArchivedListItem = Response<Schemas["ArchivedListItemRead"]>;
-// Bin rows for workspaces and lists: the read shape plus when it was deleted. The
-// backend exposes DeletedWorkspaceRead / DeletedListRead, so `npm run gen:api` will
+export type ArchivedTableRecord = Response<Schemas["ArchivedTableRecordRead"]>;
+// Bin rows for workspaces and tables: the read shape plus when it was deleted. The
+// backend exposes DeletedWorkspaceRead / DeletedTableRead, so `npm run gen:api` will
 // fold these into the generated schema; until it is re-run they mirror them here by
-// extension, exactly as DeletedListItem does through the generated model.
+// extension, exactly as DeletedTableRecord does through the generated model.
 export type DeletedWorkspace = Workspace & { deleted_at: string };
-export type DeletedList = ListRead & { deleted_at: string };
-/** One row of a list's config bin — a deleted column, view, form or metric. The
+export type DeletedTable = TableRead & { deleted_at: string };
+/** One row of a table's config bin — a deleted column, view, form or metric. The
  *  same shape for all four, and deliberately narrower than their live schemas: it
  *  carries what identifies the thing and when it went, not its `config`. */
 export type BinnedChild = Response<Schemas["BinnedChildRead"]>;
@@ -149,22 +149,22 @@ export interface ColumnConfig {
    *  a cell may hold an answer of its own, stored as the typed string like any
    *  other label, so nothing downstream can tell the two apart. */
   allow_other?: boolean;
-  /** Nullable, not merely absent: deleting the target list clears these in place
+  /** Nullable, not merely absent: deleting the target table clears these in place
    *  rather than dropping the keys, so the server really does send `null` here. */
-  target_list_uuid?: string | null;
+  target_table_uuid?: string | null;
   display_column_uuid?: string | null;
   /** Nested lookup: the sibling lookup whose value filters this one's options,
-   *  and the target-list lookup column the filter matches on. Set together. */
+   *  and the target-table lookup column the filter matches on. Set together. */
   parent_column_uuid?: string | null;
   target_filter_column_uuid?: string | null;
   /** Lookup columns only. Narrows which target rows the picker offers, over the
-   *  *target list's* columns. Saved with the column and applied server-side; the
+   *  *target table's* columns. Saved with the column and applied server-side; the
    *  picker never sends one, because a caller-chosen predicate would make a
    *  lookup-only target's hidden columns readable by elimination. */
   option_filters?: FilterGroup | null;
   /** Lookup columns only. Lets the picker create a missing target row instead of
    *  dead-ending. An affordance and nothing more: the button also needs `create`
-   *  on the *target* list, and the target's own route enforces that whatever this
+   *  on the *target* table, and the target's own route enforces that whatever this
    *  says. Only the pickers honour it — import and the API still refuse a label
    *  that matches no row. */
   allow_create?: boolean;
@@ -274,10 +274,10 @@ export type Form = Omit<Response<Schemas["FormRead"]>, "config"> & {
 
 /** What restoring a column answers with: the column, plus the one consequence of
  *  its delete that the restore does *not* undo and can still be observed — the
- *  list being left without a primary column. Built on the refined `Column` so the
+ *  table being left without a primary column. Built on the refined `Column` so the
  *  `config` shape does not have to be stated twice. */
 export type RestoredColumn = Column &
-  Pick<Response<Schemas["RestoredColumnRead"]>, "list_has_no_primary_column">;
+  Pick<Response<Schemas["RestoredColumnRead"]>, "table_has_no_primary_column">;
 
 /** Metrics need no refinement, unlike the three above: a metric's config is one
  *  shape whatever the metric is, so the backend types it as a Pydantic model and

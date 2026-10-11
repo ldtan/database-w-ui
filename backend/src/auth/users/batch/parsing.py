@@ -27,7 +27,7 @@ PERSON_HEADERS = (
 KNOWN_HEADERS = (*ACCOUNT_HEADERS, *PERSON_HEADERS)
 REQUIRED_HEADERS = ("username", "email")
 
-# The row cap is `settings.IMPORT_MAX_ROWS`, shared with the list importer: each row
+# The row cap is `settings.IMPORT_MAX_ROWS`, shared with the table importer: each row
 # is several round trips either way, so an unbounded file is a request that never
 # returns. Parsing is pure, so hitting the cap still means nothing was written.
 
@@ -48,8 +48,8 @@ def _flatten(exc: PydanticValidationError) -> str:
 def check_headers(fieldnames: Optional[list[str]]) -> None:
     """Reject a file whose columns are wrong, before a single account exists.
 
-    Unknown headers are an error here where list import ignores them, because this
-    column set is *closed*: `frist_name` cannot be another list's column, so it is a
+    Unknown headers are an error here where table import ignores them, because this
+    column set is *closed*: `frist_name` cannot be another table's column, so it is a
     file that would silently drop every name in it. Missing required headers get
     their own message for the same reason read the other way -- without it every row
     fails identically, and a thousand copies of one error describe a file-level
@@ -108,7 +108,7 @@ def parse_file(text: str) -> ParsedFile:
     for raw in reader:
         # reader.line_num is the row's real source line, so a reported number still
         # points at the right line when the file has blank ones. Same reasoning as
-        # lists/transfer/routers.py.
+        # tables/transfer/routers.py.
         number = reader.line_num
         if len(rows) + len(errors) >= max_rows:
             raise ValidationError(

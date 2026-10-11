@@ -1,14 +1,14 @@
 /** Location cells: `{address, lat, lng}`, and how to read one.
  *
  *  **The only cell in the system whose value is an object.** Everything else stores a
- *  scalar or a list of them, which is why this type needed changes in four backend
+ *  scalar or a table of them, which is why this type needed changes in four backend
  *  readers (`filtering._field`, `_apply_search`, `_csv_cell`, `_render_scalar`) that
  *  no other type has ever needed. On this side the consequence is smaller but the
  *  same in kind: `String(value)` on a cell is `[object Object]`, so every surface
  *  that shows one has to come through here.
  *
  *  Mirrors `format_location` / `parse_location` in
- *  backend/src/lists/columns/validation.py — the canonical one-line text form the
+ *  backend/src/tables/columns/validation.py — the canonical one-line text form the
  *  export writes and the import reads. Kept in step with them: a form one accepts and
  *  the other refuses is a value somebody can paste into the grid but not into a file.
  */

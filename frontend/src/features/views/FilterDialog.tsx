@@ -7,7 +7,7 @@ import { FilterConditionsEditor } from "./FilterConditionsEditor";
 import { cleanConditions } from "./operators";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   /** The filter currently in effect, which this opens on. */
   value: FilterGroup;
@@ -22,7 +22,7 @@ interface Props {
  * This used to PATCH the view the moment you pressed Apply, which made filtering
  * three things it should never have been: permanent, shared with everyone who can
  * see that view, and gated on `configure`. So the most ordinary question you can
- * ask a list — "just the overdue ones" — was a change to the list, and someone
+ * ask a table — "just the overdue ones" — was a change to the table, and someone
  * with read access could not ask it at all.
  *
  * Now it hands the conditions back to the page, which sends them with the next
@@ -31,7 +31,7 @@ interface Props {
  * share: the "Save view" button, when you decide the question was worth keeping.
  */
 export function FilterDialog({
-  listUuid,
+  tableUuid,
   columns,
   value,
   onApply,
@@ -78,7 +78,7 @@ export function FilterDialog({
     >
       <div className="flex flex-col gap-3">
         <FilterConditionsEditor
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           columns={columns}
           conjunction={conjunction}
           onConjunctionChange={setConjunction}

@@ -27,13 +27,13 @@ class WorkspaceUpdate(BaseModel):
 
 class WorkspaceTransfer(BaseModel):
     # The user to hand the workspace to. They become its owner, and with it the
-    # owner of every list inside. Owner-only (enforced in the router).
+    # owner of every table inside. Owner-only (enforced in the router).
     user_uuid: UUID
 
 
 class WorkspaceRead(WorkspaceBase):
     uuid: UUID
-    # True only for the per-user "Incoming" workspace transferred lists land in. The
+    # True only for the per-user "Incoming" workspace transferred tables land in. The
     # UI hides rename/delete for it, because it is immutable server-side too.
     is_system: bool = False
 

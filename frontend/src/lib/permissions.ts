@@ -24,10 +24,10 @@ export const ACTIONS: {
     label: "Lookup",
     help:
       "Use as a lookup target: values can be read through a lookup column, " +
-      "but the list stays hidden and cannot be opened",
-    // A lookup points at a list, so only a list — or the workspace whose lists
+      "but the table stays hidden and cannot be opened",
+    // A lookup points at a table, so only a table — or the workspace whose tables
     // inherit the grant — can be one. On a record, view, or form it would be inert.
-    only: ["list", "workspace"],
+    only: ["table", "workspace"],
   },
 ];
 

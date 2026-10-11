@@ -10,7 +10,7 @@ import { NameFields } from "../../components/NameFields";
 import { isValidName } from "../../lib/slug";
 import { useToast } from "../../lib/toast";
 import type { Column, View, ViewConfig } from "../../lib/types";
-import { DeletedConfigDialog } from "../lists/DeletedConfigDialog";
+import { DeletedConfigDialog } from "../tables/DeletedConfigDialog";
 import { useEffectiveActionsMap } from "../permissions/useEffectiveActions";
 import { ViewBar } from "./ViewBar";
 import { ViewControls } from "./ViewControls";
@@ -29,13 +29,13 @@ export interface ViewControlsState {
 }
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   views: View[];
   activeUuid: string | null;
   onSelect: (uuid: string | null) => void;
   currentConfig: ViewConfig;
   controls: ViewControlsState;
-  /** The list's own `configure`, which is what the bin is gated on — a deleted view
+  /** The table's own `configure`, which is what the bin is gated on — a deleted view
    *  resolves to no permission context of its own, so the per-view answers below
    *  cannot speak for one. */
   canConfigure: boolean;
@@ -45,12 +45,12 @@ interface Props {
  *
  *  Everything here is also on the toolbar — the same components, not a second copy
  *  of them — because changing a filter while watching the grid react is the natural
- *  way to do it. This tab exists so the list's configuration is all reachable from
+ *  way to do it. This tab exists so the table's configuration is all reachable from
  *  one button, and adds the two things the toolbar has no room for: renaming a view
  *  and deleting one.
  */
 export function ViewsPanel({
-  listUuid,
+  tableUuid,
   views,
   activeUuid,
   onSelect,
@@ -65,13 +65,13 @@ export function ViewsPanel({
   const [showDeleted, setShowDeleted] = useState(false);
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["views", listUuid] });
-    queryClient.invalidateQueries({ queryKey: ["items", listUuid] });
+    queryClient.invalidateQueries({ queryKey: ["views", tableUuid] });
+    queryClient.invalidateQueries({ queryKey: ["records", tableUuid] });
     queryClient.invalidateQueries({ queryKey: ["effective"] });
   };
 
   // A view can carry its own grants, so who may rename or delete one is decided per
-  // view, not by the list.
+  // view, not by the table.
   const canView = useEffectiveActionsMap(
     "view",
     views.map((v) => v.uuid),
@@ -79,7 +79,7 @@ export function ViewsPanel({
 
   const rename = useMutation({
     mutationFn: () =>
-      api.patch<View>(`/lists/${listUuid}/views/${renaming!.uuid}`, {
+      api.patch<View>(`/tables/${tableUuid}/views/${renaming!.uuid}`, {
         name: names.name,
         display_name: names.displayName,
       }),
@@ -91,7 +91,7 @@ export function ViewsPanel({
   });
 
   const remove = useMutation({
-    mutationFn: (uuid: string) => api.del(`/lists/${listUuid}/views/${uuid}`),
+    mutationFn: (uuid: string) => api.del(`/tables/${tableUuid}/views/${uuid}`),
     onSuccess: (_data, uuid) => {
       // The page is showing this view; drop the selection so it falls back to
       // whichever view remains rather than filtering by one that is gone.
@@ -118,12 +118,12 @@ export function ViewsPanel({
   return (
     <div className="flex flex-col gap-4">
       {views.length === 0 && (
-        <Message severity="info" text="This list has no views." />
+        <Message severity="info" text="This table has no views." />
       )}
 
       {/* Pick a view, save it, share it, add one — the toolbar's own bar. */}
       <ViewBar
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         views={views}
         activeUuid={activeUuid}
         onSelect={onSelect}
@@ -135,7 +135,7 @@ export function ViewsPanel({
       <ViewControls {...controls} stacked />
 
       <div className="flex flex-col gap-2">
-        {/* The bin heads the roll of views rather than sitting under it: this list
+        {/* The bin heads the roll of views rather than sitting under it: this table
             can be long, and a deleted view is found by looking where the live ones
             are listed. */}
         <div className="flex items-center justify-between gap-2">
@@ -220,7 +220,7 @@ export function ViewsPanel({
       </AppDialog>
 
       <DeletedConfigDialog
-        listUuid={listUuid}
+        tableUuid={tableUuid}
         kind="views"
         visible={showDeleted}
         onHide={() => setShowDeleted(false)}

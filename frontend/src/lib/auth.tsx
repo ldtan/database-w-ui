@@ -34,7 +34,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   // Nothing cached survives an account boundary. Query keys are shared and mostly
-  // say *what* rather than *whose* (`["me"]`, `["items", uuid]`), so a second account
+  // say *what* rather than *whose* (`["me"]`, `["records", uuid]`), so a second account
   // signing in on the same tab would be served the first one's data until each query
   // refetched — reading someone else's rows, and writing their preferences back to
   // its own account. Cleared on the way in as well as out, because a session can end

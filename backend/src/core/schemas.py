@@ -4,7 +4,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, StringConstraints
 
 
-# The code-facing identifier for lists/columns/views/forms: a slug that must
+# The code-facing identifier for tables/columns/views/forms: a slug that must
 # start with a lowercase letter and contain only lowercase letters, digits, and
 # underscores. `display_name` (free text) is what the UI shows.
 NameSlug = Annotated[
@@ -25,7 +25,7 @@ NameSlug = Annotated[
 # name before building `<name>__before_conversion` and its comment notes that
 # `ColumnCreate.display_name` has no `max_length`, "so such a column is creatable
 # today". This is that root cause, fixed once for all six schemas that carry one:
-# columns, lists, views, forms, metrics and workspaces.
+# columns, tables, views, forms, metrics and workspaces.
 DisplayName = Annotated[str, StringConstraints(max_length=255)]
 
 

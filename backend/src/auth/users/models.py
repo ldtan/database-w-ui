@@ -34,7 +34,7 @@ class User(BaseModel):
     password: Mapped[str] = mapped_column(sa.String(255))
     is_active: Mapped[bool] = mapped_column(sa.Boolean, default=True)
     # Administers accounts and groups. Orthogonal to the permission model, which
-    # governs workspaces/lists/records — a superuser is not automatically granted
+    # governs workspaces/tables/records — a superuser is not automatically granted
     # access to other people's data.
     is_superuser: Mapped[bool] = mapped_column(
         sa.Boolean, default=False, server_default=sa.false(), nullable=False
@@ -79,14 +79,14 @@ AUTHENTICATED_USERS_DISPLAY_NAME = "Authenticated Users"
 class UserGroup(BaseModel):
     __tablename__ = "user_groups"
 
-    # The same split every workspace, list, column, view and form carries: `name` is
+    # The same split every workspace, table, column, view and form carries: `name` is
     # the code-facing slug, `display_name` is what a person reads. Groups got it late
     # because `name` was doing both jobs *and* serving as a wire identifier — the
     # `groups` column of a batch-user CSV and the exported value of a `group` cell
     # both resolve against it — so a cosmetic rename silently invalidated saved files.
     # Now the rename has somewhere to land that no file refers to.
     name: Mapped[str] = mapped_column(sa.String(63), unique=True)
-    # Not unique, matching lists. Two groups may therefore read alike in a picker,
+    # Not unique, matching tables. Two groups may therefore read alike in a picker,
     # which is why SharePanel renders the slug beneath the label: choosing the wrong
     # group there grants access, so the tie-breaker has to be visible.
     display_name: Mapped[str] = mapped_column(sa.String(255))

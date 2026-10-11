@@ -1,5 +1,5 @@
 """The workspaces bin: soft-deleted workspaces can be listed and restored, and
-restoring one brings back exactly the lists that went down with it.
+restoring one brings back exactly the tables that went down with it.
 
 Runs as the seeded 'tester' user (DISABLE_AUTH), who owns everything it creates, so
 the owner-scoped bin and the restore both resolve without extra grants.
@@ -31,39 +31,39 @@ async def test_workspace_bin_lists_and_restores(client, workspace_uuid):
     assert binned.headers["X-Total-Count"] == "0"
 
 
-async def test_restoring_workspace_brings_back_its_lists(
-    client, workspace_uuid, list_uuid
+async def test_restoring_workspace_brings_back_its_tables(
+    client, workspace_uuid, table_uuid
 ):
-    # Deleting the workspace cascades to its list.
+    # Deleting the workspace cascades to its table.
     assert (await client.delete(f"/api/workspaces/{workspace_uuid}")).status_code == 204
-    assert (await client.get(f"/api/lists/{list_uuid}")).status_code == 404
+    assert (await client.get(f"/api/tables/{table_uuid}")).status_code == 404
 
     # Restoring the workspace un-does exactly that cascade.
     assert (
         await client.post(f"/api/workspaces/{workspace_uuid}/restore")
     ).status_code == 200
 
-    got = await client.get(f"/api/lists/{list_uuid}")
+    got = await client.get(f"/api/tables/{table_uuid}")
     assert got.status_code == 200, got.text
-    assert got.json()["uuid"] == list_uuid
+    assert got.json()["uuid"] == table_uuid
 
 
-async def test_workspace_restore_leaves_independently_binned_lists(
-    client, workspace_uuid, list_uuid
+async def test_workspace_restore_leaves_independently_binned_tables(
+    client, workspace_uuid, table_uuid
 ):
-    # A list binned on its own carries a different deleted_at than the later
+    # A table binned on its own carries a different deleted_at than the later
     # workspace delete, so restoring the workspace must not revive it.
-    assert (await client.delete(f"/api/lists/{list_uuid}")).status_code == 204
+    assert (await client.delete(f"/api/tables/{table_uuid}")).status_code == 204
     assert (await client.delete(f"/api/workspaces/{workspace_uuid}")).status_code == 204
     assert (
         await client.post(f"/api/workspaces/{workspace_uuid}/restore")
     ).status_code == 200
 
-    # Workspace is back; the list stays in the workspace's own bin.
-    assert (await client.get(f"/api/lists/{list_uuid}")).status_code == 404
-    binned = await client.get(f"/api/lists/deleted?workspace_uuid={workspace_uuid}")
+    # Workspace is back; the table stays in the workspace's own bin.
+    assert (await client.get(f"/api/tables/{table_uuid}")).status_code == 404
+    binned = await client.get(f"/api/tables/deleted?workspace_uuid={workspace_uuid}")
     assert binned.status_code == 200, binned.text
-    assert any(row["uuid"] == list_uuid for row in binned.json())
+    assert any(row["uuid"] == table_uuid for row in binned.json())
 
 
 async def test_restore_missing_workspace_is_404(client):

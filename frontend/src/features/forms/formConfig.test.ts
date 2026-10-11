@@ -140,7 +140,7 @@ describe("rowIsCustomised", () => {
 
   /**
    * The four audit columns arrive excluded *and* not-editable, which lit a dot on
-   * every list against rows whose panel offers nothing to change. `enabled` on a row
+   * every table against rows whose panel offers nothing to change. `enabled` on a row
    * the form never renders is not a setting anybody chose — the panel disables the
    * control for exactly that reason — and a dot on every row says nothing about any
    * of them.
@@ -305,7 +305,7 @@ describe("withAppliedSettings, conditions only", () => {
   /**
    * The bug the browser found, and the reason this takes `columns` at all.
    *
-   * A form provisioned with a list names only the audit columns, so every real column
+   * A form provisioned with a table names only the audit columns, so every real column
    * reaches the dialog through `resolveFields`' "newer than the config" rule and has
    * no entry to hang a condition on. Copying by mapping over the stored fields
    * reported success and wrote nothing.
@@ -608,7 +608,7 @@ describe("withAppliedSettings", () => {
   });
 
   /** The same reason `withCopiedConditions` takes `columns` at all: a form provisioned
-   *  with a list names no real column, so there is nothing to hang a setting on. */
+   *  with a table names no real column, so there is nothing to hang a setting on. */
   it("gives a column the target has never listed an entry to hold the setting", () => {
     const bare = form({ uuid: "u2", type: "update", config: { fields: [] } });
     const patched = withAppliedSettings(

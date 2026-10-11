@@ -31,7 +31,7 @@ export interface SharePanelProps {
 }
 
 // Not a module constant: some actions only mean something on some resource types
-// (`lookup` on a list or workspace, never on a record, view, or form).
+// (`lookup` on a table or workspace, never on a record, view, or form).
 const actionOptions = (resourceType: ResourceType) =>
   actionsFor(resourceType).map((a) => ({ label: a.label, value: a.value }));
 
@@ -48,7 +48,7 @@ function expiryLabel(
 }
 
 /** Who may do what to one resource. The body of the Share dialog, split out so the
- *  list's own permissions can live inside List settings while records and forms
+ *  table's own permissions can live inside Table settings while records and forms
  *  still open it as a dialog of its own. */
 export function SharePanel({
   resourceType,
@@ -200,8 +200,8 @@ export function SharePanel({
 
       {/* Adding someone is one step with several parts, so it sits in a panel of
           its own. Loose on the dialog, its picker, its four presets, its action
-          list, its expiry and its Add button read as six unrelated controls
-          between the checkbox above and the list below. */}
+          table, its expiry and its Add button read as six unrelated controls
+          between the checkbox above and the table below. */}
       <FormSection title="Add people or groups">
         <div className="inset-panel flex flex-col gap-3">
           <Dropdown
@@ -235,7 +235,7 @@ export function SharePanel({
 
           <Field label="Can">
             {/* The presets are the answer almost every time, so they lead and the
-                action list is the way to depart from one — quiet, small buttons
+                action table is the way to depart from one — quiet, small buttons
                 rather than four outlined blocks competing with Add. */}
             <div className="flex flex-wrap items-center gap-1">
               {presetsFor(resourceType).map((preset) => {
@@ -300,7 +300,7 @@ export function SharePanel({
           />
         )}
         {grants.data && grants.data.length > 0 && (
-          <div className="row-list">
+          <div className="row-table">
             {grants.data.map((grant) => {
               const isUser = !!grant.user_uuid;
               const name = isUser ? grant.user_username : grant.group_name;
@@ -308,7 +308,7 @@ export function SharePanel({
               const uuid = (grant.user_uuid ?? grant.group_uuid)!;
               const expiry = expiryLabel(grant.expires_at);
               return (
-                <div key={grant.uuid} className="row-list-item flex-col !items-stretch gap-2">
+                <div key={grant.uuid} className="row-table-item flex-col !items-stretch gap-2">
                   <div className="flex items-center gap-2">
                     <span className="entity-icon is-muted" style={{ width: "1.75rem", height: "1.75rem", fontSize: "0.8rem" }} aria-hidden>
                       <i className={isUser ? "pi pi-user" : "pi pi-users"} />

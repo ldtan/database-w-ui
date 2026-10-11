@@ -9,7 +9,7 @@ import { EmptyState } from "../../components/EmptyState";
 import { SkeletonCards } from "../../components/Skeleton";
 import { fullName, useMyPerson } from "../../lib/people";
 import { useOnboarding } from "../onboarding/OnboardingProvider";
-import type { ListRead, Workspace } from "../../lib/types";
+import type { TableRead, Workspace } from "../../lib/types";
 
 /**
  * The home page: a friendly landing that greets you, shows how much you already
@@ -17,7 +17,7 @@ import type { ListRead, Workspace } from "../../lib/types";
  * going next — including the Guide for anyone new.
  *
  * Everything here is a shortcut into pages that already exist; the dashboard owns
- * no data of its own. Counts and previews come from the same list endpoints the
+ * no data of its own. Counts and previews come from the same table endpoints the
  * Workspaces page uses (just a small page of each), so they cost one light request
  * apiece and never block the greeting from rendering.
  */
@@ -97,7 +97,7 @@ function ActionCard({
   );
 }
 
-/** A compact row linking into a workspace or a shared list. */
+/** A compact row linking into a workspace or a shared table. */
 function LinkCard({
   to,
   icon,
@@ -163,9 +163,9 @@ export function DashboardPage() {
     queryFn: () => api.getPage<Workspace>(`/workspaces/?skip=0&limit=${PREVIEW}`),
   });
   const shared = useQuery({
-    queryKey: ["lists", "shared", "overview", PREVIEW],
+    queryKey: ["tables", "shared", "overview", PREVIEW],
     queryFn: () =>
-      api.getPage<ListRead>(`/lists/?shared=true&skip=0&limit=${PREVIEW}`),
+      api.getPage<TableRead>(`/tables/?shared=true&skip=0&limit=${PREVIEW}`),
   });
 
   const workspaceItems = workspaces.data?.items ?? [];
@@ -183,7 +183,7 @@ export function DashboardPage() {
           </h1>
           <p style={{ color: "var(--text-muted)", maxWidth: "44rem" }}>
             Build flexible databases without writing code — organise everything
-            into workspaces, fill lists with records, then filter, share, and
+            into workspaces, fill tables with records, then filter, share, and
             export.
           </p>
           {person.data && (
@@ -224,7 +224,7 @@ export function DashboardPage() {
           icon="pi pi-share-alt"
           value={sharedTotal}
           label={
-            sharedTotal === 1 ? "list shared with you" : "lists shared with you"
+            sharedTotal === 1 ? "table shared with you" : "tables shared with you"
           }
           loading={shared.isLoading}
         />
@@ -252,7 +252,7 @@ export function DashboardPage() {
           <EmptyState
             icon="pi pi-th-large"
             title="No workspaces yet"
-            text="A workspace is a folder that holds your lists — create your first one to get started."
+            text="A workspace is a folder that holds your tables — create your first one to get started."
             action={
               <div className="flex flex-wrap gap-2 justify-center">
                 <Link to="/workspaces" className="no-underline">
@@ -272,7 +272,7 @@ export function DashboardPage() {
                 to={`/workspaces/${ws.uuid}`}
                 icon={ws.is_system ? "pi pi-inbox" : "pi pi-th-large"}
                 title={ws.display_name}
-                sub={ws.is_system ? "Lists transferred to you" : ws.name}
+                sub={ws.is_system ? "Tables transferred to you" : ws.name}
               />
             ))}
           </div>
@@ -297,16 +297,16 @@ export function DashboardPage() {
             }
           />
           <div className="card-grid">
-            {sharedItems.map((list) => (
+            {sharedItems.map((table) => (
               <LinkCard
-                key={list.uuid}
-                to={`/lists/${list.uuid}`}
+                key={table.uuid}
+                to={`/tables/${table.uuid}`}
                 icon="pi pi-table"
-                title={list.display_name}
+                title={table.display_name}
                 sub={
-                  list.owner_username
-                    ? `owned by ${list.owner_username}`
-                    : list.name
+                  table.owner_username
+                    ? `owned by ${table.owner_username}`
+                    : table.name
                 }
               />
             ))}
@@ -321,8 +321,8 @@ export function DashboardPage() {
           <ActionCard
             to="/workspaces"
             icon="pi pi-th-large"
-            title="Workspaces & lists"
-            desc="Create workspaces, build lists, and add your records."
+            title="Workspaces & tables"
+            desc="Create workspaces, build tables, and add your records."
           />
           <ActionCard
             to="/guide"

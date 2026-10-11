@@ -432,7 +432,7 @@ export type TemporalStatus = {
 };
 
 /** How each type describes itself. `noun` is lifted verbatim from `_TEMPORAL` in
- *  backend/src/lists/columns/validation.py, so the line under the box and the 400
+ *  backend/src/tables/columns/validation.py, so the line under the box and the 400
  *  behind it say the same words. */
 const SHAPE: Record<string, { noun: string; example: string; thing: string }> = {
   date: {

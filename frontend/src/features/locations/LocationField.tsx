@@ -10,7 +10,7 @@
  * anything Leaflet owns.
  *
  * Loaded lazily (`import("leaflet")`), because the library and its CSS are ~150 kB
- * that only somebody editing a location column ever needs, and most lists have no
+ * that only somebody editing a location column ever needs, and most tables have no
  * such column at all.
  *
  * Tiles are fetched by the browser straight from OpenStreetMap, with the
@@ -104,7 +104,7 @@ export function LocationField({
   }
 
   // Create the map once. Leaflet is loaded here rather than imported at the top so
-  // the bundle only pays for it on a list that has a location column.
+  // the bundle only pays for it on a table that has a location column.
   useEffect(() => {
     let cancelled = false;
     let map: LeafletMap | null = null;

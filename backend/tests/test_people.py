@@ -168,7 +168,7 @@ async def test_birth_date_cannot_be_in_the_future(make_client, session_factory):
 
 async def test_prefix_and_suffix_round_trip(client):
     """A field added to PersonBase must actually reach the row — `create` used to
-    list its columns by hand, so a new one was accepted by the API and dropped."""
+    table its columns by hand, so a new one was accepted by the API and dropped."""
     created = await client.post(
         "/api/people/",
         json={

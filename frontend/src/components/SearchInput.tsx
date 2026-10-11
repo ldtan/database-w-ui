@@ -19,7 +19,7 @@ interface Props {
  * plus a hand-counted `pl-9` to clear an icon the reset had not made room for.
  * They are all the same control, so it is one component — and one that can then
  * afford the clear button none of them had, which is otherwise select-all-then-
- * delete every time you want the whole list back.
+ * delete every time you want the whole table back.
  */
 export function SearchInput({
   value,

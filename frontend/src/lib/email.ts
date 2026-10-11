@@ -8,7 +8,7 @@
  *  submit it.
  */
 
-// The same check as `_EMAIL_RE` in backend/src/lists/columns/validation.py, and
+// The same check as `_EMAIL_RE` in backend/src/tables/columns/validation.py, and
 // deliberately as loose: one `@`, something either side, a dot in the host, no
 // whitespace. Kept in step with it — a stricter rule here would reject a value the
 // server accepts and refuse to render a cell that is legitimately stored.

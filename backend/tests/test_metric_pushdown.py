@@ -1,7 +1,7 @@
 """Metrics answered by Postgres instead of by a Python scan.
 
-`src.lists.metrics.pushdown` compiles the common aggregate shapes into SQL so a
-whole-list total costs no per-record Python. That is only worth having if the two
+`src.tables.metrics.pushdown` compiles the common aggregate shapes into SQL so a
+whole-table total costs no per-record Python. That is only worth having if the two
 paths are indistinguishable, so the load-bearing test here is the equivalence
 one: every formula is asked twice — once compiled, once with the compiler
 disabled — and the answers must match exactly. A performance change that alters a
@@ -13,7 +13,7 @@ the two visible consequences of compiling (a true `row_count`, and no cap).
 import pytest
 import pytest_asyncio
 
-from src.lists.metrics import pushdown, services
+from src.tables.metrics import pushdown, services
 
 from test_metrics import add_metric, value_of  # noqa: F401  (shared helpers)
 
@@ -25,18 +25,18 @@ def no_pushdown(monkeypatch):
 
 
 @pytest_asyncio.fixture
-async def ledger(client, list_uuid, add_column):
+async def ledger(client, table_uuid, add_column):
     """Numbers, text, a calculated column, and rows that exercise the edges.
 
     One record leaves `qty` empty and one leaves `note` empty, because "a blank is
     skipped, never counted as zero" is the rule most likely to drift between an
     accumulator and a SQL aggregate.
     """
-    qty = await add_column(list_uuid, name="qty", display_name="Qty", type="number")
-    price = await add_column(list_uuid, name="price", display_name="Price", type="number")
-    note = await add_column(list_uuid, name="note", display_name="Note", type="text")
+    qty = await add_column(table_uuid, name="qty", display_name="Qty", type="number")
+    price = await add_column(table_uuid, name="price", display_name="Price", type="number")
+    note = await add_column(table_uuid, name="note", display_name="Note", type="text")
     line = await add_column(
-        list_uuid,
+        table_uuid,
         name="line",
         display_name="Line",
         type="calculated",
@@ -48,13 +48,13 @@ async def ledger(client, list_uuid, add_column):
         {qty: 1, price: 10, note: None},
         {qty: None, price: 7, note: "fourth"},
     ):
-        resp = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": values})
+        resp = await client.post(f"/api/tables/{table_uuid}/records/", json={"data": values})
         assert resp.status_code == 201, resp.text
-    return {"list": list_uuid, "qty": qty, "price": price, "note": note, "line": line}
+    return {"table": table_uuid, "qty": qty, "price": price, "note": note, "line": line}
 
 
-async def values(client, list_uuid):
-    resp = await client.get(f"/api/lists/{list_uuid}/metrics/values")
+async def values(client, table_uuid):
+    resp = await client.get(f"/api/tables/{table_uuid}/metrics/values")
     assert resp.status_code == 200, resp.text
     return resp.json()
 
@@ -100,10 +100,10 @@ EQUIVALENT = [
 @pytest.mark.parametrize("formula,expected", EQUIVALENT)
 async def test_compiled_answer_matches_the_scan(client, ledger, formula, expected):
     """The whole bargain: same question, same answer, whichever path runs it."""
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "m", formula)).status_code == 201
+    table = ledger["table"]
+    assert (await add_metric(client, table, "m", formula)).status_code == 201
 
-    compiled = await values(client, lst)
+    compiled = await values(client, table)
     assert value_of(compiled, "m") == expected
 
     # Now the same request with the compiler disabled. Done through the module
@@ -111,7 +111,7 @@ async def test_compiled_answer_matches_the_scan(client, ledger, formula, expecte
     original = pushdown.compile_all
     pushdown.compile_all = lambda *args, **kwargs: None
     try:
-        scanned = await values(client, lst)
+        scanned = await values(client, table)
     finally:
         pushdown.compile_all = original
     assert value_of(scanned, "m") == expected
@@ -125,7 +125,7 @@ async def test_the_formulas_above_really_do_compile(ledger):
     EQUIVALENT would still pass — both runs would be the scan. This asserts the
     first half was in fact the compiled path.
     """
-    from src.lists.metrics import aggregate
+    from src.tables.metrics import aggregate
 
     columns = {
         name: _FakeColumn(name)
@@ -140,7 +140,7 @@ class _FakeColumn:
     """The three attributes `pushdown` reads off a column."""
 
     def __init__(self, name, type_=None, config=None):
-        from src.lists.columns.enums import ColumnType
+        from src.tables.columns.enums import ColumnType
 
         self.name = name
         self.uuid = "00000000-0000-0000-0000-00000000000f"
@@ -156,7 +156,7 @@ class _FakeColumn:
 
 
 def _compiles(formula: str, columns=None) -> bool:
-    from src.lists.metrics import aggregate
+    from src.tables.metrics import aggregate
 
     columns = columns or {n: _FakeColumn(n) for n in ("qty", "price", "note")}
     return pushdown.compile_all([aggregate.parse(formula)], columns) is not None
@@ -187,7 +187,7 @@ def test_these_stay_on_the_scan(formula):
 def test_a_calculated_column_is_never_compiled():
     """Its stored value is an index that may lag a formula edit, so a total has to
     recompute it per record rather than sum where it sits."""
-    from src.lists.columns.enums import ColumnType
+    from src.tables.columns.enums import ColumnType
 
     columns = {
         "qty": _FakeColumn("qty"),
@@ -206,7 +206,7 @@ def test_a_multiple_column_is_never_compiled():
 def test_one_uncompilable_metric_puts_the_whole_strip_on_the_scan():
     """All-or-nothing. Two cards answered over two different record sets — one
     capped, one not — is worse than both being slow."""
-    from src.lists.metrics import aggregate
+    from src.tables.metrics import aggregate
 
     columns = {n: _FakeColumn(n) for n in ("qty", "note")}
     formulas = [aggregate.parse("SUM(qty)"), aggregate.parse("MEDIAN(qty)")]
@@ -215,9 +215,9 @@ def test_one_uncompilable_metric_puts_the_whole_strip_on_the_scan():
 
 async def test_a_calculated_metric_still_answers_via_the_scan(client, ledger):
     """The fallback is a fallback, not a refusal: the number still arrives."""
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "total_line", "SUM(line)")).status_code == 201
-    assert value_of(await values(client, lst), "total_line") == 45
+    table = ledger["table"]
+    assert (await add_metric(client, table, "total_line", "SUM(line)")).status_code == 201
+    assert value_of(await values(client, table), "total_line") == 45
 
 
 # --------------------------------------------------------------------------
@@ -226,9 +226,9 @@ async def test_a_calculated_metric_still_answers_via_the_scan(client, ledger):
 
 
 async def test_row_count_is_the_true_count_and_nothing_is_truncated(client, ledger):
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "m", "SUM(qty)")).status_code == 201
-    payload = await values(client, lst)
+    table = ledger["table"]
+    assert (await add_metric(client, table, "m", "SUM(qty)")).status_code == 201
+    payload = await values(client, table)
     assert payload["row_count"] == 4
     assert payload["truncated"] is False
 
@@ -240,10 +240,10 @@ async def test_the_compiled_path_ignores_the_scan_row_limit(client, ledger, monk
     truncated; the compiled path answers over all four and does not.
     """
     monkeypatch.setattr(services, "METRIC_ROW_LIMIT", 1)
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "m", "SUM(qty)")).status_code == 201
+    table = ledger["table"]
+    assert (await add_metric(client, table, "m", "SUM(qty)")).status_code == 201
 
-    payload = await values(client, lst)
+    payload = await values(client, table)
     assert value_of(payload, "m") == 8
     assert payload["row_count"] == 4
     assert payload["truncated"] is False
@@ -251,10 +251,10 @@ async def test_the_compiled_path_ignores_the_scan_row_limit(client, ledger, monk
 
 async def test_the_scan_still_honours_the_row_limit(client, ledger, monkeypatch, no_pushdown):
     monkeypatch.setattr(services, "METRIC_ROW_LIMIT", 1)
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "m", "SUM(qty)")).status_code == 201
+    table = ledger["table"]
+    assert (await add_metric(client, table, "m", "SUM(qty)")).status_code == 201
 
-    payload = await values(client, lst)
+    payload = await values(client, table)
     assert payload["row_count"] == 1
     assert payload["truncated"] is True
 
@@ -266,36 +266,36 @@ async def test_the_scan_still_honours_the_row_limit(client, ledger, monkeypatch,
 
 async def test_a_filter_narrows_the_compiled_answer(client, ledger):
     """The compiled query is built on `visible_stmt`, so the filters still apply."""
-    lst, price = ledger["list"], ledger["price"]
-    assert (await add_metric(client, lst, "m", "SUM(qty)")).status_code == 201
+    table, price = ledger["table"], ledger["price"]
+    assert (await add_metric(client, table, "m", "SUM(qty)")).status_code == 201
 
     filters = (
         '{"match":"all","conditions":[{"column_uuid":"%s","operator":"=","value":10}]}'
         % price
     )
-    resp = await client.get(f"/api/lists/{lst}/metrics/values", params={"filters": filters})
+    resp = await client.get(f"/api/tables/{table}/metrics/values", params={"filters": filters})
     assert resp.status_code == 200, resp.text
     assert value_of(resp.json(), "m") == 3  # the two rows priced 10: qty 2 and 1
     assert resp.json()["row_count"] == 2
 
 
 async def test_a_search_narrows_the_compiled_answer(client, ledger):
-    lst = ledger["list"]
-    assert (await add_metric(client, lst, "m", "COUNT()")).status_code == 201
+    table = ledger["table"]
+    assert (await add_metric(client, table, "m", "COUNT()")).status_code == 201
 
-    resp = await client.get(f"/api/lists/{lst}/metrics/values", params={"q": "second"})
+    resp = await client.get(f"/api/tables/{table}/metrics/values", params={"q": "second"})
     assert resp.status_code == 200, resp.text
     assert value_of(resp.json(), "m") == 1
 
 
-async def test_an_empty_list_totals_to_zero_not_blank(client, list_uuid, add_column):
+async def test_an_empty_table_totals_to_zero_not_blank(client, table_uuid, add_column):
     """`SUM` of no records is 0 on both paths — SQL's own answer there is NULL,
     which would render as an empty card."""
-    await add_column(list_uuid, name="qty", display_name="Qty", type="number")
-    assert (await add_metric(client, list_uuid, "total", "SUM(qty)")).status_code == 201
-    assert (await add_metric(client, list_uuid, "mean", "AVG(qty)")).status_code == 201
+    await add_column(table_uuid, name="qty", display_name="Qty", type="number")
+    assert (await add_metric(client, table_uuid, "total", "SUM(qty)")).status_code == 201
+    assert (await add_metric(client, table_uuid, "mean", "AVG(qty)")).status_code == 201
 
-    payload = await values(client, list_uuid)
+    payload = await values(client, table_uuid)
     assert payload["row_count"] == 0
     assert value_of(payload, "total") == 0
     assert value_of(payload, "mean") is None  # an average of nothing is not zero

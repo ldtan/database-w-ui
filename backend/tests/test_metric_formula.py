@@ -9,7 +9,7 @@ in a SUM.
 import pytest
 
 from src.core.exceptions import ValidationError
-from src.lists.metrics import aggregate
+from src.tables.metrics import aggregate
 
 
 def value_of(source, rows):
@@ -200,7 +200,7 @@ def test_wrong_arity_is_refused():
 )
 def test_there_is_no_escape_hatch(source):
     """Everything the row language refuses stays refused here: wrapping an
-    expression in an aggregate must not be a way around the allow-list."""
+    expression in an aggregate must not be a way around the allow-table."""
     with pytest.raises(ValidationError):
         aggregate.parse(source)
 
@@ -222,7 +222,7 @@ def test_column_refs_reports_the_names_the_formula_reads():
 
 
 def test_one_pass_answers_every_metric_over_the_same_records():
-    """Several metrics share a scan, which is what lets a list be read once
+    """Several metrics share a scan, which is what lets a table be read once
     however many cards it carries — and is why they always agree with each other."""
     formulas = [aggregate.parse(s) for s in ("SUM(qty)", "COUNT()", "AVG(price)")]
     evaluator = aggregate.MetricEvaluator(formulas)

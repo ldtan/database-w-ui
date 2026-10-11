@@ -22,7 +22,7 @@ import { TemporalInput } from "../records/TemporalInput";
 import { NO_VALUE_OPS, OPERATORS } from "./operators";
 
 interface Props {
-  listUuid: string;
+  tableUuid: string;
   columns: Column[];
   conjunction: "and" | "or";
   onConjunctionChange: (value: "and" | "or") => void;
@@ -44,7 +44,7 @@ interface Props {
  * what has been typed into it.
  */
 export function FilterConditionsEditor({
-  listUuid,
+  tableUuid,
   columns,
   conjunction,
   onConjunctionChange,
@@ -184,7 +184,7 @@ export function FilterConditionsEditor({
               ) : col?.type === "lookup" ? (
                 // Same: a lookup cell stores a target-row uuid, not its label.
                 <LookupFilterValue
-                  listUuid={listUuid}
+                  tableUuid={tableUuid}
                   column={col}
                   value={cond.value}
                   onChange={(v) => update(i, { value: v })}
@@ -214,11 +214,11 @@ export function FilterConditionsEditor({
                 onConditionsChange(conditions.filter((_, j) => j !== i))
               }
             />
-            {/* A multi-valued cell is compared as its whole stored list, so `is`
+            {/* A multi-valued cell is compared as its whole stored table, so `is`
                 and `is not` ask whether the record picked *exactly that set* —
                 which reads as "matches nothing" to anyone who meant "has this
                 one". `contains` is the nearest thing the filter language has to
-                element-wise matching, and it searches the serialized list, so it
+                element-wise matching, and it searches the serialized table, so it
                 is a substring match: "Arts" also finds "Martial Arts". Said here
                 rather than fixed, because real per-element operators are their
                 own piece of work (known-gaps.md). */}
@@ -226,7 +226,7 @@ export function FilterConditionsEditor({
               <p className="field-hint w-full">
                 {cond.operator === "contains" ||
                 cond.operator === "does_not_contain"
-                  ? `“${col.display_name}” holds several values, so this matches anywhere in the list — including part of a longer option.`
+                  ? `“${col.display_name}” holds several values, so this matches anywhere in the table — including part of a longer option.`
                   : `“${col.display_name}” holds several values, so this asks for that exact set. Use “contains” to match records holding one of them.`}
               </p>
             )}

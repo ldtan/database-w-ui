@@ -1,7 +1,7 @@
 /**
  * What each picture in the guide shows — generated, do not edit.
  *
- * Written by `scripts/capture-guide.mjs` from its own `SHOTS` list, which is
+ * Written by `scripts/capture-guide.mjs` from its own `SHOTS` table, which is
  * also what took the images in `public/guide/`. Run `npm run capture:guide` to
  * rebuild both together; editing this by hand puts a caption under a picture that
  * nothing else agrees with.
@@ -24,19 +24,19 @@ export const FIGURES: Record<string, Figure> = {
     caption: "Home, with the strip on the left. It stays there wherever you go.",
   },
   "nav-tree": {
-    alt: "The navigation strip, with workspaces expanded to show the lists inside.",
-    caption: "Click the arrow beside a workspace to see its lists; click the name to open the workspace itself.",
+    alt: "The navigation strip, with workspaces expanded to show the tables inside.",
+    caption: "Click the arrow beside a workspace to see its tables; click the name to open the workspace itself.",
   },
   "workspaces": {
     alt: "The Workspaces page, showing workspace cards and the New workspace button.",
     caption: "Your workspaces. “New workspace” is at the top right.",
   },
-  "lists": {
-    alt: "A workspace opened, showing its lists as cards with actions on each.",
-    caption: "Inside a workspace. Each list card carries share, move, duplicate, rename and delete.",
+  "tables": {
+    alt: "A workspace opened, showing its tables as cards with actions on each.",
+    caption: "Inside a workspace. Each table card carries share, move, duplicate, rename and delete.",
   },
   "columns": {
-    alt: "The Columns tab of a list's settings, listing each column with its type.",
+    alt: "The Columns tab of a table's settings, listing each column with its type.",
     caption: "Settings → Columns. Every column, its short name in brackets, and the buttons that change it.",
   },
   "add-column": {
@@ -49,11 +49,11 @@ export const FIGURES: Record<string, Figure> = {
   },
   "formula": {
     alt: "The Add column dialog with Calculated chosen, showing the Formula box and the columns it may name.",
-    caption: "A calculated column holds a formula. The dialog lists the short names you are allowed to use.",
+    caption: "A calculated column holds a formula. The dialog tables the short names you are allowed to use.",
   },
   "records": {
-    alt: "The Contacts list, showing records in a table.",
-    caption: "A list with records in it — the screen you will spend most time on.",
+    alt: "The Contacts table, showing records in a table.",
+    caption: "A table with records in it — the screen you will spend most time on.",
   },
   "add-record": {
     alt: "The Add record dialog, with a field per column and required ones starred.",
@@ -69,18 +69,18 @@ export const FIGURES: Record<string, Figure> = {
   },
   "toolbar": {
     alt: "The toolbar above the records: view, columns, filter, group, sort, metrics and search.",
-    caption: "The bar above your records. Everything here changes how you are looking, not what the list is.",
+    caption: "The bar above your records. Everything here changes how you are looking, not what the table is.",
   },
   "filter": {
     alt: "The filter dialog, with one condition made of a column, an operator and a value.",
     caption: "A filter is one or more conditions, matched all or any.",
   },
   "views": {
-    alt: "The view dropdown open, listing the saved views of a list.",
+    alt: "The view dropdown open, listing the saved views of a table.",
     caption: "Saved ways of looking. The “+” beside it makes a new one.",
   },
   "forms": {
-    alt: "The Forms tab of a list's settings, with a row per field.",
+    alt: "The Forms tab of a table's settings, with a row per field.",
     caption: "Settings → Forms. Tick what appears, tick what can be typed into, and reorder.",
   },
   "metrics": {
@@ -93,10 +93,10 @@ export const FIGURES: Record<string, Figure> = {
   },
   "transfer": {
     alt: "The move-or-transfer dialog, offering another workspace or another person.",
-    caption: "Move a list to another workspace, or hand it to somebody else.",
+    caption: "Move a table to another workspace, or hand it to somebody else.",
   },
   "duplicate": {
-    alt: "The duplicate-list dialog, with the option to copy the records too.",
+    alt: "The duplicate-table dialog, with the option to copy the records too.",
     caption: "Duplicating takes the structure; the records are a tick box.",
   },
   "import-export": {

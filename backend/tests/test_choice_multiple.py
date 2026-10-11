@@ -18,11 +18,11 @@ carries the default across the two shapes rather than leaving it behind.
 import pytest
 
 
-async def _column(client, list_uuid: str, name: str = "status", **config):
+async def _column(client, table_uuid: str, name: str = "status", **config):
     """Create a choice column, returning the response rather than the uuid: half
     of these expect a refusal."""
     return await client.post(
-        f"/api/lists/{list_uuid}/columns/",
+        f"/api/tables/{table_uuid}/columns/",
         json={
             "name": name,
             "display_name": name.title(),
@@ -32,42 +32,42 @@ async def _column(client, list_uuid: str, name: str = "status", **config):
     )
 
 
-async def test_a_list_default_lands_on_a_record_left_blank(client, list_uuid):
-    resp = await _column(client, list_uuid, multiple=True, default=["Todo", "Doing"])
+async def test_a_list_default_lands_on_a_record_left_blank(client, table_uuid):
+    resp = await _column(client, table_uuid, multiple=True, default=["Todo", "Doing"])
     assert resp.status_code == 201, resp.text
     col = resp.json()["uuid"]
 
-    created = await client.post(f"/api/lists/{list_uuid}/items/", json={"data": {}})
+    created = await client.post(f"/api/tables/{table_uuid}/records/", json={"data": {}})
     assert created.status_code == 201, created.text
     assert created.json()["data"][col] == ["Todo", "Doing"]
 
 
 async def test_a_bare_string_default_is_refused_on_a_multiple_column(
-    client, list_uuid
+    client, table_uuid
 ):
     """The reason the dialog holds a separate piece of state for this shape.
 
     A default is judged by the same validator a cell is, so on a `multiple` column
     it has to be a list — even though the write path would have coerced it.
     """
-    resp = await _column(client, list_uuid, multiple=True, default="Todo")
+    resp = await _column(client, table_uuid, multiple=True, default="Todo")
     assert resp.status_code == 400, resp.text
     assert "list of options" in resp.json()["detail"]
 
 
-async def test_a_list_default_is_refused_on_a_single_column(client, list_uuid):
+async def test_a_list_default_is_refused_on_a_single_column(client, table_uuid):
     """The mirror, so neither direction is left to chance."""
-    resp = await _column(client, list_uuid, default=["Todo"])
+    resp = await _column(client, table_uuid, default=["Todo"])
     assert resp.status_code == 400, resp.text
 
 
-async def test_every_entry_in_the_default_has_to_be_an_option(client, list_uuid):
-    resp = await _column(client, list_uuid, multiple=True, default=["Todo", "Nope"])
+async def test_every_entry_in_the_default_has_to_be_an_option(client, table_uuid):
+    resp = await _column(client, table_uuid, multiple=True, default=["Todo", "Nope"])
     assert resp.status_code == 400, resp.text
     assert "not a valid option" in resp.json()["detail"]
 
 
-async def test_an_off_list_default_is_allowed_with_allow_other(client, list_uuid):
+async def test_an_off_list_default_is_allowed_with_allow_other(client, table_uuid):
     """A write-in default is a *server* possibility on a multi-valued column.
 
     Pinned because the column dialog does not offer it — a MultiSelect takes no
@@ -77,7 +77,7 @@ async def test_an_off_list_default_is_allowed_with_allow_other(client, list_uuid
     """
     resp = await _column(
         client,
-        list_uuid,
+        table_uuid,
         multiple=True,
         allow_other=True,
         default=["Todo", "Waiting on legal"],
@@ -86,7 +86,7 @@ async def test_an_off_list_default_is_allowed_with_allow_other(client, list_uuid
 
 
 async def test_toggling_multiple_on_must_reshape_the_default_with_it(
-    client, list_uuid
+    client, table_uuid
 ):
     """The trap the dialog steers around, stated as a test.
 
@@ -95,18 +95,18 @@ async def test_toggling_multiple_on_must_reshape_the_default_with_it(
     a multi-valued column with a single-valued default, which is refused. Sending
     both together is the fix, and is what the dialog does.
     """
-    resp = await _column(client, list_uuid, default="Todo")
+    resp = await _column(client, table_uuid, default="Todo")
     assert resp.status_code == 201, resp.text
     col = resp.json()["uuid"]
 
     alone = await client.patch(
-        f"/api/lists/{list_uuid}/columns/{col}", json={"config": {"multiple": True}}
+        f"/api/tables/{table_uuid}/columns/{col}", json={"config": {"multiple": True}}
     )
     assert alone.status_code == 400, alone.text
     assert "list of options" in alone.json()["detail"]
 
     together = await client.patch(
-        f"/api/lists/{list_uuid}/columns/{col}",
+        f"/api/tables/{table_uuid}/columns/{col}",
         json={"config": {"multiple": True, "default": ["Todo"]}},
     )
     assert together.status_code == 200, together.text
@@ -116,7 +116,7 @@ async def test_toggling_multiple_on_must_reshape_the_default_with_it(
 @pytest.mark.parametrize(
     "value", [["Todo"], ["Todo", "Done"], []]
 )
-async def test_a_cell_holds_the_list_it_was_given(client, list_uuid, value):
+async def test_a_cell_holds_the_list_it_was_given(client, table_uuid, value):
     """Verbatim, including the empty one.
 
     `[]` is **not** collapsed to `None` the way `""` is — an empty list is how a
@@ -125,30 +125,30 @@ async def test_a_cell_holds_the_list_it_was_given(client, list_uuid, value):
     care, because `_is_empty` counts `[]` alongside `None` (see the required test
     below) and `coerce_shape` reads it back unchanged.
     """
-    resp = await _column(client, list_uuid, multiple=True)
+    resp = await _column(client, table_uuid, multiple=True)
     assert resp.status_code == 201, resp.text
     col = resp.json()["uuid"]
 
     created = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert created.status_code == 201, created.text
     assert created.json()["data"][col] == value
 
 
 @pytest.mark.parametrize("value", [[], None])
-async def test_an_empty_list_does_not_satisfy_required(client, list_uuid, value):
+async def test_an_empty_list_does_not_satisfy_required(client, table_uuid, value):
     """The other half of storing `[]` as itself: it still reads as blank.
 
     Both spellings have to be refused — the UI sends `null` for an emptied picker
     (`toStored`), while an import or a direct API call is at liberty to send `[]`.
     """
-    resp = await _column(client, list_uuid, multiple=True, required=True)
+    resp = await _column(client, table_uuid, multiple=True, required=True)
     assert resp.status_code == 201, resp.text
     col = resp.json()["uuid"]
 
     created = await client.post(
-        f"/api/lists/{list_uuid}/items/", json={"data": {col: value}}
+        f"/api/tables/{table_uuid}/records/", json={"data": {col: value}}
     )
     assert created.status_code == 400, created.text
     assert "required" in created.json()["detail"]

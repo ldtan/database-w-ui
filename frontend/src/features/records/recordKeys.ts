@@ -1,9 +1,9 @@
-/** Query keys for a list's records, and the namespace they share.
+/** Query keys for a table's records, and the namespace they share.
  *
- * `["items", listUuid]` is a *namespace* rather than a key. The grid's pages sit
+ * `["records", tableUuid]` is a *namespace* rather than a key. The grid's pages sit
  * under it and so do the metric cards' values (see `metricKeys`), because a
  * record changing goes stale for both at the same moment — so the one
- * `invalidateQueries({ queryKey: ["items", listUuid] })` spelled at a dozen call
+ * `invalidateQueries({ queryKey: ["records", tableUuid] })` spelled at a dozen call
  * sites refreshes everything that reads the records, and a call site that adds a
  * record gets it right without knowing what else is listening.
  *
@@ -12,14 +12,14 @@
  * an updater shaped like a page of records is also handed the metric values,
  * whose data has no `items` in it at all — and a throwing updater takes its
  * mutation down with it, since `onMutate` runs before `mutationFn`. So every
- * query under the namespace names itself in the segment after the list —
+ * query under the namespace names itself in the segment after the table —
  * `"page"` here, `"metrics"` there — and anything writing into the cache targets
  * that longer prefix instead of the namespace.
  */
 import type { FilterGroup } from "../../lib/types";
 
-export const recordPagesKey = (listUuid: string) =>
-  ["items", listUuid, "page"] as const;
+export const recordPagesKey = (tableUuid: string) =>
+  ["records", tableUuid, "page"] as const;
 
 /** How many records match — the paginator's total, keyed on the *scope* only.
  *
@@ -32,25 +32,25 @@ export const recordPagesKey = (listUuid: string) =>
  *
  * The scope it *is* keyed on — view, search, filter — matches `metricValuesKey`
  * exactly, and for the same reason: both ask "which records", and both go stale at
- * the moment the records do. Living under `["items", listUuid]` is what gets them
+ * the moment the records do. Living under `["records", tableUuid]` is what gets them
  * refreshed by the invalidations already spelled at every call site that writes a
  * record; `"count"` is what keeps this query distinguishable from those, per the
  * rule above.
  */
 export const recordCountKey = (
-  listUuid: string,
+  tableUuid: string,
   viewUuid: string | null,
   q: string,
   filters: FilterGroup,
-) => ["items", listUuid, "count", viewUuid, q, filters] as const;
+) => ["records", tableUuid, "count", viewUuid, q, filters] as const;
 
-/** Every count of this list, whatever scope it was asked in.
+/** Every count of this table, whatever scope it was asked in.
  *
  * The prefix `recordCountKey` sits under, for a caller that wants to refresh the
  * total without knowing which view, search or filter produced the one on screen —
- * `useLiveList`, which is handed a live event naming the list and nothing more.
+ * `useLiveTable`, which is handed a live event naming the table and nothing more.
  * Spelled here rather than inline at that call site so the segment after the uuid is
  * decided in exactly one place, which is the rule the docblock above states.
  */
-export const recordCountsKey = (listUuid: string) =>
-  ["items", listUuid, "count"] as const;
+export const recordCountsKey = (tableUuid: string) =>
+  ["records", tableUuid, "count"] as const;

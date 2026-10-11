@@ -5,29 +5,29 @@ import { Paginator } from "primereact/paginator";
 import { RowActions } from "../../components/RowActions";
 import { SkeletonRows } from "../../components/Skeleton";
 
-import type { Column, ListItem, PermissionAction } from "../../lib/types";
+import type { Column, TableRecord, PermissionAction } from "../../lib/types";
 import type { PrincipalType } from "../principals/PrincipalControls";
 import { renderCell } from "./renderCell";
 
 interface Props {
-  listUuid: string;
-  items: ListItem[];
-  /** Visible columns, in display order — the same list the grid renders. */
+  tableUuid: string;
+  items: TableRecord[];
+  /** Visible columns, in display order — the same table the grid renders. */
   columns: Column[];
   loading: boolean;
   /** What to show when there are no rows, decided by the page so that this layout
-   *  and the grid can never tell different stories about why the list is blank —
-   *  a search with no hits, a filter hiding everything, an empty list, or a failed
-   *  fetch. See `emptyContent` in ListDetailPage. */
+   *  and the grid can never tell different stories about why the table is blank —
+   *  a search with no hits, a filter hiding everything, an empty table, or a failed
+   *  fetch. See `emptyContent` in TableDetailPage. */
   empty: ReactNode;
   principalUuids: Record<PrincipalType, string[]>;
   lookupUuids: Map<string, string[]>;
-  selection: ListItem[];
-  onSelectionChange: (next: ListItem[]) => void;
+  selection: TableRecord[];
+  onSelectionChange: (next: TableRecord[]) => void;
   /** Null unless the view groups; cards then carry the same subheaders the grid does. */
   groupColumn: Column | null;
   /** Offset of the page on screen, owned by the page (it is the `skip` sent to
-   *  the server), so the cards and the grid page the same list the same way. */
+   *  the server), so the cards and the grid page the same table the same way. */
   first: number;
   pageSize: number;
   /** How many records match in total, not how many arrived — the paginator needs
@@ -35,13 +35,13 @@ interface Props {
   total: number;
   onPage: (first: number, rows: number) => void;
   can: (uuid: string, action: PermissionAction) => boolean;
-  /** Undefined when the list has no view form visible to this caller — the action
+  /** Undefined when the table has no view form visible to this caller — the action
    *  then drops out, exactly as it does in the grid. */
-  onView?: (item: ListItem) => void;
-  onEdit: (item: ListItem) => void;
-  onShare: (item: ListItem) => void;
-  onQr: (item: ListItem) => void;
-  onDelete: (item: ListItem) => void;
+  onView?: (item: TableRecord) => void;
+  onEdit: (item: TableRecord) => void;
+  onShare: (item: TableRecord) => void;
+  onQr: (item: TableRecord) => void;
+  onDelete: (item: TableRecord) => void;
 }
 
 /**
@@ -62,7 +62,7 @@ interface Props {
  * which paged only the records that had been fetched.
  */
 export function RecordCards({
-  listUuid,
+  tableUuid,
   items,
   columns,
   loading,
@@ -85,7 +85,7 @@ export function RecordCards({
 }: Props) {
   const selected = new Set(selection.map((item) => item.uuid));
 
-  function toggle(item: ListItem, checked: boolean) {
+  function toggle(item: TableRecord, checked: boolean) {
     onSelectionChange(
       checked
         ? [...selection, item]
@@ -118,7 +118,7 @@ export function RecordCards({
                   {renderCell(
                     groupColumn,
                     item,
-                    listUuid,
+                    tableUuid,
                     principalUuids,
                     lookupUuids,
                   )}
@@ -149,7 +149,7 @@ export function RecordCards({
                     {renderCell(
                       col,
                       item,
-                      listUuid,
+                      tableUuid,
                       principalUuids,
                       lookupUuids,
                     )}

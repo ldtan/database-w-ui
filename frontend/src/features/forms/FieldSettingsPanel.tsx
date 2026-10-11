@@ -4,7 +4,7 @@
  * These used to sit on the row itself — a checkbox, a second checkbox, a text box —
  * which was already 460px of columns that had to stay in step with a header, and
  * scrolled sideways to fit. A condition builder would not have fitted at any width, and
- * more to the point it should not have to: reordering fields is what the list is for,
+ * more to the point it should not have to: reordering fields is what the table is for,
  * and the settings are what you open one row to change.
  *
  * So the row keeps Order, Field and Shown, and this opens over it.
@@ -25,8 +25,8 @@ const EFFECTS = [
 ];
 
 interface Props {
-  listUuid: string;
-  /** Every column of this list, including this row's own — filtered below. */
+  tableUuid: string;
+  /** Every column of this table, including this row's own — filtered below. */
   columns: Column[];
   column: Column | undefined;
   row: FormFieldRow;
@@ -37,7 +37,7 @@ interface Props {
 }
 
 export function FieldSettingsPanel({
-  listUuid,
+  tableUuid,
   columns,
   column,
   row,
@@ -102,7 +102,7 @@ export function FieldSettingsPanel({
         <div className="flex flex-col gap-2 border-t pt-3">
           <span className="field-label">Only apply this field when…</span>
           <FilterConditionsEditor
-            listUuid={listUuid}
+            tableUuid={tableUuid}
             columns={testable}
             conjunction={condition?.when?.conjunction ?? "and"}
             onConjunctionChange={(conjunction) =>

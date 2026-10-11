@@ -196,9 +196,9 @@ describe("phoneCountries", () => {
   });
 
   it("puts the column's own country first and leaves the rest alphabetical", () => {
-    const list = phoneCountries(column({ default_region: "PH" }));
-    expect(list[0].value).toBe("PH");
-    const rest = list.slice(1).map((o) => o.label);
+    const table = phoneCountries(column({ default_region: "PH" }));
+    expect(table[0].value).toBe("PH");
+    const rest = table.slice(1).map((o) => o.label);
     expect([...rest].sort((a, b) => a.localeCompare(b))).toEqual(rest);
   });
 
@@ -209,7 +209,7 @@ describe("phoneCountries", () => {
   });
 
   it("hoists nothing when the default is not on offer", () => {
-    // A column can hold a default outside its own allow-list: the server refuses
+    // A column can hold a default outside its own allow-table: the server refuses
     // that config, but the dialog can be mid-edit and must not throw on it.
     expect(countryChoices(["US"], "PH").map((o) => o.value)).toEqual(["US"]);
   });

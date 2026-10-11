@@ -4,10 +4,10 @@
  *  laid out — the column picker, the payload request, the size advice and the print path
  *  are all shared, and splitting them would mean keeping two copies of each in step.
  *
- *  **The payload comes from the server** (`POST /lists/{uuid}/items/qr`), which is the whole
+ *  **The payload comes from the server** (`POST /tables/{uuid}/records/qr`), which is the whole
  *  reason this feature round-trips: a code's values have to be the ones the importer reads,
  *  and resolving a reference cell to that value needs the database and the caller's
- *  permissions on the target list. Building it from the grid would be a second
+ *  permissions on the target table. Building it from the grid would be a second
  *  implementation of a rule that already has one — and a subtly different one, since a
  *  group shows its display name on screen and exports its slug.
  */
@@ -24,7 +24,7 @@ import { api } from "../../lib/api";
 import { downloadBlob, downloadFile } from "../../lib/download";
 import { BULK_MAX } from "../../lib/limits";
 import { byteLength, encode, payloadText, type EncodedQr } from "../../lib/qr";
-import type { Column, ListItem, ListRead } from "../../lib/types";
+import type { Column, TableRecord, TableRead } from "../../lib/types";
 import {
   QrColumnPicker,
   resolveQrSelection,
@@ -32,7 +32,7 @@ import {
 } from "./QrColumnPicker";
 
 interface QrPayloadRow {
-  item_uuid: string;
+  record_uuid: string;
   payload: Record<string, unknown>;
 }
 
@@ -52,7 +52,7 @@ const SIZES = [
 const PRINTING = "qr-printing";
 
 export function QrCodeDialog({
-  listUuid,
+  tableUuid,
   lst,
   columns,
   items,
@@ -60,12 +60,12 @@ export function QrCodeDialog({
   visible,
   onHide,
 }: {
-  listUuid: string;
-  lst: ListRead | undefined;
+  tableUuid: string;
+  lst: TableRead | undefined;
   columns: Column[];
   /** One record, or the selection. The sheet layout kicks in past one. */
-  items: ListItem[];
-  /** `configure` on the list — gates *saving* the field choice, not making it. */
+  items: TableRecord[];
+  /** `configure` on the table — gates *saving* the field choice, not making it. */
   canConfigure: boolean;
   visible: boolean;
   onHide: () => void;
@@ -77,14 +77,14 @@ export function QrCodeDialog({
   const [size, setSize] = useState(35);
   const [showPayload, setShowPayload] = useState(false);
   // Whether the user has touched the ticks yet. Without it, the seeding effect below
-  // re-seeds from the list every time react-query hands back a new object and silently
+  // re-seeds from the table every time react-query hands back a new object and silently
   // undoes what they just chose — the same guard, for the same reason, as
   // `ImportExportDialog`'s `chosenByUser`.
   const chosenByUser = useRef(false);
   // The printable subtree, so `print` clones the node itself rather than
   // re-finding it by selector.
   const printRef = useRef<HTMLDivElement>(null);
-  // Whether `selection` reflects the list yet. The query below waits for it: without the
+  // Whether `selection` reflects the table yet. The query below waits for it: without the
   // gate it fires once on the initial empty selection — a request whose answer is thrown
   // away, and a code that flashes up carrying the wrong fields — and then again once the
   // saved choice arrives.
@@ -105,7 +105,7 @@ export function QrCodeDialog({
   const many = uuids.length > 1;
 
   const payloads = useQuery({
-    queryKey: ["qr-payloads", listUuid, uuids, selection],
+    queryKey: ["qr-payloads", tableUuid, uuids, selection],
     queryFn: async () => {
       // Chunked against the server's own cap, like every other bulk call in the app
       // (`BULK_MAX` mirrors `BULK_DELETE_MAX`). A selection past it is rare and a refusal
@@ -113,8 +113,8 @@ export function QrCodeDialog({
       const out: QrPayloadRow[] = [];
       for (let i = 0; i < uuids.length; i += BULK_MAX) {
         out.push(
-          ...(await api.post<QrPayloadRow[]>(`/lists/${listUuid}/items/qr`, {
-            item_uuids: uuids.slice(i, i + BULK_MAX),
+          ...(await api.post<QrPayloadRow[]>(`/tables/${tableUuid}/records/qr`, {
+            record_uuids: uuids.slice(i, i + BULK_MAX),
             columns: selection.columns,
             include_uuid: selection.includeUuid,
           })),
@@ -138,7 +138,7 @@ export function QrCodeDialog({
       try {
         const next = new Map<string, EncodedQr>();
         for (const row of rows) {
-          next.set(row.item_uuid, await encode(payloadText(row.payload)));
+          next.set(row.record_uuid, await encode(payloadText(row.payload)));
         }
         if (!cancelled) {
           setCodes(next);
@@ -147,7 +147,7 @@ export function QrCodeDialog({
       } catch (err) {
         // One over-long payload fails the batch, deliberately: every code on a sheet
         // carries the same fields, so if one record's values do not fit then the choice of
-        // fields is wrong for this list rather than for that record. Showing 39 codes and
+        // fields is wrong for this table rather than for that record. Showing 39 codes and
         // silently omitting the 40th is how somebody hands out a badge that does not exist.
         if (!cancelled) {
           setCodes(new Map());
@@ -162,7 +162,7 @@ export function QrCodeDialog({
 
   const rows = payloads.data ?? [];
   const first = rows[0];
-  const firstCode = first ? codes.get(first.item_uuid) : undefined;
+  const firstCode = first ? codes.get(first.record_uuid) : undefined;
   const dense = [...codes.values()].some((c) => c.dense);
 
   /** The size readout, measured on the **worst** code in the batch rather than the first.
@@ -173,7 +173,7 @@ export function QrCodeDialog({
   const worst = rows.reduce(
     (acc, row) => {
       const bytes = byteLength(payloadText(row.payload));
-      const version = codes.get(row.item_uuid)?.version ?? 0;
+      const version = codes.get(row.record_uuid)?.version ?? 0;
       return bytes > acc.bytes ? { bytes, version } : acc;
     },
     { bytes: 0, version: 0 },
@@ -187,7 +187,7 @@ export function QrCodeDialog({
       const value = row.payload[name];
       if (value !== null && value !== undefined && value !== "") return String(value);
     }
-    return row.item_uuid.slice(0, 8);
+    return row.record_uuid.slice(0, 8);
   }
 
   /** A caption as a filename. A record's value is arbitrary text and a download name is
@@ -312,10 +312,10 @@ export function QrCodeDialog({
           style={{ "--qr-size": `${size}mm` } as React.CSSProperties}
         >
           {rows.map((row) => {
-            const code = codes.get(row.item_uuid);
+            const code = codes.get(row.record_uuid);
             if (!code) return null;
             return (
-              <figure key={row.item_uuid} className="qr-cell">
+              <figure key={row.record_uuid} className="qr-cell">
                 <img src={code.dataUrl} alt={`QR code for ${caption(row)}`} />
                 <figcaption className="qr-caption">{caption(row)}</figcaption>
               </figure>
@@ -352,7 +352,7 @@ export function QrCodeDialog({
         description="Each code holds these as JSON. Fewer fields make a code easier to scan."
       >
         <QrColumnPicker
-          listUuid={listUuid}
+          tableUuid={tableUuid}
           columns={columns}
           selection={selection}
           onChange={(next) => {

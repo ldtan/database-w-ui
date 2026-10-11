@@ -73,8 +73,8 @@ class PermissionGrant(BaseModel):
         ),
         # Every collection-visibility filter asks the opposite question from the one
         # this table was indexed for: not "who may touch this resource" but "what may
-        # this principal touch". `workspace_view_filter`, `list_query_filter` and
-        # `item_view_filter` all select `resource_id` given a principal and a
+        # this principal touch". `workspace_view_filter`, `table_query_filter` and
+        # `record_view_filter` all select `resource_id` given a principal and a
         # resource_type.
         #
         # The unique indexes above can be used for that — resource_type does lead

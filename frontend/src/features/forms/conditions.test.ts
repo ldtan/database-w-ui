@@ -169,7 +169,7 @@ describe("conditionMet", () => {
 
   /** Empty means always, matching `apply_filters` on an empty filter group — so a
    *  half-built block is inert rather than hiding what it was meant to reveal. */
-  it("is true when the condition list is empty", () => {
+  it("is true when the condition table is empty", () => {
     expect(conditionMet(condition(), {}, COLUMNS)).toBe(true);
   });
 
@@ -301,8 +301,8 @@ describe("applyFieldConditions", () => {
 
   /**
    * The reason neither effect needed a change to `buildRecordData`: it already skips
-   * a field that is not enabled, and a dropped field was never in the list. So an
-   * unmet field's value is not sent, and since `PATCH /items/{uuid}` merges rather
+   * a field that is not enabled, and a dropped field was never in the table. So an
+   * unmet field's value is not sent, and since `PATCH /records/{uuid}` merges rather
    * than replaces, whatever the record already held there survives.
    */
   it.each(["hide", "disable"] as const)(

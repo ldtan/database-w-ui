@@ -1,8 +1,8 @@
 /**
- * Which column of a lookup's target list carries a row's label.
+ * Which column of a lookup's target table carries a row's label.
  *
  * A hand-kept mirror of the server's `display_column_key`
- * (`backend/src/lists/items/services.py`), which is the authority: the write
+ * (`backend/src/tables/records/services.py`), which is the authority: the write
  * path, the export formatter and the options endpoint all call it, so that the
  * three cannot disagree about what a label *is*. Nothing here feeds any of them.
  * This copy exists for one job — deciding which field of the "add a row" dialog
@@ -12,7 +12,7 @@
  *
  * The fallback chain is load-bearing all the same, and is the reason this is a
  * function rather than a property read: `primary_column` is only ever set by an
- * explicit PATCH and is nulled again when that column is deleted, so most lists
+ * explicit PATCH and is nulled again when that column is deleted, so most tables
  * have none at all. Stopping at it would leave the dialog unable to prefill for
  * the ordinary case.
  *
@@ -20,7 +20,7 @@
  */
 import type { Column } from "../../lib/types";
 
-/** A list's primary column, as `ListRead` publishes it — a link, not an id. */
+/** A table's primary column, as `TableRead` publishes it — a link, not an id. */
 export interface PrimaryColumnLink {
   uuid: string;
 }
@@ -29,11 +29,11 @@ export interface PrimaryColumnLink {
  * The uuid of the column to show (and to prefill), or null when the target has
  * nothing that could serve as a label.
  *
- * `columns` must be the target list's columns **as the API returned them**:
- * `ColumnService.list` orders by `(position, id)` and filters to the list's
+ * `columns` must be the target table's columns **as the API returned them**:
+ * `ColumnService.table` orders by `(position, id)` and filters to the table's
  * shape, so the first element is already the server's "first column" and
  * re-sorting here could only introduce a disagreement. A target whose schema is
- * refused — a list shared as a lookup target only — yields an empty array and
+ * refused — a table shared as a lookup target only — yields an empty array and
  * therefore null, which is correct: that caller cannot create rows there either.
  */
 export function resolveDisplayColumn(
@@ -49,7 +49,7 @@ export function resolveDisplayColumn(
   if (displayColumnUuid) return displayColumnUuid;
 
   // Only when it is still part of the shape. A deleted primary column nulls the
-  // list's pointer server-side, but a cached list payload can outlive that.
+  // table's pointer server-side, but a cached table payload can outlive that.
   if (primaryColumn && columns.some((c) => c.uuid === primaryColumn.uuid)) {
     return primaryColumn.uuid;
   }

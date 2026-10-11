@@ -3,7 +3,7 @@
 What this app costs to run, measured rather than guessed, and what that means for the
 deployment described in `deploy/render/README.md`.
 
-Measured 2026-08-01 against the seeded school demo (`src.demo.school`: 9 lists, ~740
+Measured 2026-08-01 against the seeded school demo (`src.demo.school`: 9 tables, ~740
 records, 16 users) on an AMD Ryzen 7 5700U. That core is roughly a cloud vCPU and
 probably a little faster, so **treat every number here as a best case** — the same code
 on Render is likely 10–30% worse.
@@ -35,13 +35,13 @@ Do not measure wall time — argon2 runs on four threads by default, so it burns
 |---|---|
 | `GET /health` | ~0 ms |
 | `GET auth/users/me` | 6 ms |
-| `GET lists/{u}/columns/` | 14 ms |
-| `GET lists/{u}/views/` | 20 ms |
-| `GET lists/{u}/items/?limit=25` | 23 ms |
-| `GET lists/{u}/items/?limit=100` | 29 ms |
-| `GET lists/{u}/metrics/values` | 28 ms (see "Metrics" below) |
-| `GET lists/{u}/items/?q=…` (search) | 106 ms |
-| **Opening a list** (list + columns + items + views + forms) | **98 ms** |
+| `GET tables/{u}/columns/` | 14 ms |
+| `GET tables/{u}/views/` | 20 ms |
+| `GET tables/{u}/records/?limit=25` | 23 ms |
+| `GET tables/{u}/records/?limit=100` | 29 ms |
+| `GET tables/{u}/metrics/values` | 28 ms (see "Metrics" below) |
+| `GET tables/{u}/records/?q=…` (search) | 106 ms |
+| **Opening a table** (table + columns + records + views + forms) | **98 ms** |
 | **`POST auth/tokens/login`** | **717 ms** |
 
 Reading is cheap and scales the way you would hope: `limit=100` costs only 26% more than
@@ -53,14 +53,14 @@ Everything else is a rounding error next to login.
 
 ## Metrics: the same total, on the app's CPU or on the database's
 
-The 28 ms above is the school demo's ~740 records, which says nothing about a large list.
-A metric is an aggregate over *every* record in scope, so its cost scales with the list —
+The 28 ms above is the school demo's ~740 records, which says nothing about a large table.
+A metric is an aggregate over *every* record in scope, so its cost scales with the table —
 and unlike the re-index below it runs on every request, on a timer, while someone is
 looking at the strip.
 
 `metrics/pushdown.py` compiles the common aggregate shapes into one SQL statement so
 Postgres computes them, and falls back to streaming the records into Python for the rest.
-Measured 2026-08-05, same machine and method, on a 100,000-record list with two number
+Measured 2026-08-05, same machine and method, on a 100,000-record table with two number
 columns (the scan's cap lifted so both paths cover the same records):
 
 | Formula | Scan — app CPU | Compiled — app CPU | Compiled — Postgres wall |
@@ -96,14 +96,14 @@ The compiled one is the more accurate of the two.
 
 ## Re-indexing a calculated column
 
-The one operation whose cost scales with the *list* rather than the page. A calculated
+The one operation whose cost scales with the *table* rather than the page. A calculated
 column's value is stored so Postgres can filter and sort on it, and a schema change — a
 formula edited, or a column one reads renamed or deleted — leaves that stored copy behind
-until `POST /lists/{uuid}/columns/recompute` or the nightly `recompute_calculated` rebuilds
+until `POST /tables/{uuid}/columns/recompute` or the nightly `recompute_calculated` rebuilds
 it. Nothing a person reads depends on it: reads recompute and overwrite the stored value, so
 a stale index misplaces a row in a sorted or filtered view but never shows a wrong number.
 
-Measured 2026-08-04, same machine and method, on a synthetic list with two calculated
+Measured 2026-08-04, same machine and method, on a synthetic table with two calculated
 columns per record (`qty * price` and a `CONCAT`), every row forced to rewrite:
 
 | | 20,000 records | 50,000 records |
@@ -119,13 +119,13 @@ Three things that table is meant to settle:
   `FORMULA_INLINE_MAX_RECORDS` threshold) is ~0.2 s of CPU; 500,000 — what a 1 GB database
   holds — is ~18 s of CPU, about three minutes of wall time on the free tier's 0.1 CPU.
 - **Memory is flat, not proportional.** 500-row batches are read, rewritten and released,
-  so a list ten times longer costs the same 2.8 MB. This is why there is no row ceiling:
-  a big list makes a slow job, not a failing one.
+  so a table ten times longer costs the same 2.8 MB. This is why there is no row ceiling:
+  a big table makes a slow job, not a failing one.
 - **The event loop is never blocked long.** Every batch awaits the database, so the longest
   stretch of uninterrupted Python is ~23 ms — comfortably inside the health check, so the
   instance is not restarted underneath a running re-index.
 
-A pass over a list that is *already* current costs ~0.026 ms per record and writes nothing,
+A pass over a table that is *already* current costs ~0.026 ms per record and writes nothing,
 because rows whose values already agree are skipped rather than rewritten with identical
 bytes. That is what makes running the nightly sweep unconditionally cheap.
 
@@ -145,14 +145,14 @@ whole job — read, convert, write both the new value and the original, retype t
 — inside **one transaction**. It used to stage the work in a hidden column between the
 two, and the gap that opened is what lost writes (known-gaps §11).
 
-Measured 2026-08-15, same machine and method, `text` → `number` over a list whose every
+Measured 2026-08-15, same machine and method, `text` → `number` over a table whose every
 cell converts:
 
 | | 5,000 records | 20,000 records | 50,000 records |
 |---|---|---|---|
 | `preview` app CPU | 78 ms | 297 ms | 859 ms |
 | `apply` app CPU | 125 ms | 438 ms | 1,219 ms |
-| **`apply` wall — the list is locked this long** | **0.3 s** | **1.4 s** | **3.5 s** |
+| **`apply` wall — the table is locked this long** | **0.3 s** | **1.4 s** | **3.5 s** |
 | CPU per record (apply) | 25 µs | 22 µs | 24 µs |
 
 Linear, so the per-record figure extrapolates, and the two numbers to read are the last
@@ -165,7 +165,7 @@ plan's share to get Render figures: on `starter` (0.5 CPU) the 50,000-record app
 ~2.4 s of CPU.
 
 **The wall time is the number that matters**, because it is how long every other writer
-to that list waits. The apply holds row locks on every record it has written until it
+to that table waits. The apply holds row locks on every record it has written until it
 commits, which is the price of the whole thing being atomic — and it is the right price
 for a point-of-no-return schema change, but it is a real cost and not a rounding error.
 Wall exceeds CPU by roughly 3× here because most of the gap is Postgres doing the
@@ -174,24 +174,24 @@ hold rather than worsen on the deployed plan.
 
 **`ROW_CEILING` stays at 50,000 on the strength of this.** A ~3.5 s lock locally implies
 something in the range of 7–10 s on `starter`, which is tolerable for an operation a
-person deliberately triggered and confirmed, on a list size the deployment has not come
-close to. If a list that big ever becomes plausible, the fix is a job that can hold the
+person deliberately triggered and confirmed, on a table size the deployment has not come
+close to. If a table that big ever becomes plausible, the fix is a job that can hold the
 lock outside a web request — not a return to staging, which is what the window bug was.
 
 Two things this does **not** cost. The preview is free to abandon: it creates no column,
 writes no value and reserves no name, so closing the dialog makes no request at all.
 And a refusal — a failed `required`/`unique` gate, or a record written by somebody else
 mid-apply — rolls back the entire transaction, so a conversion either happens or leaves
-the list exactly as it was.
+the table exactly as it was.
 
-## Cloning a list with its records
+## Cloning a table with its records
 
-The other operation that scales with the list rather than the page, and the only one that
-was ever a threat to the instance rather than to a response time. `POST /lists/{uuid}/clone`
+The other operation that scales with the table rather than the page, and the only one that
+was ever a threat to the instance rather than to a response time. `POST /tables/{uuid}/clone`
 with `with_records: true` used to load every source record as an ORM instance, build a
 second instance for each copy, and hold both until a single flush at the end.
 
-Measured 2026-08-04, same machine, on a synthetic list of three columns at ~1.9 kB per
+Measured 2026-08-04, same machine, on a synthetic table of three columns at ~1.9 kB per
 record, with RSS sampled every 10 ms from a separate thread *during* the call — reading it
 afterwards measures what survived garbage collection, which for the old version understated
 the peak by about 5×:
@@ -207,7 +207,7 @@ the peak by about 5×:
 - **This was an availability bug, not a slow endpoint.** 859 MB of peak growth cannot happen
   on a 512 MB instance; the process is killed and every user goes down with it. Even 20,000
   records put it at ~320 MB against a ~146 MB idle baseline. One request, from any user who
-  owns a list, was enough.
+  owns a table, was enough.
 - **Memory is now flat, not merely smaller** — the same 0.6 MB at both sizes, and the same
   at any size. The source is keyset-paged and each batch is copied by a single
   `INSERT ... SELECT` that remaps the column-uuid keys with `jsonb_object_agg`, so record
@@ -222,7 +222,7 @@ the peak by about 5×:
   was already in; a half-populated clone is not. Keeping the batches in one transaction is
   what leaves a failed clone with nothing behind.
 
-Wall time is still linear, and its dominant term is now `ix_list_items_data`, the GIN index
+Wall time is still linear, and its dominant term is now `ix_table_records_data`, the GIN index
 on `data`: every inserted row has to be indexed into it, which costs more than the heap
 insert and the key remap together. Extrapolating, 500,000 records — what a 1 GB database
 holds — is roughly 50 s here and correspondingly longer on the free tier. That is a slow
@@ -233,7 +233,7 @@ OOMed after telling the caller it had succeeded.
 
 ## Deleting records in bulk asked per record
 
-`POST /lists/{uuid}/items/bulk-delete` is not memory-shaped like the two above — its cost is
+`POST /tables/{uuid}/records/bulk-delete` is not memory-shaped like the two above — its cost is
 round trips. For each uuid it resolved the record, then asked whether the caller could delete
 it, which fetched their group membership and their grants afresh every time; then the service
 resolved every uuid a second time to soft-delete it one row at a time.
@@ -277,18 +277,18 @@ server-side cursor with `yield_per=1000`, and yields CSV a row at a time into a
 `StreamingResponse`. Labels resolve in batches of 500 on that same session — deliberately,
 since a second session would have each export holding two pooled connections and enough
 concurrent exports would deadlock the pool — with the resolver's cache evicting oldest-first
-past 50,000 entries. Memory is flat in the size of the list. `limit: null` means "the whole
-list", but the whole list streams, so what an unbounded export costs is time and bandwidth,
+past 50,000 entries. Memory is flat in the size of the table. `limit: null` means "the whole
+table", but the whole table streams, so what an unbounded export costs is time and bandwidth,
 not the instance. Nothing to fix.
 
 **Import was the opposite on every count.** It read the upload whole with `await file.read()`,
 decoded it whole, and for JSON parsed it whole again — so the memory cost was set by whatever
-was sent, before anything had looked at it. Then it inserted rows through the item service,
+was sent, before anything had looked at it. Then it inserted rows through the record service,
 several round trips apiece, with no ceiling on how many.
 
 Both ends are now capped: `MAX_UPLOAD_BYTES` (8 MB), checked *while* the upload is read in
 64 kB pieces rather than after, and `IMPORT_MAX_ROWS` (1,000). Both are settings rather than
-constants, and both importers — list records and user accounts — read the same two, since the
+constants, and both importers — table records and user accounts — read the same two, since the
 reasoning is identical either side. The batch sizes around them stay constants: they are
 shaped by round-trip latency and memory, not by anything a deployment has an opinion about,
 and their optimum is flat enough that there is no better value to find.
@@ -304,31 +304,31 @@ them reconciling which thousand rows already went in.
 
 Both tables were indexed for a question nobody was asking.
 
-Measured 2026-08-05 on a scratch database of 100,000 records spread over 50 lists (so one
-list is 1/50th of the table, which is what a real workspace looks like) and 50,000 grants
+Measured 2026-08-05 on a scratch database of 100,000 records spread over 50 tables (so one
+table is 1/50th of the table, which is what a real workspace looks like) and 50,000 grants
 over 2,000 users and 50 groups. `EXPLAIN (ANALYZE, BUFFERS)`, same session and same data
 with the indexes dropped and then created:
 
 | | before | after |
 |---|---|---|
-| Grid page — one list's live records, id order, `LIMIT 100` | 5.9 ms, 553 buffers | **0.29 ms** |
+| Grid page — one table's live records, id order, `LIMIT 100` | 5.9 ms, 553 buffers | **0.29 ms** |
 | Collection filter — grants for one principal and resource type | 1.0 ms, 44 buffers | **0.20 ms**, 4 buffers |
 
-**`list_items (list_id, id) WHERE deleted_at IS NULL`.** The grid orders by `id` —
+**`table_records (table_id, id) WHERE deleted_at IS NULL`.** The grid orders by `id` —
 `apply_sorts` appends it as the tiebreaker and it is the whole ordering when no sort is
-chosen. Given a `list_id` index that offers no order, the planner preferred the *primary
-key*, which is already in id order, and simply discarded the rows belonging to other lists:
+chosen. Given a `table_id` index that offers no order, the planner preferred the *primary
+key*, which is already in id order, and simply discarded the rows belonging to other tables:
 
 ```
-->  Index Scan using list_items_pkey on list_items
-      Filter: ((deleted_at IS NULL) AND (list_id = 1))
+->  Index Scan using table_records_pkey on table_records
+      Filter: ((deleted_at IS NULL) AND (table_id = 1))
       Rows Removed by Filter: 9850
 ```
 
 9,850 rows read and thrown away to return 100. What that cost tracks is not how large the
-list is but how *sparse* it is in the table — a workspace with many lists is worse per list,
+table is but how *sparse* it is in the table — a workspace with many tables is worse per table,
 not better — and `OFFSET` paging multiplies it per page, since page 50 discards fifty times
-as much. With `id` trailing `list_id` the scan is already in the right order and stops after
+as much. With `id` trailing `table_id` the scan is already in the right order and stops after
 100 rows.
 
 **`permission_grants (user_id, resource_type)` and `(group_id, resource_type)`, each partial
@@ -345,31 +345,31 @@ meant walking a whole fifth of the index:
 33 buffers to return nothing. Principal-first makes it 2. The resource-led index stays: grant
 management still asks the original question, "who may touch this resource".
 
-Neither index is free on writes, and `list_items` now carries two on `list_id`. The plain one
+Neither index is free on writes, and `table_records` now carries two on `table_id`. The plain one
 stays because the bin asks the opposite question — soft-deleted rows — which the partial index
 deliberately excludes. Against the GIN index on `data`, which every insert already pays for,
 both are noise.
 
 **When the planner actually takes it.** Re-measured 2026-08-05 against a second dataset, this
-time varying how sparse the list is in the table and A/B-ing the index in place:
+time varying how sparse the table is in the table and A/B-ing the index in place:
 
-| list's share of the table | index chosen | buffers | time |
+| table's share of the table | index chosen | buffers | time |
 |---|---|---|---|
-| 1% | **`ix_list_items_list_id_id`** | 44 | 0.04 ms (from 2.81 ms) |
-| 5% | `list_items_pkey`, 1,882 rows discarded | 408 | 0.39 ms |
-| 49% | `list_items_pkey`, 109 rows discarded | 71 | 0.06 ms |
+| 1% | **`ix_table_records_table_id_id`** | 44 | 0.04 ms (from 2.81 ms) |
+| 5% | `table_records_pkey`, 1,882 rows discarded | 408 | 0.39 ms |
+| 49% | `table_records_pkey`, 109 rows discarded | 71 | 0.06 ms |
 
-The index is ignored unless the list is sparse, and that is the planner being right rather
+The index is ignored unless the table is sparse, and that is the planner being right rather
 than wrong: reaching rows through it costs a random heap fetch each, which only beats walking
 the primary key in order once there are enough foreign rows to skip. Sparsity is the variable
 that decides it — which is the same thing the paragraph above says, now with the other side of
-the curve measured. A workspace with many lists is where this index earns its keep; a database
-with one big list will never use it, and does not need it.
+the curve measured. A workspace with many tables is where this index earns its keep; a database
+with one big table will never use it, and does not need it.
 
 ## Paging by cursor, because `OFFSET` cannot be indexed away
 
-Measured 2026-08-05 on a scratch database of 200,000 records: one list holding 100,000 (99,009
-live), interleaved 50/50 with twenty other lists, `data` averaging 533 bytes, 120 MB heap, every
+Measured 2026-08-05 on a scratch database of 200,000 records: one table holding 100,000 (99,009
+live), interleaved 50/50 with twenty other tables, `data` averaging 533 bytes, 120 MB heap, every
 current index in place.
 
 One page of 100 in the default order:
@@ -386,13 +386,13 @@ One page of 100 in the default order:
 **No index can fix this, which is the whole reason the endpoint needed a second way to page.**
 `OFFSET` is applied by the Limit node *above* the scan, so the scan is obliged to produce
 complete rows — heap fetches included — for every row that is then discarded. The planner
-knows it, and at depth it deliberately refuses `ix_list_items_list_id_id` in favour of the
+knows it, and at depth it deliberately refuses `ix_table_records_table_id_id` in favour of the
 primary key: reaching 99,000 doomed rows through the partial index would mean 99,000 random
 heap fetches, where the primary key walks them in order. It picks the cheaper way to do
 unnecessary work. A cursor is the only thing that stops the work being requested, because
 `id > :after` moves the starting point *into* the scan.
 
-Through `ListItemService.list`, which is what the endpoint actually spends:
+Through `TableRecordService.list`, which is what the endpoint actually spends:
 
 | page | `skip=` | `after=` | |
 |---|---|---|---|
@@ -402,24 +402,24 @@ Through `ListItemService.list`, which is what the endpoint actually spends:
 | 500 | 31.7 ms | 4.1 ms | 7.8× |
 | 990 | 60.2 ms | 3.9 ms | **15.6×** |
 
-**The finding that made this worth building** was not the 100k list. Deep pages of a huge list
+**The finding that made this worth building** was not the 100k table. Deep pages of a huge table
 are a place few people go. But the cost is driven by how expensive the *discarded* rows are to
-produce, and both a filter and a sparse list make them more expensive:
+produce, and both a filter and a sparse table make them more expensive:
 
 | | page 1 | page 50 | page 200 |
 |---|---|---|---|
 | filtered view (`status = 'open'`, 49,504 rows), `skip` | 0.20 ms | **99.13 ms** | 105.42 ms |
 | filtered view, `after` | 0.14 ms | 0.18 ms | 0.20 ms |
-| 10,000-record list at 5% of the table, `skip` | 0.42 ms | **26.79 ms** | — |
-| 10,000-record list, `after` | 0.36 ms | 0.38 ms | — |
+| 10,000-record table at 5% of the table, `skip` | 0.42 ms | **26.79 ms** | — |
+| 10,000-record table, `after` | 0.36 ms | 0.38 ms | — |
 
-Page 50 of a ten-thousand-record list is an ordinary place for an ordinary person to be, and
+Page 50 of a ten-thousand-record table is an ordinary place for an ordinary person to be, and
 it costs 27 ms of the app's scarcest resource to get there. That is the case this fixes.
 
 **It is also a correctness fix.** `skip` names a position, so a record deleted ahead of that
 position pulls every later one back a place and the next page steps over one the caller never
 saw. Ids only grow, so an insert cannot cause this — a delete can, and a bin any editor can
-fill makes it routine rather than a race. `tests/test_lists_flow.py` pins the difference:
+fill makes it routine rather than a race. `tests/test_tables_flow.py` pins the difference:
 after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor returns
 `03, 04, 05`.
 
@@ -433,14 +433,14 @@ after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor r
   entangled with the `multiple` toggle; see `known-gaps.md`).
 
   Ordering by a **reference** column costs one more thing on top of that: it LEFT JOINs a
-  derived table of the target's labels (`items/references.py`), so the target list is
+  derived table of the target's labels (`records/references.py`), so the target table is
   scanned once per query. Only a request that actually sorts or groups by such a column
   pays it — the count and an unordered listing build no sources at all — and because the
   join is on the unique `uuid` it adds columns to a row and never rows to the result, so
   the page size and `X-Total-Count` cannot drift apart. The derived table is a simple one,
   so Postgres flattens it and still gets to choose between an index nested loop and a hash
-  join on the real relative sizes of the two lists.
-- **`X-Total-Count`.** A flat 12–13 ms against this list, paid on every page load whichever way
+  join on the real relative sizes of the two tables.
+- **`X-Total-Count`.** A flat 12–13 ms against this table, paid on every page load whichever way
   the page was fetched. Once the page itself is ~4 ms, the count is three-quarters of the
   request — it was the largest single thing this endpoint did, and is dealt with in the next
   section.
@@ -452,7 +452,7 @@ after one delete, `skip=3` returns `04, 05, 06` while `after=` the same cursor r
 ## The total was recounted on every page turn
 
 `count(*)` cannot be made cheaper. Measured on the same 200,000-record database, the count
-of the 100k list runs an **index-only scan** on `ix_list_items_list_id_id` — 269 buffers,
+of the 100k table runs an **index-only scan** on `ix_table_records_table_id_id` — 269 buffers,
 zero heap fetches after a vacuum, which is as good as the plan gets. It still takes 12 ms,
 because it has to visit all 97,029 matching index entries and that is ~0.12 µs each. It is
 CPU, not I/O:
@@ -473,12 +473,12 @@ turning a page re-asked a question whose answer cannot have changed — the coun
 `skip`, `limit`, the sort and the grouping by construction. Page 2 of a search made the server
 count every matching record a second time to return the number it had just returned.
 
-So the count moved to `GET items/count`, taking only the parameters that change which records
-match — the view, the search, the filter — and `GET items/` gained `total=false`. The grid
+So the count moved to `GET records/count`, taking only the parameters that change which records
+match — the view, the search, the filter — and `GET records/` gained `total=false`. The grid
 fetches the count under a key holding exactly that scope (`recordCountKey`, deliberately the
 same shape as `metricValuesKey`), so paging, sorting and grouping all read the cached answer:
 
-| one page turn on the 100k list | before | after |
+| one page turn on the 100k table | before | after |
 |---|---|---|
 | plain listing | 15.5 ms | **3.3 ms** |
 | under a search | 769 ms | **501 ms** |
@@ -491,9 +491,9 @@ one. Everything after it is the page alone.
 this change is unmeasurable. It matters at a size the deployment has not reached.
 
 **The search numbers above are the real finding.** Counting is a rounding error next to what
-search costs on a large list:
+search costs on a large table:
 
-| request on the 100k list | count | page | total |
+| request on the 100k table | count | page | total |
 |---|---|---|---|
 | plain | 11.5 ms | 3.8 ms | 15 ms |
 | filter `status = 'open'` | 12.7 ms | 4.0 ms | 17 ms |
@@ -507,7 +507,7 @@ the scan itself remains, and is now by a wide margin the most expensive read in 
 
 Fixing it is a design problem rather than a tuning one, which is why it is not done here.
 `pg_trgm` indexes an *expression*, and the expressions are `data ->> '<column-uuid>'` where the
-uuids are per-list and unbounded — there is no finite set of indexes to create. The realistic
+uuids are per-table and unbounded — there is no finite set of indexes to create. The realistic
 shapes are a maintained `search_text` column or a generated column with an immutable extractor,
 and both turn per-column matching into matching over the row's values, which is a deliberate
 behaviour change: `_apply_search` matches per column specifically so a query cannot hit a
@@ -521,57 +521,57 @@ rather than the labels — so nothing it maintains depends on a row other than i
 ## Archiving records, and the fraction at which it starts to pay
 
 Every fix above makes a question cheaper to ask. Archiving is the first one that asks about
-fewer rows: `archived_at` drops a record out of `ListItemService._select`, and
-`ix_list_items_list_id_id` is partial on both lifecycle flags so the index follows the
+fewer rows: `archived_at` drops a record out of `TableRecordService._select`, and
+`ix_table_records_table_id_id` is partial on both lifecycle flags so the index follows the
 predicate. What that is worth is not obvious in advance, because the planner decides whether
 to *use* the partial index, and it only does so when reaching rows through it beats walking
 the primary key in order.
 
-Measured 2026-08-06 against `paging_bench` — the 300,000-row table, list 1 holding 97,029 live
-records interleaved 50/50 with twenty other lists, 20 columns. Each fraction is
+Measured 2026-08-06 against `paging_bench` — the 300,000-row table, table 1 holding 97,029 live
+records interleaved 50/50 with twenty other tables, 20 columns. Each fraction is
 `VACUUM (ANALYZE)`-ed then `EXPLAIN (ANALYZE, BUFFERS)`-ed twice, second run reported. The
 search is a term matching **nothing**, which is the expensive case (a `LIMIT` cannot stop a
 scan early when there is nothing to find):
 
-| archived | live | grid page | `items/count` | search (0 matches) | search's index |
+| archived | live | grid page | `records/count` | search (0 matches) | search's index |
 |---|---|---|---|---|---|
-| 0% | 97,029 | 0.11 ms | 12.6 ms | 104 ms | `ix_list_items_list_id` |
-| 50% | 49,509 | 0.34 ms | 12.1 ms | **141 ms** | `ix_list_items_list_id` |
-| 60% | 39,609 | 0.26 ms | 5.8 ms | **41 ms** | `ix_list_items_list_id_id` |
-| 70% | 29,709 | 0.07 ms | 4.2 ms | 32 ms | `ix_list_items_list_id_id` |
-| 80% | 19,809 | 0.10 ms | 4.0 ms | 30 ms | `ix_list_items_list_id_id` |
-| 90% | 9,905 | 0.08 ms | 1.7 ms | 13 ms | `ix_list_items_list_id_id` |
-| 99% | 1,981 | 0.13 ms | 0.5 ms | 3.7 ms | `ix_list_items_list_id_id` |
+| 0% | 97,029 | 0.11 ms | 12.6 ms | 104 ms | `ix_table_records_table_id` |
+| 50% | 49,509 | 0.34 ms | 12.1 ms | **141 ms** | `ix_table_records_table_id` |
+| 60% | 39,609 | 0.26 ms | 5.8 ms | **41 ms** | `ix_table_records_table_id_id` |
+| 70% | 29,709 | 0.07 ms | 4.2 ms | 32 ms | `ix_table_records_table_id_id` |
+| 80% | 19,809 | 0.10 ms | 4.0 ms | 30 ms | `ix_table_records_table_id_id` |
+| 90% | 9,905 | 0.08 ms | 1.7 ms | 13 ms | `ix_table_records_table_id_id` |
+| 99% | 1,981 | 0.13 ms | 0.5 ms | 3.7 ms | `ix_table_records_table_id_id` |
 
 **The count is the clean win and it is immediate.** It falls with the live row count from the
 first record archived — 25× by 99% — because it was already an index-only scan whose whole
 cost is visiting matching entries, and archiving removes entries.
 
 **Search has a cliff, not a slope, and it sits between 50% and 60% archived.** Below it
-archiving buys *nothing*: the planner stays on the plain `list_id` index, still reaches every
-row of the list, and the `archived_at IS NULL` test is far too cheap to matter next to the
+archiving buys *nothing*: the planner stays on the plain `table_id` index, still reaches every
+row of the table, and the `archived_at IS NULL` test is far too cheap to matter next to the
 ILIKE fan-out it precedes — 141 ms at 50% archived against 104 ms at none is noise, not a
 regression. Above it the planner switches to the partial index, and search steps down 3.4× in
-one move and then improves roughly with the live count. So **half a list archived is the
+one move and then improves roughly with the live count. So **half a table archived is the
 threshold that matters for the app's most expensive read**, and anything less is not worth
 doing for search alone.
 
 **The grid page neither gains nor suffers**, which is the result to keep in mind when someone
-proposes archiving to "speed up the list". It is 0.1 ms throughout: already flat, already
-independent of list size, and the operation people perform most.
+proposes archiving to "speed up the table". It is 0.1 ms throughout: already flat, already
+independent of table size, and the operation people perform most.
 
 Two caveats, both measured:
 
-- **A list whose rows sit at one end of the table can get slower.** Repeating this against
-  list 23 — 100,000 rows appended after the other 200,000 rather than interleaved — the page
+- **A table whose rows sit at one end of the table can get slower.** Repeating this against
+  table 23 — 100,000 rows appended after the other 200,000 rather than interleaved — the page
   never leaves the primary key and goes **129 ms → 208 ms** from 0% to 99% archived, because
   the scan must walk further through discarded rows to find 100 live ones. The 129 ms baseline
   is the pre-existing sparsity cost described in "Two indexes for the questions actually
   asked"; archiving makes it worse rather than better. Sparsity decides this, as it decides
   everything else about that index.
 - **The heap and the GIN index on `data` do not shrink.** The rows are still there. That is
-  the ceiling of the flag approach: a list heading for millions of records outgrows it, and
-  the version without the ceiling is a separate `list_items_archive` table that the rows
+  the ceiling of the flag approach: a table heading for millions of records outgrows it, and
+  the version without the ceiling is a separate `table_records_archive` table that the rows
   physically move to. Every read already funnels through `visible_stmt`, so that migration
   stays open.
 
@@ -579,8 +579,8 @@ Two caveats, both measured:
 
 Archiving only helps the operations whose cost **scales with the live row count** — search,
 `count(*)`, filters and sorts, metrics that fall back to the Python scan, and deep `skip`
-paging. It does nothing for the default paged listing. So the question is not "is this list
-big" but "is this list big *and* is anyone doing those things to it".
+paging. It does nothing for the default paged listing. So the question is not "is this table
+big" but "is this table big *and* is anyone doing those things to it".
 
 Thresholds below are stated on the free tier's 0.1 CPU, where wall time is ~10× the CPU figures
 above — that is how they were derived, and they are left in those terms so the table and the
@@ -588,10 +588,10 @@ measurements stay in one unit. On the deployed 0.5 CPU, every *wall* figure in i
 smaller and the app-CPU thresholds move up correspondingly; the Postgres-side ones do not move
 at all (see the second qualifier below).
 
-| Live records in one list | What starts to hurt |
+| Live records in one table | What starts to hurt |
 |---|---|
 | < 10k | Nothing. Do not archive for performance. |
-| 10k–25k | Search crosses ~1 s of wall time (~7.7 µs per row on a 20-column list). Deep `skip` paging is already 27 ms at page 50 of a 10k list. |
+| 10k–25k | Search crosses ~1 s of wall time (~7.7 µs per row on a 20-column table). Deep `skip` paging is already 27 ms at page 50 of a 10k table. |
 | 25k–50k | Metrics that do not compile cost ~20 µs a record — ~1 s of CPU, ~10 s of wall — and 50k is `METRIC_ROW_LIMIT`, where they truncate. |
 | 50k–100k | Search is 4–8 s of wall time; `count(*)` ~120 ms; a sort or a group re-sorts the whole matching set on *every* page (~105 ms of Postgres at 100k). |
 | 100k+ | Search is unusable on the free tier, and ~1 s on the deployed Starter — better, but a second of a single event loop that everyone else queues behind. Archiving is maintenance, not tuning. |
@@ -600,19 +600,19 @@ at all (see the second qualifier below).
 Three qualifiers belong with that table:
 
 - **Column count drives search cost as much as row count.** Search ORs one `ILIKE` per column,
-  so a 40-column list costs roughly twice per row what a 20-column one does. 25,000 assumes
+  so a 40-column table costs roughly twice per row what a 20-column one does. 25,000 assumes
   about twenty.
 - **A bigger instance buys its CPU multiple on the app-CPU half only** — search and non-compiled
   metrics — and nothing on the Postgres-side sorting and counting. The Starter upgrade bought 5×
   (0.1 → 0.5 CPU) on the first half and exactly nothing on the second: `count(*)` at ~120 ms and
   the ~105 ms re-sort per page are Postgres's own work on its own instance, and they are
   unchanged. Those thresholds do not move with the web plan.
-- **A workspace with many lists is worse per list, not better**, since sparsity is what decides
-  whether the planner takes `ix_list_items_list_id_id` at all.
+- **A workspace with many tables is worse per table, not better**, since sparsity is what decides
+  whether the planner takes `ix_table_records_table_id_id` at all.
 
 `VITE_ARCHIVE_HINT_THRESHOLD` (default 25,000, `0` disables) is where the first row of that
-table is wired into the app: past it, a list offers the archive to anyone holding `delete`,
-and only when the record count is the whole list's rather than a filtered subset's.
+table is wired into the app: past it, a table offers the archive to anyone holding `delete`,
+and only when the record count is the whole table's rather than a filtered subset's.
 
 ## Login was 30× a page load, and most of it was waste
 
@@ -659,13 +659,13 @@ Wall-clock floor per request with no contention at all:
 
 | | Free (0.1 CPU) | **Starter (0.5 CPU) — deployed** | Standard (1 CPU) |
 |---|---|---|---|
-| Open a list | ~1.0 s | ~0.20 s | ~0.10 s |
+| Open a table | ~1.0 s | ~0.20 s | ~0.10 s |
 | Poll / cell edit | ~230 ms | ~46 ms | ~23 ms |
 | Login — before the fixes | ~7.2 s | ~1.4 s | ~0.72 s |
 | Login — after the fixes | **~0.67 s** | ~0.13 s | ~0.07 s |
 | Steady-state active users | ~50 | ~245 | ~490 |
 
-"Active user" means a tab open on a list: one poll per `VITE_LIVE_REFRESH_SECONDS`, a
+"Active user" means a tab open on a table: one poll per `VITE_LIVE_REFRESH_SECONDS`, a
 navigation every couple of minutes, a token refresh every 15 — about 1.5 ms of CPU per
 second each at the 60s interval this row was computed against, taken at a 60% utilisation
 target because a single event loop queues badly above that.
@@ -675,21 +675,21 @@ the change — the count stops at 30 and the metric strip stays at 60 — so onl
 page actually quadruples, taking an active tab to ~2.9 ms of CPU per second and the
 steady-state column to roughly ~25 / ~125 / ~250. Arithmetic from the per-endpoint costs
 above; nothing was re-measured. Note this row was never the binding limit anyway (see the
-login burst below), and it counts tabs someone is *using* — `useLiveList` still stops
+login burst below), and it counts tabs someone is *using* — `useLiveTable` still stops
 polling on a hidden tab and after 5 idle minutes on a visible one.
 
 **Since live records became a server push (2026-08-22), that whole row is a worst case
-rather than the normal one, and it has not been re-measured either.** An open list holds
-an SSE stream and refetches when the server says its records moved, so a quiet list costs
+rather than the normal one, and it has not been re-measured either.** An open table holds
+an SSE stream and refetches when the server says its records moved, so a quiet table costs
 an active tab *nothing* between changes instead of a request every 15 seconds — the
 interval above is only what the app falls back to when the stream cannot be held open.
-Two caveats keep it from being a free win. A **busy** list now signals faster than the
+Two caveats keep it from being a free win. A **busy** table now signals faster than the
 timer ever ticked, which is why the count and metric floors were kept through the swap and
 why they throttle invalidations rather than only setting intervals. And a held stream is
 much cheaper than a poll but not free: it is an open socket and an asyncio task for up to
 `SSE_MAX_STREAM_SECONDS`, writing a heartbeat every `SSE_HEARTBEAT_SECONDS` and
 reconnecting when the server closes it. It holds **no pooled database connection** — that
-is the whole reason the route is mounted outside the lists router, and
+is the whole reason the route is mounted outside the tables router, and
 `tests/test_live_events.py` pins it — so the fifteen-connection pool is not what bounds
 concurrent viewers here. The two guardrails still apply, so an abandoned tab still costs
 nothing on either transport.
@@ -721,7 +721,7 @@ immutably cacheable. Against 100 GB/month that is ~85,000 first-time visits.
 
 (The JS was ~374 KB before drag-reordering; `@dnd-kit/core` and `@dnd-kit/sortable` are
 ~24 KB gzipped between them. They sit in the main chunk because `ViewControls` is on the
-list page itself, not behind a dialog — worth knowing if the entry bundle ever needs
+table page itself, not behind a dialog — worth knowing if the entry bundle ever needs
 trimming, though at 6% it is not where the weight is.)
 
 
@@ -780,8 +780,8 @@ is locked out, because old hashes are still verifiable on their own terms.
   about a minute to answer the next request. Starter is always-on, so the pinger that would
   have papered over it is not needed and neither is the free-instance-hours budget it ate.
 - **Search is still the expensive read** at ~106 ms. It has not been a problem at demo
-  scale; it is the first thing to look at if list views get slow. Archiving is now a partial
-  answer to it, but only past roughly half a list — below that the planner does not take the
+  scale; it is the first thing to look at if table views get slow. Archiving is now a partial
+  answer to it, but only past roughly half a table — below that the planner does not take the
   partial index and search costs the same. The real fix is still
   [search-design.md](search-design.md).
 - **Nothing is on the free tier any more** except the static site, which does not have a paid

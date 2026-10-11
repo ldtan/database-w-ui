@@ -12,10 +12,10 @@ from src.auth.users.models import User, UserGroup, user_group_association
 from src.auth.users.services import UserGroupService, UserService
 from src.core.exceptions import PermissionDeniedError, UnknownReferenceError
 from src.core.utils import coerce_uuid
-from src.lists.forms.models import Form
-from src.lists.items.models import ListItem
-from src.lists.models import List
-from src.lists.views.models import View
+from src.tables.forms.models import Form
+from src.tables.records.models import TableRecord
+from src.tables.models import Table
+from src.tables.views.models import View
 from src.workspaces.models import Workspace
 
 from .enums import ALL_ACTIONS, CONFERRED_BY, Action, ResourceType, expand_actions
@@ -29,13 +29,13 @@ _GROUP_IDS_CACHE = "group_ids"
 # Maps a resource type to its ORM model (for id/uuid resolution).
 _MODELS = {
     ResourceType.workspace: Workspace,
-    ResourceType.list: List,
+    ResourceType.table: Table,
     ResourceType.view: View,
     ResourceType.form: Form,
-    ResourceType.item: ListItem,
+    ResourceType.record: TableRecord,
 }
-# Child resources that hang off a list and carry a permissions_inherit flag.
-_LIST_CHILDREN = {ResourceType.item: ListItem, ResourceType.view: View, ResourceType.form: Form}
+# Child resources that hang off a table and carry a permissions_inherit flag.
+_TABLE_CHILDREN = {ResourceType.record: TableRecord, ResourceType.view: View, ResourceType.form: Form}
 
 
 class PermissionService:
@@ -63,10 +63,10 @@ class PermissionService:
         chain: list[tuple[ResourceType, int]] = []
         child_inherits = True
 
-        if rt == ResourceType.list:
-            list_id = resource_id
+        if rt == ResourceType.table:
+            table_id = resource_id
         else:
-            model = _LIST_CHILDREN.get(rt)
+            model = _TABLE_CHILDREN.get(rt)
             if model is None:
                 return None
             obj = await db.get(model, resource_id)
@@ -74,19 +74,19 @@ class PermissionService:
                 return None
             chain.append((rt, obj.id))
             child_inherits = obj.permissions_inherit
-            list_id = obj.list_id
+            table_id = obj.table_id
 
-        lst = await db.get(List, list_id)
-        if lst is None or lst.deleted_at is not None:
+        table = await db.get(Table, table_id)
+        if table is None or table.deleted_at is not None:
             return None
-        ws = await db.get(Workspace, lst.workspace_id)
+        ws = await db.get(Workspace, table.workspace_id)
         if ws is None or ws.deleted_at is not None:
             return None
 
-        # The list joins the chain if the target *is* the list, or the child inherits.
-        if rt == ResourceType.list or child_inherits:
-            chain.append((ResourceType.list, lst.id))
-            if lst.permissions_inherit:
+        # The table joins the chain if the target *is* the table, or the child inherits.
+        if rt == ResourceType.table or child_inherits:
+            chain.append((ResourceType.table, table.id))
+            if table.permissions_inherit:
                 chain.append((ResourceType.workspace, ws.id))
 
         return (chain, ws.owner_id)
@@ -119,7 +119,7 @@ class PermissionService:
         cache in front of an authorization answer, and the cost of it being wrong is
         somebody reaching what they should not.
 
-        **Creating a group is deliberately not on that list**, and the distinction is
+        **Creating a group is deliberately not on that table**, and the distinction is
         the direction of the error rather than an oversight. A cached answer that is
         missing a group id matches *fewer* grants, so a session that resolved someone
         before a group was created simply keeps its narrower view — fail-closed.
@@ -133,7 +133,7 @@ class PermissionService:
         of that without dropping here would hand them back for the rest of the
         session.
 
-        `restore` is the exception in the list, and is here for symmetry rather than
+        `restore` is the exception in the table, and is here for symmetry rather than
         because it fails open: it makes a cached answer *under*-report, exactly as
         `create` does. It is dropped anyway because recomputing costs one query and
         because a bin operation that left the session disagreeing with the database
@@ -196,9 +196,9 @@ class PermissionService:
         """Matches grants whose stored actions confer ``action``.
 
         The collection filters below are SQL and cannot call ``expand_actions``, so
-        they test the action list against ``CONFERRED_BY`` with jsonb ``?|`` — true
+        they test the action table against ``CONFERRED_BY`` with jsonb ``?|`` — true
         when the array holds any of those strings. Matching on the existence of a
-        grant row instead, as they used to, would put a lookup-only list straight
+        grant row instead, as they used to, would put a lookup-only table straight
         back into "Shared with me" and defeat the grant.
         """
         return PermissionGrant.actions.has_any(
@@ -224,7 +224,7 @@ class PermissionService:
         """Matches grants held by this user (or one of their groups) that are still
         live. Every authorization read funnels through here — the per-resource checks
         (`effective_actions`, `effective_actions_bulk`) and the collection-visibility
-        filters (`workspace_view_filter`, `list_query_filter`, `item_view_filter`) —
+        filters (`workspace_view_filter`, `table_query_filter`, `record_view_filter`) —
         so folding expiry in here makes an expired grant invisible to all of them at
         once. Grant *management* builds its own principal clause and is unaffected, so
         a re-share can still find and update an expired row."""
@@ -418,63 +418,63 @@ class PermissionService:
         return or_(Workspace.owner_id == user.id, Workspace.id.in_(granted))
 
     @classmethod
-    async def list_query_filter(
+    async def table_query_filter(
         cls, db: AsyncSession, user: User, action: Action = Action.view
     ) -> ColumnElement[bool]:
-        """Condition for a List select (joined to its Workspace): a list is visible
-        when the caller owns the workspace, has a direct list grant conferring
-        ``action``, or inherits a workspace grant conferring it (and the list still
+        """Condition for a Table select (joined to its Workspace): a table is visible
+        when the caller owns the workspace, has a direct table grant conferring
+        ``action``, or inherits a workspace grant conferring it (and the table still
         inherits).
 
-        ``action`` defaults to ``view``, so a lookup-only grant — a list whose
-        *values* may be read through someone else's lookup column while the list
+        ``action`` defaults to ``view``, so a lookup-only grant — a table whose
+        *values* may be read through someone else's lookup column while the table
         itself stays unlisted — does not reach "Shared with me", the only surface
-        those lists would otherwise appear on. The lookup target picker passes
+        those tables would otherwise appear on. The lookup target picker passes
         ``lookup`` to get the wider set it must offer; nothing else should."""
         group_ids = await cls._group_ids(db, user.id)
         principal = and_(
             cls._principal_condition(user.id, group_ids), cls._confers(action)
         )
-        granted_lists = select(PermissionGrant.resource_id).where(
-            PermissionGrant.resource_type == ResourceType.list, principal
+        granted_tables = select(PermissionGrant.resource_id).where(
+            PermissionGrant.resource_type == ResourceType.table, principal
         )
         granted_workspaces = select(PermissionGrant.resource_id).where(
             PermissionGrant.resource_type == ResourceType.workspace, principal
         )
         return or_(
             Workspace.owner_id == user.id,
-            List.id.in_(granted_lists),
+            Table.id.in_(granted_tables),
             and_(
-                List.permissions_inherit.is_(True),
+                Table.permissions_inherit.is_(True),
                 Workspace.id.in_(granted_workspaces),
             ),
         )
 
     @classmethod
-    async def item_view_filter(
-        cls, db: AsyncSession, user: User, lst: List, action: Action = Action.view
+    async def record_view_filter(
+        cls, db: AsyncSession, user: User, table: Table, action: Action = Action.view
     ) -> ColumnElement[bool]:
-        """Condition for a ListItem select inside ``lst``.
+        """Condition for a TableRecord select inside ``table``.
 
-        ``action`` is the list-level access being exercised. It is ``view`` for every
+        ``action`` is the table-level access being exercised. It is ``view`` for every
         read of the records themselves, and ``lookup`` for the paths that only
         resolve a row's *label* (the options endpoint, the export formatter, search
         by linked label). A lookup-only grantee holds no ``view``, so leaving this at
-        the default would drop them to "items granted individually" — an empty picker
-        rather than the reference list they were given. Per-record grants still apply
-        either way: ``lookup`` relaxes the list-level gate, not row-level ones.
+        the default would drop them to "records granted individually" — an empty picker
+        rather than the reference table they were given. Per-record grants still apply
+        either way: ``lookup`` relaxes the table-level gate, not row-level ones.
         """
-        if user.id == lst.workspace.owner_id:
+        if user.id == table.workspace.owner_id:
             return true()
         group_ids = await cls._group_ids(db, user.id)
         granted = select(PermissionGrant.resource_id).where(
-            PermissionGrant.resource_type == ResourceType.item,
+            PermissionGrant.resource_type == ResourceType.record,
             cls._principal_condition(user.id, group_ids),
         )
-        list_viewable = await cls.has(db, user, ResourceType.list, lst.id, action)
+        list_viewable = await cls.has(db, user, ResourceType.table, table.id, action)
         if list_viewable:
-            return or_(ListItem.permissions_inherit.is_(True), ListItem.id.in_(granted))
-        return ListItem.id.in_(granted)
+            return or_(TableRecord.permissions_inherit.is_(True), TableRecord.id.in_(granted))
+        return TableRecord.id.in_(granted)
 
     # -- grant management ---------------------------------------------------
 
